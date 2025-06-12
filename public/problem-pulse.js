@@ -1,4 +1,5 @@
- // The single URL for our new, simplified Netlify function
+
+    // The single URL for our new, simplified Netlify function
     const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
     
     const stopWords = [
@@ -989,156 +990,137 @@ function calculateFindingMetrics(validatedSummaries, filteredPosts) {
           document.getElementById("findings-5"),
         ];
         
-        const metrics = calculateFindingMetrics(validatedSummaries, filteredPosts);
-        const summaryCount = validatedSummaries.length;
-    
-        for (let i = 0; i < 5; i++) {
-          const block = document.getElementById(`findings-block${i+1}`);
-          const content = document.getElementById(`findings-${i+1}`);
-          const btn = document.getElementById(`button-sample${i+1}`);
-          const redditDiv = document.getElementById(`reddit-div${i+1}`);
-    
-          if (i < summaryCount) {
-            if (block) block.style.display = "flex";
-    
-// =============================================================
-// PASTE THIS NEW BLOCK IN ITS PLACE
-// =============================================================
-// =============================================================
-// THIS IS THE CORRECTED if(content){...} BLOCK
-// =============================================================
-if (content) {
-    const summary = validatedSummaries[i];
+  // =================================================================
+// PASTE THIS ENTIRE CORRECTED BLOCK IN ITS PLACE
+// =================================================================
+const metrics = calculateFindingMetrics(validatedSummaries, filteredPosts);
 
-    // Get our new, reliable metrics
-    const findingMetrics = metrics[i];
+// Combine findings with their scores and sort them by prevalence
+const sortedFindings = validatedSummaries.map((summary, index) => {
+    const findingMetrics = metrics[index];
     const totalProblemPosts = metrics.totalProblemPosts || 1;
     const prevalence = Math.round((findingMetrics.supportCount / totalProblemPosts) * 100);
+    return { summary: summary, prevalence: prevalence, originalIndex: index };
+}).sort((a, b) => b.prevalence - a.prevalence);
 
-    // Define the visual style and label for the prevalence bar
-    let barColor = "#007bff"; // Blue for high prevalence
-    let prevalenceLabel = "High Prevalence";
-    if (prevalence < 30) {
-        barColor = "#ffc107"; // Yellow for medium
-        prevalenceLabel = "Medium Prevalence";
-    }
-    if (prevalence < 10) {
-        barColor = "#dc3545"; // Red for low
-        prevalenceLabel = "Low Prevalence";
-    }
-    
-    const summaryId = `summary-body-${i+1}-${Date.now()}`;
-    const summaryShort = summary.body.length > 95 ? summary.body.substring(0, 95) + "…" : summary.body;
-    
-    // This is the clean innerHTML assignment
-    content.innerHTML = `
-        <div class="section-title">${summary.title}</div>
-        <div class="summary-expand-container">
-            <span class="summary-teaser" id="${summaryId}">${summaryShort}</span>
-            ${summary.body.length > 95 
-                ? `<button class="see-more-btn" data-summary="${summaryId}">See more</button>` 
-                : ""}
-            <span class="summary-full" id="${summaryId}-full" style="display:none">${summary.body}</span>
-        </div>
-        <div class="quotes-container">
-            ${summary.quotes.map(quote => `<div class="quote">"${quote}"</div>`).join('')}
-        </div>
-        <div class="prevalence-container">
-            <div class="prevalence-header">${prevalenceLabel}</div>
-            <div class="prevalence-bar-background">
-                <div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${barColor};">
-                    ${prevalence}%
+// Get a simple array of the summaries in their new sorted order
+const sortedSummaries = sortedFindings.map(item => item.summary);
+
+// Hide all finding blocks initially to ensure a clean slate
+for (let i = 1; i <= 5; i++) {
+    const block = document.getElementById(`findings-block${i}`);
+    if (block) block.style.display = "none";
+}
+
+// Loop through the SORTED findings and display them in the correct order
+sortedFindings.forEach((findingData, index) => {
+    const displayIndex = index + 1; // This is the visual position (1, 2, 3...)
+
+    const block = document.getElementById(`findings-block${displayIndex}`);
+    const content = document.getElementById(`findings-${displayIndex}`);
+    const btn = document.getElementById(`button-sample${displayIndex}`);
+    const redditDiv = document.getElementById(`reddit-div${displayIndex}`);
+
+    if (block) block.style.display = "flex";
+
+    if (content) {
+        const { summary, prevalence } = findingData;
+        let barColor = "#007bff", prevalenceLabel = "High Prevalence";
+        if (prevalence < 30) { barColor = "#ffc107"; prevalenceLabel = "Medium Prevalence"; }
+        if (prevalence < 10) { barColor = "#dc3545"; prevalenceLabel = "Low Prevalence"; }
+        
+        const summaryId = `summary-body-${displayIndex}-${Date.now()}`;
+        const summaryShort = summary.body.length > 95 ? summary.body.substring(0, 95) + "…" : summary.body;
+        
+        content.innerHTML = `
+            <div class="section-title">${summary.title}</div>
+            <div class="summary-expand-container">
+                <span class="summary-teaser" id="${summaryId}">${summaryShort}</span>
+                ${summary.body.length > 95 ? `<button class="see-more-btn" data-summary="${summaryId}">See more</button>` : ""}
+                <span class="summary-full" id="${summaryId}-full" style="display:none">${summary.body}</span>
+            </div>
+            <div class="quotes-container">
+                ${summary.quotes.map(quote => `<div class="quote">"${quote}"</div>`).join('')}
+            </div>
+            <div class="prevalence-container">
+                <div class="prevalence-header">${prevalenceLabel}</div>
+                <div class="prevalence-bar-background">
+                    <div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${barColor};">
+                        ${prevalence}%
+                    </div>
+                </div>
+                <div class="prevalence-subtitle">
+                    Represents ${prevalence}% of all identified problems.
                 </div>
             </div>
-            <div class="prevalence-subtitle">
-                Represents ${prevalence}% of all identified problems.
-            </div>
-        </div>
-    `;
-
-    // The 'See more' button logic remains the same
-    if (summary.body.length > 95) {
-        setTimeout(() => {
-          const seeMoreBtn = content.querySelector(`.see-more-btn[data-summary="${summaryId}"]`);
-          const teaser = content.querySelector(`#${summaryId}`);
-          const full = content.querySelector(`#${summaryId}-full`);
-          if (seeMoreBtn) {
-            seeMoreBtn.addEventListener('click', function() {
-              if (teaser.style.display !== 'none') {
-                teaser.style.display = 'none';
-                full.style.display = '';
-                seeMoreBtn.textContent = 'See less';
-              } else {
-                teaser.style.display = '';
-                full.style.display = 'none';
-                seeMoreBtn.textContent = 'See more';
-              }
-            });
-          }
-        }, 0);
-    }
-}
-// =============================================================
-// =============================================================
-// END OF THE NEW BLOCK
-// =============================================================
-    
-            if (redditDiv) redditDiv.innerHTML = "";
-    
-            if (btn) {
-              btn.onclick = function() {
-                showSamplePosts(i, window._assignments, window._filteredPosts, window._usedPostIds);
-              };
-            }
-          } else {
-            if (block) block.style.display = "none";
-            if (content) content.innerHTML = "";
-            if (redditDiv) redditDiv.innerHTML = "";
-            if (btn) btn.onclick = null;
-          }
+        `;
+        
+        if (summary.body.length > 95) {
+            setTimeout(() => {
+                const seeMoreBtn = content.querySelector(`.see-more-btn[data-summary="${summaryId}"]`);
+                const teaser = content.querySelector(`#${summaryId}`);
+                const full = content.querySelector(`#${summaryId}-full`);
+                if (seeMoreBtn) {
+                    seeMoreBtn.addEventListener('click', function() {
+                        if (teaser.style.display !== 'none') {
+                            teaser.style.display = 'none';
+                            full.style.display = '';
+                            seeMoreBtn.textContent = 'See less';
+                        } else {
+                            teaser.style.display = '';
+                            full.style.display = 'none';
+                            seeMoreBtn.textContent = 'See more';
+                        }
+                    });
+                }
+            }, 0);
         }
-        window._filteredPosts = filteredPosts;
-        window._summaries = validatedSummaries;
+    }
 
-    // =================================================================
-// NEW: Create a smaller, smarter list of posts for the AI to assign
-// =================================================================
-const MAX_POSTS_FOR_ASSIGNMENT = 75; // Limit to prevent huge prompts
+    if (redditDiv) redditDiv.innerHTML = "";
+    if (btn) {
+        btn.onclick = function() {
+            // 'index' correctly refers to the position in the sorted list (0, 1, 2...)
+            showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds);
+        };
+    }
+});
 
-// Score every post based on how relevant it is to ANY of our validated findings.
+// Update the global summaries to be in the new sorted order
+window._summaries = sortedSummaries;
+
+// Create the smart candidate list for AI assignment
+const MAX_POSTS_FOR_ASSIGNMENT = 75;
 const postsForAssignment = filteredPosts.map(post => {
     let bestScore = 0;
-    validatedSummaries.forEach(finding => {
+    sortedSummaries.forEach(finding => {
         const score = calculateRelevanceScore(post, finding);
-        if (score > bestScore) {
-            bestScore = score;
-        }
+        if (score > bestScore) { bestScore = score; }
     });
     return { post, score: bestScore };
-})
-.filter(item => item.score > 0) // Only keep posts that are at least somewhat relevant
-.sort((a, b) => b.score - a.score) // Sort by the best score
-.slice(0, MAX_POSTS_FOR_ASSIGNMENT) // Take the top N posts
-.map(item => item.post); // Get just the post objects back
+}).filter(item => item.score > 0).sort((a, b) => b.score - a.score).slice(0, MAX_POSTS_FOR_ASSIGNMENT).map(item => item.post);
 
+// Call AI for assignment using the SORTED summaries
+const assignments = await assignPostsToFindings(
+    sortedSummaries,
+    postsForAssignment,
+    keywordsString,
+    userNiche,
+    combinedTexts,
+    5
+);
+window._assignments = assignments;
+window._usedPostIds = new Set();
+
+// Finally, show the initial set of samples for the sorted summaries
+for (let index = 0; index < sortedSummaries.length; index++) {
+    showSamplePosts(index, assignments, filteredPosts, window._usedPostIds);
+}
+
+if (loadingBlock) loadingBlock.style.display = "none";
 // =================================================================
-        const assignments = await assignPostsToFindings(
-      validatedSummaries, // <-- Use the clean list
-      postsForAssignment,
-      keywordsString,
-      userNiche,
-      combinedTexts,
-      5
-    );
-    window._assignments = assignments;
-    
-    window._usedPostIds = new Set();
-    
-    for (let index = 0; index < validatedSummaries.length; index++) { // <-- Use the clean list
-      showSamplePosts(index, assignments, filteredPosts, window._usedPostIds);
-    }
-    
-        if (loadingBlock) loadingBlock.style.display = "none";
+// END OF THE REPLACEMENT BLOCK
+// =================================================================
     
       } catch (err) {
         if (loadingBlock) loadingBlock.style.display = "none";

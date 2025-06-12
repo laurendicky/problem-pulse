@@ -1,4 +1,3 @@
-
     // The single URL for our new, simplified Netlify function
     const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
     
@@ -1029,29 +1028,31 @@ if (content) {
     const summaryShort = summary.body.length > 95 ? summary.body.substring(0, 95) + "…" : summary.body;
     
     content.innerHTML = `
-        <div class="section-title">${summary.title}</div>
-        <div class="summary-expand-container">
-            <span class="summary-teaser" id="${summaryId}">${summaryShort}</span>
-            ${summary.body.length > 95 
-                ? `<button class="see-more-btn" data-summary="${summaryId}">See more</button>` 
-                : ""}
-            <span class="summary-full" id="${summaryId}-full" style="display:none">${summary.body}</span>
-        </div>
-        <div class="quotes-container">
-            ${summary.quotes.map(quote => `<div class="quote">"${quote}"</div>`).join('')}
-        </div>
-        <div class="prevalence-container" style="margin-top: 12px;">
-            <div class="prevalence-header" style="font-size: 0.9rem; font-weight: bold; margin-bottom: 4px;">${prevalenceLabel}</div>
-            <div class="prevalence-bar-background" style="background-color: #e9ecef; border-radius: 4px; overflow: hidden;">
-                <div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${barColor}; color: white; text-align: right; padding: 2px 8px; font-weight: bold; font-size: 0.8rem; white-space: nowrap;">
-                    ${prevalence}%
-                </div>
-            </div>
-            <div class="prevalence-subtitle" style="font-size: 0.8rem; color: #6c757d; margin-top: 4px;">
-                Represents ${prevalence}% of all identified problems.
+// --- NEW JAVASCRIPT BLOCK (styles moved to CSS) ---
+content.innerHTML = `
+    <div class="section-title">${summary.title}</div>
+    <div class="summary-expand-container">
+        <span class="summary-teaser" id="${summaryId}">${summaryShort}</span>
+        ${summary.body.length > 95 
+            ? `<button class="see-more-btn" data-summary="${summaryId}">See more</button>` 
+            : ""}
+        <span class="summary-full" id="${summaryId}-full" style="display:none">${summary.body}</span>
+    </div>
+    <div class="quotes-container">
+        ${summary.quotes.map(quote => `<div class="quote">"${quote}"</div>`).join('')}
+    </div>
+    <div class="prevalence-container">
+        <div class="prevalence-header">${prevalenceLabel}</div>
+        <div class="prevalence-bar-background">
+            <div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${barColor};">
+                ${prevalence}%
             </div>
         </div>
-    `;
+        <div class="prevalence-subtitle">
+            Represents ${prevalence}% of all identified problems.
+        </div>
+    </div>
+`;
 
     // The 'See more' button logic remains the same
     if (summary.body.length > 95) {
@@ -1168,3 +1169,4 @@ const postsForAssignment = filteredPosts.map(post => {
         renderPosts(sortedPosts);
       }
     });
+

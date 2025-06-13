@@ -1,4 +1,5 @@
 
+  <script>
     // The single URL for our new, simplified Netlify function
     const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
     
@@ -1053,25 +1054,36 @@ sortedFindings.forEach((findingData, index) => {
             `;
         } 
         // ELSE: If there are multiple findings, show the comparative prevalence bar.
-        else {
-            let barColor = "#007bff", prevalenceLabel = "High Prevalence";
-            if (prevalence < 30) { barColor = "#ffc107"; prevalenceLabel = "Medium Prevalence"; }
-            if (prevalence < 10) { barColor = "#dc3545"; prevalenceLabel = "Low Prevalence"; }
-            
-            metricsHtml = `
-                <div class="prevalence-container">
-                    <div class="prevalence-header">${prevalenceLabel}</div>
-                    <div class="prevalence-bar-background">
-                        <div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${barColor};">
-                            ${prevalence}%
-                        </div>
-                    </div>
-                    <div class="prevalence-subtitle">
-                        Represents ${prevalence}% of all identified problems.
-                    </div>
+// ...
+else {
+    let barColor, prevalenceLabel;
+
+    // Use the index to determine the rank of the finding
+    if (index === 0) { // The #1 finding
+        prevalenceLabel = "Primary Finding";
+        barColor = "#007bff"; // Blue for the most important
+    } else if (index === 1) { // The #2 finding
+        prevalenceLabel = "Secondary Finding";
+        barColor = "#17a2b8"; // A different color like teal or cyan
+    } else { // All other findings
+        prevalenceLabel = "Tertiary Finding";
+        barColor = "#6c757d"; // Grey for less important
+    }
+
+    metricsHtml = `
+        <div class="prevalence-container">
+            <div class="prevalence-header">${prevalenceLabel}</div>
+            <div class="prevalence-bar-background">
+                <div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${barColor};">
+                    ${prevalence}%
                 </div>
-            `;
-        }
+            </div>
+            <div class="prevalence-subtitle">
+                Represents ${prevalence}% of all identified problems.
+            </div>
+        </div>
+    `;
+}
 
         content.innerHTML = `
             <div class="section-title">${summary.title}</div>

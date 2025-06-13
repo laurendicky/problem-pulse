@@ -1126,7 +1126,7 @@ window._postsForAssignment = filteredPosts.map(post => {
 // Call AI for assignment using the SORTED summaries
 const assignments = await assignPostsToFindings(
     sortedSummaries,
-    postsForAssignment,
+    window._postsForAssignment,
     keywordsString,
     userNiche,
     combinedTexts,

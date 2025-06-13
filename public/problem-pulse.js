@@ -982,17 +982,11 @@ function calculateFindingMetrics(validatedSummaries, filteredPosts) {
         // =================================================================
      
     
-        const findingsDivs = [
-          document.getElementById("findings-1"),
-          document.getElementById("findings-2"),
-          document.getElementById("findings-3"),
-          document.getElementById("findings-4"),
-          document.getElementById("findings-5"),
-        ];
-        
-  // =================================================================
-// PASTE THIS ENTIRE CORRECTED BLOCK IN ITS PLACE
 // =================================================================
+// START OF THE REPLACEMENT BLOCK
+// =================================================================
+
+// Calculate metrics based on the original validated summaries
 const metrics = calculateFindingMetrics(validatedSummaries, filteredPosts);
 
 // Combine findings with their scores and sort them by prevalence
@@ -1000,8 +994,13 @@ const sortedFindings = validatedSummaries.map((summary, index) => {
     const findingMetrics = metrics[index];
     const totalProblemPosts = metrics.totalProblemPosts || 1;
     const prevalence = Math.round((findingMetrics.supportCount / totalProblemPosts) * 100);
-    return { summary: summary, prevalence: prevalence, originalIndex: index };
-}).sort((a, b) => b.prevalence - a.prevalence);
+    // We return an object containing ALL the data we need for each finding
+    return {
+        summary: summary,
+        prevalence: prevalence,
+        supportCount: findingMetrics.supportCount
+    };
+}).sort((a, b) => b.prevalence - a.prevalence); // Sort by prevalence, highest to lowest
 
 // Get a simple array of the summaries in their new sorted order
 const sortedSummaries = sortedFindings.map(item => item.summary);
@@ -1024,14 +1023,47 @@ sortedFindings.forEach((findingData, index) => {
     if (block) block.style.display = "flex";
 
     if (content) {
-        const { summary, prevalence } = findingData;
-        let barColor = "#007bff", prevalenceLabel = "High Prevalence";
-        if (prevalence < 30) { barColor = "#ffc107"; prevalenceLabel = "Medium Prevalence"; }
-        if (prevalence < 10) { barColor = "#dc3545"; prevalenceLabel = "Low Prevalence"; }
-        
+        const { summary, prevalence, supportCount } = findingData; // Destructure our data object
         const summaryId = `summary-body-${displayIndex}-${Date.now()}`;
         const summaryShort = summary.body.length > 95 ? summary.body.substring(0, 95) + "…" : summary.body;
-        
+
+        let metricsHtml = '';
+
+        // CONTEXTUAL LOGIC: Check if there is only ONE finding
+        if (sortedFindings.length === 1) {
+            metricsHtml = `
+                <div class="prevalence-container">
+                    <div class="prevalence-header">Primary Finding</div>
+                    <div class="single-finding-metric" style="font-size: 1.2rem; font-weight: bold; color: #333; margin-top: 4px;">
+                        Supported by ${supportCount} Posts
+                    </div>
+                    <div class="prevalence-subtitle">
+                        This was the only significant problem theme identified.
+                    </div>
+                </div>
+            `;
+        } 
+        // ELSE: If there are multiple findings, show the comparative prevalence bar.
+        else {
+            let barColor = "#007bff", prevalenceLabel = "High Prevalence";
+            if (prevalence < 30) { barColor = "#ffc107"; prevalenceLabel = "Medium Prevalence"; }
+            if (prevalence < 10) { barColor = "#dc3545"; prevalenceLabel = "Low Prevalence"; }
+            
+            metricsHtml = `
+                <div class="prevalence-container">
+                    <div class="prevalence-header">${prevalenceLabel}</div>
+                    <div class="prevalence-bar-background">
+                        <div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${barColor};">
+                            ${prevalence}%
+                        </div>
+                    </div>
+                    <div class="prevalence-subtitle">
+                        Represents ${prevalence}% of all identified problems.
+                    </div>
+                </div>
+            `;
+        }
+
         content.innerHTML = `
             <div class="section-title">${summary.title}</div>
             <div class="summary-expand-container">
@@ -1042,35 +1074,18 @@ sortedFindings.forEach((findingData, index) => {
             <div class="quotes-container">
                 ${summary.quotes.map(quote => `<div class="quote">"${quote}"</div>`).join('')}
             </div>
-            <div class="prevalence-container">
-                <div class="prevalence-header">${prevalenceLabel}</div>
-                <div class="prevalence-bar-background">
-                    <div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${barColor};">
-                        ${prevalence}%
-                    </div>
-                </div>
-                <div class="prevalence-subtitle">
-                    Represents ${prevalence}% of all identified problems.
-                </div>
-            </div>
+            ${metricsHtml}
         `;
         
         if (summary.body.length > 95) {
             setTimeout(() => {
                 const seeMoreBtn = content.querySelector(`.see-more-btn[data-summary="${summaryId}"]`);
-                const teaser = content.querySelector(`#${summaryId}`);
-                const full = content.querySelector(`#${summaryId}-full`);
                 if (seeMoreBtn) {
+                    const teaser = content.querySelector(`#${summaryId}`);
+                    const full = content.querySelector(`#${summaryId}-full`);
                     seeMoreBtn.addEventListener('click', function() {
-                        if (teaser.style.display !== 'none') {
-                            teaser.style.display = 'none';
-                            full.style.display = '';
-                            seeMoreBtn.textContent = 'See less';
-                        } else {
-                            teaser.style.display = '';
-                            full.style.display = 'none';
-                            seeMoreBtn.textContent = 'See more';
-                        }
+                        if (teaser.style.display !== 'none') { teaser.style.display = 'none'; full.style.display = ''; seeMoreBtn.textContent = 'See less'; } 
+                        else { teaser.style.display = ''; full.style.display = 'none'; seeMoreBtn.textContent = 'See more'; }
                     });
                 }
             }, 0);
@@ -1080,7 +1095,6 @@ sortedFindings.forEach((findingData, index) => {
     if (redditDiv) redditDiv.innerHTML = "";
     if (btn) {
         btn.onclick = function() {
-            // 'index' correctly refers to the position in the sorted list (0, 1, 2...)
             showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds);
         };
     }
@@ -1089,7 +1103,7 @@ sortedFindings.forEach((findingData, index) => {
 // Update the global summaries to be in the new sorted order
 window._summaries = sortedSummaries;
 
-// Create the smart candidate list for AI assignment
+// Create the smart candidate list for AI assignment using the sorted data
 const MAX_POSTS_FOR_ASSIGNMENT = 75;
 const postsForAssignment = filteredPosts.map(post => {
     let bestScore = 0;

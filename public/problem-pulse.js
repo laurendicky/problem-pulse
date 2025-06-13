@@ -1,5 +1,4 @@
-
-    // The single URL for our new, simplified Netlify function
+  // The single URL for our new, simplified Netlify function
     const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
     
     const stopWords = [
@@ -778,7 +777,7 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
     
       // Show animated code loading block
       const loadingBlock = document.getElementById("loading-code-1");
-      if (loadingBlock) loadingBlock.style.display = "block";
+      if (loadingBlock) loadingBlock.style.display = "flex";
     
       const searchTerms = [
         "struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve",

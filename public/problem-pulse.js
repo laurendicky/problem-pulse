@@ -468,30 +468,66 @@
         throw new Error("Failed to assign Reddit posts to findings using OpenAI.");
       }
     }
+    // =============================================================
+// NEW: Precision Regex Helper
+// =============================================================
+// Creates a case-insensitive regex that only matches whole words.
+function getWordMatchRegex(word) {
+    // Escape special regex characters in the word, then wrap with word boundaries (\b).
+    const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${escapedWord}\\b`, 'i');
+}
     // New Helper Function: Calculate Relevance Score
-    function calculateRelevanceScore(post, finding) {
-      let score = 0;
-      const postTitle = (post.data.title || "").toLowerCase();
-      const postBody = (post.data.selftext || "").toLowerCase();
-      const findingKeywords = (finding.keywords || []).map(k => k.toLowerCase());
-      const titleWords = finding.title.toLowerCase().split(' ').filter(word => word.length > 3 && !stopWords.includes(word));
-    
-      // Combine all relevant keywords for the finding
-      const allRelevantWords = [...new Set([...findingKeywords, ...titleWords])];
-    
-      for (const keyword of allRelevantWords) {
-        // Higher score for matches in the title
-        if (postTitle.includes(keyword)) {
-          score += 2;
+// =============================================================
+// NEW: The Intelligent Relevance Scoring Engine
+// =============================================================
+function calculateRelevanceScore(post, finding) {
+    let score = 0;
+    const postTitle = post.data.title || "";
+    const postBody = post.data.selftext || "";
+
+    // Get the most important words from the finding's title.
+    const findingTitleWords = finding.title.toLowerCase().split(' ').filter(word => word.length > 3 && !stopWords.includes(word));
+    // Get the supplemental keywords for the finding.
+    const findingKeywords = (finding.keywords || []).map(k => k.toLowerCase());
+
+    let titleWordMatched = false;
+    let keywordMatched = false;
+
+    // --- Score based on Finding Title words (high value) ---
+    for (const word of findingTitleWords) {
+        const regex = getWordMatchRegex(word);
+        if (regex.test(postTitle)) {
+            score += 5; // Major bonus for a title-in-title match.
+            titleWordMatched = true;
         }
-        // Standard score for matches in the body
-        if (postBody.includes(keyword)) {
-          score += 1;
+        if (regex.test(postBody)) {
+            score += 2; // Standard bonus for title-in-body match.
+            titleWordMatched = true;
         }
-      }
-    
-      return score;
     }
+
+    // --- Score based on Finding Keywords (medium value) ---
+    for (const keyword of findingKeywords) {
+        const regex = getWordMatchRegex(keyword);
+        if (regex.test(postTitle)) {
+            score += 3; // Good bonus for keyword-in-title match.
+            keywordMatched = true;
+        }
+        if (regex.test(postBody)) {
+            score += 1; // Basic bonus for keyword-in-body match.
+            keywordMatched = true;
+        }
+    }
+    
+    // --- Massive "Combo" Bonus ---
+    // If a post matches BOTH a title word AND a keyword, it's very likely to be relevant.
+    if (titleWordMatched && keywordMatched) {
+        score += 10;
+    }
+
+    return score;
+}
     // New Helper Function: Calculate Prevalence Metrics
 function calculateFindingMetrics(validatedSummaries, filteredPosts) {
     const metrics = {};
@@ -520,104 +556,77 @@ function calculateFindingMetrics(validatedSummaries, filteredPosts) {
     return metrics;
 }
     // Show Sample Posts Function
-    function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
-        const MIN_POSTS = 4;
-        const MAX_POSTS = 8;
-      
-        const finding = window._summaries[summaryIndex];
-        if (!finding) return;
-    
-        let relevantPosts = [];
-        const addedPostIds = new Set();
-        let headerMessage = `Real Stories from Reddit: "${finding.title}"`;
-    
-        const addPost = (post) => {
-            // Ensure post is valid and not already used anywhere
-            if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) {
-                relevantPosts.push(post);
-                addedPostIds.add(post.data.id);
-                return true;
-            }
-            return false;
-        };
-    
-    // --- Step 1: Add the best posts - those assigned by the AI ---
-    const assignedPostNumbers = assignments
-        .filter(a => a.finding === (summaryIndex + 1))
-        .map(a => a.postNumber);
-    
+// =============================================================
+// FINAL: Upgraded showSamplePosts with Quality Gate
+// =============================================================
+function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
+    const MIN_POSTS = 3; // It's better to show 3 great posts than 4 mediocre ones.
+    const MAX_POSTS = 6;
+    const MINIMUM_RELEVANCE_SCORE = 5; // The QUALITY GATE. A post MUST score at least this high to be shown as a fallback.
+
+    const finding = window._summaries[summaryIndex];
+    if (!finding) return;
+
+    let relevantPosts = [];
+    const addedPostIds = new Set();
+    let headerMessage = `Real Stories from Reddit: "${finding.title}"`;
+
+    const addPost = (post) => {
+        if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) {
+            relevantPosts.push(post);
+            addedPostIds.add(post.data.id);
+        }
+    };
+
+    // --- Step 1: Add AI-Assigned Posts ---
+    // These are considered the highest quality and bypass the score check.
+    const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber);
     assignedPostNumbers.forEach(postNum => {
-        // The post number is a direct index into the `allPosts` array we received
-        const post = allPosts[postNum - 1]; 
+        // Find the post in the `postsForAssignment` list that the AI actually saw
+        const post = window._postsForAssignment[postNum - 1]; 
         addPost(post);
     });
-    
-        // --- Step 2: If we don't have enough, score and rank the rest ---
-        if (relevantPosts.length < MIN_POSTS) {
-            // Create a candidate pool of all posts not yet used
-            const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id));
-    
-            // Score every candidate post based on its relevance to the current finding
-            const scoredCandidates = candidatePool.map(post => ({
-                post: post,
-                score: calculateRelevanceScore(post, finding)
-            })).filter(item => item.score > 0); // Only consider posts with a score > 0
-    
-            // Sort candidates by the highest score, then by upvotes as a tie-breaker
-            scoredCandidates.sort((a, b) => {
-                if (b.score !== a.score) {
-                    return b.score - a.score;
-                }
-                return b.post.data.ups - a.post.data.ups;
-            });
-    
-            // Add the best-scoring candidates until we reach our minimum
-            for (const candidate of scoredCandidates) {
-                if (relevantPosts.length >= MIN_POSTS) break;
-                addPost(candidate.post);
-            }
+
+    // --- Step 2: If we need more, run the scoring engine on ALL posts ---
+    if (relevantPosts.length < MIN_POSTS) {
+        const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id));
+
+        const scoredCandidates = candidatePool.map(post => ({
+            post: post,
+            score: calculateRelevanceScore(post, finding) // Use our powerful new engine
+        }))
+        .filter(item => item.score >= MINIMUM_RELEVANCE_SCORE) // Apply the quality gate
+        .sort((a, b) => b.score - a.score); // Sort by the best score
+
+        // Add the best-scoring candidates until we reach our minimum
+        for (const candidate of scoredCandidates) {
+            if (relevantPosts.length >= MIN_POSTS) break;
+            addPost(candidate.post);
         }
-        
-        // --- Step 3: Handle cases where no relevant posts could be found ---
-        if (relevantPosts.length === 0) {
-            const container = document.getElementById(`reddit-div${summaryIndex + 1}`);
-            if (container) {
-                container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">
-                                          Samples for "${finding.title}"
-                                       </div>
-                                       <div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`;
-            }
-            return; // Stop here
-        }
+    }
     
-        // --- Step 4: Build the HTML for the selected posts ---
+    // --- Step 3: Final Display ---
+    let html;
+    if (relevantPosts.length === 0) {
+        html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`;
+    } else {
         const finalPosts = relevantPosts.slice(0, MAX_POSTS);
         finalPosts.forEach(post => usedPostIds.add(post.data.id)); // Mark as used globally
-    
-        const html = finalPosts.map(post => `
+
+        html = finalPosts.map(post => `
           <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;">
-            <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">
-              ${post.data.title}
-            </a>
-            <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">
-              ${post.data.selftext ? post.data.selftext.substring(0,150) + (post.data.selftext.length > 150 ? '...' : '') : 'No additional content.'}
-            </p>
+            <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${post.data.title}</a>
+            <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${post.data.selftext ? post.data.selftext.substring(0, 150) + '...' : 'No content.'}</p>
             <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</small>
           </div>
         `).join('');
-      
-        const container = document.getElementById(`reddit-div${summaryIndex + 1}`);
-        if (container) {
-          container.innerHTML = `
-          <div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">
-            ${headerMessage}
-          </div>
-          <div class="reddit-samples-posts">
-            ${html}
-          </div>
-        `;
-        }
     }
+  
+    const container = document.getElementById(`reddit-div${summaryIndex + 1}`);
+    if (container) {
+        container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">${headerMessage}</div><div class="reddit-samples-posts">${html}</div>`;
+    }
+}
     const sortFunctions = {
       relevance: (a, b) => 0,
       newest: (a, b) => b.data.created_utc - a.data.created_utc,
@@ -1105,7 +1114,7 @@ window._summaries = sortedSummaries;
 
 // Create the smart candidate list for AI assignment using the sorted data
 const MAX_POSTS_FOR_ASSIGNMENT = 75;
-const postsForAssignment = filteredPosts.map(post => {
+window._postsForAssignment = filteredPosts.map(post => {
     let bestScore = 0;
     sortedSummaries.forEach(finding => {
         const score = calculateRelevanceScore(post, finding);

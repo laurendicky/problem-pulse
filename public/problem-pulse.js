@@ -886,7 +886,7 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
         });
         postScores.sort((a, b) => b.score - a.score);
     
-        const topPosts = postScores.slice(0, 50).map(item => item.post);
+        const topPosts = postScores.slice(0, 80).map(item => item.post);
     
         const combinedTexts = topPosts.map(post => {
           const title = post.data.title || "";
@@ -936,7 +936,7 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
       \`\`\`
       `
           }],
-          temperature: 0.7,
+          temperature: 0.0,
           max_tokens: 1000
         };
     

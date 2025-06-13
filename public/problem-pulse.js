@@ -529,28 +529,43 @@ function calculateRelevanceScore(post, finding) {
     return score;
 }
     // New Helper Function: Calculate Prevalence Metrics
+// =============================================================
+// NEW & IMPROVED: "Best Fit" Metrics Calculation
+// =============================================================
 function calculateFindingMetrics(validatedSummaries, filteredPosts) {
     const metrics = {};
     const allProblemPostIds = new Set();
 
+    // Initialize metrics object for each finding
     validatedSummaries.forEach((finding, index) => {
-        let findingSupportCount = 0;
-        
-        filteredPosts.forEach(post => {
-            // Use our reliable relevance score to check if a post supports the finding
-            if (calculateRelevanceScore(post, finding) > 0) {
-                findingSupportCount++;
-                allProblemPostIds.add(post.data.id);
-            }
-        });
-        
-        // Store the raw count for this specific finding
         metrics[index] = {
-            supportCount: findingSupportCount
+            supportCount: 0
         };
     });
 
-    // Add the total number of unique posts that support any finding
+    // For each post, find the SINGLE best finding it belongs to
+    filteredPosts.forEach(post => {
+        let bestFindingIndex = -1;
+        let maxScore = 0;
+
+        // Calculate score for this post against every finding
+        validatedSummaries.forEach((finding, index) => {
+            const score = calculateRelevanceScore(post, finding);
+            if (score > maxScore) {
+                maxScore = score;
+                bestFindingIndex = index;
+            }
+        });
+
+        // If the post was a good match for at least one finding...
+        // We use a minimum score of 1 to ensure it's a real match.
+        if (bestFindingIndex !== -1 && maxScore > 0) {
+            // ...increment the count for ONLY the winning finding
+            metrics[bestFindingIndex].supportCount++;
+            allProblemPostIds.add(post.data.id);
+        }
+    });
+
     metrics.totalProblemPosts = allProblemPostIds.size;
     
     return metrics;
@@ -1058,27 +1073,15 @@ else {
     let barColor, prevalenceLabel;
 
     // --- NEW HYBRID LOGIC ---
-    if (index === 0) {
-        // Special, more generous thresholds for the #1 Ranked Finding
-        if (prevalence >= 40) {
-            prevalenceLabel = "High Prevalence";
-            barColor = "#007bff"; // Blue for High
-        } else if (prevalence >= 20) {
-            prevalenceLabel = "Medium Prevalence";
-            barColor = "#ffc107"; // Yellow for Medium
-        } else {
-            prevalenceLabel = "Low Prevalence";
-            barColor = "#dc3545"; // Red for Low
-        }
+    if (prevalence >= 30) {
+        prevalenceLabel = "High Prevalence";
+        barColor = "#007bff"; // Blue for High
+    } else if (prevalence >= 15) {
+        prevalenceLabel = "Medium Prevalence";
+        barColor = "#ffc107"; // Yellow for Medium
     } else {
-        // Stricter thresholds for all other findings (Ranks 2+)
-        if (prevalence >= 20) {
-            prevalenceLabel = "Medium Prevalence";
-            barColor = "#ffc107"; // Yellow for Medium
-        } else {
-            prevalenceLabel = "Low Prevalence";
-            barColor = "#dc3545"; // Red for Low
-        }
+        prevalenceLabel = "Low Prevalence";
+        barColor = "#dc3545"; // Red for Low
     }
     // --- END OF NEW LOGIC ---
 

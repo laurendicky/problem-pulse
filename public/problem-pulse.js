@@ -1,4 +1,4 @@
-// The single URL for our new, simplified Netlify function
+ // The single URL for our new, simplified Netlify function
     const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
     
     const stopWords = [
@@ -665,6 +665,8 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
       container.innerHTML = html;
     }
     
+    document.addEventListener('DOMContentLoaded', function() {
+
     document.getElementById("pulse-search").addEventListener("click", async function(event) {
       event.preventDefault();
       const toClear = [
@@ -1187,17 +1189,21 @@ if (loadingBlock) loadingBlock.style.display = "none";
 // END OF THE REPLACEMENT BLOCK
 // =================================================================
     
-      } catch (err) {
-        if (loadingBlock) loadingBlock.style.display = "none";
-        console.error("Error:", err);
-        resultsMessageDiv.innerHTML = `<p class='error'>❌ ${err.message}</p>`;
-        finding1.innerHTML = "<p class='error'>❌ Unable to load summary 1.</p>";
-        finding2.innerHTML = "<p class='error'>❌ Unable to load summary 2.</p>";
-        finding3.innerHTML = "<p class='error'>❌ Unable to load summary 3.</p>";
-        finding4.innerHTML = "<p class='error'>❌ Unable to load summary 4.</p>";
-        finding5.innerHTML = "<p class='error'>❌ Unable to load summary 5.</p>";
-        if (countHeaderDiv) countHeaderDiv.textContent = "";
-      }
+// REPLACE IT WITH THIS
+} catch (err) {
+  if (loadingBlock) loadingBlock.style.display = "none";
+  console.error("Error:", err);
+  resultsMessageDiv.innerHTML = `<p class='error'>❌ An error occurred. Check the console (F12) for details.</p>`;
+  
+  // New "Emergency Plan": Just make the boxes empty.
+  finding1.innerHTML = "";
+  finding2.innerHTML = "";
+  finding3.innerHTML = "";
+  finding4.innerHTML = "";
+  finding5.innerHTML = "";
+  
+  if (countHeaderDiv) countHeaderDiv.textContent = "";
+}
     });
     
     // Add click listeners to sample buttons

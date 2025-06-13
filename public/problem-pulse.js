@@ -1,26 +1,4 @@
- 
-  <!-- Problem Pulse Tool -->
-  <div id="problem-pulse">
-    <!-- Ensure these elements (input and button) exist in your Webflow project with the correct IDs -->
-    <label for="sort-posts">Sort posts by:</label>
-<select id="sort-posts">
-  <option value="relevance">Relevance (default)</option>
-  <option value="newest">Date (Newest first)</option>
-  <option value="upvotes">Upvotes</option>
-  <option value="comments">Comments</option>
-</select>
-<div id="posts-container"></div>
-    <div id="pulse-results"></div>
-    
-    <!-- Findings Container -->
-    <div id="findings-1" class="finding"></div>
-    <div id="findings-2" class="finding"></div>
-    <div id="findings-3" class="finding"></div>
-    <div id="findings-4" class="finding"></div>
-    <div id="findings-5" class="finding"></div>
-  </div>
-  
-  <script>
+
     // The single URL for our new, simplified Netlify function
     const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
     

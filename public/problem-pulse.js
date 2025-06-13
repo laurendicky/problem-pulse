@@ -1,4 +1,26 @@
-
+ 
+  <!-- Problem Pulse Tool -->
+  <div id="problem-pulse">
+    <!-- Ensure these elements (input and button) exist in your Webflow project with the correct IDs -->
+    <label for="sort-posts">Sort posts by:</label>
+<select id="sort-posts">
+  <option value="relevance">Relevance (default)</option>
+  <option value="newest">Date (Newest first)</option>
+  <option value="upvotes">Upvotes</option>
+  <option value="comments">Comments</option>
+</select>
+<div id="posts-container"></div>
+    <div id="pulse-results"></div>
+    
+    <!-- Findings Container -->
+    <div id="findings-1" class="finding"></div>
+    <div id="findings-2" class="finding"></div>
+    <div id="findings-3" class="finding"></div>
+    <div id="findings-4" class="finding"></div>
+    <div id="findings-5" class="finding"></div>
+  </div>
+  
+  <script>
     // The single URL for our new, simplified Netlify function
     const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
     
@@ -1057,17 +1079,30 @@ sortedFindings.forEach((findingData, index) => {
 else {
     let barColor, prevalenceLabel;
 
-    // Use the index to determine the rank of the finding
-    if (index === 0) { // The #1 finding
-        prevalenceLabel = "Primary Finding";
-        barColor = "#007bff"; // Blue for the most important
-    } else if (index === 1) { // The #2 finding
-        prevalenceLabel = "Secondary Finding";
-        barColor = "#17a2b8"; // A different color like teal or cyan
-    } else { // All other findings
-        prevalenceLabel = "Tertiary Finding";
-        barColor = "#6c757d"; // Grey for less important
+    // --- NEW HYBRID LOGIC ---
+    if (index === 0) {
+        // Special, more generous thresholds for the #1 Ranked Finding
+        if (prevalence >= 40) {
+            prevalenceLabel = "High Prevalence";
+            barColor = "#007bff"; // Blue for High
+        } else if (prevalence >= 20) {
+            prevalenceLabel = "Medium Prevalence";
+            barColor = "#ffc107"; // Yellow for Medium
+        } else {
+            prevalenceLabel = "Low Prevalence";
+            barColor = "#dc3545"; // Red for Low
+        }
+    } else {
+        // Stricter thresholds for all other findings (Ranks 2+)
+        if (prevalence >= 20) {
+            prevalenceLabel = "Medium Prevalence";
+            barColor = "#ffc107"; // Yellow for Medium
+        } else {
+            prevalenceLabel = "Low Prevalence";
+            barColor = "#dc3545"; // Red for Low
+        }
     }
+    // --- END OF NEW LOGIC ---
 
     metricsHtml = `
         <div class="prevalence-container">

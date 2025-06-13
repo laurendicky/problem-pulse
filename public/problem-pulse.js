@@ -1075,13 +1075,13 @@ else {
     // --- NEW HYBRID LOGIC ---
     if (prevalence >= 30) {
         prevalenceLabel = "High Prevalence";
-        barColor = "#007bff"; // Blue for High
+        barColor = "#475baa"; 
     } else if (prevalence >= 15) {
         prevalenceLabel = "Medium Prevalence";
-        barColor = "#ffc107"; // Yellow for Medium
+        barColor = "#b5cef3"; 
     } else {
         prevalenceLabel = "Low Prevalence";
-        barColor = "#dc3545"; // Red for Low
+        barColor = "#dc3545"; 
     }
     // --- END OF NEW LOGIC ---
 

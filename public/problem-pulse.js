@@ -1,4 +1,4 @@
-  // The single URL for our new, simplified Netlify function
+ // The single URL for our new, simplified Netlify function
     const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
     
     const stopWords = [
@@ -768,12 +768,28 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
     
       const selectedTime = timeMap[selectedTimeRaw] || "all";
     
-      redditDiv.innerHTML = "";
-      finding1.innerHTML = "<p class='loading'>🤖 Loading summary 1...</p>";
-      finding2.innerHTML = "<p class='loading'>🤖 Loading summary 2...</p>";
-      finding3.innerHTML = "<p class='loading'>🤖 Loading summary 3...</p>";
-      finding4.innerHTML = "<p class='loading'>🤖 Loading summary 4...</p>";
-      finding5.innerHTML = "<p class='loading'>🤖 Loading summary 5...</p>";
+          // --- NEW, IMPROVED LOADING STATE CODE ---
+
+      // First, try to get the HTML from our hidden Lottie template
+      const lottieTemplate = document.getElementById("lottie-loader-template");
+      const lottieLoaderHtml = lottieTemplate ? lottieTemplate.innerHTML : null;
+
+      // Now, loop through the finding blocks to set their loading state
+      for (let i = 1; i <= 5; i++) {
+        const findingDiv = document.getElementById(`findings-${i}`);
+        if (findingDiv) {
+            // If we successfully found the Lottie HTML, use it.
+            if (lottieLoaderHtml) {
+                // This injects a clone of your Lottie animation
+                findingDiv.innerHTML = lottieLoaderHtml;
+            } else {
+                // If the template isn't found for any reason, fall back to the old text.
+                console.warn("Lottie template not found. Using fallback text.");
+                findingDiv.innerHTML = `<p class='loading'>🤖 Loading summary ${i}...</p>`;
+            }
+        }
+      }
+      // --- END OF NEW CODE ---
     
       // Show animated code loading block
       const loadingBlock = document.getElementById("loading-code-1");

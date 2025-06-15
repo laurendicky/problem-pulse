@@ -1,4 +1,4 @@
-
+// The single URL for our new, simplified Netlify function
  const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
     
     const stopWords = [
@@ -476,6 +476,7 @@ function getWordMatchRegex(word) {
     const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`\\b${escapedWord}\\b`, 'i');
 }
+    // New Helper Function: Calculate Relevance Score
 // =============================================================
 // NEW: The Intelligent Relevance Scoring Engine
 // =============================================================
@@ -767,33 +768,47 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
     
       const selectedTime = timeMap[selectedTimeRaw] || "all";
     
-// --- CORRECTED LOADING STATE CODE ---
+          // --- NEW, IMPROVED LOADING STATE CODE ---
+// --- CORRECTED & RE-INITIALIZED LOADING STATE CODE ---
 
 // First, get the HTML from our hidden Lottie template
 const lottieTemplate = document.getElementById("lottie-loader-template");
 if (!lottieTemplate) {
-  console.error("CRITICAL: The <template id='lottie-loader-template'> was not found in the HTML. Loaders cannot be displayed.");
+    console.error("CRITICAL: The Div with ID 'lottie-loader-template' was not found. Loaders cannot be displayed.");
 }
-const lottieLoaderHtml = lottieTemplate ? lottieTemplate.innerHTML : "<p class='loading'>Loading...</p>"; // Fallback text
+const lottieLoaderHtml = lottieTemplate ? lottieTemplate.innerHTML : "<p class='loading'>🤖 Loading...</p>";
 
 // Show all finding blocks and put a loader in each one
 for (let i = 1; i <= 5; i++) {
-  const parentBlock = document.getElementById(`findings-block${i}`);
-  const contentDiv = document.getElementById(`findings-${i}`);
+    const parentBlock = document.getElementById(`findings-block${i}`);
+    const contentDiv = document.getElementById(`findings-${i}`);
 
-  if (parentBlock && contentDiv) {
-    // 1. Make the parent container visible
-    parentBlock.style.display = "flex"; // Or "block", whichever is correct for your layout
+    if (parentBlock && contentDiv) {
+        // 1. Make the parent container visible
+        parentBlock.style.display = "flex";
 
-    // 2. Place the loader HTML inside the child container
-    contentDiv.innerHTML = lottieLoaderHtml;
+        // 2. Place the loader HTML inside the child container
+        contentDiv.innerHTML = lottieLoaderHtml;
 
-    // 3. Clear any old Reddit post samples
-    const redditDiv = document.getElementById(`reddit-div${i}`);
-    if (redditDiv) redditDiv.innerHTML = "";
-  }
+        // 3. Clear any old Reddit post samples from the previous run
+        const redditDiv = document.getElementById(`reddit-div${i}`);
+        if (redditDiv) redditDiv.innerHTML = "";
+    }
 }
-// --- END OF CORRECTED CODE ---
+
+// =================================================================
+// THE FIX: Tell Webflow to find and start the new Lottie animations
+// =================================================================
+if (window.Webflow) {
+    window.Webflow.destroy(); // Optional: clears out old instances
+    window.Webflow.ready();   // Scans the page and brings new animations to life
+    window.Webflow.require('lottie').ready(); // Specifically for Lottie
+}
+// =================================================================
+
+// Show animated code loading block (if you are still using this)
+const loadingBlock = document.getElementById("loading-code-1");
+if (loadingBlock) loadingBlock.style.display = "flex";
     
       const searchTerms = [
         "struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve",

@@ -665,275 +665,268 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
       container.innerHTML = html;
     }
     
-    document.addEventListener('DOMContentLoaded', function() {
+// =============================================================
+// NEW HELPER FUNCTION: To control Lottie loader visibility
+// =============================================================
+function toggleFindingLoaders(show) {
+  // Find all elements with the class 'lottie-loader-findings'
+  const loaders = document.querySelectorAll('.lottie-loader-findings');
+  loaders.forEach(loader => {
+    loader.style.display = show ? 'block' : 'none';
+  });
+}
 
-    document.getElementById("pulse-search").addEventListener("click", async function(event) {
-      event.preventDefault();
-      const toClear = [
-        "count-header",
-        "filter-header",
-        "findings-1",
-        "findings-2",
-        "findings-3",
-        "findings-4",
-        "findings-5",
-        "pulse-results",
-        "posts-container"
-      ];
-    
-      toClear.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.innerHTML = "";
-      });
-      document.querySelectorAll('.reddit-samples-posts').forEach(container => {
-        container.innerHTML = '';
-      });
-      document.querySelectorAll('.reddit-samples-header').forEach(header => {
-        header.innerHTML = '';
-      });
-    
-      const nicheElement = document.getElementById("niche-input");
-      if (!nicheElement) {
-        alert("Error: 'niche-input' element not found.");
-        return;
-      }
-    
-      let userNiche = (typeof nicheElement.value !== 'undefined') ?
-        nicheElement.value.trim() :
-        nicheElement.innerText.trim();
-    
-      const redditDiv = document.getElementById("pulse-results");
-      const finding1 = document.getElementById("findings-1");
-      const finding2 = document.getElementById("findings-2");
-      const finding3 = document.getElementById("findings-3");
-      const finding4 = document.getElementById("findings-4");
-      const finding5 = document.getElementById("findings-5");
-      const resultsMessageDiv = document.getElementById("results-message");
-      const countHeaderDiv = document.getElementById("count-header");
-    
-      if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
-    
-      if (!userNiche) {
-        alert("Please enter a niche.");
-        return;
-      }
-    
-      const timeRadios = document.getElementsByName("timePosted");
-      let selectedTimeRaw = "all";
-      for (const radio of timeRadios) {
-        if (radio.checked) {
-          selectedTimeRaw = radio.value;
-          break;
-        }
-      }
-    
-      const timeMap = {
-        week: "week",
-        month: "month",
-        "6months": "year",
-        year: "year",
-        all: "all"
-      };
-    
-      const minVotesRadios = document.getElementsByName("minVotes");
-      let selectedMinUpvotes = 20;
-      for (const radio of minVotesRadios) {
-        if (radio.checked) {
-          selectedMinUpvotes = parseInt(radio.value, 10);
-          break;
-        }
-      }
-    
-      const filterHeaderDiv = document.getElementById("filter-header");
-      if (filterHeaderDiv) {
-        filterHeaderDiv.innerText = formatFilterHeader(selectedTimeRaw, selectedMinUpvotes);
-      }
-    
-      function formatFilterHeader(timeRaw, minUpvotes) {
-        const timeMapReadable = {
-          all: "All-time",
-          week: "Past week",
-          month: "Past month",
-          year: "Past year"
-        };
-        const timeText = timeMapReadable[timeRaw] || "All-time";
-        let upvoteText;
-        if (minUpvotes === 0) {
-          upvoteText = "all upvotes";
-        } else if (minUpvotes === 1) {
-          upvoteText = "1+ upvote";
-        } else {
-          upvoteText = `${minUpvotes}+ upvotes`;
-        }
-        return `${timeText} posts with ${upvoteText}`;
-      }
-    
-      const selectedTime = timeMap[selectedTimeRaw] || "all";
-    
-          // --- NEW, IMPROVED LOADING STATE CODE ---
 
-      // First, try to get the HTML from our hidden Lottie template
-      const lottieTemplate = document.getElementById("lottie-loader-template");
-      const lottieLoaderHtml = lottieTemplate ? lottieTemplate.innerHTML : null;
+document.getElementById("pulse-search").addEventListener("click", async function(event) {
+  event.preventDefault();
+  const toClear = [
+    "count-header",
+    "filter-header",
+    "findings-1",
+    "findings-2",
+    "findings-3",
+    "findings-4",
+    "findings-5",
+    "pulse-results",
+    "posts-container"
+  ];
 
-      // Now, loop through the finding blocks to set their loading state
+  toClear.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = "";
+  });
+  document.querySelectorAll('.reddit-samples-posts').forEach(container => {
+    container.innerHTML = '';
+  });
+  document.querySelectorAll('.reddit-samples-header').forEach(header => {
+    header.innerHTML = '';
+  });
+
+  const nicheElement = document.getElementById("niche-input");
+  if (!nicheElement) {
+    alert("Error: 'niche-input' element not found.");
+    return;
+  }
+
+  let userNiche = (typeof nicheElement.value !== 'undefined') ?
+    nicheElement.value.trim() :
+    nicheElement.innerText.trim();
+
+  const redditDiv = document.getElementById("pulse-results");
+  const finding1 = document.getElementById("findings-1");
+  const finding2 = document.getElementById("findings-2");
+  const finding3 = document.getElementById("findings-3");
+  const finding4 = document.getElementById("findings-4");
+  const finding5 = document.getElementById("findings-5");
+  const resultsMessageDiv = document.getElementById("results-message");
+  const countHeaderDiv = document.getElementById("count-header");
+
+  if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
+
+  if (!userNiche) {
+    alert("Please enter a niche.");
+    return;
+  }
+
+  const timeRadios = document.getElementsByName("timePosted");
+  let selectedTimeRaw = "all";
+  for (const radio of timeRadios) {
+    if (radio.checked) {
+      selectedTimeRaw = radio.value;
+      break;
+    }
+  }
+
+  const timeMap = {
+    week: "week",
+    month: "month",
+    "6months": "year",
+    year: "year",
+    all: "all"
+  };
+
+  const minVotesRadios = document.getElementsByName("minVotes");
+  let selectedMinUpvotes = 20;
+  for (const radio of minVotesRadios) {
+    if (radio.checked) {
+      selectedMinUpvotes = parseInt(radio.value, 10);
+      break;
+    }
+  }
+
+  const filterHeaderDiv = document.getElementById("filter-header");
+  if (filterHeaderDiv) {
+    filterHeaderDiv.innerText = formatFilterHeader(selectedTimeRaw, selectedMinUpvotes);
+  }
+
+  function formatFilterHeader(timeRaw, minUpvotes) {
+    const timeMapReadable = {
+      all: "All-time",
+      week: "Past week",
+      month: "Past month",
+      year: "Past year"
+    };
+    const timeText = timeMapReadable[timeRaw] || "All-time";
+    let upvoteText;
+    if (minUpvotes === 0) {
+      upvoteText = "all upvotes";
+    } else if (minUpvotes === 1) {
+      upvoteText = "1+ upvote";
+    } else {
+      upvoteText = `${minUpvotes}+ upvotes`;
+    }
+    return `${timeText} posts with ${upvoteText}`;
+  }
+
+  const selectedTime = timeMap[selectedTimeRaw] || "all";
+
+  // --- REVISED LOADING STATE CODE ---
+  // Hide any previous Lottie animations just in case, then show them.
+  toggleFindingLoaders(false); 
+  toggleFindingLoaders(true);
+  // --- END OF REVISED CODE ---
+
+  // Show animated code loading block
+  const loadingBlock = document.getElementById("loading-code-1");
+  if (loadingBlock) loadingBlock.style.display = "flex";
+
+  const searchTerms = [
+    "struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve",
+    "annoyance", "annoyed", "frustration", "disappointed", "fed up", "drives me mad", "hate when",
+    "help", "advice", "solution to", "workaround", "how do I", "how to fix", "how to stop",
+    "can’t find", "nothing works", "tried everything", "too expensive", "takes too long",
+    "vent", "rant", "so annoying", "makes me want to scream"
+  ];
+
+  function countUniquePostsMentioningTerm(posts, term) {
+    const termLower = term.toLowerCase();
+    let count = 0;
+    posts.forEach(post => {
+      const title = post.data.title ? post.data.title.toLowerCase() : '';
+      const selftext = post.data.selftext ? post.data.selftext.toLowerCase() : '';
+      const combinedText = title + " " + selftext;
+      if (combinedText.includes(termLower)) {
+        count++;
+      }
+    });
+    return count;
+  }
+
+  try {
+    let allPosts = await fetchMultipleRedditDataBatched(userNiche, searchTerms, 100, selectedTime);
+
+    if (allPosts.length === 0) {
+      if (loadingBlock) loadingBlock.style.display = "none";
+      resultsMessageDiv.innerHTML = "<p>😔 No results found on Reddit.</p>";
+      
+      // <<< CHANGE: Hide loaders on exit
+      toggleFindingLoaders(false);
+
+      if (countHeaderDiv) countHeaderDiv.textContent = "";
+      return;
+    }
+
+    const reorderedPosts = reorderPostsAdvanced(allPosts, userNiche, searchTerms);
+    const filteredPosts = filterPosts(reorderedPosts, selectedMinUpvotes);
+
+    if (filteredPosts.length === 0) {
+      if (loadingBlock) loadingBlock.style.display = "none";
+      resultsMessageDiv.innerHTML = "<p class='no-results-message'>😔 No high-quality results found on Reddit.</p>";
+
+      // <<< CHANGE: Hide loaders on exit
+      toggleFindingLoaders(false);
+      
+      if (countHeaderDiv) countHeaderDiv.textContent = "";
+      return;
+    }
+
+    if (filteredPosts.length < 10) {
+      if (loadingBlock) loadingBlock.style.display = "none";
+      resultsMessageDiv.innerHTML = "<p class='no-results-message'>😔 No high-quality results found on Reddit.</p>";
+
+      // <<< CHANGE: Hide loaders on exit
+      toggleFindingLoaders(false);
+      
       for (let i = 1; i <= 5; i++) {
-        const findingDiv = document.getElementById(`findings-${i}`);
-        if (findingDiv) {
-            // If we successfully found the Lottie HTML, use it.
-            if (lottieLoaderHtml) {
-                // This injects a clone of your Lottie animation
-                findingDiv.innerHTML = lottieLoaderHtml;
-            } else {
-                // If the template isn't found for any reason, fall back to the old text.
-                console.warn("Lottie template not found. Using fallback text.");
-                findingDiv.innerHTML = `<p class='loading'>🤖 Loading summary ${i}...</p>`;
-            }
-        }
+        let div = document.getElementById(`reddit-div${i}`);
+        if (div) div.innerHTML = "";
       }
-      // --- END OF NEW CODE ---
-    
-      // Show animated code loading block
-      const loadingBlock = document.getElementById("loading-code-1");
-      if (loadingBlock) loadingBlock.style.display = "flex";
-    
-      const searchTerms = [
-        "struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve",
-        "annoyance", "annoyed", "frustration", "disappointed", "fed up", "drives me mad", "hate when",
-        "help", "advice", "solution to", "workaround", "how do I", "how to fix", "how to stop",
-        "can’t find", "nothing works", "tried everything", "too expensive", "takes too long",
-        "vent", "rant", "so annoying", "makes me want to scream"
-      ];
-    
-      function countUniquePostsMentioningTerm(posts, term) {
-        const termLower = term.toLowerCase();
-        let count = 0;
-        posts.forEach(post => {
-          const title = post.data.title ? post.data.title.toLowerCase() : '';
-          const selftext = post.data.selftext ? post.data.selftext.toLowerCase() : '';
-          const combinedText = title + " " + selftext;
-          if (combinedText.includes(termLower)) {
-            count++;
-          }
-        });
-        return count;
+      if (countHeaderDiv) countHeaderDiv.textContent = "";
+      if (document.getElementById("posts-container")) {
+        document.getElementById("posts-container").innerHTML = "";
       }
-    
-      try {
-        let allPosts = await fetchMultipleRedditDataBatched(userNiche, searchTerms, 100, selectedTime);
-    
-        if (allPosts.length === 0) {
-          if (loadingBlock) loadingBlock.style.display = "none";
-          resultsMessageDiv.innerHTML = "<p>😔 No results found on Reddit.</p>";
-          ["findings-1", "findings-2", "findings-3", "findings-4", "findings-5"].forEach(id => {
-            const d = document.getElementById(id);
-            if (d) d.innerHTML = "";
-          });
-          if (countHeaderDiv) countHeaderDiv.textContent = "";
-          return;
-        }
-    
-        const reorderedPosts = reorderPostsAdvanced(allPosts, userNiche, searchTerms);
-        const filteredPosts = filterPosts(reorderedPosts, selectedMinUpvotes);
-    
-        if (filteredPosts.length === 0) {
-          if (loadingBlock) loadingBlock.style.display = "none";
-          resultsMessageDiv.innerHTML = "<p class='no-results-message'>😔 No high-quality results found on Reddit.</p>";
-          ["findings-1", "findings-2", "findings-3", "findings-4", "findings-5"].forEach(id => {
-            const d = document.getElementById(id);
-            if (d) d.innerHTML = "";
-          });
-          if (countHeaderDiv) countHeaderDiv.textContent = "";
-          return;
-        }
-    
-        if (filteredPosts.length < 10) {
-          if (loadingBlock) loadingBlock.style.display = "none";
-          resultsMessageDiv.innerHTML = "<p class='no-results-message'>😔 No high-quality results found on Reddit.</p>";
-          ["findings-1", "findings-2", "findings-3", "findings-4", "findings-5"].forEach(id => {
-            const d = document.getElementById(id);
-            if (d) d.innerHTML = "";
-          });
-          for (let i = 1; i <= 5; i++) {
-            let div = document.getElementById(`reddit-div${i}`);
-            if (div) div.innerHTML = "";
-          }
-          if (countHeaderDiv) countHeaderDiv.textContent = "";
-          if (document.getElementById("posts-container")) {
-            document.getElementById("posts-container").innerHTML = "";
-          }
-          return;
-        }
-    
-        window._filteredPosts = filteredPosts;
-        renderPosts(filteredPosts);
-    
-        function formatPercentageMention(count, total, term) {
-          if (total === 0) return `No Reddit posts mention struggles with “${term}” right now.`;
-          const percent = Math.round((count / total) * 100);
-          return `Found in ${percent}% of posts.`;
-        }
-    
-        function formatMentionCount(count, term) {
-          if (count < 10) {
-            return `No high quality Reddit posts mention struggles with “${term}” right now.`;
-          } else if (count < 100) {
-            const rounded = Math.round(count / 10) * 10;
-            return `Over ${rounded.toLocaleString()} Reddit posts mention struggles with “${term}”.`;
-          } else {
-            const rounded = Math.round(count / 100) * 100;
-            return `Over ${rounded.toLocaleString()} Reddit posts mention struggles with “${term}”.`;
-          }
-        }
-    
-        const userNicheCount = countUniquePostsMentioningTerm(allPosts, userNiche);
-        if (countHeaderDiv) {
-          countHeaderDiv.textContent = formatMentionCount(userNicheCount, userNiche);
-          if (countHeaderDiv.textContent.trim() !== "") {
-            const offset = 20;
-            const y = countHeaderDiv.getBoundingClientRect().top + window.pageYOffset - offset;
-            window.scrollTo({
-              top: y,
-              behavior: "smooth"
-            });
-          }
-        }
-    
-        resultsMessageDiv.innerHTML = "";
-    
-        const topKeywords = getTopKeywords(filteredPosts, 10);
-        const keywordsString = topKeywords.join(', ');
-        const countsForTopKeywords = countKeywordMentions(allPosts, topKeywords);
-    
-        const postScores = filteredPosts.map(post => {
-          const combinedText = `${post.data.title} ${post.data.selftext}`.toLowerCase();
-          let score = 0;
-          topKeywords.forEach(word => {
-            if (combinedText.includes(word.toLowerCase())) score++;
-          });
-          return {
-            post,
-            score
-          };
+      return;
+    }
+
+    window._filteredPosts = filteredPosts;
+    renderPosts(filteredPosts);
+
+    function formatPercentageMention(count, total, term) {
+      if (total === 0) return `No Reddit posts mention struggles with “${term}” right now.`;
+      const percent = Math.round((count / total) * 100);
+      return `Found in ${percent}% of posts.`;
+    }
+
+    function formatMentionCount(count, term) {
+      if (count < 10) {
+        return `No high quality Reddit posts mention struggles with “${term}” right now.`;
+      } else if (count < 100) {
+        const rounded = Math.round(count / 10) * 10;
+        return `Over ${rounded.toLocaleString()} Reddit posts mention struggles with “${term}”.`;
+      } else {
+        const rounded = Math.round(count / 100) * 100;
+        return `Over ${rounded.toLocaleString()} Reddit posts mention struggles with “${term}”.`;
+      }
+    }
+
+    const userNicheCount = countUniquePostsMentioningTerm(allPosts, userNiche);
+    if (countHeaderDiv) {
+      countHeaderDiv.textContent = formatMentionCount(userNicheCount, userNiche);
+      if (countHeaderDiv.textContent.trim() !== "") {
+        const offset = 20;
+        const y = countHeaderDiv.getBoundingClientRect().top + window.pageYOffset - offset;
+        window.scrollTo({
+          top: y,
+          behavior: "smooth"
         });
-        postScores.sort((a, b) => b.score - a.score);
-    
-        const topPosts = postScores.slice(0, 80).map(item => item.post);
-    
-        const combinedTexts = topPosts.map(post => {
-          const title = post.data.title || "";
-          const selftext = post.data.selftext ? post.data.selftext.substring(0, 300) : "";
-          return `${title}. ${selftext}`;
-        }).join("\n\n");
-    
-        const openAIParams = {
-          model: "gpt-4o-mini",
-          messages: [{
-            role: "system",
-            content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles within a specific niche and provides three authentic, concise quotes for each struggle."
-          }, {
-            role: "user",
-            content: `Using the top keywords [${keywordsString}], summarize the following content into between 1 and 5 core common struggles in the niche "${userNiche}". For each struggle, provide a concise title, a brief summary, and the number of times this problem was mentioned. Additionally, generate three authentic, raw, and short (no longer than 6 words) quotes that reflect the lived experience of each struggle. Ensure that each summary's "body" includes the user's keyword "${userNiche}" or a close variant of it, and that it appears naturally and clearly to emphasize relevance. 
+      }
+    }
+
+    resultsMessageDiv.innerHTML = "";
+
+    const topKeywords = getTopKeywords(filteredPosts, 10);
+    const keywordsString = topKeywords.join(', ');
+    const countsForTopKeywords = countKeywordMentions(allPosts, topKeywords);
+
+    const postScores = filteredPosts.map(post => {
+      const combinedText = `${post.data.title} ${post.data.selftext}`.toLowerCase();
+      let score = 0;
+      topKeywords.forEach(word => {
+        if (combinedText.includes(word.toLowerCase())) score++;
+      });
+      return {
+        post,
+        score
+      };
+    });
+    postScores.sort((a, b) => b.score - a.score);
+
+    const topPosts = postScores.slice(0, 80).map(item => item.post);
+
+    const combinedTexts = topPosts.map(post => {
+      const title = post.data.title || "";
+      const selftext = post.data.selftext ? post.data.selftext.substring(0, 300) : "";
+      return `${title}. ${selftext}`;
+    }).join("\n\n");
+
+    const openAIParams = {
+      model: "gpt-4o-mini",
+      messages: [{
+        role: "system",
+        content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles within a specific niche and provides three authentic, concise quotes for each struggle."
+      }, {
+        role: "user",
+        content: `Using the top keywords [${keywordsString}], summarize the following content into between 1 and 5 core common struggles in the niche "${userNiche}". For each struggle, provide a concise title, a brief summary, and the number of times this problem was mentioned. Additionally, generate three authentic, raw, and short (no longer than 6 words) quotes that reflect the lived experience of each struggle. Ensure that each summary's "body" includes the user's keyword "${userNiche}" or a close variant of it, and that it appears naturally and clearly to emphasize relevance. 
       Present the output in strict JSON format as shown below:
     
       {
@@ -967,112 +960,108 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
       ${combinedTexts}
       \`\`\`
       `
-          }],
-          temperature: 0.0,
-          max_tokens: 1000
-        };
-    
-        const openAIResponse = await fetch(OPENAI_PROXY_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ openaiPayload: openAIParams })
-        });
-        if (!openAIResponse.ok) {
-          const errorDetail = await openAIResponse.json();
-          throw new Error(`OpenAI API Error: ${errorDetail.error || openAIResponse.statusText}`);
-        }
-        const openAIData = await openAIResponse.json();
-        const aiSummary = openAIData.openaiResponse;
-    
-        let summaries;
-        try {
-          summaries = parseAISummary(aiSummary);
-        } catch (parseError) {
-          if (loadingBlock) loadingBlock.style.display = "none";
-          redditDiv.innerHTML += `<p class='error'>❌ Parsing Error: ${parseError.message}</p>`;
-          throw parseError;
-        }
-        // =================================================================
-        // NEW: VALIDATION STEP - Filter out findings with no evidence
-        // =================================================================
-        const MIN_SUPPORTING_POSTS_PER_FINDING = 3; // <--- You can adjust this threshold!
-        
-        const validatedSummaries = summaries.filter(finding => {
-            // For each finding, let's see how many posts are relevant.
-            const supportingPosts = filteredPosts.filter(post => {
-                // We use our existing relevance score! A score > 0 means it's a match.
-                return calculateRelevanceScore(post, finding) > 0;
-            });
-            
-            // Keep the finding ONLY if it has enough supporting posts.
-            return supportingPosts.length >= MIN_SUPPORTING_POSTS_PER_FINDING;
-        });
-    
-        if (validatedSummaries.length === 0) {
-            if (loadingBlock) loadingBlock.style.display = "none";
-            resultsMessageDiv.innerHTML = "<p class='no-results-message'>😔 While posts were found, none formed a clear, common problem. Try a broader niche.</p>";
-            ["findings-1", "findings-2", "findings-3", "findings-4", "findings-5"].forEach(id => {
-                const d = document.getElementById(id);
-                if(d) d.innerHTML = "";
-            });
-            if (countHeaderDiv) countHeaderDiv.textContent = "";
-            return; // Stop execution if no valid findings remain
-        }
-        // =================================================================
-        // END of new validation step
-        // =================================================================
-     
-    
-// =================================================================
-// START OF THE REPLACEMENT BLOCK
-// =================================================================
+      }],
+      temperature: 0.0,
+      max_tokens: 1000
+    };
 
-// Calculate metrics based on the original validated summaries
-const metrics = calculateFindingMetrics(validatedSummaries, filteredPosts);
+    const openAIResponse = await fetch(OPENAI_PROXY_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        openaiPayload: openAIParams
+      })
+    });
+    if (!openAIResponse.ok) {
+      const errorDetail = await openAIResponse.json();
+      throw new Error(`OpenAI API Error: ${errorDetail.error || openAIResponse.statusText}`);
+    }
+    const openAIData = await openAIResponse.json();
+    const aiSummary = openAIData.openaiResponse;
 
-// Combine findings with their scores and sort them by prevalence
-const sortedFindings = validatedSummaries.map((summary, index) => {
-    const findingMetrics = metrics[index];
-    const totalProblemPosts = metrics.totalProblemPosts || 1;
-    const prevalence = Math.round((findingMetrics.supportCount / totalProblemPosts) * 100);
-    // We return an object containing ALL the data we need for each finding
-    return {
+    let summaries;
+    try {
+      summaries = parseAISummary(aiSummary);
+    } catch (parseError) {
+      if (loadingBlock) loadingBlock.style.display = "none";
+      redditDiv.innerHTML += `<p class='error'>❌ Parsing Error: ${parseError.message}</p>`;
+      
+      // <<< CHANGE: Hide loaders on exit
+      toggleFindingLoaders(false);
+
+      throw parseError;
+    }
+    const MIN_SUPPORTING_POSTS_PER_FINDING = 3;
+
+    const validatedSummaries = summaries.filter(finding => {
+      const supportingPosts = filteredPosts.filter(post => {
+        return calculateRelevanceScore(post, finding) > 0;
+      });
+      return supportingPosts.length >= MIN_SUPPORTING_POSTS_PER_FINDING;
+    });
+
+    if (validatedSummaries.length === 0) {
+      if (loadingBlock) loadingBlock.style.display = "none";
+      resultsMessageDiv.innerHTML = "<p class='no-results-message'>😔 While posts were found, none formed a clear, common problem. Try a broader niche.</p>";
+      
+      // <<< CHANGE: Hide loaders on exit
+      toggleFindingLoaders(false);
+
+      if (countHeaderDiv) countHeaderDiv.textContent = "";
+      return;
+    }
+
+    // <<< CHANGE START: Hide loaders just before displaying results
+    // The content below will overwrite the parent divs, but this is a clean
+    // way to ensure the loaders are gone before the new content is rendered.
+    toggleFindingLoaders(false);
+    // <<< CHANGE END
+
+    const metrics = calculateFindingMetrics(validatedSummaries, filteredPosts);
+
+    const sortedFindings = validatedSummaries.map((summary, index) => {
+      const findingMetrics = metrics[index];
+      const totalProblemPosts = metrics.totalProblemPosts || 1;
+      const prevalence = Math.round((findingMetrics.supportCount / totalProblemPosts) * 100);
+      return {
         summary: summary,
         prevalence: prevalence,
         supportCount: findingMetrics.supportCount
-    };
-}).sort((a, b) => b.prevalence - a.prevalence); // Sort by prevalence, highest to lowest
+      };
+    }).sort((a, b) => b.prevalence - a.prevalence);
 
-// Get a simple array of the summaries in their new sorted order
-const sortedSummaries = sortedFindings.map(item => item.summary);
+    const sortedSummaries = sortedFindings.map(item => item.summary);
 
-// Hide all finding blocks initially to ensure a clean slate
-for (let i = 1; i <= 5; i++) {
-    const block = document.getElementById(`findings-block${i}`);
-    if (block) block.style.display = "none";
-}
+    for (let i = 1; i <= 5; i++) {
+      const block = document.getElementById(`findings-block${i}`);
+      if (block) block.style.display = "none";
+    }
 
-// Loop through the SORTED findings and display them in the correct order
-sortedFindings.forEach((findingData, index) => {
-    const displayIndex = index + 1; // This is the visual position (1, 2, 3...)
+    sortedFindings.forEach((findingData, index) => {
+      const displayIndex = index + 1;
 
-    const block = document.getElementById(`findings-block${displayIndex}`);
-    const content = document.getElementById(`findings-${displayIndex}`);
-    const btn = document.getElementById(`button-sample${displayIndex}`);
-    const redditDiv = document.getElementById(`reddit-div${displayIndex}`);
+      const block = document.getElementById(`findings-block${displayIndex}`);
+      const content = document.getElementById(`findings-${displayIndex}`);
+      const btn = document.getElementById(`button-sample${displayIndex}`);
+      const redditDiv = document.getElementById(`reddit-div${displayIndex}`);
 
-    if (block) block.style.display = "flex";
+      if (block) block.style.display = "flex";
 
-    if (content) {
-        const { summary, prevalence, supportCount } = findingData; // Destructure our data object
+      if (content) {
+        const {
+          summary,
+          prevalence,
+          supportCount
+        } = findingData;
         const summaryId = `summary-body-${displayIndex}-${Date.now()}`;
         const summaryShort = summary.body.length > 95 ? summary.body.substring(0, 95) + "…" : summary.body;
 
         let metricsHtml = '';
 
-        // CONTEXTUAL LOGIC: Check if there is only ONE finding
         if (sortedFindings.length === 1) {
-            metricsHtml = `
+          metricsHtml = `
                 <div class="prevalence-container">
                     <div class="prevalence-header">Primary Finding</div>
                     <div class="single-finding-metric" style="font-size: 1.2rem; font-weight: bold; color: #333; margin-top: 4px;">
@@ -1083,39 +1072,34 @@ sortedFindings.forEach((findingData, index) => {
                     </div>
                 </div>
             `;
-        } 
-        // ELSE: If there are multiple findings, show the comparative prevalence bar.
-// ...
-else {
-    let barColor, prevalenceLabel;
+        } else {
+          let barColor, prevalenceLabel;
 
-    // --- NEW HYBRID LOGIC ---
-    if (prevalence >= 30) {
-        prevalenceLabel = "High Prevalence";
-        barColor = "#475baa"; 
-    } else if (prevalence >= 15) {
-        prevalenceLabel = "Medium Prevalence";
-        barColor = "#b5cef3"; 
-    } else {
-        prevalenceLabel = "Low Prevalence";
-        barColor = "#dc3545"; 
-    }
-    // --- END OF NEW LOGIC ---
+          if (prevalence >= 30) {
+            prevalenceLabel = "High Prevalence";
+            barColor = "#475baa";
+          } else if (prevalence >= 15) {
+            prevalenceLabel = "Medium Prevalence";
+            barColor = "#b5cef3";
+          } else {
+            prevalenceLabel = "Low Prevalence";
+            barColor = "#dc3545";
+          }
 
-    metricsHtml = `
-        <div class="prevalence-container">
-            <div class="prevalence-header">${prevalenceLabel}</div>
-            <div class="prevalence-bar-background">
-                <div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${barColor};">
-                    ${prevalence}%
+          metricsHtml = `
+            <div class="prevalence-container">
+                <div class="prevalence-header">${prevalenceLabel}</div>
+                <div class="prevalence-bar-background">
+                    <div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${barColor};">
+                        ${prevalence}%
+                    </div>
+                </div>
+                <div class="prevalence-subtitle">
+                    Represents ${prevalence}% of all identified problems.
                 </div>
             </div>
-            <div class="prevalence-subtitle">
-                Represents ${prevalence}% of all identified problems.
-            </div>
-        </div>
-    `;
-}
+          `;
+        }
 
         content.innerHTML = `
             <div class="section-title">${summary.title}</div>
@@ -1129,82 +1113,87 @@ else {
             </div>
             ${metricsHtml}
         `;
-        
+
         if (summary.body.length > 95) {
-            setTimeout(() => {
-                const seeMoreBtn = content.querySelector(`.see-more-btn[data-summary="${summaryId}"]`);
-                if (seeMoreBtn) {
-                    const teaser = content.querySelector(`#${summaryId}`);
-                    const full = content.querySelector(`#${summaryId}-full`);
-                    seeMoreBtn.addEventListener('click', function() {
-                        if (teaser.style.display !== 'none') { teaser.style.display = 'none'; full.style.display = ''; seeMoreBtn.textContent = 'See less'; } 
-                        else { teaser.style.display = ''; full.style.display = 'none'; seeMoreBtn.textContent = 'See more'; }
-                    });
+          setTimeout(() => {
+            const seeMoreBtn = content.querySelector(`.see-more-btn[data-summary="${summaryId}"]`);
+            if (seeMoreBtn) {
+              const teaser = content.querySelector(`#${summaryId}`);
+              const full = content.querySelector(`#${summaryId}-full`);
+              seeMoreBtn.addEventListener('click', function() {
+                if (teaser.style.display !== 'none') {
+                  teaser.style.display = 'none';
+                  full.style.display = '';
+                  seeMoreBtn.textContent = 'See less';
+                } else {
+                  teaser.style.display = '';
+                  full.style.display = 'none';
+                  seeMoreBtn.textContent = 'See more';
                 }
-            }, 0);
+              });
+            }
+          }, 0);
         }
-    }
+      }
 
-    if (redditDiv) redditDiv.innerHTML = "";
-    if (btn) {
+      if (redditDiv) redditDiv.innerHTML = "";
+      if (btn) {
         btn.onclick = function() {
-            showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds);
+          showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds);
         };
-    }
-});
+      }
+    });
 
-// Update the global summaries to be in the new sorted order
-window._summaries = sortedSummaries;
+    window._summaries = sortedSummaries;
 
-// Create the smart candidate list for AI assignment using the sorted data
-const MAX_POSTS_FOR_ASSIGNMENT = 75;
-window._postsForAssignment = filteredPosts.map(post => {
-    let bestScore = 0;
-    sortedSummaries.forEach(finding => {
+    const MAX_POSTS_FOR_ASSIGNMENT = 75;
+    window._postsForAssignment = filteredPosts.map(post => {
+      let bestScore = 0;
+      sortedSummaries.forEach(finding => {
         const score = calculateRelevanceScore(post, finding);
-        if (score > bestScore) { bestScore = score; }
-    });
-    return { post, score: bestScore };
-}).filter(item => item.score > 0).sort((a, b) => b.score - a.score).slice(0, MAX_POSTS_FOR_ASSIGNMENT).map(item => item.post);
+        if (score > bestScore) {
+          bestScore = score;
+        }
+      });
+      return {
+        post,
+        score: bestScore
+      };
+    }).filter(item => item.score > 0).sort((a, b) => b.score - a.score).slice(0, MAX_POSTS_FOR_ASSIGNMENT).map(item => item.post);
 
-// Call AI for assignment using the SORTED summaries
-const assignments = await assignPostsToFindings(
-    sortedSummaries,
-    window._postsForAssignment,
-    keywordsString,
-    userNiche,
-    combinedTexts,
-    5
-);
-window._assignments = assignments;
-window._usedPostIds = new Set();
+    const assignments = await assignPostsToFindings(
+      sortedSummaries,
+      window._postsForAssignment,
+      keywordsString,
+      userNiche,
+      combinedTexts,
+      5
+    );
+    window._assignments = assignments;
+    window._usedPostIds = new Set();
 
-// Finally, show the initial set of samples for the sorted summaries
-for (let index = 0; index < sortedSummaries.length; index++) {
-    showSamplePosts(index, assignments, filteredPosts, window._usedPostIds);
-}
+    for (let index = 0; index < sortedSummaries.length; index++) {
+      showSamplePosts(index, assignments, filteredPosts, window._usedPostIds);
+    }
 
-if (loadingBlock) loadingBlock.style.display = "none";
-// =================================================================
-// END OF THE REPLACEMENT BLOCK
-// =================================================================
-    
-// REPLACE IT WITH THIS
-} catch (err) {
-  if (loadingBlock) loadingBlock.style.display = "none";
-  console.error("Error:", err);
-  resultsMessageDiv.innerHTML = `<p class='error'>❌ An error occurred. Check the console (F12) for details.</p>`;
-  
-  // New "Emergency Plan": Just make the boxes empty.
-  finding1.innerHTML = "";
-  finding2.innerHTML = "";
-  finding3.innerHTML = "";
-  finding4.innerHTML = "";
-  finding5.innerHTML = "";
-  
-  if (countHeaderDiv) countHeaderDiv.textContent = "";
-}
-    });
+    if (loadingBlock) loadingBlock.style.display = "none";
+
+  } catch (err) {
+    if (loadingBlock) loadingBlock.style.display = "none";
+    console.error("Error:", err);
+    resultsMessageDiv.innerHTML = `<p class='error'>❌ ${err.message}</p>`;
+
+    // <<< CHANGE: Hide loaders on error and clear content
+    toggleFindingLoaders(false);
+    finding1.innerHTML = "";
+    finding2.innerHTML = "";
+    finding3.innerHTML = "";
+    finding4.innerHTML = "";
+    finding5.innerHTML = "";
+
+    if (countHeaderDiv) countHeaderDiv.textContent = "";
+  }
+});
     
     // Add click listeners to sample buttons
     ['button-sample1', 'button-sample2', 'button-sample3'].forEach((buttonId, idx) => {

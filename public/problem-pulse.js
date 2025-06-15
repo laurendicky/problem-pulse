@@ -1,5 +1,5 @@
 // The single URL for our new, simplified Netlify function
- const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
+    const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
     
     const stopWords = [
       "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at",
@@ -768,47 +768,16 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
     
       const selectedTime = timeMap[selectedTimeRaw] || "all";
     
-          // --- NEW, IMPROVED LOADING STATE CODE ---
-// --- CORRECTED & RE-INITIALIZED LOADING STATE CODE ---
-
-// First, get the HTML from our hidden Lottie template
-const lottieTemplate = document.getElementById("lottie-loader-template");
-if (!lottieTemplate) {
-    console.error("CRITICAL: The Div with ID 'lottie-loader-template' was not found. Loaders cannot be displayed.");
-}
-const lottieLoaderHtml = lottieTemplate ? lottieTemplate.innerHTML : "<p class='loading'>🤖 Loading...</p>";
-
-// Show all finding blocks and put a loader in each one
-for (let i = 1; i <= 5; i++) {
-    const parentBlock = document.getElementById(`findings-block${i}`);
-    const contentDiv = document.getElementById(`findings-${i}`);
-
-    if (parentBlock && contentDiv) {
-        // 1. Make the parent container visible
-        parentBlock.style.display = "flex";
-
-        // 2. Place the loader HTML inside the child container
-        contentDiv.innerHTML = lottieLoaderHtml;
-
-        // 3. Clear any old Reddit post samples from the previous run
-        const redditDiv = document.getElementById(`reddit-div${i}`);
-        if (redditDiv) redditDiv.innerHTML = "";
-    }
-}
-
-// =================================================================
-// THE FIX: Tell Webflow to find and start the new Lottie animations
-// =================================================================
-if (window.Webflow) {
-    window.Webflow.destroy(); // Optional: clears out old instances
-    window.Webflow.ready();   // Scans the page and brings new animations to life
-    window.Webflow.require('lottie').ready(); // Specifically for Lottie
-}
-// =================================================================
-
-// Show animated code loading block (if you are still using this)
-const loadingBlock = document.getElementById("loading-code-1");
-if (loadingBlock) loadingBlock.style.display = "flex";
+      redditDiv.innerHTML = "";
+      finding1.innerHTML = "<p class='loading'>Insight brewing...</p>";
+      finding2.innerHTML = "<p class='loading'>Drama detected...</p>";
+      finding3.innerHTML = "<p class='loading'>Tea being spilled...</p>";
+      finding4.innerHTML = "<p class='loading'>Juice incoming...</p>";
+      finding5.innerHTML = "<p class='loading'>Gossip loading...</p>";
+    
+      // Show animated code loading block
+      const loadingBlock = document.getElementById("loading-code-1");
+      if (loadingBlock) loadingBlock.style.display = "flex";
     
       const searchTerms = [
         "struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve",

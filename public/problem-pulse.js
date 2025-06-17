@@ -612,6 +612,9 @@ function calculateFindingMetrics(validatedSummaries, filteredPosts) {
 
 
 // =================================================================
+// =================================================================
+// PASTE THIS ENTIRE BLOCK BACK INTO YOUR CODE
+// =================================================================
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
     // Stop any other animations that might be running
     stopAllQuoteAnimations();

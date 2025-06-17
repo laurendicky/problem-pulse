@@ -1,4 +1,5 @@
-// The single URL for our new, simplified Netlify function
+ <script>
+  // The single URL for our new, simplified Netlify function
     const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
     
     const stopWords = [
@@ -20,6 +21,48 @@
     const CLIENT_ID = 'PynIoQ3wsLrGESAOvl2nSw';
     const CLIENT_SECRET = 'giYtA4-dQNiVuKE1ePH5ImAC5vysaA';
     const USER_AGENT = 'web:problem-pulse-tool:v1.0 (by /u/RubyFishSimon)';
+
+    // =============================================================
+// FLOATING QUOTE ANIMATOR MODULE (No changes needed here)
+// =============================================================
+
+window._quoteIntervals = {};
+
+function stopAllQuoteAnimations() {
+  Object.values(window._quoteIntervals).forEach(clearInterval);
+  window._quoteIntervals = {};
+  const allBubbles = document.querySelectorAll('.quote-bubble');
+  allBubbles.forEach(bubble => bubble.remove());
+}
+
+function startQuoteAnimation(containerId, quotesArray) {
+  const container = document.getElementById(containerId);
+  if (!container || !quotesArray || quotesArray.length === 0) {
+    return;
+  }
+  if (window._quoteIntervals[containerId]) {
+    clearInterval(window._quoteIntervals[containerId]);
+  }
+  const createQuote = () => {
+    const quoteEl = document.createElement('div');
+    quoteEl.classList.add('quote-bubble');
+    const randomIndex = Math.floor(Math.random() * quotesArray.length);
+    quoteEl.textContent = `“${quotesArray[randomIndex]}”`;
+    const randomLeft = Math.random() * 70;
+    quoteEl.style.left = `${randomLeft}%`;
+    const randomDuration = Math.random() * 15 + 20;
+    quoteEl.style.animation = `floatUp ${randomDuration}s linear forwards`;
+    const randomSize = Math.random() * 4 + 14;
+    quoteEl.style.fontSize = `${randomSize}px`;
+    container.appendChild(quoteEl);
+    setTimeout(() => {
+      quoteEl.remove();
+    }, randomDuration * 1000);
+  }
+  const intervalId = setInterval(createQuote, 4000);
+  window._quoteIntervals[containerId] = intervalId;
+  createQuote();
+}
     
     function deduplicatePosts(posts) {
       const seen = new Set();
@@ -569,17 +612,25 @@ function calculateFindingMetrics(validatedSummaries, filteredPosts) {
     
     return metrics;
 }
-    // Show Sample Posts Function
+
 // =============================================================
-// FINAL: Upgraded showSamplePosts with Quality Gate
+// REVISED: showSamplePosts Function with Animation Control
 // =============================================================
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
-    const MIN_POSTS = 3; // It's better to show 3 great posts than 4 mediocre ones.
+    // --- ADDITION 1: Stop all other animations first ---
+    // This ensures only the active modal has floating quotes.
+    stopAllQuoteAnimations();
+
+    const MIN_POSTS = 3;
     const MAX_POSTS = 6;
-    const MINIMUM_RELEVANCE_SCORE = 5; // The QUALITY GATE. A post MUST score at least this high to be shown as a fallback.
+    const MINIMUM_RELEVANCE_SCORE = 5;
 
     const finding = window._summaries[summaryIndex];
     if (!finding) return;
+
+    // --- ADDITION 2: Identify the container and quotes for this finding ---
+    const animationContainerId = `quote-float-container-${summaryIndex + 1}`;
+    const quotesForAnimation = finding.quotes;
 
     let relevantPosts = [];
     const addedPostIds = new Set();
@@ -592,40 +643,34 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
         }
     };
 
-    // --- Step 1: Add AI-Assigned Posts ---
-    // These are considered the highest quality and bypass the score check.
+    // --- Your existing logic for finding posts (NO CHANGES NEEDED HERE) ---
     const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber);
     assignedPostNumbers.forEach(postNum => {
-        // Find the post in the `postsForAssignment` list that the AI actually saw
         const post = window._postsForAssignment[postNum - 1]; 
         addPost(post);
     });
 
-    // --- Step 2: If we need more, run the scoring engine on ALL posts ---
     if (relevantPosts.length < MIN_POSTS) {
         const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id));
-
         const scoredCandidates = candidatePool.map(post => ({
             post: post,
-            score: calculateRelevanceScore(post, finding) // Use our powerful new engine
+            score: calculateRelevanceScore(post, finding)
         }))
-        .filter(item => item.score >= MINIMUM_RELEVANCE_SCORE) // Apply the quality gate
-        .sort((a, b) => b.score - a.score); // Sort by the best score
-
-        // Add the best-scoring candidates until we reach our minimum
+        .filter(item => item.score >= MINIMUM_RELEVANCE_SCORE)
+        .sort((a, b) => b.score - a.score);
         for (const candidate of scoredCandidates) {
             if (relevantPosts.length >= MIN_POSTS) break;
             addPost(candidate.post);
         }
     }
     
-    // --- Step 3: Final Display ---
+    // --- Your existing logic for displaying posts (NO CHANGES NEEDED HERE) ---
     let html;
     if (relevantPosts.length === 0) {
         html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`;
     } else {
         const finalPosts = relevantPosts.slice(0, MAX_POSTS);
-        finalPosts.forEach(post => usedPostIds.add(post.data.id)); // Mark as used globally
+        finalPosts.forEach(post => usedPostIds.add(post.data.id));
 
         html = finalPosts.map(post => `
           <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;">
@@ -636,10 +681,14 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
         `).join('');
     }
   
+    // This container is in your modal
     const container = document.getElementById(`reddit-div${summaryIndex + 1}`);
     if (container) {
         container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">${headerMessage}</div><div class="reddit-samples-posts">${html}</div>`;
     }
+
+    // --- ADDITION 3: Start the animation now that the modal is visible ---
+    startQuoteAnimation(animationContainerId, quotesForAnimation);
 }
     const sortFunctions = {
       relevance: (a, b) => 0,

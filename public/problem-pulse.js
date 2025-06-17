@@ -1,4 +1,4 @@
-
+// The single URL for our new, simplified Netlify function
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 
 const stopWords = [
@@ -43,24 +43,6 @@ function formatDate(utcSeconds) {
 let accessToken = null;
 let tokenExpiry = 0;
 
-
-function formatFilterHeader(timeRaw, minUpvotes) {
-    const timeMapReadable = {
-        all: "All-time",
-        week: "Past week",
-        month: "Past month",
-        year: "Past year"
-    };
-    const timeText = timeMapReadable[timeRaw] || "All-time";
-    let upvoteText;
-    if (minUpvotes === 0) {
-        upvoteText = "all upvotes";
-    } else {
-        upvoteText = `${minUpvotes}+ upvotes`;
-    }
-    return `${timeText} posts with ${upvoteText}`;
-}
-
 async function fetchNewToken() {
     const credentials = btoa(`${CLIENT_ID}:${CLIENT_SECRET}`);
 
@@ -95,14 +77,12 @@ const MAX_CONCURRENT_BATCH = 8; // Number of simultaneous requests per batch
 const PAGINATION_BATCH_SIZE = 25; // Posts fetched per page during pagination
 const MAX_RETRIES = 3; // Max retries on rate limit/error per request
 
-// Fetch posts for one term with pagination and retries
 async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all') {
     let allPosts = [];
     let after = null;
     let retries = 0;
     let token = await getValidToken();
 
-    // Helper function to fetch a single page
     async function fetchPage(afterToken) {
         let url = `https://oauth.reddit.com/search?q=${encodeURIComponent(term + ' ' + niche)}&limit=${PAGINATION_BATCH_SIZE}&t=${timeFilter}`;
         if (afterToken) url += `&after=${afterToken}`;
@@ -116,115 +96,84 @@ async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, t
 
         if (!response.ok) {
             if (response.status === 401) {
-                // Token expired, refresh token once (fail-safe)
                 token = await fetchNewToken();
                 return await fetchPage(afterToken);
             }
-
             if (response.status === 429) {
                 if (retries >= MAX_RETRIES) {
                     throw new Error(`Rate limited by Reddit API too many times for term "${term}".`);
                 }
-                // Read Retry-After header, fallback 2 seconds
                 const retryAfterSec = Number(response.headers.get('Retry-After')) || 2;
                 console.warn(`Rate limited on term "${term}", retrying after ${retryAfterSec} seconds...`);
                 await new Promise(resolve => setTimeout(resolve, retryAfterSec * 1000));
                 retries++;
                 return await fetchPage(afterToken);
             }
-
             throw new Error(`Error fetching posts for term "${term}": ${response.status} ${response.statusText}`);
         }
-
-        retries = 0; // reset retry count on success
-
+        retries = 0;
         const data = await response.json();
         return data.data;
     }
 
-    // Paginate until totalLimit reached or no more pages
     try {
         while (allPosts.length < totalLimit) {
             const pageData = await fetchPage(after);
             if (!pageData || !pageData.children || pageData.children.length === 0) break;
-
             allPosts = allPosts.concat(pageData.children);
-
             after = pageData.after;
-            if (!after) break; // no more pages
+            if (!after) break;
         }
     } catch (err) {
         console.error(`Failed to fetch posts for term "${term}":`, err.message);
     }
-
     return allPosts.slice(0, totalLimit);
 }
 
-// Main function to fetch posts for multiple terms batching requests
 async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all') {
     const allResults = [];
-
     for (let i = 0; i < searchTerms.length; i += MAX_CONCURRENT_BATCH) {
         const batchTerms = searchTerms.slice(i, i + MAX_CONCURRENT_BATCH);
-
-        // Map each term in the batch to a fetch promise
-        const batchPromises = batchTerms.map(term =>
-            fetchRedditForTermWithPagination(niche, term, limitPerTerm, timeFilter)
-        );
-
-        // Await them all and flatten results
+        const batchPromises = batchTerms.map(term => fetchRedditForTermWithPagination(niche, term, limitPerTerm, timeFilter));
         const batchResults = await Promise.all(batchPromises);
         batchResults.forEach(posts => {
             if (Array.isArray(posts)) {
                 allResults.push(...posts);
             }
         });
-
-        // Optional: short pause between batches to be polite and avoid surge
         if (i + MAX_CONCURRENT_BATCH < searchTerms.length) {
-            await new Promise(resolve => setTimeout(resolve, 500)); // 500 ms delay
+            await new Promise(resolve => setTimeout(resolve, 500));
         }
     }
-
     const dedupedPosts = deduplicatePosts(allResults);
     return dedupedPosts;
 }
-// Fetch Reddit Data Function
+
 async function fetchMultipleRedditData(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all', minUpvotes = 0) {
     const fetchPromises = searchTerms.map(async (term) => {
         const token = await getValidToken();
         const query = encodeURIComponent(`${term} ${niche}`);
         const url = `https://oauth.reddit.com/search?q=${query}&limit=${limitPerTerm}&t=${timeFilter}`;
-
         const response = await fetch(url, {
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'User-Agent': USER_AGENT,
             }
         });
-
         if (!response.ok) {
             console.error(`Reddit API Error for term "${term}": ${response.status} ${response.statusText}`);
             return [];
         }
-
         const data = await response.json();
         return data.data.children || [];
     });
-
     const results = await Promise.all(fetchPromises);
     const allPosts = results.flat();
-
     const dedupedPosts = deduplicatePosts(allPosts);
-
-    // Filter by minUpvotes only if minUpvotes > 0
-    const filteredByUpvotes = minUpvotes > 0 ?
-        dedupedPosts.filter(post => post.data.ups >= minUpvotes) :
-        dedupedPosts;
-
+    const filteredByUpvotes = minUpvotes > 0 ? dedupedPosts.filter(post => post.data.ups >= minUpvotes) : dedupedPosts;
     return filteredByUpvotes;
 }
-// Parse AI Summary
+
 function parseAISummary(aiResponse) {
     try {
         aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim();
@@ -236,12 +185,12 @@ function parseAISummary(aiResponse) {
         if (!parsed.summaries || !Array.isArray(parsed.summaries) || parsed.summaries.length < 1) {
             throw new Error("AI response does not contain at least one summary.");
         }
-        // Don't slice, and don't require 3! Allow 1–5
         parsed.summaries.forEach((summary, idx) => {
             const missingFields = [];
             if (!summary.title) missingFields.push("title");
             if (!summary.body) missingFields.push("body");
             if (typeof summary.count !== 'number') missingFields.push("count");
+            if (!summary.quotes || !Array.isArray(summary.quotes) || summary.quotes.length < 1) missingFields.push("quotes");
             if (!summary.keywords || !Array.isArray(summary.keywords) || summary.keywords.length === 0) missingFields.push("keywords");
             if (missingFields.length > 0)
                 throw new Error(`Summary ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`);
@@ -249,62 +198,22 @@ function parseAISummary(aiResponse) {
         return parsed.summaries;
     } catch (error) {
         console.error("Parsing Error:", error);
-        console.log("Raw AI Response:", aiResponse); // Debugging
+        console.log("Raw AI Response:", aiResponse);
         throw new Error("Failed to parse AI response. Ensure the response is in the correct JSON format.");
     }
-} // <<< THIS WAS THE MISSING BRACE. IT IS NOW FIXED.
-
-// NEW HELPER FUNCTION: Fetch Comments for a Post
-async function fetchCommentsForPost(subreddit, postId) {
-    try {
-        const token = await getValidToken();
-        const url = `https://oauth.reddit.com/r/${subreddit}/comments/${postId}.json?sort=top&limit=25`; // Get top 25 comments
-
-        const response = await fetch(url, {
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'User-Agent': USER_AGENT,
-            }
-        });
-
-        if (!response.ok) {
-            console.error(`Failed to fetch comments for post ${postId}: ${response.status}`);
-            return []; // Return empty array on failure
-        }
-
-        const data = await response.json();
-        // The comments are in the second element of the response array
-        const commentsData = data[1]?.data?.children || [];
-
-        // Filter out deleted comments or ones without a body, and return just the text
-        return commentsData
-            .map(comment => comment.data?.body)
-            .filter(body => body && body !== '[deleted]' && body !== '[removed]');
-
-    } catch (error) {
-        console.error(`Error in fetchCommentsForPost for post ${postId}:`, error);
-        return []; // Return empty on error
-    }
 }
-// New Function: Parse AI Assignments
+
 function parseAIAssignments(aiResponse) {
     try {
-        // Remove any code block markers or backticks
         aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim();
-
-        // Extract JSON using regex to find the first JSON object in the response
         const jsonMatch = aiResponse.match(/{[\s\S]*}/);
         if (!jsonMatch) {
             throw new Error("No JSON object found in the AI response.");
         }
-
         const parsed = JSON.parse(jsonMatch[0]);
-
         if (!parsed.assignments || !Array.isArray(parsed.assignments)) {
             throw new Error("AI response does not contain an 'assignments' array.");
         }
-
-        // Validate each assignment
         parsed.assignments.forEach((assignment, idx) => {
             const missingFields = [];
             if (typeof assignment.postNumber !== 'number') missingFields.push("postNumber");
@@ -312,50 +221,38 @@ function parseAIAssignments(aiResponse) {
             if (missingFields.length > 0)
                 throw new Error(`Assignment ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`);
         });
-
         return parsed.assignments;
     } catch (error) {
         console.error("Parsing Error:", error);
-        console.log("Raw AI Response:", aiResponse); // Debugging
+        console.log("Raw AI Response:", aiResponse);
         throw new Error("Failed to parse AI response. Ensure the response is in the correct JSON format.");
     }
 }
 
 function isRamblingOrNoisy(text) {
     if (!text) return false;
-
-    // Check for escaped unicode or HTML entities -- many of these look like "​"
     const htmlEntityRegex = /&#x[0-9a-fA-F]+;/g;
     if (htmlEntityRegex.test(text)) return true;
-
-    // Check for long sequences (>5) of non-alphanumeric chars e.g., ####, $$$$$, ---
     const longSymbolSeqRegex = /[^a-zA-Z0-9\s]{5,}/g;
     if (longSymbolSeqRegex.test(text)) return true;
-
-    // Optional: check for excessive repeated chars (7 or more times)
     const gibberishRegex = /(.)\1{6,}/g;
     if (gibberishRegex.test(text)) return true;
-
     return false;
 }
 
-// Make sure this is *after* isRamblingOrNoisy definition
 function filterPosts(posts, minUpvotes = 20) {
     return posts.filter(post => {
         const title = post.data.title.toLowerCase();
         const selftext = post.data.selftext || '';
-
         if (title.includes('[ad]') || title.includes('sponsored')) return false;
         if (post.data.upvote_ratio < 0.2) return false;
-        if (post.data.ups < minUpvotes) return false; // use minUpvotes param here
+        if (post.data.ups < minUpvotes) return false;
         if (!selftext || selftext.length < 100) return false;
         if (isRamblingOrNoisy(title) || isRamblingOrNoisy(selftext)) return false;
-
         return true;
     });
 }
 
-// Preprocess Text
 function preprocessText(text) {
     text = text.replace(/<[^>]+>/g, '');
     text = text.replace(/[^a-zA-Z0-9\s.,!?]/g, '');
@@ -375,7 +272,6 @@ function countUniquePostsPerKeyword(posts, keyword) {
     return seenPostIds.size;
 }
 
-// Get Top Keywords
 function getTopKeywords(posts, topN = 10) {
     const freqMap = {};
     posts.forEach(post => {
@@ -392,7 +288,6 @@ function getTopKeywords(posts, topN = 10) {
     return sortedWords.slice(0, topN);
 }
 
-// Count Keyword Mentions
 function countKeywordMentions(posts, terms) {
     const counts = {};
     terms.forEach(term => {
@@ -410,7 +305,6 @@ function countKeywordMentions(posts, terms) {
     return counts;
 }
 
-// Get First Two Sentences
 function getFirstTwoSentences(text) {
     if (!text) return '';
     const sentences = text.match(/[^\.!\?]+[\.!\?]+(?:\s|$)/g);
@@ -418,7 +312,6 @@ function getFirstTwoSentences(text) {
     return sentences.slice(0, 2).join(' ').trim();
 }
 
-// Reorder Posts (Advanced)
 function reorderPostsAdvanced(allPosts, userTerm, struggleTerms) {
     const group1 = [];
     const group2 = [];
@@ -428,13 +321,10 @@ function reorderPostsAdvanced(allPosts, userTerm, struggleTerms) {
         const title = post.data.title || "";
         const selftext = post.data.selftext || "";
         const firstTwo = getFirstTwoSentences(selftext);
-
         const titleHasUser = title.toLowerCase().includes(userTerm.toLowerCase());
         const titleHasStruggle = struggleTerms.some(term => title.toLowerCase().includes(term.toLowerCase()));
-
         const firstTwoHasUser = firstTwo.toLowerCase().includes(userTerm.toLowerCase());
         const firstTwoHasStruggle = struggleTerms.some(term => firstTwo.toLowerCase().includes(term.toLowerCase()));
-
         if (titleHasUser && titleHasStruggle) group1.push(post);
         else if (titleHasUser) group2.push(post);
         else if (firstTwoHasUser && firstTwoHasStruggle) group3.push(post);
@@ -443,40 +333,25 @@ function reorderPostsAdvanced(allPosts, userTerm, struggleTerms) {
     return [...group1, ...group2, ...group3, ...group4];
 }
 
-// Assign Posts to Findings using OpenAI
-async function assignPostsToFindings(
-    summaries,
-    posts,
-    keywordsString,
-    userNiche,
-    combinedTexts,
-    maxFindings = 5
-) {
+async function assignPostsToFindings(summaries, posts, keywordsString, userNiche, combinedTexts, maxFindings = 5) {
     const prompt = `
     You are an assistant that carefully categorizes Reddit posts by assigning each to the most relevant of up to ${maxFindings} findings, based on the post's content. Each finding must have highly relevant posts, ensuring posts clearly illustrate the finding’s core theme. Avoid assigning duplicated, unrelated or off-topic posts. Provide your response only as a JSON object listing assignments.
-    
     Here are the findings:
     ${summaries.map((summary, index) => `Finding ${index + 1}:
     Title: ${summary.title}
     Summary: ${summary.body}`).join('\n\n')}
-    
     Here are the Reddit posts:
     ${posts.map((post, index) => `Post ${index + 1}:
     Title: ${post.data.title}
     Body: ${getFirstTwoSentences(post.data.selftext)}`).join('\n\n')}
-    
     For each post, assign it to the most relevant finding (between 1 and ${summaries.length}) based on the content. If a post does not clearly relate to any finding, it can be omitted.
-    
     Provide the assignments in the following JSON format without any additional text, explanations, or code blocks:
-    
     {
       "assignments": [
         {"postNumber": 1, "finding": 2},
         {"postNumber": 3, "finding": 1}
       ]
-    }
-    `;
-
+    }`;
     const openAIParams = {
         model: "gpt-4o-mini",
         messages: [{
@@ -489,16 +364,11 @@ async function assignPostsToFindings(
         temperature: 0,
         max_tokens: 1000
     };
-
     try {
         const response = await fetch(OPENAI_PROXY_URL, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                openaiPayload: openAIParams
-            })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
         });
         if (!response.ok) {
             const errorDetail = await response.json();
@@ -506,10 +376,7 @@ async function assignPostsToFindings(
         }
         const data = await response.json();
         let aiResponse = data.openaiResponse;
-
-        // Attempt to parse the JSON response
         const assignments = parseAIAssignments(aiResponse);
-
         return assignments;
     } catch (error) {
         console.error("Assignment Error:", error);
@@ -518,167 +385,57 @@ async function assignPostsToFindings(
 }
 
 function getWordMatchRegex(word) {
-    // Escape special regex characters in the word, then wrap with word boundaries (\b).
     const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`\\b${escapedWord}\\b`, 'i');
-}
-// =============================================================
-// NEW: Smart Quote Extractor
-// =============================================================
-/**
- * Extracts a relevant, quote-worthy sentence from a post based on a finding's keywords.
- * @param {object} post - The Reddit post object.
- * @param {object} finding - The summary/finding object (containing keywords).
- * @returns {string|null} A relevant quote string, or null if no suitable quote is found.
- */
-function extractRelevantQuote(post, finding) {
-    const bodyText = post.data.selftext;
-    if (!bodyText || bodyText.length < 50) return null; // Ignore posts with no real body
-
-    // Split the post body into individual sentences. This is a simple but effective regex.
-    const sentences = bodyText.match(/[^\.!\?]+[\.!\?]+/g) || [];
-
-    // Get the finding's keywords to search for.
-    const keywords = (finding.keywords || []).map(k => k.toLowerCase());
-    if (keywords.length === 0) return null; // Can't find a relevant quote without keywords
-
-    let bestQuote = null;
-
-    // First pass: Find a sentence that contains a keyword.
-    for (const sentence of sentences) {
-        const cleanSentence = sentence.trim();
-        // A good quote is not too short and not excessively long.
-        if (cleanSentence.length > 20 && cleanSentence.length < 250) {
-            for (const keyword of keywords) {
-                // Use your whole-word matching regex for precision
-                if (getWordMatchRegex(keyword).test(cleanSentence)) {
-                    return cleanSentence; // Found a great match, return it immediately.
-                }
-            }
-        }
-    }
-
-    // Fallback: If no keyword-matched sentence was found, just return the first sentence
-    // of the post as it often contains the main point.
-    if (sentences.length > 0) {
-        const firstSentence = sentences[0].trim();
-        if (firstSentence.length > 20 && firstSentence.length < 250) {
-            return firstSentence;
-        }
-    }
-
-    return null; // Could not find any suitable quote.
-}
-
-// =============================================================
-// NEW: Quote Bubble Renderer
-// =============================================================
-/**
- * Finds top posts for a finding, extracts quotes, and renders them as bubbles.
- * @param {number} findingIndex - The 0-based index of the finding.
- * @param {object} finding - The summary/finding object.
- * @param {Array} allPosts - The complete list of filtered Reddit posts.
- */
-function renderQuoteBubbles(findingIndex, finding, allPosts) {
-    const container = document.getElementById(`quote-float-container-${findingIndex + 1}`);
-    if (!container) return; // Exit if the container div doesn't exist
-
-    // Find the top 4 most relevant posts for this specific finding
-    const topPosts = allPosts
-        .map(post => ({
-            post: post,
-            score: calculateRelevanceScore(post, finding)
-        }))
-        .filter(item => item.score > 0) // Only consider posts with some relevance
-        .sort((a, b) => b.score - a.score) // Sort by best score
-        .slice(0, 4) // Get the top 4
-        .map(item => item.post);
-
-    // Extract one quote from each of the top posts
-    const quotes = topPosts.map(post => extractRelevantQuote(post, finding))
-        .filter(quote => quote !== null); // Filter out any null results
-
-    let html = '';
-    if (quotes.length > 0) {
-        // We have quotes, let's build the bubbles
-        html = quotes.map(quote => `
-        <div class="quote-bubble">
-          "${quote}"
-        </div>
-      `).join('');
-    } else {
-        // Optional: handle cases where no relevant quotes could be found
-        html = '<!-- No specific quotes found for this finding. -->';
-    }
-
-    container.innerHTML = html;
 }
 
 function calculateRelevanceScore(post, finding) {
     let score = 0;
     const postTitle = post.data.title || "";
     const postBody = post.data.selftext || "";
-
-    // Get the most important words from the finding's title.
     const findingTitleWords = finding.title.toLowerCase().split(' ').filter(word => word.length > 3 && !stopWords.includes(word));
-    // Get the supplemental keywords for the finding.
     const findingKeywords = (finding.keywords || []).map(k => k.toLowerCase());
-
     let titleWordMatched = false;
     let keywordMatched = false;
-
-    // --- Score based on Finding Title words (high value) ---
     for (const word of findingTitleWords) {
         const regex = getWordMatchRegex(word);
         if (regex.test(postTitle)) {
-            score += 5; // Major bonus for a title-in-title match.
+            score += 5;
             titleWordMatched = true;
         }
         if (regex.test(postBody)) {
-            score += 2; // Standard bonus for title-in-body match.
+            score += 2;
             titleWordMatched = true;
         }
     }
-
-    // --- Score based on Finding Keywords (medium value) ---
     for (const keyword of findingKeywords) {
         const regex = getWordMatchRegex(keyword);
         if (regex.test(postTitle)) {
-            score += 3; // Good bonus for keyword-in-title match.
+            score += 3;
             keywordMatched = true;
         }
         if (regex.test(postBody)) {
-            score += 1; // Basic bonus for keyword-in-body match.
+            score += 1;
             keywordMatched = true;
         }
     }
-
-    // --- Massive "Combo" Bonus ---
-    // If a post matches BOTH a title word AND a keyword, it's very likely to be relevant.
     if (titleWordMatched && keywordMatched) {
         score += 10;
     }
-
     return score;
 }
 
 function calculateFindingMetrics(validatedSummaries, filteredPosts) {
     const metrics = {};
     const allProblemPostIds = new Set();
-
-    // Initialize metrics object for each finding
     validatedSummaries.forEach((finding, index) => {
         metrics[index] = {
             supportCount: 0
         };
     });
-
-    // For each post, find the SINGLE best finding it belongs to
     filteredPosts.forEach(post => {
         let bestFindingIndex = -1;
         let maxScore = 0;
-
-        // Calculate score for this post against every finding
         validatedSummaries.forEach((finding, index) => {
             const score = calculateRelevanceScore(post, finding);
             if (score > maxScore) {
@@ -686,145 +443,54 @@ function calculateFindingMetrics(validatedSummaries, filteredPosts) {
                 bestFindingIndex = index;
             }
         });
-
-        // If the post was a good match for at least one finding...
-        // We use a minimum score of 1 to ensure it's a real match.
         if (bestFindingIndex !== -1 && maxScore > 0) {
-            // ...increment the count for ONLY the winning finding
             metrics[bestFindingIndex].supportCount++;
             allProblemPostIds.add(post.data.id);
         }
     });
-
     metrics.totalProblemPosts = allProblemPostIds.size;
-
     return metrics;
-}
-// NEW: Quote Extraction Engine
-async function populateFindingsWithRealQuotes(findings, allPosts) {
-    const MAX_QUOTES_PER_FINDING = 3;
-    const POSTS_TO_SCAN_PER_FINDING = 5; // Scan top 5 posts for quotes to be efficient
-
-    // Use a map to avoid re-fetching comments for the same post if it's relevant to multiple findings
-    const commentCache = new Map();
-
-    for (const finding of findings) {
-        const findingKeywords = [...(finding.summary.keywords || []), ...finding.summary.title.toLowerCase().split(' ')];
-        const uniqueKeywords = [...new Set(findingKeywords)].filter(k => k.length > 3 && !stopWords.includes(k));
-
-        // Find the most relevant posts for THIS specific finding using your relevance score
-        const relevantPosts = allPosts
-            .map(post => ({
-                post,
-                score: calculateRelevanceScore(post, finding.summary)
-            }))
-            .filter(item => item.score > 0)
-            .sort((a, b) => b.score - a.score)
-            .slice(0, POSTS_TO_SCAN_PER_FINDING)
-            .map(item => item.post);
-
-        let potentialQuotes = [];
-
-        // Go through the top posts to find quotes
-        for (const post of relevantPosts) {
-            const postId = post.data.id;
-            let comments = [];
-
-            // Fetch comments if we haven't already for this post
-            if (commentCache.has(postId)) {
-                comments = commentCache.get(postId);
-            } else {
-                comments = await fetchCommentsForPost(post.data.subreddit, postId);
-                commentCache.set(postId, comments);
-            }
-
-            // Combine the post's own text with all its comments
-            const allTextSources = [post.data.selftext, ...comments];
-
-            // Search for sentences containing our keywords
-            for (const text of allTextSources) {
-                if (!text) continue;
-                // Split text into sentences for better quote extraction
-                const sentences = text.match(/[^.!?]+[.!?]+/g) || [];
-                for (const sentence of sentences) {
-                    for (const keyword of uniqueKeywords) {
-                        const regex = getWordMatchRegex(keyword); // Use your existing helper for whole-word matching
-                        if (regex.test(sentence)) {
-                            const cleanedSentence = sentence.trim();
-                            // Add quote if it's a reasonable length
-                            if (cleanedSentence.length > 15 && cleanedSentence.length < 200) {
-                                potentialQuotes.push(cleanedSentence);
-                            }
-                            break; // Move to the next sentence once one keyword is found
-                        }
-                    }
-                }
-            }
-        }
-
-        // Deduplicate and select the best quotes
-        const uniqueQuotes = [...new Set(potentialQuotes)];
-        finding.summary.quotes = uniqueQuotes.slice(0, MAX_QUOTES_PER_FINDING);
-    }
-
-    // The 'findings' array is now updated with real quotes!
-    return findings;
 }
 
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
-    const MIN_POSTS = 3; // It's better to show 3 great posts than 4 mediocre ones.
+    const MIN_POSTS = 3;
     const MAX_POSTS = 6;
-    const MINIMUM_RELEVANCE_SCORE = 5; // The QUALITY GATE. A post MUST score at least this high to be shown as a fallback.
-
+    const MINIMUM_RELEVANCE_SCORE = 5;
     const finding = window._summaries[summaryIndex];
     if (!finding) return;
-
     let relevantPosts = [];
     const addedPostIds = new Set();
     let headerMessage = `Real Stories from Reddit: "${finding.title}"`;
-
     const addPost = (post) => {
         if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) {
             relevantPosts.push(post);
             addedPostIds.add(post.data.id);
         }
     };
-
-    // --- Step 1: Add AI-Assigned Posts ---
-    // These are considered the highest quality and bypass the score check.
     const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber);
     assignedPostNumbers.forEach(postNum => {
-        // Find the post in the `postsForAssignment` list that the AI actually saw
         const post = window._postsForAssignment[postNum - 1];
         addPost(post);
     });
-
-    // --- Step 2: If we need more, run the scoring engine on ALL posts ---
     if (relevantPosts.length < MIN_POSTS) {
         const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id));
-
         const scoredCandidates = candidatePool.map(post => ({
-            post: post,
-            score: calculateRelevanceScore(post, finding) // Use our powerful new engine
-        }))
-        .filter(item => item.score >= MINIMUM_RELEVANCE_SCORE) // Apply the quality gate
-        .sort((a, b) => b.score - a.score); // Sort by the best score
-
-        // Add the best-scoring candidates until we reach our minimum
+                post: post,
+                score: calculateRelevanceScore(post, finding)
+            }))
+            .filter(item => item.score >= MINIMUM_RELEVANCE_SCORE)
+            .sort((a, b) => b.score - a.score);
         for (const candidate of scoredCandidates) {
             if (relevantPosts.length >= MIN_POSTS) break;
             addPost(candidate.post);
         }
     }
-
-    // --- Step 3: Final Display ---
     let html;
     if (relevantPosts.length === 0) {
         html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`;
     } else {
         const finalPosts = relevantPosts.slice(0, MAX_POSTS);
-        finalPosts.forEach(post => usedPostIds.add(post.data.id)); // Mark as used globally
-
+        finalPosts.forEach(post => usedPostIds.add(post.data.id));
         html = finalPosts.map(post => `
           <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;">
             <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${post.data.title}</a>
@@ -833,12 +499,12 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
           </div>
         `).join('');
     }
-
     const container = document.getElementById(`reddit-div${summaryIndex + 1}`);
     if (container) {
         container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">${headerMessage}</div><div class="reddit-samples-posts">${html}</div>`;
     }
 }
+
 const sortFunctions = {
     relevance: (a, b) => 0,
     newest: (a, b) => b.data.created_utc - a.data.created_utc,
@@ -863,46 +529,120 @@ function renderPosts(posts) {
     container.innerHTML = html;
 }
 
+// =============================================================
+// START: ADDITION OF NEW HELPER FUNCTIONS FOR QUOTE BUBBLES
+// These are added here, in the global scope, with other helpers.
+// =============================================================
+
+/**
+ * Extracts a relevant, quote-worthy sentence from a post based on a finding's keywords.
+ * @param {object} post - The Reddit post object.
+ * @param {object} finding - The summary/finding object (containing keywords).
+ * @returns {string|null} A relevant quote string, or null if no suitable quote is found.
+ */
+function extractRelevantQuote(post, finding) {
+    const bodyText = post.data.selftext;
+    if (!bodyText || bodyText.length < 50) return null;
+
+    const sentences = bodyText.match(/[^\.!\?]+[\.!\?]+/g) || [];
+    const keywords = (finding.keywords || []).map(k => k.toLowerCase());
+    if (keywords.length === 0) return null;
+
+    for (const sentence of sentences) {
+        const cleanSentence = sentence.trim();
+        if (cleanSentence.length > 20 && cleanSentence.length < 250) {
+            for (const keyword of keywords) {
+                if (getWordMatchRegex(keyword).test(cleanSentence)) {
+                    return cleanSentence;
+                }
+            }
+        }
+    }
+    if (sentences.length > 0) {
+        const firstSentence = sentences[0].trim();
+        if (firstSentence.length > 20 && firstSentence.length < 250) {
+            return firstSentence;
+        }
+    }
+    return null;
+}
+
+/**
+ * Finds top posts for a finding, extracts quotes, and renders them as bubbles.
+ * @param {number} findingIndex - The 0-based index of the finding.
+ * @param {object} finding - The summary/finding object.
+ * @param {Array} allPosts - The complete list of filtered Reddit posts.
+ */
+function renderQuoteBubbles(findingIndex, finding, allPosts) {
+    const container = document.getElementById(`quote-float-container-${findingIndex + 1}`);
+    if (!container) return;
+
+    const topPosts = allPosts
+        .map(post => ({
+            post: post,
+            score: calculateRelevanceScore(post, finding)
+        }))
+        .filter(item => item.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 4)
+        .map(item => item.post);
+
+    const quotes = topPosts.map(post => extractRelevantQuote(post, finding))
+        .filter(quote => quote !== null);
+
+    let html = '';
+    if (quotes.length > 0) {
+        html = quotes.map(quote => `<div class="quote-bubble">"${quote}"</div>`).join('');
+    } else {
+        html = '<!-- No relevant quotes found for bubbles. -->';
+    }
+    container.innerHTML = html;
+}
+// =============================================================
+// END: ADDITION OF NEW HELPER FUNCTIONS
+// =============================================================
+
+
 document.getElementById("pulse-search").addEventListener("click", async function(event) {
     event.preventDefault();
-
-    // --- 1. CLEAR OLD RESULTS ---
     const toClear = [
         "count-header", "filter-header", "findings-1", "findings-2", "findings-3",
         "findings-4", "findings-5", "pulse-results", "posts-container"
     ];
+
     toClear.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.innerHTML = "";
     });
-    document.querySelectorAll('.reddit-samples-posts, .reddit-samples-header, .quote-float-container').forEach(el => {
-        el.innerHTML = '';
+    document.querySelectorAll('.reddit-samples-posts, .reddit-samples-header, .quote-float-container').forEach(container => {
+        container.innerHTML = '';
     });
-    for (let i = 1; i <= 5; i++) {
-        const block = document.getElementById(`findings-block${i}`);
-        if (block) block.style.display = "none";
+
+    const nicheElement = document.getElementById("niche-input");
+    if (!nicheElement) {
+        alert("Error: 'niche-input' element not found.");
+        return;
     }
 
-    // --- 2. GET USER INPUT AND SET UP UI ---
-    const nicheElement = document.getElementById("niche-input");
-    let userNiche = (typeof nicheElement.value !== 'undefined') ? nicheElement.value.trim() : nicheElement.innerText.trim();
+    let userNiche = (typeof nicheElement.value !== 'undefined') ?
+        nicheElement.value.trim() :
+        nicheElement.innerText.trim();
+
+    const redditDiv = document.getElementById("pulse-results");
+    const finding1 = document.getElementById("findings-1");
+    const finding2 = document.getElementById("findings-2");
+    const finding3 = document.getElementById("findings-3");
+    const finding4 = document.getElementById("findings-4");
+    const finding5 = document.getElementById("findings-5");
+    const resultsMessageDiv = document.getElementById("results-message");
+    const countHeaderDiv = document.getElementById("count-header");
+
+    if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
+
     if (!userNiche) {
         alert("Please enter a niche.");
         return;
     }
-
-    const redditDiv = document.getElementById("pulse-results");
-    const findingElements = [1, 2, 3, 4, 5].map(i => document.getElementById(`findings-${i}`));
-    const resultsMessageDiv = document.getElementById("results-message");
-    const countHeaderDiv = document.getElementById("count-header");
-    const loadingBlock = document.getElementById("loading-code-1");
-    if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
-    if (loadingBlock) loadingBlock.style.display = "flex";
-
-    const loadingMessages = ["Insight brewing...", "Drama detected...", "Tea being spilled...", "Juice incoming...", "Gossip loading..."];
-    findingElements.forEach((el, index) => {
-        if (el) el.innerHTML = `<p class='loading'>${loadingMessages[index]}</p>`;
-    });
 
     const timeRadios = document.getElementsByName("timePosted");
     let selectedTimeRaw = "all";
@@ -912,6 +652,14 @@ document.getElementById("pulse-search").addEventListener("click", async function
             break;
         }
     }
+
+    const timeMap = {
+        week: "week",
+        month: "month",
+        "6months": "year",
+        year: "year",
+        all: "all"
+    };
 
     const minVotesRadios = document.getElementsByName("minVotes");
     let selectedMinUpvotes = 20;
@@ -923,44 +671,93 @@ document.getElementById("pulse-search").addEventListener("click", async function
     }
 
     const filterHeaderDiv = document.getElementById("filter-header");
+    
+    // THIS IS YOUR ORIGINAL NESTED FUNCTION, PRESERVED EXACTLY.
+    function formatFilterHeader(timeRaw, minUpvotes) {
+        const timeMapReadable = {
+            all: "All-time",
+            week: "Past week",
+            month: "Past month",
+            year: "Past year"
+        };
+        const timeText = timeMapReadable[timeRaw] || "All-time";
+        let upvoteText;
+        if (minUpvotes === 0) {
+            upvoteText = "all upvotes";
+        } else if (minUpvotes === 1) {
+            upvoteText = "1+ upvote";
+        } else {
+            upvoteText = `${minUpvotes}+ upvotes`;
+        }
+        return `${timeText} posts with ${upvoteText}`;
+    }
+
     if (filterHeaderDiv) {
         filterHeaderDiv.innerText = formatFilterHeader(selectedTimeRaw, selectedMinUpvotes);
     }
     
-    // --- 3. MAIN LOGIC BLOCK ---
-    try {
-        const searchTerms = [
-            "struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance",
-            "frustration", "disappointed", "fed up", "drives me mad", "hate when", "help", "advice", "solution to",
-            "workaround", "how do I", "how to fix", "how to stop", "can’t find", "nothing works", "tried everything",
-            "too expensive", "takes too long", "vent", "rant", "so annoying"
-        ];
-        const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
-        const selectedTime = timeMap[selectedTimeRaw] || "all";
+    const selectedTime = timeMap[selectedTimeRaw] || "all";
 
-        // --- 4. FETCH AND FILTER REDDIT DATA ---
+    redditDiv.innerHTML = "";
+    finding1.innerHTML = "<p class='loading'>Insight brewing...</p>";
+    finding2.innerHTML = "<p class='loading'>Drama detected...</p>";
+    finding3.innerHTML = "<p class='loading'>Tea being spilled...</p>";
+    finding4.innerHTML = "<p class='loading'>Juice incoming...</p>";
+    finding5.innerHTML = "<p class='loading'>Gossip loading...</p>";
+
+    const loadingBlock = document.getElementById("loading-code-1");
+    if (loadingBlock) loadingBlock.style.display = "flex";
+
+    const searchTerms = [
+        "struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve",
+        "annoyance", "annoyed", "frustration", "disappointed", "fed up", "drives me mad", "hate when",
+        "help", "advice", "solution to", "workaround", "how do I", "how to fix", "how to stop",
+        "can’t find", "nothing works", "tried everything", "too expensive", "takes too long",
+        "vent", "rant", "so annoying", "makes me want to scream"
+    ];
+    
+    // THIS IS YOUR ORIGINAL NESTED FUNCTION, PRESERVED EXACTLY.
+    function countUniquePostsMentioningTerm(posts, term) {
+        const termLower = term.toLowerCase();
+        let count = 0;
+        posts.forEach(post => {
+            const title = post.data.title ? post.data.title.toLowerCase() : '';
+            const selftext = post.data.selftext ? post.data.selftext.toLowerCase() : '';
+            const combinedText = title + " " + selftext;
+            if (combinedText.includes(termLower)) {
+                count++;
+            }
+        });
+        return count;
+    }
+
+    try {
         let allPosts = await fetchMultipleRedditDataBatched(userNiche, searchTerms, 100, selectedTime);
 
         if (allPosts.length === 0) {
             if (loadingBlock) loadingBlock.style.display = "none";
             resultsMessageDiv.innerHTML = "<p>😔 No results found on Reddit.</p>";
-            findingElements.forEach(el => { if (el) el.innerHTML = ""; });
+            [finding1, finding2, finding3, finding4, finding5].forEach(f => { if(f) f.innerHTML = "" });
             if (countHeaderDiv) countHeaderDiv.textContent = "";
             return;
         }
 
         const reorderedPosts = reorderPostsAdvanced(allPosts, userNiche, searchTerms);
         const filteredPosts = filterPosts(reorderedPosts, selectedMinUpvotes);
-        window._filteredPosts = filteredPosts;
 
         if (filteredPosts.length === 0 || filteredPosts.length < 10) {
             if (loadingBlock) loadingBlock.style.display = "none";
-            resultsMessageDiv.innerHTML = "<p class='no-results-message'>😔 Not enough high-quality results found. Try broader terms or different filters.</p>";
-            findingElements.forEach(el => { if (el) el.innerHTML = ""; });
+            let msg = filteredPosts.length === 0 ? 'No high-quality results found on Reddit.' : 'Not enough high-quality results found on Reddit.';
+            resultsMessageDiv.innerHTML = `<p class='no-results-message'>😔 ${msg}</p>`;
+            [finding1, finding2, finding3, finding4, finding5].forEach(f => { if(f) f.innerHTML = "" });
             if (countHeaderDiv) countHeaderDiv.textContent = "";
+            if (document.getElementById("posts-container")) {
+                document.getElementById("posts-container").innerHTML = "";
+            }
             return;
         }
-        
+
+        window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
 
         function formatMentionCount(count, term) {
@@ -974,86 +771,147 @@ document.getElementById("pulse-search").addEventListener("click", async function
                 return `Over ${rounded.toLocaleString()} Reddit posts complain about “${term}”.`;
             }
         }
-        const userNicheCount = allPosts.filter(p => ((p.data.title || '') + (p.data.selftext || '')).toLowerCase().includes(userNiche.toLowerCase())).length;
+
+        const userNicheCount = countUniquePostsMentioningTerm(allPosts, userNiche);
         if (countHeaderDiv) {
             countHeaderDiv.textContent = formatMentionCount(userNicheCount, userNiche);
-            if (countHeaderDiv.textContent.includes('Over')) {
-                window.scrollTo({ top: countHeaderDiv.getBoundingClientRect().top + window.pageYOffset - 20, behavior: "smooth" });
+            if (countHeaderDiv.textContent.trim() !== "" && countHeaderDiv.textContent.includes("Over")) {
+                const offset = 20;
+                const y = countHeaderDiv.getBoundingClientRect().top + window.pageYOffset - offset;
+                window.scrollTo({
+                    top: y,
+                    behavior: "smooth"
+                });
             }
         }
+
         resultsMessageDiv.innerHTML = "";
 
-        // --- 5. GET AI SUMMARIES (WITHOUT QUOTES) ---
         const topKeywords = getTopKeywords(filteredPosts, 10);
         const keywordsString = topKeywords.join(', ');
-        const topPosts = filteredPosts.slice(0, 80);
-        const combinedTexts = topPosts.map(p => `${p.data.title || ""}. ${p.data.selftext ? p.data.selftext.substring(0, 300) : ""}`).join("\n\n");
 
+        const topPosts = filteredPosts.slice(0, 80);
+        const combinedTexts = topPosts.map(post => `${post.data.title || ""}. ${post.data.selftext ? post.data.selftext.substring(0, 300) : ""}`).join("\n\n");
+        
         const openAIParams = {
             model: "gpt-4o-mini",
             messages: [{
                 role: "system",
-                content: "You are an assistant that summarizes text into 1-5 common struggles, providing a title, body, and relevant keywords for each. You do NOT provide quotes."
+                content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles within a specific niche and provides three authentic, concise quotes for each struggle."
             }, {
                 role: "user",
-                content: `Using top keywords [${keywordsString}], summarize the content into 1-5 struggles in the niche "${userNiche}". For each, provide a title, summary, and 2-3 keywords. Ensure the summary includes "${userNiche}". Output strict JSON.
-                {"summaries": [{"title": "T1", "body": "B1", "count": 0, "keywords": ["k1"]}, ...]}
-                ---
-                ${combinedTexts}`
+                content: `Using the top keywords [${keywordsString}], summarize the following content into between 1 and 5 core common struggles in the niche "${userNiche}". For each struggle, provide a concise title, a brief summary, and the number of times this problem was mentioned. Additionally, generate three authentic, raw, and short (no longer than 6 words) quotes that reflect the lived experience of each struggle. Ensure that each summary's "body" includes the user's keyword "${userNiche}" or a close variant of it, and that it appears naturally and clearly to emphasize relevance. 
+      Present the output in strict JSON format as shown below:
+    
+      {
+        "summaries": [
+          { "title": "SummaryTitle1", "body": "SummaryBody1", "count": 60, "quotes": ["Quote1","Quote2","Quote3"], "keywords": ["keyword1","synonym1"] },
+          { "title": "SummaryTitle2", "body": "SummaryBody2", "count": 45, "quotes": ["Quote1","Quote2","Quote3"], "keywords": ["keyword2a","synonym2a"] }
+        ]
+      }
+      Ensure the quotes and keywords sound realistic and reflect genuine user language.
+    
+      \`\`\`
+      ${combinedTexts}
+      \`\`\``
             }],
             temperature: 0.0,
             max_tokens: 1000
         };
-        const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        if (!openAIResponse.ok) throw new Error(`OpenAI API Error: ${await openAIResponse.text()}`);
-        const openAIData = await openAIResponse.json();
-        const summaries = parseAISummary(openAIData.openaiResponse);
 
-        // --- 6. VALIDATE, CALCULATE METRICS, AND SORT ---
-        const MIN_SUPPORTING_POSTS = 3;
-        const validatedSummaries = summaries.filter(finding => filteredPosts.filter(post => calculateRelevanceScore(post, finding) > 0).length >= MIN_SUPPORTING_POSTS);
+        const openAIResponse = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        });
+        if (!openAIResponse.ok) {
+            const errorDetail = await openAIResponse.json();
+            throw new Error(`OpenAI API Error: ${errorDetail.error || openAIResponse.statusText}`);
+        }
+        const openAIData = await openAIResponse.json();
+        const aiSummary = openAIData.openaiResponse;
+
+        let summaries;
+        try {
+            summaries = parseAISummary(aiSummary);
+        } catch (parseError) {
+            if (loadingBlock) loadingBlock.style.display = "none";
+            redditDiv.innerHTML += `<p class='error'>❌ Parsing Error: ${parseError.message}</p>`;
+            throw parseError;
+        }
+        
+        const MIN_SUPPORTING_POSTS_PER_FINDING = 3;
+        const validatedSummaries = summaries.filter(finding => {
+            const supportingPosts = filteredPosts.filter(post => calculateRelevanceScore(post, finding) > 0);
+            return supportingPosts.length >= MIN_SUPPORTING_POSTS_PER_FINDING;
+        });
+
         if (validatedSummaries.length === 0) {
-            throw new Error("While posts were found, none formed a clear, common problem. Try a broader niche.");
+            if (loadingBlock) loadingBlock.style.display = "none";
+            resultsMessageDiv.innerHTML = "<p class='no-results-message'>😔 While posts were found, none formed a clear, common problem. Try a broader niche.</p>";
+            [finding1, finding2, finding3, finding4, finding5].forEach(f => { if(f) f.innerHTML = "" });
+            if (countHeaderDiv) countHeaderDiv.textContent = "";
+            return;
         }
 
         const metrics = calculateFindingMetrics(validatedSummaries, filteredPosts);
         const sortedFindings = validatedSummaries.map((summary, index) => {
             const findingMetrics = metrics[index];
             const totalProblemPosts = metrics.totalProblemPosts || 1;
-            const prevalence = totalProblemPosts > 0 ? Math.round((findingMetrics.supportCount / totalProblemPosts) * 100) : 0;
-            return { summary, prevalence, supportCount: findingMetrics.supportCount };
+            const prevalence = Math.round((findingMetrics.supportCount / totalProblemPosts) * 100);
+            return {
+                summary: summary,
+                prevalence: prevalence,
+                supportCount: findingMetrics.supportCount
+            };
         }).sort((a, b) => b.prevalence - a.prevalence);
 
-        // --- 7. POPULATE FINDINGS WITH REAL QUOTES (for main card) ---
-        const findingsWithRealQuotes = await populateFindingsWithRealQuotes(sortedFindings, filteredPosts);
+        const sortedSummaries = sortedFindings.map(item => item.summary);
 
-        // --- 8. RENDER THE FINDINGS AND QUOTES ---
-        findingsWithRealQuotes.forEach((findingData, index) => {
+        for (let i = 1; i <= 5; i++) {
+            const block = document.getElementById(`findings-block${i}`);
+            if (block) block.style.display = "none";
+        }
+
+        sortedFindings.forEach((findingData, index) => {
             const displayIndex = index + 1;
             const block = document.getElementById(`findings-block${displayIndex}`);
             const content = document.getElementById(`findings-${displayIndex}`);
             const btn = document.getElementById(`button-sample${displayIndex}`);
             const redditDiv = document.getElementById(`reddit-div${displayIndex}`);
+
             if (!block || !content) return;
-
             block.style.display = "flex";
+
+            // --- THIS IS THE ONLY ADDED LINE IN THIS LOOP ---
+            renderQuoteBubbles(index, findingData.summary, window._filteredPosts);
+            // --------------------------------------------------
+
             const { summary, prevalence, supportCount } = findingData;
-
-            const mainCardQuotesHtml = summary.quotes.map(quote => `<div class="quote">“${quote}”</div>`).join('');
-            renderQuoteBubbles(index, summary, window._filteredPosts);
-
             const summaryId = `summary-body-${displayIndex}-${Date.now()}`;
             const summaryShort = summary.body.length > 95 ? summary.body.substring(0, 95) + "…" : summary.body;
 
             let metricsHtml = '';
             if (sortedFindings.length === 1) {
-                metricsHtml = `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric" style="font-size: 1.2rem; font-weight: bold; color: #333; margin-top: 4px;">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>`;
+                metricsHtml = `
+                    <div class="prevalence-container">
+                        <div class="prevalence-header">Primary Finding</div>
+                        <div class="single-finding-metric" style="font-size: 1.2rem; font-weight: bold; color: #333; margin-top: 4px;">Supported by ${supportCount} Posts</div>
+                        <div class="prevalence-subtitle">This was the only significant problem theme identified.</div>
+                    </div>`;
             } else {
                 let barColor, prevalenceLabel;
                 if (prevalence >= 30) { prevalenceLabel = "High Prevalence"; barColor = "#296fd3"; } 
                 else if (prevalence >= 15) { prevalenceLabel = "Medium Prevalence"; barColor = "#8ab4f3"; } 
                 else { prevalenceLabel = "Low Prevalence"; barColor = "#b5cef3"; }
-                metricsHtml = `<div class="prevalence-container"><div class="prevalence-header">${prevalenceLabel}</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${barColor};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
+                metricsHtml = `
+                    <div class="prevalence-container">
+                        <div class="prevalence-header">${prevalenceLabel}</div>
+                        <div class="prevalence-bar-background">
+                            <div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${barColor};">${prevalence}%</div>
+                        </div>
+                        <div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div>
+                    </div>`;
             }
 
             content.innerHTML = `
@@ -1063,18 +921,23 @@ document.getElementById("pulse-search").addEventListener("click", async function
                     ${summary.body.length > 95 ? `<button class="see-more-btn" data-summary="${summaryId}">See more</button>` : ""}
                     <span class="summary-full" id="${summaryId}-full" style="display:none">${summary.body}</span>
                 </div>
-                <div class="quotes-container">${mainCardQuotesHtml}</div>
+                <div class="quotes-container">
+                    ${summary.quotes.map(quote => `<div class="quote">"${quote}"</div>`).join('')}
+                </div>
                 ${metricsHtml}`;
-
+            
             if (summary.body.length > 95) {
-                content.querySelector(`.see-more-btn`)?.addEventListener('click', function(e) {
-                    const teaser = content.querySelector(`#${summaryId}`);
-                    const full = content.querySelector(`#${summaryId}-full`);
-                    const isHidden = teaser.style.display !== 'none';
-                    teaser.style.display = isHidden ? 'none' : 'inline';
-                    full.style.display = isHidden ? 'inline' : 'none';
-                    e.target.textContent = isHidden ? 'See less' : 'See more';
-                });
+                setTimeout(() => {
+                    const seeMoreBtn = content.querySelector(`.see-more-btn[data-summary="${summaryId}"]`);
+                    if (seeMoreBtn) {
+                        const teaser = content.querySelector(`#${summaryId}`);
+                        const full = content.querySelector(`#${summaryId}-full`);
+                        seeMoreBtn.addEventListener('click', function() {
+                            if (teaser.style.display !== 'none') { teaser.style.display = 'none'; full.style.display = ''; seeMoreBtn.textContent = 'See less'; } 
+                            else { teaser.style.display = ''; full.style.display = 'none'; seeMoreBtn.textContent = 'See more'; }
+                        });
+                    }
+                }, 0);
             }
 
             if (redditDiv) redditDiv.innerHTML = "";
@@ -1085,35 +948,37 @@ document.getElementById("pulse-search").addEventListener("click", async function
             }
         });
 
-        // --- 9. SETUP FOR "SEE MORE POSTS" BUTTONS ---
-        const finalSummaries = findingsWithRealQuotes.map(item => item.summary);
-        window._summaries = finalSummaries;
+        window._summaries = sortedSummaries;
+        
         const postsForAssignment = filteredPosts.map(post => {
             let bestScore = 0;
-            finalSummaries.forEach(finding => { bestScore = Math.max(bestScore, calculateRelevanceScore(post, finding)); });
+            sortedSummaries.forEach(finding => {
+                const score = calculateRelevanceScore(post, finding);
+                if (score > bestScore) { bestScore = score; }
+            });
             return { post, score: bestScore };
         }).filter(item => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 75).map(item => item.post);
         window._postsForAssignment = postsForAssignment;
-
-        const assignments = await assignPostsToFindings(finalSummaries, postsForAssignment, keywordsString, userNiche, combinedTexts, 5);
+        
+        const assignments = await assignPostsToFindings(sortedSummaries, postsForAssignment, keywordsString, userNiche, combinedTexts, 5);
         window._assignments = assignments;
         window._usedPostIds = new Set();
-
-        for (let index = 0; index < finalSummaries.length; index++) {
+        
+        for (let index = 0; index < sortedSummaries.length; index++) {
             showSamplePosts(index, assignments, filteredPosts, window._usedPostIds);
         }
 
         if (loadingBlock) loadingBlock.style.display = "none";
-
+    
     } catch (err) {
         if (loadingBlock) loadingBlock.style.display = "none";
         console.error("Error:", err);
         resultsMessageDiv.innerHTML = `<p class='error'>❌ ${err.message}</p>`;
-        findingElements.forEach(el => { if(el) el.innerHTML = ""; });
+        [finding1, finding2, finding3, finding4, finding5].forEach(f => { if(f) f.innerHTML = `<p class='error'>❌ Unable to load summary.</p>` });
+        if (countHeaderDiv) countHeaderDiv.textContent = "";
     }
 });
 
-// Add click listeners to sample buttons
 ['button-sample1', 'button-sample2', 'button-sample3', 'button-sample4', 'button-sample5'].forEach((buttonId, idx) => {
     const btn = document.getElementById(buttonId);
     if (btn) {

@@ -568,7 +568,7 @@ function extractRelevantQuote(post, finding) {
 }
 
 /**
- * Finds top posts for a finding, extracts quotes, and renders them as bubbles.
+ * Finds top posts for a finding, extracts quotes, and renders them as animated floating bubbles.
  * @param {number} findingIndex - The 0-based index of the finding.
  * @param {object} finding - The summary/finding object.
  * @param {Array} allPosts - The complete list of filtered Reddit posts.
@@ -590,18 +590,36 @@ function renderQuoteBubbles(findingIndex, finding, allPosts) {
     const quotes = topPosts.map(post => extractRelevantQuote(post, finding))
         .filter(quote => quote !== null);
 
-    let html = '';
-    if (quotes.length > 0) {
-        html = quotes.map(quote => `<div class="quote-bubble">"${quote}"</div>`).join('');
-    } else {
-        html = '<!-- No relevant quotes found for bubbles. -->';
-    }
-    container.innerHTML = html;
+    // Clear any existing quote bubbles first
+    container.innerHTML = '';
+
+    quotes.forEach(quote => {
+        const quoteEl = document.createElement('div');
+        quoteEl.classList.add('quote-bubble');
+        quoteEl.textContent = `“${quote}”`;
+
+        // Random horizontal position (0–70%)
+        const randomLeft = Math.random() * 70;
+        quoteEl.style.left = `${randomLeft}%`;
+
+        // Random float duration (20–35s)
+        const randomDuration = Math.random() * 15 + 20;
+        quoteEl.style.animation = `floatUp ${randomDuration}s linear forwards`;
+
+        // Random font size (14–18px)
+        const randomSize = Math.random() * 4 + 14;
+        quoteEl.style.fontSize = `${randomSize}px`;
+
+        container.appendChild(quoteEl);
+
+        // Remove quote after animation to prevent buildup
+        setTimeout(() => quoteEl.remove(), randomDuration * 1000);
+    });
 }
+
 // =============================================================
 // END: ADDITION OF NEW HELPER FUNCTIONS
 // =============================================================
-
 
 document.getElementById("pulse-search").addEventListener("click", async function(event) {
     event.preventDefault();

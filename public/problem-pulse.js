@@ -1,4 +1,3 @@
-<script>
     const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
     
     const stopWords = [
@@ -538,4 +537,3 @@
             renderPosts(sortedPosts);
         }
     });
-</script>

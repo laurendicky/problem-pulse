@@ -620,6 +620,15 @@ function renderQuoteBubbles(findingIndex, finding, allPosts) {
         setTimeout(() => quoteEl.remove(), randomDuration * 1000);
     });
 }
+// Only render bubbles when the matching "See more" button is clicked
+const totalFindings = 5;
+for (let i = 1; i <= totalFindings; i++) {
+  const btn = document.getElementById(`see-more-${i}`);
+  if (!btn) continue;
+  btn.addEventListener('click', () => {
+    renderQuoteBubbles(i - 1, findings[i - 1], allPosts);
+  });
+}
 
 // =============================================================
 // END: ADDITION OF NEW HELPER FUNCTIONS

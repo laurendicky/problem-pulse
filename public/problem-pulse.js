@@ -861,10 +861,10 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
             return `No high quality Reddit posts mention struggles with “${term}” right now.`;
           } else if (count < 100) {
             const rounded = Math.round(count / 10) * 10;
-            return `Over ${rounded.toLocaleString()} Reddit posts mention struggles with “${term}”.`;
+            return `Over ${rounded.toLocaleString()} Reddit posts complain about “${term}”.`;
           } else {
             const rounded = Math.round(count / 100) * 100;
-            return `Over ${rounded.toLocaleString()} Reddit posts mention struggles with “${term}”.`;
+            return `Over ${rounded.toLocaleString()} Reddit posts complain about “${term}”.`;
           }
         }
     
@@ -1074,13 +1074,13 @@ else {
     // --- NEW HYBRID LOGIC ---
     if (prevalence >= 30) {
         prevalenceLabel = "High Prevalence";
-        barColor = "#475baa"; 
+        barColor = "#296fd3"; 
     } else if (prevalence >= 15) {
         prevalenceLabel = "Medium Prevalence";
-        barColor = "#b5cef3"; 
+        barColor = "#8ab4f3"; 
     } else {
         prevalenceLabel = "Low Prevalence";
-        barColor = "#dc3545"; 
+        barColor = "#b5cef3"; 
     }
     // --- END OF NEW LOGIC ---
 

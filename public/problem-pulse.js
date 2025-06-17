@@ -602,6 +602,10 @@ function renderQuoteBubbles(findingIndex, finding, allPosts) {
         const randomLeft = Math.random() * 70;
         quoteEl.style.left = `${randomLeft}%`;
 
+        // Random vertical offset (to reduce overlapping)
+        const randomBottomOffset = Math.random() * 300;// pixels
+        quoteEl.style.bottom = `-${200 + randomBottomOffset}px`;
+
         // Random float duration (20–35s)
         const randomDuration = Math.random() * 15 + 20;
         quoteEl.style.animation = `floatUp ${randomDuration}s linear forwards`;

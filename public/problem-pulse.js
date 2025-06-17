@@ -1,5 +1,4 @@
-  // The single URL for our new, simplified Netlify function
-    const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
+  const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
     
     const stopWords = [
       "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at",
@@ -569,8 +568,7 @@ function calculateRelevanceScore(post, finding) {
 
     return score;
 }
-    // New Helper Function: Calculate Prevalence Metrics
-// =============================================================
+
 // NEW & IMPROVED: "Best Fit" Metrics Calculation
 // =============================================================
 function calculateFindingMetrics(validatedSummaries, filteredPosts) {
@@ -612,65 +610,54 @@ function calculateFindingMetrics(validatedSummaries, filteredPosts) {
     return metrics;
 }
 
-// =============================================================
-// REVISED: showSamplePosts Function with Animation Control
-// =============================================================
+
+// =================================================================
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
-    // --- ADDITION 1: Stop all other animations first ---
-    // This ensures only the active modal has floating quotes.
+    // Stop any other animations that might be running
     stopAllQuoteAnimations();
 
-    const MIN_POSTS = 3;
-    const MAX_POSTS = 6;
-    const MINIMUM_RELEVANCE_SCORE = 5;
+    const MIN_POSTS = 3, MAX_POSTS = 6, MINIMUM_RELEVANCE_SCORE = 5;
 
     const finding = window._summaries[summaryIndex];
-    if (!finding) return;
-
-    // --- ADDITION 2: Identify the container and quotes for this finding ---
+    if (!finding) {
+        console.error(`showSamplePosts called with invalid index: ${summaryIndex}`);
+        return;
+    }
+    
+    // Identify our animation targets
     const animationContainerId = `quote-float-container-${summaryIndex + 1}`;
     const quotesForAnimation = finding.quotes;
 
+    // --- All your existing logic for finding and building post HTML ---
     let relevantPosts = [];
     const addedPostIds = new Set();
     let headerMessage = `Real Stories from Reddit: "${finding.title}"`;
-
     const addPost = (post) => {
         if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) {
             relevantPosts.push(post);
             addedPostIds.add(post.data.id);
         }
     };
-
-    // --- Your existing logic for finding posts (NO CHANGES NEEDED HERE) ---
     const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber);
     assignedPostNumbers.forEach(postNum => {
         const post = window._postsForAssignment[postNum - 1]; 
         addPost(post);
     });
-
     if (relevantPosts.length < MIN_POSTS) {
         const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id));
-        const scoredCandidates = candidatePool.map(post => ({
-            post: post,
-            score: calculateRelevanceScore(post, finding)
-        }))
-        .filter(item => item.score >= MINIMUM_RELEVANCE_SCORE)
-        .sort((a, b) => b.score - a.score);
+        const scoredCandidates = candidatePool.map(post => ({ post: post, score: calculateRelevanceScore(post, finding) }))
+        .filter(item => item.score >= MINIMUM_RELEVANCE_SCORE).sort((a, b) => b.score - a.score);
         for (const candidate of scoredCandidates) {
             if (relevantPosts.length >= MIN_POSTS) break;
             addPost(candidate.post);
         }
     }
-    
-    // --- Your existing logic for displaying posts (NO CHANGES NEEDED HERE) ---
     let html;
     if (relevantPosts.length === 0) {
         html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`;
     } else {
         const finalPosts = relevantPosts.slice(0, MAX_POSTS);
         finalPosts.forEach(post => usedPostIds.add(post.data.id));
-
         html = finalPosts.map(post => `
           <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;">
             <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${post.data.title}</a>
@@ -679,15 +666,16 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
           </div>
         `).join('');
     }
-  
-    // This container is in your modal
     const container = document.getElementById(`reddit-div${summaryIndex + 1}`);
     if (container) {
         container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">${headerMessage}</div><div class="reddit-samples-posts">${html}</div>`;
     }
 
-    // --- ADDITION 3: Start the animation now that the modal is visible ---
-    startQuoteAnimation(animationContainerId, quotesForAnimation);
+    // --- THE TIMING FIX ---
+    // Wait 100 milliseconds to give the modal time to become visible before we animate.
+    setTimeout(() => {
+        startQuoteAnimation(animationContainerId, quotesForAnimation);
+    }, 100);
 }
     const sortFunctions = {
       relevance: (a, b) => 0,
@@ -715,6 +703,7 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
     
     document.getElementById("pulse-search").addEventListener("click", async function(event) {
       event.preventDefault();
+      stopAllQuoteAnimations();
       const toClear = [
         "count-header",
         "filter-header",
@@ -1209,10 +1198,6 @@ const assignments = await assignPostsToFindings(
 window._assignments = assignments;
 window._usedPostIds = new Set();
 
-// Finally, show the initial set of samples for the sorted summaries
-for (let index = 0; index < sortedSummaries.length; index++) {
-    showSamplePosts(index, assignments, filteredPosts, window._usedPostIds);
-}
 
 if (loadingBlock) loadingBlock.style.display = "none";
 // =================================================================
@@ -1232,15 +1217,6 @@ if (loadingBlock) loadingBlock.style.display = "none";
       }
     });
     
-    // Add click listeners to sample buttons
-    ['button-sample1', 'button-sample2', 'button-sample3'].forEach((buttonId, idx) => {
-      const btn = document.getElementById(buttonId);
-      if (btn) {
-        btn.addEventListener('click', () => {
-          showSamplePosts(idx, window._assignments, window._filteredPosts, window._usedPostIds);
-        });
-      }
-    });
     
     document.getElementById("sort-posts").addEventListener("change", (event) => {
       const sortBy = event.target.value;

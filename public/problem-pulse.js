@@ -1,3 +1,4 @@
+
 // The single URL for our new, simplified Netlify function
     const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
     
@@ -911,9 +912,10 @@ setTimeout(() => {
     behavior: "smooth"
   });
 
-}, 50); // A 50ms delay is imperceptible but gives the browser ample time.
-          }
-        
+}, 50); 
+ }
+}
+   
     
         resultsMessageDiv.innerHTML = "";
     

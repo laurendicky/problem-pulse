@@ -884,18 +884,36 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
             const y = countHeaderDiv.getBoundingClientRect().top + window.pageYOffset - offset;
             
             if (resultsWrapper) {
-                resultsWrapper.style.display = 'block'; // Makes it take up space
-                // Use a tiny timeout to ensure the display change is registered before the opacity transition starts
-                setTimeout(() => {
-                    resultsWrapper.style.opacity = '1'; // Fades it in
-                }, 10);
-              }
-            window.scrollTo({
-              top: y,
-              behavior: "smooth"
-            });
+// --- THIS IS THE CORRECTED LOGIC BLOCK ---
+
+// 1. Make the wrapper take up space in the layout first.
+if (resultsWrapper) {
+    resultsWrapper.style.display = 'block';
+}
+
+// 2. Give the browser a moment to render the new layout.
+setTimeout(() => {
+  // Now that the layout is stable, we can proceed.
+  
+  // 2a. Fade the wrapper in.
+  if (resultsWrapper) {
+      resultsWrapper.style.opacity = '1';
+  }
+
+  // 2b. Get the CORRECT position of the header.
+  const offset = 20;
+  const y = countHeaderDiv.getBoundingClientRect().top + window.pageYOffset - offset;
+  
+  // 2c. Scroll to that correct position.
+  // --- Scroll command is now INSIDE ---
+  window.scrollTo({
+    top: y,
+    behavior: "smooth"
+  });
+
+}, 50); // A 50ms delay is imperceptible but gives the browser ample time.
           }
-        }
+        
     
         resultsMessageDiv.innerHTML = "";
     
@@ -1096,7 +1114,7 @@ else {
         barColor = "#5b98eb"; 
     } else {
         prevalenceLabel = "Low Prevalence";
-        barColor = "#ffffff00"; 
+        barColor = "#ffffff"; 
     }
     // --- END OF NEW LOGIC ---
 

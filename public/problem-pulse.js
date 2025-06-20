@@ -1,6 +1,8 @@
 
+
 // The single URL for our new, simplified Netlify function
     const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
+    const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
     
     const stopWords = [
       "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at",
@@ -18,9 +20,7 @@
       "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself",
       "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still",
     ];
-    const CLIENT_ID = 'PynIoQ3wsLrGESAOvl2nSw';
-    const CLIENT_SECRET = 'giYtA4-dQNiVuKE1ePH5ImAC5vysaA';
-    const USER_AGENT = 'web:problem-pulse-tool:v1.0 (by /u/RubyFishSimon)';
+
     
     function deduplicatePosts(posts) {
       const seen = new Set();
@@ -41,107 +41,55 @@
       });
     }
     
-    let accessToken = null;
-    let tokenExpiry = 0;
-    
-    async function fetchNewToken() {
-      const credentials = btoa(`${CLIENT_ID}:${CLIENT_SECRET}`);
-    
-      const resp = await fetch('https://www.reddit.com/api/v1/access_token', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Basic ${credentials}`,
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'User-Agent': USER_AGENT,
-        },
-        body: 'grant_type=client_credentials'
-      });
-    
-      if (!resp.ok) {
-        const text = await resp.text();
-        throw new Error(`Failed to get Reddit token: ${resp.status} ${resp.statusText} - ${text}`);
-      }
-    
-      const data = await resp.json();
-      accessToken = data.access_token;
-      tokenExpiry = Date.now() + (data.expires_in - 60) * 1000; // expires_in is seconds
-      return accessToken;
-    }
-    
-    async function getValidToken() {
-      if (!accessToken || Date.now() >= tokenExpiry) {
-        await fetchNewToken();
-      }
-      return accessToken;
-    }
+
     const MAX_CONCURRENT_BATCH = 8; // Number of simultaneous requests per batch
     const PAGINATION_BATCH_SIZE = 25; // Posts fetched per page during pagination
     const MAX_RETRIES = 3; // Max retries on rate limit/error per request
     
     // Fetch posts for one term with pagination and retries
-    async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all') {
-      let allPosts = [];
-      let after = null;
-      let retries = 0;
-      let token = await getValidToken();
-    
-      // Helper function to fetch a single page
-      async function fetchPage(afterToken) {
-        let url = `https://oauth.reddit.com/search?q=${encodeURIComponent(term + ' ' + niche)}&limit=${PAGINATION_BATCH_SIZE}&t=${timeFilter}`;
-        if (afterToken) url += `&after=${afterToken}`;
-    
-        const response = await fetch(url, {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'User-Agent': USER_AGENT,
-          }
-        });
-    
-        if (!response.ok) {
-          if (response.status === 401) {
-            // Token expired, refresh token once (fail-safe)
-            token = await fetchNewToken();
-            return await fetchPage(afterToken);
-          }
-    
-          if (response.status === 429) {
-            if (retries >= MAX_RETRIES) {
-              throw new Error(`Rate limited by Reddit API too many times for term "${term}".`);
-            }
-            // Read Retry-After header, fallback 2 seconds
-            const retryAfterSec = Number(response.headers.get('Retry-After')) || 2;
-            console.warn(`Rate limited on term "${term}", retrying after ${retryAfterSec} seconds...`);
-            await new Promise(resolve => setTimeout(resolve, retryAfterSec * 1000));
-            retries++;
-            return await fetchPage(afterToken);
-          }
-    
-          throw new Error(`Error fetching posts for term "${term}": ${response.status} ${response.statusText}`);
-        }
-    
-        retries = 0; // reset retry count on success
-    
-        const data = await response.json();
-        return data.data;
-      }
-    
-      // Paginate until totalLimit reached or no more pages
-      try {
+// +++ THIS IS THE NEW REPLACEMENT FUNCTION +++
+async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all') {
+    let allPosts = [];
+    let after = null;
+    try {
         while (allPosts.length < totalLimit) {
-          const pageData = await fetchPage(after);
-          if (!pageData || !pageData.children || pageData.children.length === 0) break;
-    
-          allPosts = allPosts.concat(pageData.children);
-    
-          after = pageData.after;
-          if (!after) break; // no more pages
+            // It now calls YOUR proxy URL, not Reddit's
+            const response = await fetch(REDDIT_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    searchTerm: term,
+                    niche: niche,
+                    limit: PAGINATION_BATCH_SIZE, // Your existing constant
+                    timeFilter: timeFilter,
+                    after: after
+                })
+            });
+
+            if (!response.ok) {
+                // The error handling is now much simpler
+                throw new Error(`Proxy Error: Server returned status ${response.status}`);
+            }
+
+            const data = await response.json();
+
+            if (!data.data || !data.data.children || !data.data.children.length) {
+                break; // No more results
+            }
+
+            allPosts = allPosts.concat(data.data.children);
+            after = data.data.after;
+
+            if (!after) {
+                break; // Reached the last page
+            }
         }
-      } catch (err) {
-        console.error(`Failed to fetch posts for term "${term}":`, err.message);
-      }
-    
-      return allPosts.slice(0, totalLimit);
+    } catch (err) {
+        console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message);
+        return []; // Return an empty array so the rest of the script doesn't crash
     }
+    return allPosts.slice(0, totalLimit);
+}
     
     // Main function to fetch posts for multiple terms batching requests
     async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all') {

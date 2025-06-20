@@ -1201,9 +1201,7 @@ for (let index = 0; index < sortedSummaries.length; index++) {
 }
 
 if (loadingBlock) loadingBlock.style.display = "none";
-// =================================================================
-// END OF THE REPLACEMENT BLOCK
-// =================================================================
+}
     
       } catch (err) {
         if (loadingBlock) loadingBlock.style.display = "none";

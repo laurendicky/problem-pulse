@@ -1,13 +1,16 @@
-// netlify/functions/reddit-proxy.js
+// Copy and paste this entire block into netlify/functions/reddit-proxy.js
+
 const fetch = require('node-fetch');
 
 const { REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET } = process.env;
 const USER_AGENT = 'web:problem-pulse-tool:v1.0 (by /u/RubyFishSimon)';
 
-// 1. Define your whitelist of allowed domains
+// Define the complete whitelist of allowed domains
 const allowedOrigins = [
+  'https://minky.ai',
   'https://www.minky.ai',
   'https://problempop.io',
+  'https://www.problempop.io',
   // It's a good practice to add your local dev environment too
   // e.g., 'http://localhost:8888' (Netlify Dev) or 'http://localhost:3000'
 ];
@@ -44,7 +47,7 @@ async function getValidToken() {
 }
 
 exports.handler = async (event) => {
-    // 2. Check the incoming request's origin and prepare dynamic headers
+    // Check the incoming request's origin and prepare dynamic headers
     const origin = event.headers.origin;
     const headers = {
         'Access-Control-Allow-Methods': 'POST, OPTIONS',

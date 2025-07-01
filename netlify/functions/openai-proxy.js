@@ -1,15 +1,19 @@
+// Copy and paste this entire block into netlify/functions/openai-proxy.js
+
 const OpenAI = require('openai');
 
-// 1. Define your whitelist of allowed domains
+// Define the complete whitelist of allowed domains
 const allowedOrigins = [
+  'https://minky.ai',
   'https://www.minky.ai',
   'https://problempop.io',
+  'https://www.problempop.io',
   // It's a good practice to add your local dev environment too
   // e.g., 'http://localhost:8888' (Netlify Dev) or 'http://localhost:3000'
 ];
 
 exports.handler = async (event) => {
-  // 2. Check the incoming request's origin
+  // Check the incoming request's origin
   const origin = event.headers.origin;
   
   // Prepare the response headers object. We will build this dynamically.
@@ -18,7 +22,7 @@ exports.handler = async (event) => {
     'Access-Control-Allow-Headers': 'Content-Type',
   };
 
-  // 3. If the origin is in our whitelist, add the ACAO header to the response
+  // If the origin is in our whitelist, add the ACAO header to the response
   if (allowedOrigins.includes(origin)) {
     headers['Access-Control-Allow-Origin'] = origin;
   }
@@ -34,6 +38,7 @@ exports.handler = async (event) => {
 
   // If the origin is not allowed, the 'Access-Control-Allow-Origin' header
   // will be missing, and the browser will block the request.
+  // We can also return a explicit forbidden error.
   if (!allowedOrigins.includes(origin)) {
       return {
         statusCode: 403,
@@ -43,7 +48,7 @@ exports.handler = async (event) => {
   
   // Only allow POST requests for the actual work.
   if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, body: 'Method Not Allowed' };
+    return { statusCode: 405, headers, body: 'Method Not Allowed' };
   }
 
   try {
@@ -63,7 +68,7 @@ exports.handler = async (event) => {
     const openai = new OpenAI({ apiKey });
     const chatCompletion = await openai.chat.completions.create(openaiPayload);
 
-    // 4. Send the successful response back, using the dynamic headers
+    // Send the successful response back, using the dynamic headers
     return {
       statusCode: 200,
       headers: {
@@ -76,7 +81,7 @@ exports.handler = async (event) => {
     };
   } catch (error) {
     console.error('Error in function:', error);
-    // 5. Send the error response back, also using the dynamic headers
+    // Send the error response back, also using the dynamic headers
     return {
       statusCode: 500,
       headers: {

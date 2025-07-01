@@ -4,12 +4,13 @@ const fetch = require('node-fetch');
 const { REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET } = process.env;
 const USER_AGENT = 'web:problem-pulse-tool:v1.0 (by /u/RubyFishSimon)';
 
-// Define CORS headers. We are explicitly allowing your website's domain.
-const corsHeaders = {
-    'Access-Control-Allow-Origin': 'https://www.minky.ai',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'POST, OPTIONS'
-};
+// 1. Define your whitelist of allowed domains
+const allowedOrigins = [
+  'https://www.minky.ai',
+  'https://problempop.io',
+  // It's a good practice to add your local dev environment too
+  // e.g., 'http://localhost:8888' (Netlify Dev) or 'http://localhost:3000'
+];
 
 let accessToken = null;
 let tokenExpiry = 0;
@@ -43,18 +44,36 @@ async function getValidToken() {
 }
 
 exports.handler = async (event) => {
+    // 2. Check the incoming request's origin and prepare dynamic headers
+    const origin = event.headers.origin;
+    const headers = {
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type',
+    };
+    if (allowedOrigins.includes(origin)) {
+        headers['Access-Control-Allow-Origin'] = origin;
+    }
+
     // Handle the preflight 'OPTIONS' request
     if (event.httpMethod === 'OPTIONS') {
         return {
             statusCode: 204, // No Content
-            headers: corsHeaders,
+            headers,
             body: ''
+        };
+    }
+    
+    // Forbid requests from non-whitelisted origins
+    if (!allowedOrigins.includes(origin)) {
+        return {
+          statusCode: 403,
+          body: 'Forbidden: Origin not allowed.'
         };
     }
     
     // Only allow POST requests for the actual logic
     if (event.httpMethod !== 'POST') {
-        return { statusCode: 405, headers: corsHeaders, body: 'Method Not Allowed' };
+        return { statusCode: 405, headers, body: 'Method Not Allowed' };
     }
 
     try {
@@ -73,7 +92,7 @@ exports.handler = async (event) => {
         if (!redditResponse.ok) {
             return {
                 statusCode: redditResponse.status,
-                headers: corsHeaders,
+                headers, // Use dynamic headers
                 body: JSON.stringify({ error: `Reddit API Error: ${redditResponse.statusText}` })
             };
         }
@@ -81,14 +100,14 @@ exports.handler = async (event) => {
         const redditData = await redditResponse.json();
         return {
             statusCode: 200,
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+            headers: { ...headers, 'Content-Type': 'application/json' }, // Use dynamic headers
             body: JSON.stringify(redditData)
         };
 
     } catch (error) {
         return { 
             statusCode: 500, 
-            headers: corsHeaders,
+            headers, // Use dynamic headers
             body: JSON.stringify({ error: error.message }) 
         };
     }

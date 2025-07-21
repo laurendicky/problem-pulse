@@ -1,9 +1,9 @@
-// File: netlify/functions/reddit-proxy.js
+// Copy and paste this entire block into netlify/functions/reddit-proxy.js
 
 const fetch = require('node-fetch');
 
 const { REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET } = process.env;
-const USER_AGENT = 'web:problem-pop-tool:v1.0 (by /u/YourUsername)'; // It's good practice to update this
+const USER_AGENT = 'web:problem-pulse-tool:v1.0 (by /u/RubyFishSimon)';
 
 // Define the complete whitelist of allowed domains
 const allowedOrigins = [
@@ -11,8 +11,8 @@ const allowedOrigins = [
   'https://www.minky.ai',
   'https://problempop.io',
   'https://www.problempop.io',
-  // Add your local dev environment if you need it, e.g.:
-  // 'http://localhost:8888',
+  // It's a good practice to add your local dev environment too
+  // e.g., 'http://localhost:8888' (Netlify Dev) or 'http://localhost:3000'
 ];
 
 let accessToken = null;
@@ -47,7 +47,7 @@ async function getValidToken() {
 }
 
 exports.handler = async (event) => {
-    // --- CORS and Preflight Handling (No changes here) ---
+    // Check the incoming request's origin and prepare dynamic headers
     const origin = event.headers.origin;
     const headers = {
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -56,62 +56,62 @@ exports.handler = async (event) => {
     if (allowedOrigins.includes(origin)) {
         headers['Access-Control-Allow-Origin'] = origin;
     }
+
+    // Handle the preflight 'OPTIONS' request
     if (event.httpMethod === 'OPTIONS') {
-        return { statusCode: 204, headers, body: '' };
+        return {
+            statusCode: 204, // No Content
+            headers,
+            body: ''
+        };
     }
+    
+    // Forbid requests from non-whitelisted origins
     if (!allowedOrigins.includes(origin)) {
-        return { statusCode: 403, body: 'Forbidden: Origin not allowed.' };
+        return {
+          statusCode: 403,
+          body: 'Forbidden: Origin not allowed.'
+        };
     }
+    
+    // Only allow POST requests for the actual logic
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, headers, body: 'Method Not Allowed' };
     }
 
     try {
-        const body = JSON.parse(event.body);
+        const { searchTerm, niche, limit, timeFilter, after } = JSON.parse(event.body);
         const token = await getValidToken();
-        let url;
-
-        // --- NEW LOGIC: Route based on the 'type' of request ---
-        if (body.type === 'find_subreddits') {
-            // This handles the new "Audience Discovery" step
-            if (!body.topic) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Topic is required.' }) };
-            const query = encodeURIComponent(body.topic);
-            // This is the Reddit API endpoint for searching for subreddits
-            url = `https://oauth.reddit.com/api/search_subreddits.json?query=${query}&limit=10&sort=relevance`;
-        
-        } else if (body.type === 'find_problems') {
-            // This is our existing logic for finding problem posts
-            if (!body.subreddits) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Subreddits are required.' }) };
-            const query = encodeURIComponent(body.searchTerm);
-            url = `https://oauth.reddit.com/r/${body.subreddits}/search.json?q=${query}&restrict_sr=1&limit=${body.limit}&t=${body.timeFilter}&raw_json=1&sort=relevance`;
-            if (body.after) {
-                url += `&after=${body.after}`;
-            }
-        
-        } else {
-            // If no valid type is provided, return an error
-            return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid request type.' }) };
+        const query = encodeURIComponent(`${searchTerm} ${niche}`);
+        let url = `https://oauth.reddit.com/search?q=${query}&limit=${limit}&t=${timeFilter}&raw_json=1`;
+        if (after) {
+            url += `&after=${after}`;
         }
-
+        
         const redditResponse = await fetch(url, {
             headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': USER_AGENT }
         });
 
         if (!redditResponse.ok) {
-            const errorBody = await redditResponse.text();
-            console.error("Reddit API Error:", errorBody);
-            return { statusCode: redditResponse.status, headers, body: JSON.stringify({ error: `Reddit API Error: ${redditResponse.statusText}` }) };
+            return {
+                statusCode: redditResponse.status,
+                headers, // Use dynamic headers
+                body: JSON.stringify({ error: `Reddit API Error: ${redditResponse.statusText}` })
+            };
         }
 
         const redditData = await redditResponse.json();
         return {
             statusCode: 200,
-            headers: { ...headers, 'Content-Type': 'application/json' },
+            headers: { ...headers, 'Content-Type': 'application/json' }, // Use dynamic headers
             body: JSON.stringify(redditData)
         };
 
     } catch (error) {
-        console.error("Handler Error:", error);
-        return { statusCode: 500, headers, body: JSON.stringify({ error: error.message }) };
+        return { 
+            statusCode: 500, 
+            headers, // Use dynamic headers
+            body: JSON.stringify({ error: error.message }) 
+        };
     }
 };

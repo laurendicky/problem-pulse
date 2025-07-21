@@ -416,3 +416,58 @@ document.getElementById("sort-posts").addEventListener("change", (event) => {
     renderPosts(sortedPosts);
   }
 });
+// ====================================================================
+// TEMPORARY DEBUGGING SCRIPT - ADD THIS TO THE END OF YOUR FILE
+// ====================================================================
+
+document.getElementById("test-step-1").addEventListener("click", async () => {
+  try {
+    alert("Testing Step 1: Searching for subreddits related to 'dogs'...");
+    const response = await fetch(REDDIT_PROXY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'find_subreddits', topic: 'dogs' })
+    });
+    
+    if (!response.ok) {
+        alert(`STEP 1 FAILED! Server responded with status: ${response.status}`);
+        return;
+    }
+    
+    const data = await response.json();
+    alert(`STEP 1 SUCCEEDED! Here is the raw data from the server:\n\n${JSON.stringify(data, null, 2)}`);
+    
+  } catch (err) {
+    alert(`STEP 1 FAILED WITH A CRITICAL ERROR: ${err.message}`);
+  }
+});
+
+
+document.getElementById("test-step-2").addEventListener("click", async () => {
+  try {
+    alert("Testing Step 2: Searching for 'problem' posts in r/dogs...");
+    const problemTerms = ["problem", "issue", "help"]; // A small, simple list for testing
+    const response = await fetch(REDDIT_PROXY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+          type: 'find_problems', 
+          subreddits: 'dogs', // A simple, single subreddit for testing
+          searchTerm: problemTerms.join(' OR '),
+          limit: 100,
+          timeFilter: 'all'
+      })
+    });
+    
+    if (!response.ok) {
+        alert(`STEP 2 FAILED! Server responded with status: ${response.status}`);
+        return;
+    }
+    
+    const data = await response.json();
+    alert(`STEP 2 SUCCEEDED! The API returned ${data.data?.children?.length || 0} posts BEFORE filtering.`);
+
+  } catch (err) {
+    alert(`STEP 2 FAILED WITH A CRITICAL ERROR: ${err.message}`);
+  }
+});

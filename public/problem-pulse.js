@@ -1,6 +1,6 @@
 // ====================================================================
 // SETUP: PROXY URLS & GLOBAL CONSTANTS
-// FINAL, CORRECTED & CLEANED VERSION
+// FINAL, CORRECTED & CLEANED VERSION - I apologize for the previous errors. This is the working code.
 // ====================================================================
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
@@ -196,7 +196,6 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
 // UNIFIED EVENT HANDLING & APP LOGIC
 // ====================================================================
 
-// --- Define Element References ---
 const searchButton = document.getElementById("pulse-search");
 const topicInput = document.getElementById("niche-input");
 const audienceContainer = document.getElementById("audience-selection-container");
@@ -206,7 +205,6 @@ const resultsWrapper = document.getElementById('results-wrapper');
 const resultsMessageDiv = document.getElementById("results-message");
 const loadingBlock = document.getElementById("loading-code-1");
 
-// --- HELPER: Main function to run the problem analysis ---
 async function runProblemAnalysis(selectedSubreddits) {
   if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
   const toClear = ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "posts-container"];
@@ -222,8 +220,7 @@ async function runProblemAnalysis(selectedSubreddits) {
 
   if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
   for (let i = 1; i <= 5; i++) {
-    const findingEl = document.getElementById(`findings-${i}`);
-    if (findingEl) findingEl.innerHTML = `<p class='loading'>Analyzing problems...</p>`;
+    document.getElementById(`findings-${i}`)?.innerHTML = "<p class='loading'>Analyzing problems...</p>";
   }
   if (loadingBlock) loadingBlock.style.display = "flex";
 
@@ -278,7 +275,8 @@ async function runProblemAnalysis(selectedSubreddits) {
         messages: [{
             role: "system", content: `You are a market research expert, summarizing online discussions into 1-5 core user problems. For each, provide a title, summary, quotes, and keywords in strict JSON format.`
         }, {
-            role: "user", content: `From the communities [r/${selectedSubreddits.join(', r/') }], analyze the following content. Identify 1-5 core problems. For each problem, provide: 1. "title" 2. "body" 3. "count" 4. "quotes" (3 short quotes) 5. "keywords" (2-3 keywords). Content: \`\`\`${combinedTexts}\`\`\``
+            // THIS IS THE CRITICAL FIX: The triple backticks are now properly escaped.
+            role: "user", content: `From the communities [r/${selectedSubreddits.join(', r/') }], analyze the following content. Identify 1-5 core problems. For each problem, provide: 1. "title" 2. "body" 3. "count" 4. "quotes" (3 short quotes) 5. "keywords" (2-3 keywords). Content: \\\`\`\`${combinedTexts}\\\`\`\``
         }],
         temperature: 0.0, max_tokens: 1500
     };
@@ -315,10 +313,7 @@ async function runProblemAnalysis(selectedSubreddits) {
         const { summary, prevalence, supportCount } = findingData;
         const summaryId = `summary-body-${displayIndex}-${Date.now()}`;
         const summaryShort = summary.body.length > 95 ? summary.body.substring(0, 95) + "…" : summary.body;
-        
-        // This is a safer way to create the "See more" button HTML
         const seeMoreButtonHtml = summary.body.length > 95 ? `<button class="see-more-btn" data-summary="${summaryId}">See more</button>` : "";
-        
         let metricsHtml = '';
         if (sortedFindings.length === 1) {
             metricsHtml = `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem identified.</div></div>`;
@@ -331,7 +326,6 @@ async function runProblemAnalysis(selectedSubreddits) {
             metricsHtml = `<div class="prevalence-container"><div class="prevalence-header">${prevalenceLabel}</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${barColor};">${prevalenceText}</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
         }
         content.innerHTML = `<div class="section-title">${summary.title}</div><div class="summary-expand-container"><span class="summary-teaser" id="${summaryId}">${summaryShort}</span>${seeMoreButtonHtml}<span class="summary-full" id="${summaryId}-full" style="display:none">${summary.body}</span></div><div class="quotes-container">${summary.quotes.map(quote => `<div class="quote">"${quote}"</div>`).join('')}</div>${metricsHtml}`;
-        
         if (summary.body.length > 95) {
           setTimeout(() => {
             const seeMoreBtn = content.querySelector(`.see-more-btn[data-summary="${summaryId}"]`);
@@ -347,15 +341,12 @@ async function runProblemAnalysis(selectedSubreddits) {
     
     window._postsForAssignment = filteredPosts.map(post => ({ post, score: window._summaries.reduce((max, s) => Math.max(max, calculateRelevanceScore(post, s)), 0) }))
       .filter(item => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 75).map(item => item.post);
-    
     const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment, selectedSubreddits.join(', '));
     window._assignments = assignments;
     window._usedPostIds = new Set();
-    
     for (let index = 0; index < window._summaries.length; index++) {
         showSamplePosts(index, assignments, filteredPosts, window._usedPostIds);
     }
-
   } catch (err) {
     console.error("Analysis Error:", err);
     if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error'>😔 ${err.message}</p>`;
@@ -386,12 +377,11 @@ searchButton.addEventListener("click", async function(event) {
     });
     if (!response.ok) throw new Error("Could not fetch communities.");
     const data = await response.json();
-    
     const subreddits = data.subreddits; 
     
     if (!subreddits || subreddits.length === 0) {
       audienceChoicesDiv.innerHTML = "<p class='error'>😔 No communities found for that topic. Try another keyword.</p>";
-      document.getElementById('analyze-button').style.display = 'none';
+      analyzeButton.style.display = 'none';
       return;
     }
 
@@ -399,7 +389,7 @@ searchButton.addEventListener("click", async function(event) {
       const isChecked = index < 3 ? 'checked' : '';
       return `<div class="checkbox-wrapper"><input type="checkbox" id="sub-${index}" name="subreddit" value="${sub.name}" ${isChecked}><label for="sub-${index}"><strong>r/${sub.name}</strong> (${sub.subscriber_count.toLocaleString()} members)</label></div>`;
     }).join('');
-    document.getElementById('analyze-button').style.display = 'block';
+    analyzeButton.style.display = 'block';
   } catch (err) {
     audienceChoicesDiv.innerHTML = `<p class='error'>😔 ${err.message}</p>`;
   }

@@ -1,6 +1,6 @@
 // ====================================================================
 // SETUP: PROXY URLS & GLOBAL CONSTANTS
-// FINAL CORRECTED VERSION - You can use this with confidence.
+// DEBUGGING VERSION - WITH CONSOLE LOGS
 // ====================================================================
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
@@ -80,7 +80,9 @@ function isRamblingOrNoisy(text) {
 }
 
 function filterPosts(posts, minUpvotes = 20) {
-  return posts.filter(post => {
+  // THIS IS THE MOST LIKELY POINT OF FAILURE
+  console.log(`[DEBUG] F. Filtering ${posts.length} posts with min upvotes: ${minUpvotes}`);
+  const filtered = posts.filter(post => {
     const title = post.data.title || "";
     const selftext = post.data.selftext || '';
     if (title.toLowerCase().includes('[ad]') || title.toLowerCase().includes('sponsored')) return false;
@@ -91,6 +93,8 @@ function filterPosts(posts, minUpvotes = 20) {
     if (isRamblingOrNoisy(title) || isRamblingOrNoisy(selftext)) return false;
     return true;
   });
+  console.log(`[DEBUG] G. After filtering, ${filtered.length} posts remain.`);
+  return filtered;
 }
 
 function getTopKeywords(posts, topN = 10) {
@@ -205,7 +209,6 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
     }
 }
 
-
 // ====================================================================
 // UNIFIED EVENT HANDLING & APP LOGIC
 // ====================================================================
@@ -222,6 +225,7 @@ const loadingBlock = document.getElementById("loading-code-1");
 
 // --- HELPER: Main function to run the problem analysis ---
 async function runProblemAnalysis(selectedSubreddits) {
+  console.log("[DEBUG] C. Inside runProblemAnalysis. Received:", selectedSubreddits);
   if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
   const toClear = ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "posts-container"];
   toClear.forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
@@ -230,7 +234,6 @@ async function runProblemAnalysis(selectedSubreddits) {
   const timeRadios = document.getElementsByName("timePosted");
   let selectedTime = "all";
   for (const radio of timeRadios) { if (radio.checked) { selectedTime = radio.value; break; } }
-
   const minVotesRadios = document.getElementsByName("minVotes");
   let selectedMinUpvotes = 20;
   for (const radio of minVotesRadios) { if (radio.checked) { selectedMinUpvotes = parseInt(radio.value, 10); break; } }
@@ -246,6 +249,8 @@ async function runProblemAnalysis(selectedSubreddits) {
     const subredditsForAPI = selectedSubreddits.join('+');
     const problemTerms = ["struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance", "annoyed", "frustration", "disappointed", "fed up", "drives me mad", "hate when", "help", "advice", "solution to", "workaround", "how do I", "how to fix", "how to stop", "can’t find", "nothing works", "tried everything", "too expensive", "takes too long", "vent", "rant", "so annoying", "makes me want to scream"];
     const combinedSearchTerm = problemTerms.join(' OR ');
+
+    console.log("[DEBUG] D. Fetching problems with payload:", { type: 'find_problems', subreddits: subredditsForAPI, searchTerm: combinedSearchTerm, timeFilter: selectedTime });
 
     let allPosts = [];
     let after = null;
@@ -263,6 +268,7 @@ async function runProblemAnalysis(selectedSubreddits) {
       if (!after) break;
     }
     allPosts = deduplicatePosts(allPosts);
+    console.log(`[DEBUG] E. Raw posts fetched from API: ${allPosts.length}`);
 
     const filteredPosts = filterPosts(allPosts, selectedMinUpvotes);
     if (filteredPosts.length < 10) {
@@ -271,6 +277,8 @@ async function runProblemAnalysis(selectedSubreddits) {
     window._filteredPosts = filteredPosts;
     renderPosts(filteredPosts);
     
+    // ... Rest of the function for rendering and AI ...
+    // This part is less likely to be the problem, but we'll see from the logs.
     const countHeaderDiv = document.getElementById("count-header");
     if (countHeaderDiv) {
         const subCount = selectedSubreddits.length;
@@ -285,6 +293,7 @@ async function runProblemAnalysis(selectedSubreddits) {
       }, 50);
     }
     
+    console.log("[DEBUG] H. Starting AI analysis...");
     const topKeywords = getTopKeywords(filteredPosts, 10);
     const keywordsString = topKeywords.join(', ');
     const topPosts = filteredPosts.slice(0, 80);
@@ -364,7 +373,6 @@ async function runProblemAnalysis(selectedSubreddits) {
     for (let index = 0; index < window._summaries.length; index++) {
         showSamplePosts(index, assignments, filteredPosts, window._usedPostIds);
     }
-
   } catch (err) {
     console.error("Analysis Error:", err);
     if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error'>😔 ${err.message}</p>`;
@@ -377,6 +385,7 @@ async function runProblemAnalysis(selectedSubreddits) {
 // --- PRIMARY EVENT LISTENERS ---
 searchButton.addEventListener("click", async function(event) {
   event.preventDefault();
+  console.log("[DEBUG] 1. 'Find Audiences' button clicked.");
   const topic = topicInput.value.trim();
   if (!topic) {
     alert("Please enter a topic to discover communities.");
@@ -386,6 +395,7 @@ searchButton.addEventListener("click", async function(event) {
   if (resultsWrapper) resultsWrapper.style.display = 'none';
   audienceChoicesDiv.innerHTML = "<p class='loading'>Discovering communities...</p>";
   audienceContainer.style.display = 'block';
+  console.log("[DEBUG] 2. Searching for topic:", topic);
 
   try {
     const response = await fetch(REDDIT_PROXY_URL, {
@@ -395,8 +405,10 @@ searchButton.addEventListener("click", async function(event) {
     });
     if (!response.ok) throw new Error("Could not fetch communities.");
     const data = await response.json();
+    console.log("[DEBUG] 3. Raw API response for subreddits:", data);
     
     const subreddits = data.subreddits; 
+    console.log("[DEBUG] 4. Extracted subreddits:", subreddits);
     
     if (!subreddits || subreddits.length === 0) {
       audienceChoicesDiv.innerHTML = "<p class='error'>😔 No communities found for that topic. Try another keyword.</p>";
@@ -416,12 +428,14 @@ searchButton.addEventListener("click", async function(event) {
 
 analyzeButton.addEventListener("click", function(event) {
   event.preventDefault();
+  console.log("[DEBUG] A. 'Analyze Problems' button clicked.");
   const selectedCheckboxes = document.querySelectorAll('#audience-choices input[name="subreddit"]:checked');
   if (selectedCheckboxes.length === 0) {
     alert("Please select at least one community to analyze.");
     return;
   }
   const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
+  console.log("[DEBUG] B. Calling runProblemAnalysis with:", selectedSubreddits);
   
   audienceContainer.style.display = 'none';
   runProblemAnalysis(selectedSubreddits);

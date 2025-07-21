@@ -47,6 +47,7 @@ async function getValidToken() {
 }
 
 exports.handler = async (event) => {
+    // --- CORS and Preflight Handling (No changes here) ---
     const origin = event.headers.origin;
     const headers = {
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -55,54 +56,42 @@ exports.handler = async (event) => {
     if (allowedOrigins.includes(origin)) {
         headers['Access-Control-Allow-Origin'] = origin;
     }
-
     if (event.httpMethod === 'OPTIONS') {
         return { statusCode: 204, headers, body: '' };
     }
-    
     if (!allowedOrigins.includes(origin)) {
         return { statusCode: 403, body: 'Forbidden: Origin not allowed.' };
     }
-    
     if (event.httpMethod !== 'POST') {
         return { statusCode: 405, headers, body: 'Method Not Allowed' };
     }
 
     try {
-        // ====================================================================
-        // START OF KEY CHANGES
-        // ====================================================================
-
-        // 1. We now expect `subreddits` instead of `niche`.
-        const { subreddits, searchTerm, limit, timeFilter, after } = JSON.parse(event.body);
-
-        // Add a validation check for the new required parameter.
-        if (!subreddits || subreddits.trim() === '') {
-            return {
-                statusCode: 400, // Bad Request
-                headers,
-                body: JSON.stringify({ error: 'The "subreddits" parameter is required and cannot be empty.' })
-            };
-        }
-
+        const body = JSON.parse(event.body);
         const token = await getValidToken();
-        
-        // 2. The search query is now just the `searchTerm` (e.g., "problem OR challenge...").
-        const query = encodeURIComponent(searchTerm);
+        let url;
 
-        // 3. We build a new URL targeting specific subreddits and use `restrict_sr=1`.
-        // The `subreddits` variable will look like "saas+smallbusiness+entrepreneur".
-        // `restrict_sr=1` is the critical flag to search ONLY within those subreddits.
-        let url = `https://oauth.reddit.com/r/${subreddits}/search.json?q=${query}&restrict_sr=1&limit=${limit}&t=${timeFilter}&raw_json=1&sort=relevance`;
+        // --- NEW LOGIC: Route based on the 'type' of request ---
+        if (body.type === 'find_subreddits') {
+            // This handles the new "Audience Discovery" step
+            if (!body.topic) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Topic is required.' }) };
+            const query = encodeURIComponent(body.topic);
+            // This is the Reddit API endpoint for searching for subreddits
+            url = `https://oauth.reddit.com/api/search_subreddits.json?query=${query}&limit=10&sort=relevance`;
         
-        // Pagination logic remains the same.
-        if (after) {
-            url += `&after=${after}`;
+        } else if (body.type === 'find_problems') {
+            // This is our existing logic for finding problem posts
+            if (!body.subreddits) return { statusCode: 400, headers, body: JSON.stringify({ error: 'Subreddits are required.' }) };
+            const query = encodeURIComponent(body.searchTerm);
+            url = `https://oauth.reddit.com/r/${body.subreddits}/search.json?q=${query}&restrict_sr=1&limit=${body.limit}&t=${body.timeFilter}&raw_json=1&sort=relevance`;
+            if (body.after) {
+                url += `&after=${body.after}`;
+            }
+        
+        } else {
+            // If no valid type is provided, return an error
+            return { statusCode: 400, headers, body: JSON.stringify({ error: 'Invalid request type.' }) };
         }
-        
-        // ====================================================================
-        // END OF KEY CHANGES
-        // ====================================================================
 
         const redditResponse = await fetch(url, {
             headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': USER_AGENT }
@@ -110,12 +99,8 @@ exports.handler = async (event) => {
 
         if (!redditResponse.ok) {
             const errorBody = await redditResponse.text();
-            console.error("Reddit API Error Body:", errorBody);
-            return {
-                statusCode: redditResponse.status,
-                headers,
-                body: JSON.stringify({ error: `Reddit API Error: ${redditResponse.statusText}` })
-            };
+            console.error("Reddit API Error:", errorBody);
+            return { statusCode: redditResponse.status, headers, body: JSON.stringify({ error: `Reddit API Error: ${redditResponse.statusText}` }) };
         }
 
         const redditData = await redditResponse.json();
@@ -127,10 +112,6 @@ exports.handler = async (event) => {
 
     } catch (error) {
         console.error("Handler Error:", error);
-        return { 
-            statusCode: 500, 
-            headers,
-            body: JSON.stringify({ error: error.message }) 
-        };
+        return { statusCode: 500, headers, body: JSON.stringify({ error: error.message }) };
     }
 };

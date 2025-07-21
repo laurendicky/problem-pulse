@@ -98,70 +98,6 @@ async function fetchFromSubreddits(subreddits, filterTerms, totalLimit = 100, ti
 return allPosts.slice(0, totalLimit);
 }
 
-// Main function to fetch posts for multiple terms batching requests
-async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all') {
-  const allResults = [];
-
-  for (let i = 0; i < searchTerms.length; i += MAX_CONCURRENT_BATCH) {
-    const batchTerms = searchTerms.slice(i, i + MAX_CONCURRENT_BATCH);
-
-    // Map each term in the batch to a fetch promise
-    const batchPromises = batchTerms.map(term =>
-      fetchRedditForTermWithPagination(niche, term, limitPerTerm, timeFilter)
-    );
-
-    // Await them all and flatten results
-    const batchResults = await Promise.all(batchPromises);
-    batchResults.forEach(posts => {
-      if (Array.isArray(posts)) {
-        allResults.push(...posts);
-      }
-    });
-
-    // Optional: short pause between batches to be polite and avoid surge
-    if (i + MAX_CONCURRENT_BATCH < searchTerms.length) {
-      await new Promise(resolve => setTimeout(resolve, 500)); // 500 ms delay
-    }
-  }
-
-  const dedupedPosts = deduplicatePosts(allResults);
-  return dedupedPosts;
-}
-// Fetch Reddit Data Function
-async function fetchMultipleRedditData(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all', minUpvotes = 0) {
-  const fetchPromises = searchTerms.map(async (term) => {
-    const token = await getValidToken();
-    const query = encodeURIComponent(`${term} ${niche}`);
-    const url = `https://oauth.reddit.com/search?q=${query}&limit=${limitPerTerm}&t=${timeFilter}`;
-
-    const response = await fetch(url, {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-        'User-Agent': USER_AGENT,
-      }
-    });
-
-    if (!response.ok) {
-      console.error(`Reddit API Error for term "${term}": ${response.status} ${response.statusText}`);
-      return [];
-    }
-
-    const data = await response.json();
-    return data.data.children || [];
-  });
-
-  const results = await Promise.all(fetchPromises);
-  const allPosts = results.flat();
-
-  const dedupedPosts = deduplicatePosts(allPosts);
-
-  // Filter by minUpvotes only if minUpvotes > 0
-  const filteredByUpvotes = minUpvotes > 0 ?
-    dedupedPosts.filter(post => post.data.ups >= minUpvotes) :
-    dedupedPosts;
-
-  return filteredByUpvotes;
-}
 // Parse AI Summary
 function parseAISummary(aiResponse) {
   try {
@@ -248,19 +184,27 @@ function isRamblingOrNoisy(text) {
 
 // Make sure this is *after* isRamblingOrNoisy definition
 function filterPosts(posts, minUpvotes = 20) {
-  return posts.filter(post => {
-    const title = post.data.title.toLowerCase();
-    const selftext = post.data.selftext || '';
-
-    if (title.includes('[ad]') || title.includes('sponsored')) return false;
-    if (post.data.upvote_ratio < 0.2) return false;
-    if (post.data.ups < minUpvotes) return false; // use minUpvotes param here
-    if (!selftext || selftext.length < 100) return false;
-    if (isRamblingOrNoisy(title) || isRamblingOrNoisy(selftext)) return false;
-
-    return true;
-  });
-}
+    return posts.filter(post => {
+      const title = post.data.title || "";
+      const selftext = post.data.selftext || '';
+  
+      // Basic spam/ad filtering
+      if (title.toLowerCase().includes('[ad]') || title.toLowerCase().includes('sponsored')) return false;
+      if (post.data.upvote_ratio < 0.2) return false;
+      if (post.data.ups < minUpvotes) return false;
+  
+      // A post is "high-quality" if its title AND body COMBINED have enough text.
+      // This correctly includes posts with long, descriptive titles but no body.
+      const combinedTextLength = title.length + selftext.length;
+      if (combinedTextLength < 80) {
+          return false;
+      }
+  
+      if (isRamblingOrNoisy(title) || isRamblingOrNoisy(selftext)) return false;
+  
+      return true; // If it passes all checks, keep the post.
+    });
+  }
 
 // Preprocess Text
 function preprocessText(text) {
@@ -620,350 +564,287 @@ function renderPosts(posts) {
   `).join('');
   container.innerHTML = html;
 }
+// ====================================================================
+// START: NEW UNIFIED EVENT HANDLING
+// ====================================================================
 
-document.getElementById("pulse-search").addEventListener("click", async function(event) {
-    event.preventDefault();
-  
-    // --- UI & State Reset ---
-    const resultsWrapper = document.getElementById('results-wrapper');
+// --- Define Element References ---
+const searchButton = document.getElementById("pulse-search");
+const topicInput = document.getElementById("niche-input");
+const audienceContainer = document.getElementById("audience-selection-container");
+const audienceChoicesDiv = document.getElementById("audience-choices");
+const analyzeButton = document.getElementById("analyze-button");
+const resultsWrapper = document.getElementById('results-wrapper');
+const resultsMessageDiv = document.getElementById("results-message");
+const loadingBlock = document.getElementById("loading-code-1");
+
+// --- Global state to store our data ---
+let allFetchedPosts = [];
+
+// =============================================================
+//  HELPER: Main function to run the problem analysis
+// =============================================================
+async function runProblemAnalysis(selectedSubreddits) {
+  // --- UI & State Reset for the results part ---
+  if (resultsWrapper) {
+    resultsWrapper.style.display = 'none';
+    resultsWrapper.style.opacity = '0';
+  }
+  const toClear = ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "posts-container"];
+  toClear.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = "";
+  });
+  document.querySelectorAll('.reddit-samples-posts, .reddit-samples-header').forEach(el => el.innerHTML = '');
+
+  // --- Get Filter Settings ---
+  const timeRadios = document.getElementsByName("timePosted");
+  let selectedTimeRaw = "all";
+  for (const radio of timeRadios) { if (radio.checked) { selectedTimeRaw = radio.value; break; } }
+  const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
+  const selectedTime = timeMap[selectedTimeRaw] || "all";
+
+  const minVotesRadios = document.getElementsByName("minVotes");
+  let selectedMinUpvotes = 20;
+  for (const radio of minVotesRadios) { if (radio.checked) { selectedMinUpvotes = parseInt(radio.value, 10); break; } }
+
+  // --- Show Loading State ---
+  if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
+  for (let i = 1; i <= 5; i++) {
+    const findingEl = document.getElementById(`findings-${i}`);
+    if (findingEl) findingEl.innerHTML = `<p class='loading'>Analyzing problems...</p>`;
+  }
+  if (loadingBlock) loadingBlock.style.display = "flex";
+
+  try {
+    // --- 1. Prepare for API Call ---
+    const subredditsForAPI = selectedSubreddits.join('+');
+    const problemTerms = ["struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance", "annoyed", "frustration", "disappointed", "fed up", "drives me mad", "hate when", "help", "advice", "solution to", "workaround", "how do I", "how to fix", "how to stop", "can’t find", "nothing works", "tried everything", "too expensive", "takes too long", "vent", "rant", "so annoying", "makes me want to scream"];
+    const combinedSearchTerm = problemTerms.join(' OR ');
+
+    // --- 2. Fetch Posts ---
+    allFetchedPosts = []; // Reset the global posts array
+    let after = null;
+    const totalLimit = 500;
+    while (allFetchedPosts.length < totalLimit) {
+      const response = await fetch(REDDIT_PROXY_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'find_problems', subreddits: subredditsForAPI, searchTerm: combinedSearchTerm, limit: 100, timeFilter: selectedTime, after: after })
+      });
+      if (!response.ok) throw new Error(`Server error (${response.status}). Please check subreddit names.`);
+      const data = await response.json();
+      if (!data.data?.children?.length) break;
+      allFetchedPosts.push(...data.data.children);
+      after = data.data.after;
+      if (!after) break;
+    }
+    allFetchedPosts = deduplicatePosts(allFetchedPosts);
+
+    // --- 3. Filter and Validate Data ---
+    const filteredPosts = filterPosts(allFetchedPosts, selectedMinUpvotes);
+    if (filteredPosts.length < 10) {
+      const message = allFetchedPosts.length > 0 ?
+        "Found some posts, but not enough high-quality ones to analyze. Try a broader timeframe or different subreddits." :
+        "Couldn't find any relevant posts. Check subreddit spelling or try other communities.";
+      throw new Error(message);
+    }
+    window._filteredPosts = filteredPosts;
+    renderPosts(filteredPosts);
+
+    // --- 4. Render Headers and Animate ---
+    const countHeaderDiv = document.getElementById("count-header");
+    if (countHeaderDiv) {
+        const subCount = selectedSubreddits.length;
+        const subText = subCount > 1 ? `${subCount} communities` : `r/${selectedSubreddits[0]}`;
+        countHeaderDiv.textContent = `Found over ${Math.round(allFetchedPosts.length / 10) * 10} relevant posts in ${subText}.`;
+    }
     if (resultsWrapper) {
-      resultsWrapper.style.display = 'none';
-      resultsWrapper.style.opacity = '0';
+      resultsWrapper.style.display = 'block';
+      setTimeout(() => {
+        resultsWrapper.style.opacity = '1';
+        window.scrollTo({ top: resultsWrapper.offsetTop - 20, behavior: "smooth" });
+      }, 50);
     }
-    const toClear = [
-      "count-header", "filter-header", "findings-1", "findings-2", "findings-3",
-      "findings-4", "findings-5", "pulse-results", "posts-container"
-    ];
-    toClear.forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.innerHTML = "";
+
+    // --- 5. AI Analysis ---
+    const topKeywords = getTopKeywords(filteredPosts, 10);
+    const keywordsString = topKeywords.join(', ');
+    const topPosts = filteredPosts.slice(0, 80);
+    const combinedTexts = topPosts.map(p => `${p.data.title || ""}. ${p.data.selftext ? p.data.selftext.substring(0, 300) : ""}`).join("\n\n");
+
+    const openAIParams = {
+        model: "gpt-4o-mini",
+        messages: [{
+            role: "system", content: `You are a market research expert, summarizing online discussions into 1-5 core user problems. For each, provide a title, summary, quotes, and keywords in strict JSON format.`
+        }, {
+            role: "user", content: `From the communities [r/${selectedSubreddits.join(', r/') }], analyze the following content using keywords like [${keywordsString}]. Identify 1-5 core problems. For each problem, provide:
+            1.  "title": A concise title.
+            2.  "body": A brief summary.
+            3.  "count": An estimated number of mentions.
+            4.  "quotes": Three authentic, raw, short (max 8 words) quotes.
+            5.  "keywords": 2-3 relevant keywords/synonyms.
+            Content: \`\`\`${combinedTexts}\`\`\``
+        }],
+        temperature: 0.0, max_tokens: 1500
+    };
+    const openAIResponse = await fetch(OPENAI_PROXY_URL, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams })
     });
-    document.querySelectorAll('.reddit-samples-posts, .reddit-samples-header').forEach(el => el.innerHTML = '');
-  
-    // --- Get User Inputs ---
-    const subredditInputElement = document.getElementById("niche-input"); // Assuming your HTML input still has id="niche-input"
-    if (!subredditInputElement) {
-      alert("Error: Subreddit input field not found.");
-      return;
+    if (!openAIResponse.ok) throw new Error(`OpenAI API Error: ${openAIResponse.statusText}`);
+    const openAIData = await openAIResponse.json();
+    let summaries = parseAISummary(openAIData.openaiResponse);
+
+    // --- 6. Validate and Render AI Summaries ---
+    const validatedSummaries = summaries.filter(finding => {
+        return filteredPosts.filter(post => calculateRelevanceScore(post, finding) > 0).length >= 3;
+    });
+    if (validatedSummaries.length === 0) {
+        throw new Error("While posts were found, no clear, common problems emerged. Try different communities.");
     }
-    const subredditInput = subredditInputElement.value.trim();
-    if (!subredditInput) {
-      alert("Please enter at least one subreddit (e.g., r/saas, r/smallbusiness).");
-      return;
-    }
-  
-    const timeRadios = document.getElementsByName("timePosted");
-    let selectedTimeRaw = "all";
-    for (const radio of timeRadios) {
-      if (radio.checked) {
-        selectedTimeRaw = radio.value;
-        break;
-      }
-    }
-    const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
-    const selectedTime = timeMap[selectedTimeRaw] || "all";
-  
-    const minVotesRadios = document.getElementsByName("minVotes");
-    let selectedMinUpvotes = 20;
-    for (const radio of minVotesRadios) {
-      if (radio.checked) {
-        selectedMinUpvotes = parseInt(radio.value, 10);
-        break;
-      }
-    }
-  
-    // --- Update UI with Loading State & Filters ---
-    function formatFilterHeader(timeRaw, minUpvotes) {
-      const timeMapReadable = { all: "All-time", week: "Past week", month: "Past month", year: "Past year" };
-      const timeText = timeMapReadable[timeRaw] || "All-time";
-      const upvoteText = minUpvotes === 0 ? "all upvotes" : `${minUpvotes}+ upvotes`;
-      return `${timeText} posts with ${upvoteText}`;
-    }
-    const filterHeaderDiv = document.getElementById("filter-header");
-    if (filterHeaderDiv) filterHeaderDiv.innerText = formatFilterHeader(selectedTimeRaw, selectedMinUpvotes);
-  
-    document.getElementById("pulse-results").innerHTML = "";
-    for (let i = 1; i <= 5; i++) {
-      const findingEl = document.getElementById(`findings-${i}`);
-      if (findingEl) findingEl.innerHTML = `<p class='loading'>Searching for problem #${i}...</p>`;
-    }
-    const loadingBlock = document.getElementById("loading-code-1");
-    if (loadingBlock) loadingBlock.style.display = "flex";
-  
-    const resultsMessageDiv = document.getElementById("results-message");
-    if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
-  
-    // --- Main Logic: Fetch, Process, and Render ---
-    try {
-      // 1. Prepare data for the new API structure
-      const subredditsForAPI = subredditInput.split(',')
-        .map(sr => sr.trim().replace(/^r\//, ''))
-        .filter(sr => sr.length > 0)
-        .join('+');
-  
-      const problemTerms = [
-        "struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance",
-        "annoyed", "frustration", "disappointed", "fed up", "drives me mad", "hate when", "help", "advice",
-        "solution to", "workaround", "how do I", "how to fix", "how to stop", "can’t find", "nothing works",
-        "tried everything", "too expensive", "takes too long", "vent", "rant", "so annoying", "makes me want to scream"
-      ];
-      const combinedSearchTerm = problemTerms.join(' OR ');
-  
-      // 2. Make ONE efficient, paginated call to the backend
-      let allPosts = [];
-      let after = null;
-      const totalLimit = 500; // Fetch up to 500 relevant posts
-  
-      while (allPosts.length < totalLimit) {
-        const response = await fetch(REDDIT_PROXY_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            subreddits: subredditsForAPI,
-            searchTerm: combinedSearchTerm,
-            limit: 100,
-            timeFilter: selectedTime,
-            after: after
-          })
-        });
-  
-        if (!response.ok) {
-          throw new Error(`The server failed to fetch data (status ${response.status}). Please check your subreddit names and try again.`);
-        }
-  
-        const data = await response.json();
-        if (!data.data || !data.data.children || !data.data.children.length) break;
-  
-        allPosts.push(...data.data.children);
-        after = data.data.after;
-        if (!after) break;
-      }
-  
-      allPosts = deduplicatePosts(allPosts);
-  
-      // 3. Filter posts and check if we have enough data to proceed
-      const filteredPosts = filterPosts(allPosts, selectedMinUpvotes);
-  
-      if (filteredPosts.length < 10) {
-        if (loadingBlock) loadingBlock.style.display = "none";
-        const message = allPosts.length > 0 ?
-          "Found some posts, but not enough high-quality ones to analyze. Try a broader timeframe or different subreddits." :
-          "Couldn't find any relevant posts in those subreddits. Check your spelling or try other communities.";
-        resultsMessageDiv.innerHTML = `<p class='no-results-message'>😔 ${message}</p>`;
-        for (let i = 1; i <= 5; i++) {
-          const d = document.getElementById(`findings-${i}`);
-          if (d) d.innerHTML = "";
-        }
-        return;
-      }
-  
-      // 4. If we have enough data, proceed with AI analysis and rendering
-      window._filteredPosts = filteredPosts;
-      renderPosts(filteredPosts);
-  
-      // This function can be simplified now that we don't have a single "userNiche" keyword
-      function formatMentionCount(postCount, subreddits) {
-          const subCount = subreddits.split('+').length;
-          const subText = subCount > 1 ? `${subCount} communities` : `r/${subreddits}`;
-          if (postCount < 10) return `Found a few posts in ${subText}.`;
-          const rounded = Math.round(postCount / 10) * 10;
-          return `Found over ${rounded.toLocaleString()} relevant posts in ${subText}.`;
-      }
-  
-      const countHeaderDiv = document.getElementById("count-header");
-      if (countHeaderDiv) {
-          countHeaderDiv.textContent = formatMentionCount(allPosts.length, subredditsForAPI);
-      }
-      
-      // Animate results into view
-      if (resultsWrapper) {
-        resultsWrapper.style.display = 'block';
-        setTimeout(() => {
-          resultsWrapper.style.opacity = '1';
-          const offset = 20;
-          const y = countHeaderDiv.getBoundingClientRect().top + window.pageYOffset - offset;
-          window.scrollTo({ top: y, behavior: "smooth" });
-        }, 50);
-      }
-      
-      // --- Continue with your AI processing logic ---
-      const topKeywords = getTopKeywords(filteredPosts, 10);
-      const keywordsString = topKeywords.join(', ');
-  
-      const topPosts = filteredPosts.slice(0, 80); // Use a slice of the best posts for the AI
-      const combinedTexts = topPosts.map(post => {
-        const title = post.data.title || "";
-        const selftext = post.data.selftext ? post.data.selftext.substring(0, 300) : "";
-        return `${title}. ${selftext}`;
-      }).join("\n\n");
-  
-      const openAIParams = {
-          model: "gpt-4o-mini",
-          messages: [{
-              role: "system",
-              content: `You are an expert market researcher. You summarize discussions from online communities into 1 to 5 core user problems. For each problem, provide a title, a summary, a list of quotes, and relevant keywords.`
-          }, {
-              role: "user",
-              content: `Using the top keywords [${keywordsString}], analyze the following content from the communities [${subredditInput}] and summarize the core problems.
-              Provide between 1 and 5 summaries. For each summary:
-              1.  "title": A concise, descriptive title for the problem.
-              2.  "body": A brief summary of the problem.
-              3.  "count": An estimated number of mentions (you can make a reasonable guess).
-              4.  "quotes": Three authentic, raw, and short (max 6-8 words) quotes that capture the user's voice.
-              5.  "keywords": Two or three relevant keywords or synonyms for this specific problem.
-              
-              Present the output in strict JSON format.
-        
-              Content to analyze:
-              \`\`\`
-              ${combinedTexts}
-              \`\`\`
-              `
-          }],
-          temperature: 0.0,
-          max_tokens: 1500
-      };
-  
-      const openAIResponse = await fetch(OPENAI_PROXY_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ openaiPayload: openAIParams })
-      });
-      if (!openAIResponse.ok) throw new Error(`OpenAI API Error: ${openAIResponse.statusText}`);
-      const openAIData = await openAIResponse.json();
-      const aiSummary = openAIData.openaiResponse;
-  
-      let summaries = parseAISummary(aiSummary);
-  
-      // --- The rest of your logic for validating and displaying summaries continues here ---
-      // (This part seems correct, so I'm leaving it as is)
-      
-      const MIN_SUPPORTING_POSTS_PER_FINDING = 3;
-      const validatedSummaries = summaries.filter(finding => {
-          const supportingPosts = filteredPosts.filter(post => calculateRelevanceScore(post, finding) > 0);
-          return supportingPosts.length >= MIN_SUPPORTING_POSTS_PER_FINDING;
-      });
-  
-      if (validatedSummaries.length === 0) {
-          if (loadingBlock) loadingBlock.style.display = "none";
-          resultsMessageDiv.innerHTML = "<p class='no-results-message'>😔 While posts were found, no clear, common problems emerged. Try a different set of communities.</p>";
-          for (let i = 1; i <= 5; i++) {
-              const d = document.getElementById(`findings-${i}`);
-              if(d) d.innerHTML = "";
-          }
-          return;
-      }
-      
-      const metrics = calculateFindingMetrics(validatedSummaries, filteredPosts);
-      const sortedFindings = validatedSummaries.map((summary, index) => {
+    
+    // ... The rest of your rendering logic is great, so we'll just use it ...
+    const metrics = calculateFindingMetrics(validatedSummaries, filteredPosts);
+    const sortedFindings = validatedSummaries.map((summary, index) => {
         const findingMetrics = metrics[index];
-        const totalProblemPosts = metrics.totalProblemPosts || 1;
-        const prevalence = Math.round((findingMetrics.supportCount / totalProblemPosts) * 100);
+        const prevalence = Math.round((findingMetrics.supportCount / (metrics.totalProblemPosts || 1)) * 100);
         return { summary, prevalence, supportCount: findingMetrics.supportCount };
-      }).sort((a, b) => b.prevalence - a.prevalence);
-      
-      const sortedSummaries = sortedFindings.map(item => item.summary);
-      
-      for (let i = 1; i <= 5; i++) {
-        const block = document.getElementById(`findings-block${i}`);
-        if (block) block.style.display = "none";
+    }).sort((a, b) => b.prevalence - a.prevalence);
+    
+    window._summaries = sortedFindings.map(item => item.summary);
+    for (let i = 1; i <= 5; i++) { document.getElementById(`findings-block${i}`)?.style.display = "none"; }
+    
+    sortedFindings.forEach((findingData, index) => {
+      const displayIndex = index + 1;
+      const block = document.getElementById(`findings-block${displayIndex}`);
+      const content = document.getElementById(`findings-${displayIndex}`);
+      if (block) block.style.display = "flex";
+      if (content) {
+        const { summary, prevalence, supportCount } = findingData;
+        const summaryId = `summary-body-${displayIndex}-${Date.now()}`;
+        const summaryShort = summary.body.length > 95 ? summary.body.substring(0, 95) + "…" : summary.body;
+        let metricsHtml = '';
+        if (sortedFindings.length === 1) {
+            metricsHtml = `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem identified.</div></div>`;
+        } else {
+            let barColor, prevalenceLabel;
+            if (prevalence >= 30) { prevalenceLabel = "High Prevalence"; barColor = "#296fd3"; } 
+            else if (prevalence >= 15) { prevalenceLabel = "Medium Prevalence"; barColor = "#5b98eb"; } 
+            else { prevalenceLabel = "Low Prevalence"; barColor = "#aecbfa"; }
+            metricsHtml = `<div class="prevalence-container"><div class="prevalence-header">${prevalenceLabel}</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${barColor};">${prevalence > 5 ? prevalence + '%' : ''}</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
+        }
+        content.innerHTML = `<div class="section-title">${summary.title}</div><div class="summary-expand-container"><span class="summary-teaser" id="${summaryId}">${summaryShort}</span>${summary.body.length > 95 ? `<button class="see-more-btn" data-summary="${summaryId}">See more</button>` : ""}<span class="summary-full" id="${summaryId}-full" style="display:none">${summary.body}</span></div><div class="quotes-container">${summary.quotes.map(quote => `<div class="quote">"${quote}"</div>`).join('')}</div>${metricsHtml}`;
+        if (summary.body.length > 95) {
+          setTimeout(() => {
+            const seeMoreBtn = content.querySelector(`.see-more-btn[data-summary="${summaryId}"]`);
+            if (seeMoreBtn) {
+              const teaser = content.querySelector(`#${summaryId}`);
+              const full = content.querySelector(`#${summaryId}-full`);
+              seeMoreBtn.addEventListener('click', function() { if (teaser.style.display !== 'none') { teaser.style.display = 'none'; full.style.display = ''; seeMoreBtn.textContent = 'See less'; } else { teaser.style.display = ''; full.style.display = 'none'; seeMoreBtn.textContent = 'See more'; } });
+            }
+          }, 0);
+        }
       }
-      
-      // ... (Your existing 'sortedFindings.forEach' loop for rendering the findings should go here) ...
-      // ... I'll paste it in for completeness ...
-      
-      sortedFindings.forEach((findingData, index) => {
-          const displayIndex = index + 1;
-          const block = document.getElementById(`findings-block${displayIndex}`);
-          const content = document.getElementById(`findings-${displayIndex}`);
-          const btn = document.getElementById(`button-sample${displayIndex}`);
-          const redditDiv = document.getElementById(`reddit-div${displayIndex}`);
-      
-          if (block) block.style.display = "flex";
-      
-          if (content) {
-              const { summary, prevalence, supportCount } = findingData;
-              const summaryId = `summary-body-${displayIndex}-${Date.now()}`;
-              const summaryShort = summary.body.length > 95 ? summary.body.substring(0, 95) + "…" : summary.body;
-              let metricsHtml = '';
-      
-              if (sortedFindings.length === 1) {
-                  metricsHtml = `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem identified.</div></div>`;
-              } else {
-                  let barColor, prevalenceLabel;
-                  if (prevalence >= 30) { prevalenceLabel = "High Prevalence"; barColor = "#296fd3"; } 
-                  else if (prevalence >= 15) { prevalenceLabel = "Medium Prevalence"; barColor = "#5b98eb"; } 
-                  else { prevalenceLabel = "Low Prevalence"; barColor = "#aecbfa"; } // Changed color for low prevalence
-                  metricsHtml = `<div class="prevalence-container"><div class="prevalence-header">${prevalenceLabel}</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${barColor};">${prevalence > 5 ? prevalence + '%' : ''}</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
-              }
-      
-              content.innerHTML = `<div class="section-title">${summary.title}</div><div class="summary-expand-container"><span class="summary-teaser" id="${summaryId}">${summaryShort}</span>${summary.body.length > 95 ? `<button class="see-more-btn" data-summary="${summaryId}">See more</button>` : ""}<span class="summary-full" id="${summaryId}-full" style="display:none">${summary.body}</span></div><div class="quotes-container">${summary.quotes.map(quote => `<div class="quote">"${quote}"</div>`).join('')}</div>${metricsHtml}`;
-              if (summary.body.length > 95) {
-                  setTimeout(() => {
-                      const seeMoreBtn = content.querySelector(`.see-more-btn[data-summary="${summaryId}"]`);
-                      if (seeMoreBtn) {
-                          const teaser = content.querySelector(`#${summaryId}`);
-                          const full = content.querySelector(`#${summaryId}-full`);
-                          seeMoreBtn.addEventListener('click', function() { if (teaser.style.display !== 'none') { teaser.style.display = 'none'; full.style.display = ''; seeMoreBtn.textContent = 'See less'; } else { teaser.style.display = ''; full.style.display = 'none'; seeMoreBtn.textContent = 'See more'; } });
-                      }
-                  }, 0);
-              }
-          }
-      
-          if (redditDiv) redditDiv.innerHTML = "";
-          if (btn) {
-              btn.onclick = function() {
-                  showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds);
-              };
-          }
-      });
-      
-      window._summaries = sortedSummaries;
-      const MAX_POSTS_FOR_ASSIGNMENT = 75;
-      window._postsForAssignment = filteredPosts.map(post => {
-          let bestScore = 0;
-          sortedSummaries.forEach(finding => { const score = calculateRelevanceScore(post, finding); if (score > bestScore) { bestScore = score; } });
-          return { post, score: bestScore };
-      }).filter(item => item.score > 0).sort((a, b) => b.score - a.score).slice(0, MAX_POSTS_FOR_ASSIGNMENT).map(item => item.post);
-      
-      const assignments = await assignPostsToFindings(sortedSummaries, window._postsForAssignment, keywordsString, subredditInput, combinedTexts, 5);
-      window._assignments = assignments;
-      window._usedPostIds = new Set();
-      
-      for (let index = 0; index < sortedSummaries.length; index++) {
-          showSamplePosts(index, assignments, filteredPosts, window._usedPostIds);
-      }
+    });
+    
+    window._postsForAssignment = filteredPosts.map(post => ({ post, score: window._summaries.reduce((max, s) => Math.max(max, calculateRelevanceScore(post, s)), 0) }))
+      .filter(item => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 75).map(item => item.post);
+    const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment, keywordsString, selectedSubreddits.join(', '), combinedTexts, 5);
+    window._assignments = assignments;
+    window._usedPostIds = new Set();
+    for (let index = 0; index < window._summaries.length; index++) {
+        showSamplePosts(index, assignments, filteredPosts, window._usedPostIds);
+    }
+
+  } catch (err) {
+    console.error("Analysis Error:", err);
+    if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error'>😔 ${err.message}</p>`;
+    for (let i = 1; i <= 5; i++) { document.getElementById(`findings-${i}`)?.innerHTML = ""; }
+  } finally {
+    if (loadingBlock) loadingBlock.style.display = "none";
+  }
+}
+
+// =============================================================
+//  PRIMARY EVENT LISTENERS
+// =============================================================
+
+// --- 1. User searches for a topic to find audiences ---
+searchButton.addEventListener("click", async function(event) {
+  event.preventDefault();
+  const topic = topicInput.value.trim();
+  if (!topic) {
+    alert("Please enter a topic to discover communities.");
+    return;
+  }
   
-    } catch (err) {
-      console.error("Critical Error in Search:", err);
-      resultsMessageDiv.innerHTML = `<p class='error'>❌ An error occurred: ${err.message}</p>`;
-      // Clear all finding blocks on error
-      for (let i = 1; i <= 5; i++) {
-          const d = document.getElementById(`findings-${i}`);
-          if(d) d.innerHTML = "";
-      }
-    } finally {
-      // Always hide the loading spinner at the end
-      if (loadingBlock) loadingBlock.style.display = "none";
+  // Reset previous results
+  if (resultsWrapper) resultsWrapper.style.display = 'none';
+  audienceChoicesDiv.innerHTML = "<p class='loading'>Discovering communities...</p>";
+  audienceContainer.style.display = 'block';
+
+  try {
+    const response = await fetch(REDDIT_PROXY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: 'find_subreddits', topic: topic })
+    });
+    if (!response.ok) throw new Error("Could not fetch communities.");
+    const data = await response.json();
+    
+    // Reddit API for subreddit search returns {subreddits: [...]}, not data.subreddits
+    const subreddits = data.subreddits; 
+    
+    if (!subreddits || subreddits.length === 0) {
+      audienceChoicesDiv.innerHTML = "<p class='error'>😔 No communities found for that topic. Try another keyword.</p>";
+      document.getElementById('analyze-button').style.display = 'none'; // Hide analyze button if no results
+      return;
+    }
+
+    // Display choices to the user
+    audienceChoicesDiv.innerHTML = subreddits.map((sub, index) => {
+      const isChecked = index < 3 ? 'checked' : ''; // Pre-check the top 3
+      return `
+        <div class="checkbox-wrapper">
+          <input type="checkbox" id="sub-${index}" name="subreddit" value="${sub.name}" ${isChecked}>
+          <label for="sub-${index}">
+            <strong>r/${sub.name}</strong> (${sub.subscriber_count.toLocaleString()} members)
+          </label>
+        </div>
+      `;
+    }).join('');
+    document.getElementById('analyze-button').style.display = 'block'; // Show the analyze button
+  } catch (err) {
+    audienceChoicesDiv.innerHTML = `<p class='error'>😔 ${err.message}</p>`;
+  }
+});
+
+// --- 2. User clicks "Analyze" to run the full analysis ---
+analyzeButton.addEventListener("click", function(event) {
+  event.preventDefault();
+  const selectedCheckboxes = document.querySelectorAll('#audience-choices input[name="subreddit"]:checked');
+  if (selectedCheckboxes.length === 0) {
+    alert("Please select at least one community to analyze.");
+    return;
+  }
+  const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
+  
+  // Hide the audience selection and run the main analysis function
+  audienceContainer.style.display = 'none';
+  runProblemAnalysis(selectedSubreddits);
+});
+
+// --- 3. The "Sort Posts" dropdown functionality ---
+document.getElementById("sort-posts").addEventListener("change", (event) => {
+    const sortBy = event.target.value;
+    // Use window._filteredPosts, which is the list the user is actually seeing.
+    if (sortBy in sortFunctions && window._filteredPosts && window._filteredPosts.length > 0) {
+      const sortedPosts = [...window._filteredPosts]; // Create a copy to sort
+      sortedPosts.sort(sortFunctions[sortBy]);
+      renderPosts(sortedPosts);
     }
   });
 
-// Add click listeners to sample buttons
-['button-sample1', 'button-sample2', 'button-sample3'].forEach((buttonId, idx) => {
-  const btn = document.getElementById(buttonId);
-  if (btn) {
-    btn.addEventListener('click', () => {
-      showSamplePosts(idx, window._assignments, window._filteredPosts, window._usedPostIds);
-    });
-  }
-});
-
-document.getElementById("sort-posts").addEventListener("change", (event) => {
-  const sortBy = event.target.value;
-  let posts = window._filteredPosts || [];
-  if (sortBy in sortFunctions) {
-    const sortedPosts = [...posts];
-    sortedPosts.sort(sortFunctions[sortBy]);
-    renderPosts(sortedPosts);
-  }
-});
+// ====================================================================
+// END: NEW UNIFIED EVENT HANDLING
+// ====================================================================

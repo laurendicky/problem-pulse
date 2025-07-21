@@ -1,25 +1,12 @@
 // ====================================================================
 // SETUP: PROXY URLS & GLOBAL CONSTANTS
-// DEBUGGING VERSION - WITH CONSOLE LOGS
+// FINAL, CORRECTED & CLEANED VERSION
 // ====================================================================
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
 const stopWords = [
-  "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at",
-  "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could",
-  "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for",
-  "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's",
-  "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm",
-  "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't",
-  "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours",
-  "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't",
-  "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there",
-  "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too",
-  "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't",
-  "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's",
-  "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself",
-  "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still",
+  "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still",
 ];
 
 const sortFunctions = {
@@ -80,9 +67,7 @@ function isRamblingOrNoisy(text) {
 }
 
 function filterPosts(posts, minUpvotes = 20) {
-  // THIS IS THE MOST LIKELY POINT OF FAILURE
-  console.log(`[DEBUG] F. Filtering ${posts.length} posts with min upvotes: ${minUpvotes}`);
-  const filtered = posts.filter(post => {
+  return posts.filter(post => {
     const title = post.data.title || "";
     const selftext = post.data.selftext || '';
     if (title.toLowerCase().includes('[ad]') || title.toLowerCase().includes('sponsored')) return false;
@@ -93,8 +78,6 @@ function filterPosts(posts, minUpvotes = 20) {
     if (isRamblingOrNoisy(title) || isRamblingOrNoisy(selftext)) return false;
     return true;
   });
-  console.log(`[DEBUG] G. After filtering, ${filtered.length} posts remain.`);
-  return filtered;
 }
 
 function getTopKeywords(posts, topN = 10) {
@@ -156,7 +139,7 @@ function calculateFindingMetrics(summaries, posts) {
   return metrics;
 }
 
-async function assignPostsToFindings(summaries, posts, keywordsString, subredditInput) {
+async function assignPostsToFindings(summaries, posts, subredditInput) {
   const prompt = `You are an assistant that categorizes Reddit posts by assigning each to the most relevant finding.
     Here are the findings from [${subredditInput}]:
     ${summaries.map((s, i) => `Finding ${i + 1}: ${s.title}`).join('\n')}
@@ -225,7 +208,6 @@ const loadingBlock = document.getElementById("loading-code-1");
 
 // --- HELPER: Main function to run the problem analysis ---
 async function runProblemAnalysis(selectedSubreddits) {
-  console.log("[DEBUG] C. Inside runProblemAnalysis. Received:", selectedSubreddits);
   if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
   const toClear = ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "posts-container"];
   toClear.forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
@@ -250,8 +232,6 @@ async function runProblemAnalysis(selectedSubreddits) {
     const problemTerms = ["struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance", "annoyed", "frustration", "disappointed", "fed up", "drives me mad", "hate when", "help", "advice", "solution to", "workaround", "how do I", "how to fix", "how to stop", "can’t find", "nothing works", "tried everything", "too expensive", "takes too long", "vent", "rant", "so annoying", "makes me want to scream"];
     const combinedSearchTerm = problemTerms.join(' OR ');
 
-    console.log("[DEBUG] D. Fetching problems with payload:", { type: 'find_problems', subreddits: subredditsForAPI, searchTerm: combinedSearchTerm, timeFilter: selectedTime });
-
     let allPosts = [];
     let after = null;
     while (allPosts.length < 500) {
@@ -268,7 +248,6 @@ async function runProblemAnalysis(selectedSubreddits) {
       if (!after) break;
     }
     allPosts = deduplicatePosts(allPosts);
-    console.log(`[DEBUG] E. Raw posts fetched from API: ${allPosts.length}`);
 
     const filteredPosts = filterPosts(allPosts, selectedMinUpvotes);
     if (filteredPosts.length < 10) {
@@ -277,8 +256,6 @@ async function runProblemAnalysis(selectedSubreddits) {
     window._filteredPosts = filteredPosts;
     renderPosts(filteredPosts);
     
-    // ... Rest of the function for rendering and AI ...
-    // This part is less likely to be the problem, but we'll see from the logs.
     const countHeaderDiv = document.getElementById("count-header");
     if (countHeaderDiv) {
         const subCount = selectedSubreddits.length;
@@ -293,9 +270,7 @@ async function runProblemAnalysis(selectedSubreddits) {
       }, 50);
     }
     
-    console.log("[DEBUG] H. Starting AI analysis...");
     const topKeywords = getTopKeywords(filteredPosts, 10);
-    const keywordsString = topKeywords.join(', ');
     const topPosts = filteredPosts.slice(0, 80);
     const combinedTexts = topPosts.map(p => `${p.data.title || ""}. ${p.data.selftext ? p.data.selftext.substring(0, 300) : ""}`).join("\n\n");
     const openAIParams = {
@@ -303,7 +278,7 @@ async function runProblemAnalysis(selectedSubreddits) {
         messages: [{
             role: "system", content: `You are a market research expert, summarizing online discussions into 1-5 core user problems. For each, provide a title, summary, quotes, and keywords in strict JSON format.`
         }, {
-            role: "user", content: `From the communities [r/${selectedSubreddits.join(', r/') }], analyze the following content using keywords like [${keywordsString}]. Identify 1-5 core problems. For each problem, provide: 1. "title" 2. "body" 3. "count" 4. "quotes" (3 short quotes) 5. "keywords" (2-3 keywords). Content: \`\`\`${combinedTexts}\`\`\``
+            role: "user", content: `From the communities [r/${selectedSubreddits.join(', r/') }], analyze the following content. Identify 1-5 core problems. For each problem, provide: 1. "title" 2. "body" 3. "count" 4. "quotes" (3 short quotes) 5. "keywords" (2-3 keywords). Content: \`\`\`${combinedTexts}\`\`\``
         }],
         temperature: 0.0, max_tokens: 1500
     };
@@ -340,6 +315,10 @@ async function runProblemAnalysis(selectedSubreddits) {
         const { summary, prevalence, supportCount } = findingData;
         const summaryId = `summary-body-${displayIndex}-${Date.now()}`;
         const summaryShort = summary.body.length > 95 ? summary.body.substring(0, 95) + "…" : summary.body;
+        
+        // This is a safer way to create the "See more" button HTML
+        const seeMoreButtonHtml = summary.body.length > 95 ? `<button class="see-more-btn" data-summary="${summaryId}">See more</button>` : "";
+        
         let metricsHtml = '';
         if (sortedFindings.length === 1) {
             metricsHtml = `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem identified.</div></div>`;
@@ -351,7 +330,8 @@ async function runProblemAnalysis(selectedSubreddits) {
             const prevalenceText = prevalence > 5 ? `${prevalence}%` : '';
             metricsHtml = `<div class="prevalence-container"><div class="prevalence-header">${prevalenceLabel}</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${barColor};">${prevalenceText}</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
         }
-        content.innerHTML = `<div class="section-title">${summary.title}</div><div class="summary-expand-container"><span class="summary-teaser" id="${summaryId}">${summaryShort}</span>${summary.body.length > 95 ? `<button class="see-more-btn" data-summary="${summaryId}">See more</button>` : ""}<span class="summary-full" id="${summaryId}-full" style="display:none">${summary.body}</span></div><div class="quotes-container">${summary.quotes.map(quote => `<div class="quote">"${quote}"</div>`).join('')}</div>${metricsHtml}`;
+        content.innerHTML = `<div class="section-title">${summary.title}</div><div class="summary-expand-container"><span class="summary-teaser" id="${summaryId}">${summaryShort}</span>${seeMoreButtonHtml}<span class="summary-full" id="${summaryId}-full" style="display:none">${summary.body}</span></div><div class="quotes-container">${summary.quotes.map(quote => `<div class="quote">"${quote}"</div>`).join('')}</div>${metricsHtml}`;
+        
         if (summary.body.length > 95) {
           setTimeout(() => {
             const seeMoreBtn = content.querySelector(`.see-more-btn[data-summary="${summaryId}"]`);
@@ -367,12 +347,15 @@ async function runProblemAnalysis(selectedSubreddits) {
     
     window._postsForAssignment = filteredPosts.map(post => ({ post, score: window._summaries.reduce((max, s) => Math.max(max, calculateRelevanceScore(post, s)), 0) }))
       .filter(item => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 75).map(item => item.post);
-    const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment, keywordsString, selectedSubreddits.join(', '));
+    
+    const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment, selectedSubreddits.join(', '));
     window._assignments = assignments;
     window._usedPostIds = new Set();
+    
     for (let index = 0; index < window._summaries.length; index++) {
         showSamplePosts(index, assignments, filteredPosts, window._usedPostIds);
     }
+
   } catch (err) {
     console.error("Analysis Error:", err);
     if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error'>😔 ${err.message}</p>`;
@@ -385,7 +368,6 @@ async function runProblemAnalysis(selectedSubreddits) {
 // --- PRIMARY EVENT LISTENERS ---
 searchButton.addEventListener("click", async function(event) {
   event.preventDefault();
-  console.log("[DEBUG] 1. 'Find Audiences' button clicked.");
   const topic = topicInput.value.trim();
   if (!topic) {
     alert("Please enter a topic to discover communities.");
@@ -395,7 +377,6 @@ searchButton.addEventListener("click", async function(event) {
   if (resultsWrapper) resultsWrapper.style.display = 'none';
   audienceChoicesDiv.innerHTML = "<p class='loading'>Discovering communities...</p>";
   audienceContainer.style.display = 'block';
-  console.log("[DEBUG] 2. Searching for topic:", topic);
 
   try {
     const response = await fetch(REDDIT_PROXY_URL, {
@@ -405,10 +386,8 @@ searchButton.addEventListener("click", async function(event) {
     });
     if (!response.ok) throw new Error("Could not fetch communities.");
     const data = await response.json();
-    console.log("[DEBUG] 3. Raw API response for subreddits:", data);
     
     const subreddits = data.subreddits; 
-    console.log("[DEBUG] 4. Extracted subreddits:", subreddits);
     
     if (!subreddits || subreddits.length === 0) {
       audienceChoicesDiv.innerHTML = "<p class='error'>😔 No communities found for that topic. Try another keyword.</p>";
@@ -428,14 +407,12 @@ searchButton.addEventListener("click", async function(event) {
 
 analyzeButton.addEventListener("click", function(event) {
   event.preventDefault();
-  console.log("[DEBUG] A. 'Analyze Problems' button clicked.");
   const selectedCheckboxes = document.querySelectorAll('#audience-choices input[name="subreddit"]:checked');
   if (selectedCheckboxes.length === 0) {
     alert("Please select at least one community to analyze.");
     return;
   }
   const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
-  console.log("[DEBUG] B. Calling runProblemAnalysis with:", selectedSubreddits);
   
   audienceContainer.style.display = 'none';
   runProblemAnalysis(selectedSubreddits);

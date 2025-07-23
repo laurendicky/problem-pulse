@@ -430,7 +430,37 @@ Example of the required output format:
         return metrics;
     }
 
-  // This is the CORRECTED code
+// ====================================================================================
+// PASTE THIS MISSING FUNCTION INTO YOUR SCRIPT
+// A good place is right before the "showSamplePosts" function.
+// ====================================================================================
+
+function renderPosts(posts) {
+    const container = document.getElementById("posts-container");
+    if (!container) {
+      console.warn('The "posts-container" element was not found in the HTML.');
+      return;
+    }
+    
+    // Clear any previous posts
+    container.innerHTML = '';
+  
+    const html = posts.map(post => `
+      <div class="insight" style="border:1px solid #ccc; padding:12px; margin-bottom:12px; background:#fafafa; border-radius:8px;">
+        <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1.1rem; color:#007bff; text-decoration:none;">
+          ${post.data.title}
+        </a>
+        <p style="font-size:0.9rem; margin:0.75rem 0; color:#333; line-height:1.5;">
+          ${post.data.selftext ? post.data.selftext.substring(0,200) + (post.data.selftext.length > 200 ? '...' : '') : 'No additional content.'}
+        </p>
+        <small style="color:#555; font-size:0.8rem;">
+          r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}
+        </small>
+      </div>
+    `).join('');
+    
+    container.innerHTML = html;
+  }
 // ====================================================================================
 // PASTE THIS ENTIRE FUNCTION TO REPLACE THE BUGGY `showSamplePosts`
 // ====================================================================================

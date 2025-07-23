@@ -559,6 +559,10 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
 // PASTE THIS ENTIRE BLOCK TO REPLACE YOUR "find-communities-btn" LISTENER
 // ====================================================================================
 
+// ====================================================================================
+// PASTE THIS ENTIRE BLOCK TO REPLACE YOUR "find-communities-btn" LISTENER
+// ====================================================================================
+
 document.getElementById("find-communities-btn").addEventListener("click", async function(event) {
     event.preventDefault();
 
@@ -570,35 +574,29 @@ document.getElementById("find-communities-btn").addEventListener("click", async 
         return;
     }
     
-    originalGroupName = groupName; // Save the name for later
+    originalGroupName = groupName;
 
-    const selectionContainer = document.getElementById('subreddit-selection-container');
+    // *** CHANGED: We now target the new grid container for the animation ***
+    const gridContainer = document.getElementById('expansion-grid-container');
     const choicesDiv = document.getElementById('subreddit-choices');
     
-    // --- START: NEW ANIMATION AND SCROLL LOGIC ---
+    // Show a loading state inside the choices area
+    choicesDiv.innerHTML = '<p class="loading-text">Finding relevant communities...</p>';
 
-    // 1. Show a loading state inside the container
-    choicesDiv.innerHTML = '<p class="loading" style="font-style: italic; color: #555;">Finding relevant communities...</p>';
+    // Add the 'visible' class to the GRID container to trigger the animation
+    gridContainer.classList.add('visible');
 
-    // 2. Add the 'visible' class to trigger the CSS expansion animation
-    selectionContainer.classList.add('visible');
-
-    // 3. Smoothly scroll the new section into the user's view
-    // We use a short timeout to allow the animation to begin
+    // Smoothly scroll the new section into the user's view
     setTimeout(() => {
-        selectionContainer.scrollIntoView({
+        // We scroll to the inner container to make sure it's fully visible
+        document.getElementById('subreddit-selection-container').scrollIntoView({
             behavior: 'smooth',
             block: 'start' 
         });
-    }, 100); // 100ms delay is usually enough
+    }, 150); // A slightly longer delay to ensure the animation has started
 
-    // --- END: NEW ANIMATION AND SCROLL LOGIC ---
-
-    // Fetch the subreddits in the background. The user sees the loading state while this happens.
+    // Fetch subreddits and display them, replacing the loading message
     const subreddits = await findSubredditsForGroup(groupName);
-    
-    // Once the subreddits are found, display them.
-    // This will replace the "loading..." message.
     displaySubredditChoices(subreddits);
 });
 

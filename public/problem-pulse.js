@@ -553,11 +553,12 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
     }
 }
 
-// =============================================================
-// NEW & MODIFIED EVENT LISTENERS (The main logic controllers)
-// =============================================================
 
 // PHASE 1: User enters a group and clicks "Find Communities"
+// ====================================================================================
+// PASTE THIS ENTIRE BLOCK TO REPLACE YOUR "find-communities-btn" LISTENER
+// ====================================================================================
+
 document.getElementById("find-communities-btn").addEventListener("click", async function(event) {
     event.preventDefault();
 
@@ -574,10 +575,30 @@ document.getElementById("find-communities-btn").addEventListener("click", async 
     const selectionContainer = document.getElementById('subreddit-selection-container');
     const choicesDiv = document.getElementById('subreddit-choices');
     
-    selectionContainer.style.display = 'block';
+    // --- START: NEW ANIMATION AND SCROLL LOGIC ---
+
+    // 1. Show a loading state inside the container
     choicesDiv.innerHTML = '<p class="loading" style="font-style: italic; color: #555;">Finding relevant communities...</p>';
 
+    // 2. Add the 'visible' class to trigger the CSS expansion animation
+    selectionContainer.classList.add('visible');
+
+    // 3. Smoothly scroll the new section into the user's view
+    // We use a short timeout to allow the animation to begin
+    setTimeout(() => {
+        selectionContainer.scrollIntoView({
+            behavior: 'smooth',
+            block: 'start' 
+        });
+    }, 100); // 100ms delay is usually enough
+
+    // --- END: NEW ANIMATION AND SCROLL LOGIC ---
+
+    // Fetch the subreddits in the background. The user sees the loading state while this happens.
     const subreddits = await findSubredditsForGroup(groupName);
+    
+    // Once the subreddits are found, display them.
+    // This will replace the "loading..." message.
     displaySubredditChoices(subreddits);
 });
 
@@ -823,4 +844,3 @@ document.addEventListener('DOMContentLoaded', (event) => {
         });
     }
 });
-

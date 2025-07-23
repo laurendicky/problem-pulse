@@ -554,13 +554,14 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
 }
 
 
-// PHASE 1: User enters a group and clicks "Find Communities"
+
 // ====================================================================================
 // PASTE THIS ENTIRE BLOCK TO REPLACE YOUR "find-communities-btn" LISTENER
 // ====================================================================================
 
 // ====================================================================================
 // PASTE THIS ENTIRE BLOCK TO REPLACE YOUR "find-communities-btn" LISTENER
+// This version has the forced scroll REMOVED.
 // ====================================================================================
 
 document.getElementById("find-communities-btn").addEventListener("click", async function(event) {
@@ -576,7 +577,6 @@ document.getElementById("find-communities-btn").addEventListener("click", async 
     
     originalGroupName = groupName;
 
-    // *** CHANGED: We now target the new grid container for the animation ***
     const gridContainer = document.getElementById('expansion-grid-container');
     const choicesDiv = document.getElementById('subreddit-choices');
     
@@ -584,16 +584,12 @@ document.getElementById("find-communities-btn").addEventListener("click", async 
     choicesDiv.innerHTML = '<p class="loading-text">Finding relevant communities...</p>';
 
     // Add the 'visible' class to the GRID container to trigger the animation
+    // The CSS will handle the smooth slide-down effect.
     gridContainer.classList.add('visible');
 
-    // Smoothly scroll the new section into the user's view
-    setTimeout(() => {
-        // We scroll to the inner container to make sure it's fully visible
-        document.getElementById('subreddit-selection-container').scrollIntoView({
-            behavior: 'smooth',
-            block: 'start' 
-        });
-    }, 150); // A slightly longer delay to ensure the animation has started
+    // =======================================================
+    // *** The `setTimeout` and `scrollIntoView` block has been completely REMOVED. ***
+    // =======================================================
 
     // Fetch subreddits and display them, replacing the loading message
     const subreddits = await findSubredditsForGroup(groupName);

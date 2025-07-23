@@ -355,12 +355,25 @@ function parseAIAssignments(aiResponse) {
         return metrics;
     }
 
-    function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
-        // This function remains exactly as in your original code
-        const MIN_POSTS = 3, MAX_POSTS = 6, MINIMUM_RELEVANCE_SCORE = 5;
-        const finding = window._summaries[summaryIndex];
-        if (!finding) return;
-        let relevantPosts = [], addedPostIds = new Set();
+  // This is the CORRECTED code
+function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
+    // =======================================================
+    // NEW: Guard Clause to prevent crash
+    // If assignments aren't ready yet, do nothing.
+    if (!assignments) {
+        console.warn("Assignments are not ready yet. Please wait a moment and try again.");
+        return; 
+    }
+    // =======================================================
+
+    const MIN_POSTS = 3; 
+    const MAX_POSTS = 6;
+    const MINIMUM_RELEVANCE_SCORE = 5; 
+
+    const finding = window._summaries[summaryIndex];
+    if (!finding) return;
+
+    let relevantPosts = [];
         let headerMessage = `Real Stories from Reddit: "${finding.title}"`;
         const addPost = (post) => {
             if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) {

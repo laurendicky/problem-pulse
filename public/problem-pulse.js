@@ -1,6 +1,6 @@
 <script>
 // =================================================================================
-// SCRIPT START: All JavaScript logic is contained below.
+// FINAL SCRIPT START: All JavaScript logic is contained below.
 // =================================================================================
 
 // --- PHASE 0: SETUP AND INITIALIZATION ---
@@ -15,25 +15,35 @@ const suggestions = [
   "Home Bakers", "Gamers", "Content Creators", "Developers", "Brides To Be"
 ];
 
-// This function runs once when the page is ready to set up interactions
+// This function runs once when the page is ready to set up all interactions
 document.addEventListener('DOMContentLoaded', () => {
-  // Setup for suggestion pills
-  const pillsContainer = document.getElementById('pf-suggestion-pills');
+  // Get all interactive elements
   const groupInput = document.getElementById('group-input');
   const findCommunitiesBtn = document.getElementById('find-communities-btn');
-
+  const searchSelectedBtn = document.getElementById('search-selected-btn');
+  const pillsContainer = document.getElementById('pf-suggestion-pills');
+  const sortDropdown = document.getElementById("sort-posts");
+  
+  // --- Setup for Suggestion Pills ---
   if (pillsContainer && groupInput && findCommunitiesBtn) {
     pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
     pillsContainer.addEventListener('click', (event) => {
       if (event.target.classList.contains('pf-suggestion-pill')) {
         groupInput.value = event.target.getAttribute('data-value');
-        findCommunitiesBtn.click();
+        findCommunitiesBtn.click(); // Automatically trigger the next step
       }
     });
   }
 
-  // Setup for post sorting dropdown
-  const sortDropdown = document.getElementById("sort-posts");
+  // --- Setup for Button Clicks ---
+  if (findCommunitiesBtn) {
+    findCommunitiesBtn.addEventListener("click", handleFindCommunitiesClick);
+  }
+  if (searchSelectedBtn) {
+    searchSelectedBtn.addEventListener("click", handleFindProblemsClick);
+  }
+
+  // --- Setup for Post Sorting Dropdown ---
   if (sortDropdown) {
     const sortFunctions = {
       relevance: (a, b) => 0,
@@ -43,9 +53,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     sortDropdown.addEventListener("change", (event) => {
       const sortBy = event.target.value;
-      let posts = window._filteredPosts || [];
-      if (sortBy in sortFunctions && posts.length > 0) {
-        const sortedPosts = [...posts].sort(sortFunctions[sortBy]);
+      if (window._filteredPosts && sortFunctions[sortBy]) {
+        const sortedPosts = [...window._filteredPosts].sort(sortFunctions[sortBy]);
         renderPosts(sortedPosts);
       }
     });
@@ -53,9 +62,9 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 
-// --- PHASE 1: FINDING COMMUNITIES ---
+// --- PHASE 1: FIND COMMUNITIES LOGIC ---
 
-document.getElementById("find-communities-btn").addEventListener("click", async function(event) {
+async function handleFindCommunitiesClick(event) {
   event.preventDefault();
   const groupInput = document.getElementById('group-input');
   const groupName = groupInput.value.trim();
@@ -70,7 +79,7 @@ document.getElementById("find-communities-btn").addEventListener("click", async 
   gridContainer.classList.add('visible');
   const subreddits = await findSubredditsForGroup(groupName);
   displaySubredditChoices(subreddits);
-});
+}
 
 async function findSubredditsForGroup(groupName) {
     const prompt = `Given the user-defined group "${groupName}", suggest up to 10 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`;
@@ -101,31 +110,27 @@ function displaySubredditChoices(subreddits) {
 }
 
 
-// --- PHASE 2: FINDING PROBLEMS (Main Analysis) ---
+// --- PHASE 2: FIND PROBLEMS LOGIC ---
 
-document.getElementById("search-selected-btn").addEventListener("click", async function(event) {
+async function handleFindProblemsClick(event) {
   event.preventDefault();
   const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked');
   if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
   const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
   const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
 
-  // UI Clearing
   const resultsWrapper = document.getElementById('results-wrapper');
   if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
   ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container"].forEach(id => {
     const el = document.getElementById(id); if (el) el.innerHTML = "";
   });
-  for (let i = 1; i <= 5; i++) {
-    const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none";
-  }
+  for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
   const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
   const resultsMessageDiv = document.getElementById("results-message");
   const countHeaderDiv = document.getElementById("count-header");
   if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
   findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
   
-  // Get Filters
   const selectedTimeRaw = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
   const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
   const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
@@ -142,7 +147,7 @@ document.getElementById("search-selected-btn").addEventListener("click", async f
 
     const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
     if (countHeaderDiv) {
-      countHeaderDiv.textContent = userNicheCount === 1 ? `Found 1 post discussing problems related to "${originalGroupName}".` : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
+      countHeaderDiv.textContent = userNicheCount === 1 ? `Found 1 post about problems for "${originalGroupName}".` : `Found over ${userNicheCount.toLocaleString()} posts about problems for "${originalGroupName}".`;
       if (resultsWrapper) { resultsWrapper.style.display = 'block'; setTimeout(() => { resultsWrapper.style.opacity = '1'; }, 50); }
     }
 
@@ -195,27 +200,24 @@ document.getElementById("search-selected-btn").addEventListener("click", async f
     const resultsMessageDiv = document.getElementById("results-message");
     if(resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
   }
-});
+}
 
 
 // --- ALL HELPER FUNCTIONS (Preserved from your original code) ---
-
-const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still"];
-
-function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
-function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); }
-const MAX_CONCURRENT_BATCH = 8; const PAGINATION_BATCH_SIZE = 25;
-async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all') { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ searchTerm: term, niche: niche, limit: PAGINATION_BATCH_SIZE, timeFilter: timeFilter, after: after }) }); if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return []; } return allPosts.slice(0, totalLimit); }
-async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all') { const allResults = []; for (let i = 0; i < searchTerms.length; i += MAX_CONCURRENT_BATCH) { const batchTerms = searchTerms.slice(i, i + MAX_CONCURRENT_BATCH); const batchPromises = batchTerms.map(term => fetchRedditForTermWithPagination(niche, term, limitPerTerm, timeFilter)); const batchResults = await Promise.all(batchPromises); batchResults.forEach(posts => { if (Array.isArray(posts)) { allResults.push(...posts); } }); if (i + MAX_CONCURRENT_BATCH < searchTerms.length) { await new Promise(resolve => setTimeout(resolve, 500)); } } return deduplicatePosts(allResults); }
-function parseAISummary(aiResponse) { try { aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim(); const jsonMatch = aiResponse.match(/{[\s\S]*}/); if (!jsonMatch) { throw new Error("No JSON object found in the AI response."); } const parsed = JSON.parse(jsonMatch[0]); if (!parsed.summaries || !Array.isArray(parsed.summaries) || parsed.summaries.length < 1) { throw new Error("AI response does not contain at least one summary."); } parsed.summaries.forEach((summary, idx) => { const missingFields = []; if (!summary.title) missingFields.push("title"); if (!summary.body) missingFields.push("body"); if (typeof summary.count !== 'number') missingFields.push("count"); if (!summary.quotes || !Array.isArray(summary.quotes) || summary.quotes.length < 1) missingFields.push("quotes"); if (!summary.keywords || !Array.isArray(summary.keywords) || summary.keywords.length === 0) missingFields.push("keywords"); if (missingFields.length > 0) throw new Error(`Summary ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`); }); return parsed.summaries; } catch (error) { console.error("Parsing Error:", error); console.log("Raw AI Response:", aiResponse); throw new Error("Failed to parse AI response. Ensure the response is in the correct JSON format."); } }
-function parseAIAssignments(aiResponse) { try { aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim(); const jsonMatch = aiResponse.match(/{[\s\S]*}/); if (!jsonMatch) { throw new Error("No JSON object found in the AI response."); } const parsed = JSON.parse(jsonMatch[0]); if (!parsed.assignments || !Array.isArray(parsed.assignments)) { throw new Error("AI response does not contain an 'assignments' array."); } parsed.assignments.forEach((assignment, idx) => { const missingFields = []; if (typeof assignment.postNumber !== 'number') missingFields.push("postNumber"); if (typeof assignment.finding !== 'number') missingFields.push("finding"); if (missingFields.length > 0) throw new Error(`Assignment ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`); }); return parsed.assignments; } catch (error) { console.error("Parsing Error:", error); console.log("Raw AI Response:", aiResponse); throw new Error("Failed to parse AI response. Ensure the response is in the correct JSON format."); } }
-function filterPosts(posts, minUpvotes = 20) { return posts.filter(post => { const title = post.data.title.toLowerCase(); const selftext = post.data.selftext || ''; if (title.includes('[ad]') || title.includes('sponsored')) return false; if (post.data.upvote_ratio < 0.2) return false; if (post.data.ups < minUpvotes) return false; if (!selftext || selftext.length < 100) return false; const isRamblingOrNoisy = (text) => { if (!text) return false; if (/&#x[0-9a-fA-F]+;/g.test(text)) return true; if (/[^a-zA-Z0-9\s]{5,}/g.test(text)) return true; if (/(.)\1{6,}/g.test(text)) return true; return false; }; if (isRamblingOrNoisy(title) || isRamblingOrNoisy(selftext)) return false; return true; }); }
-function getTopKeywords(posts, topN = 10) { const freqMap = {}; posts.forEach(post => { const combinedText = `${post.data.title} ${post.data.selftext}`; const cleanedText = combinedText.replace(/<[^>]+>/g, '').replace(/[^a-zA-Z0-9\s.,!?]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); const words = cleanedText.split(/\s+/); words.forEach(word => { if (!stopWords.includes(word) && word.length > 2) { freqMap[word] = (freqMap[word] || 0) + 1; } }); }); const sortedWords = Object.keys(freqMap).sort((a, b) => freqMap[b] - freqMap[a]); return sortedWords.slice(0, topN); }
-function getFirstTwoSentences(text) { if (!text) return ''; const sentences = text.match(/[^\.!\?]+[\.!\?]+(?:\s|$)/g); if (!sentences) return text; return sentences.slice(0, 2).join(' ').trim(); }
-async function assignPostsToFindings(summaries, posts) { const postsForAI = posts.slice(0, 75); const prompt = `You are an expert data analyst. Your task is to categorize Reddit posts into the most relevant "Finding" from a provided list.\n\nHere are the ${summaries.length} findings you must use for categorization:\n${summaries.map((summary, index) => `\nFinding ${index + 1}:\nTitle: ${summary.title}\nSummary: ${summary.body}`).join('\n')}\n\nHere are the ${postsForAI.length} Reddit posts to categorize. For each post, only consider its title and a short snippet of its body:\n${postsForAI.map((post, index) => `\nPost ${index + 1}:\nTitle: ${post.data.title}\nBody Snippet: ${getFirstTwoSentences(post.data.selftext)}`).join('\n')}\n\nINSTRUCTIONS:\nFor each post, decide which Finding (from 1 to ${summaries.length}) it best supports. A post should only be assigned if it is a strong and clear example of the finding. If a post is not relevant to any finding, do not include it in your output.\n\nYou MUST provide your response ONLY as a JSON object. The object must contain a single key, "assignments", which is an array of objects. Each object in the array represents a single post-to-finding assignment and must have two keys: "postNumber" and "finding".\n\nExample of the required output format:\n{\n  "assignments": [\n    {"postNumber": 1, "finding": 2},\n    {"postNumber": 3, "finding": 1},\n    {"postNumber": 5, "finding": 2}\n  ]\n}\n`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data categorization engine that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) { const errorDetail = await response.text(); console.error("OpenAI Assignment API Error:", errorDetail); throw new Error(`OpenAI API Error for assignments: ${response.statusText}`); } const data = await response.json(); return parseAIAssignments(data.openaiResponse); } catch (error) { console.error("Assignment function error:", error); return []; } }
-function calculateRelevanceScore(post, finding) { let score = 0; const postTitle = post.data.title || ""; const postBody = post.data.selftext || ""; const findingTitleWords = finding.title.toLowerCase().split(' ').filter(word => word.length > 3 && !stopWords.includes(word)); const findingKeywords = (finding.keywords || []).map(k => k.toLowerCase()); let titleWordMatched = false; let keywordMatched = false; for (const word of findingTitleWords) { const regex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'); if (regex.test(postTitle)) { score += 5; titleWordMatched = true; } if (regex.test(postBody)) { score += 2; titleWordMatched = true; } } for (const keyword of findingKeywords) { const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'); if (regex.test(postTitle)) { score += 3; keywordMatched = true; } if (regex.test(postBody)) { score += 1; keywordMatched = true; } } if (titleWordMatched && keywordMatched) { score += 10; } return score; }
-function calculateFindingMetrics(validatedSummaries, filteredPosts) { const metrics = {}; const allProblemPostIds = new Set(); validatedSummaries.forEach((finding, index) => { metrics[index] = { supportCount: 0 }; }); filteredPosts.forEach(post => { let bestFindingIndex = -1; let maxScore = 0; validatedSummaries.forEach((finding, index) => { const score = calculateRelevanceScore(post, finding); if (score > maxScore) { maxScore = score; bestFindingIndex = index; } }); if (bestFindingIndex !== -1 && maxScore > 0) { metrics[bestFindingIndex].supportCount++; allProblemPostIds.add(post.data.id); } }); metrics.totalProblemPosts = allProblemPostIds.size; return metrics; }
-function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if (!assignments) { console.warn("Assignments are not ready yet. Please wait a moment and try again."); return; } const MAX_POSTS = 10; const MINIMUM_RELEVANCE_SCORE = 4; const finding = window._summaries[summaryIndex]; if (!finding) return; let relevantPosts = []; const addedPostIds = new Set(); let headerMessage = `Real Stories from Reddit: "${finding.title}"`; const addPost = (post) => { if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) { relevantPosts.push(post); addedPostIds.add(post.data.id); } }; const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber); assignedPostNumbers.forEach(postNum => { if (postNum - 1 < window._postsForAssignment.length) { const post = window._postsForAssignment[postNum - 1]; addPost(post); } }); if (relevantPosts.length < MAX_POSTS) { const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id)); const scoredCandidates = candidatePool.map(post => ({ post: post, score: calculateRelevanceScore(post, finding) })).filter(item => item.score >= MINIMUM_RELEVANCE_SCORE).sort((a, b) => b.score - a.score); for (const candidate of scoredCandidates) { if (relevantPosts.length >= MAX_POSTS) break; addPost(candidate.post); } } let html; if (relevantPosts.length === 0) { html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`; } else { const finalPosts = relevantPosts.slice(0, MAX_POSTS); finalPosts.forEach(post => usedPostIds.add(post.data.id)); html = finalPosts.map(post => ` <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${post.data.title}</a> <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${post.data.selftext ? post.data.selftext.substring(0, 150) + '...' : 'No content.'}</p> <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</small> </div> `).join(''); } const container = document.getElementById(`reddit-div${summaryIndex + 1}`); if (container) { container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">${headerMessage}</div><div class="reddit-samples-posts">${html}</div>`; } }
-function renderPosts(posts) { const container = document.getElementById("posts-container"); if (!container) { console.warn('The "posts-container" element was not found in the HTML.'); return; } container.innerHTML = ''; const html = posts.map(post => ` <div class="insight" style="border:1px solid #ccc; padding:12px; margin-bottom:12px; background:#fafafa; border-radius:8px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1.1rem; color:#007bff; text-decoration:none;"> ${post.data.title} </a> <p style="font-size:0.9rem; margin:0.75rem 0; color:#333; line-height:1.5;"> ${post.data.selftext ? post.data.selftext.substring(0, 200) + (post.data.selftext.length > 200 ? '...' : '') : 'No additional content.'} </p> <small style="color:#555; font-size:0.8rem;"> r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)} </small> </div> `).join(''); container.innerHTML = html; }
+const stopWords=["a","about","above","after","again","against","all","am","an","and","any","are","aren't","as","at","be","because","been","before","being","below","between","both","but","by","can't","cannot","could","couldn't","did","didn't","do","does","doesn't","doing","don't","down","during","each","few","for","from","further","had","hadn't","has","hasn't","have","haven't","having","he","he'd","he'll","he's","her","here","here's","hers","herself","him","himself","his","how","how's","i","i'd","i'll","i'm","i've","if","in","into","is","isn't","it","it's","its","itself","let's","me","more","most","mustn't","my","myself","no","nor","not","of","off","on","once","only","or","other","ought","our","ours","ourselves","out","over","own","same","shan't","she","she'd","she'll","she's","should","shouldn't","so","some","such","than","that","that's","the","their","theirs","them","themselves","then","there","there's","these","they","they'd","they'll","they're","they've","this","those","through","to","too","under","until","up","very","was","wasn't","we","we'd","we'll","we're","we've","were","weren't","what","what's","when","when's","where","where's","which","while","who","who's","whom","why","why's","with","won't","would","wouldn't","you","you'd","you'll","you're","you've","your","yours","yourself","yourselves","like","just","dont","can","people","help","hes","shes","thing","stuff","really","actually","even","know","still"];
+function deduplicatePosts(e){const t=new Set;return e.filter(e=>{return!(!e.data||!e.data.id)&&!t.has(e.data.id)&&(t.add(e.data.id),!0)})}
+function formatDate(e){return new Date(1e3*e).toLocaleDateString(void 0,{year:"numeric",month:"short",day:"numeric"})}
+const MAX_CONCURRENT_BATCH=8,PAGINATION_BATCH_SIZE=25;async function fetchRedditForTermWithPagination(e,t,r=100,n="all"){let o=[],s=null;try{for(;o.length<r;){const r=await fetch(REDDIT_PROXY_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({searchTerm:t,niche:e,limit:PAGINATION_BATCH_SIZE,timeFilter:n,after:s})});if(!r.ok)throw new Error(`Proxy Error: ${r.status}`);const a=await r.json();if(!a.data||!a.data.children||!a.data.children.length)break;if(o=o.concat(a.data.children),s=a.data.after,!s)break}}catch(i){return console.error(`Failed to fetch posts for term "${t}" via proxy:`,i.message),[]}return o.slice(0,r)}
+async function fetchMultipleRedditDataBatched(e,t,r=100,n="all"){const o=[];for(let s=0;s<t.length;s+=MAX_CONCURRENT_BATCH){const a=t.slice(s,s+MAX_CONCURRENT_BATCH),i=a.map(t=>fetchRedditForTermWithPagination(e,t,r,n)),l=await Promise.all(i);l.forEach(e=>{Array.isArray(e)&&o.push(...e)}),s+MAX_CONCURRENT_BATCH<t.length&&await new Promise(e=>setTimeout(e,500))}return deduplicatePosts(o)}
+function parseAISummary(e){try{e=e.replace(/```(?:json)?\s*/,"").replace(/```$/,"").trim();const t=e.match(/{[\s\S]*}/);if(!t)throw new Error("No JSON object in AI response.");const r=JSON.parse(t[0]);if(!r.summaries||!Array.isArray(r.summaries)||r.summaries.length<1)throw new Error("AI response lacks a 'summaries' array.");return r.summaries.forEach((e,t)=>{const r=[];e.title||r.push("title"),e.body||r.push("body"),"number"!=typeof e.count&&r.push("count"),(!e.quotes||!Array.isArray(e.quotes)||e.quotes.length<1)&&r.push("quotes"),(!e.keywords||!Array.isArray(e.keywords)||0===e.keywords.length)&&r.push("keywords");if(r.length>0)throw new Error(`Summary ${t+1} missing fields: ${r.join(", ")}.`)}),r.summaries}catch(n){throw console.error("Parsing Error:",n),console.log("Raw AI Response:",e),new Error("Failed to parse AI response.")}}
+function parseAIAssignments(e){try{e=e.replace(/```(?:json)?\s*/,"").replace(/```$/,"").trim();const t=e.match(/{[\s\S]*}/);if(!t)throw new Error("No JSON object in AI response.");const r=JSON.parse(t[0]);if(!r.assignments||!Array.isArray(r.assignments))throw new Error("AI response lacks an 'assignments' array.");return r.assignments.forEach((e,t)=>{const r=[];"number"!=typeof e.postNumber&&r.push("postNumber"),"number"!=typeof e.finding&&r.push("finding");if(r.length>0)throw new Error(`Assignment ${t+1} missing fields: ${r.join(", ")}.`)}),r.assignments}catch(n){throw console.error("Parsing Error:",n),console.log("Raw AI Response:",e),new Error("Failed to parse AI response.")}}
+function filterPosts(e,t=20){return e.filter(e=>{const r=e.data.title.toLowerCase(),n=e.data.selftext||"";if(r.includes("[ad]")||r.includes("sponsored"))return!1;if(e.data.upvote_ratio<.2)return!1;if(e.data.ups<t)return!1;if(!n||n.length<100)return!1;const o=e=>{if(!e)return!1;if(/&#x[0-9a-fA-F]+;/g.test(e))return!0;if(/[^a-zA-Z0-9\s]{5,}/g.test(e))return!0;return!!/(.)\1{6,}/g.test(e)};return!o(r)&&!o(n)})}
+function getTopKeywords(e,t=10){const r={};return e.forEach(e=>{const n=(e.data.title+" "+e.data.selftext).replace(/<[^>]+>/g,"").replace(/[^a-zA-Z0-9\s.,!?]/g,"").toLowerCase().replace(/\s+/g," ").trim().split(/\s+/);n.forEach(e=>{stopWords.includes(e)||e.length<=2||(r[e]=(r[e]||0)+1)})}),Object.keys(r).sort((e,t)=>r[t]-r[e]).slice(0,t)}
+function getFirstTwoSentences(e){if(!e)return"";const t=e.match(/[^\.!\?]+[\.!\?]+(?:\s|$)/g);return t?t.slice(0,2).join(" ").trim():e}
+async function assignPostsToFindings(e,t){const r=t.slice(0,75),n=`You are an expert data analyst. Your task is to categorize Reddit posts into the most relevant "Finding" from a provided list.\n\nHere are the ${e.length} findings you must use for categorization:\n${e.map((e,t)=>`\nFinding ${t+1}:\nTitle: ${e.title}\nSummary: ${e.body}`).join("\n")}\n\nHere are the ${r.length} Reddit posts to categorize. For each post, only consider its title and a short snippet of its body:\n${r.map((e,t)=>`\nPost ${t+1}:\nTitle: ${e.data.title}\nBody Snippet: ${getFirstTwoSentences(e.data.selftext)}`).join("\n")}\n\nINSTRUCTIONS:\nFor each post, decide which Finding (from 1 to ${e.length}) it best supports. A post should only be assigned if it is a strong and clear example of the finding. If a post is not relevant to any finding, do not include it in your output.\n\nYou MUST provide your response ONLY as a JSON object. The object must contain a single key, "assignments", which is an array of objects. Each object in the array represents a single post-to-finding assignment and must have two keys: "postNumber" and "finding".\n\nExample of the required output format:\n{\n  "assignments": [\n    {"postNumber": 1, "finding": 2},\n    {"postNumber": 3, "finding": 1},\n    {"postNumber": 5, "finding": 2}\n  ]\n}\n`,o={model:"gpt-4o-mini",messages:[{role:"system",content:"You are a precise data categorization engine that outputs only JSON."},{role:"user",content:n}],temperature:0,max_tokens:1500,response_format:{type:"json_object"}};try{const e=await fetch(OPENAI_PROXY_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({openaiPayload:o})});if(!e.ok){const t=await e.text();throw console.error("OpenAI Assignment API Error:",t),new Error(`OpenAI API Error for assignments: ${e.statusText}`)}const t=await e.json();return parseAIAssignments(t.openaiResponse)}catch(s){return console.error("Assignment function error:",s),[]}}
+function calculateRelevanceScore(e,t){let r=0;const n=e.data.title||"",o=e.data.selftext||"",s=t.title.toLowerCase().split(" ").filter(e=>e.length>3&&!stopWords.includes(e)),a=(t.keywords||[]).map(e=>e.toLowerCase());let i=!1,l=!1;for(const c of s){const e=new RegExp(`\\b${c.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}\\b`,"i");e.test(n)&&(r+=5,i=!0),e.test(o)&&(r+=2,i=!0)}for(const c of a){const e=new RegExp(`\\b${c.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}\\b`,"i");e.test(n)&&(r+=3,l=!0),e.test(o)&&(r+=1,l=!0)}return i&&l&&(r+=10),r}
+function calculateFindingMetrics(e,t){const r={},n=new Set;return e.forEach((e,t)=>{r[t]={supportCount:0}}),t.forEach(t=>{let o=-1,s=0;e.forEach((e,r)=>{const n=calculateRelevanceScore(t,e);n>s&&(s=n,o=r)}),-1!==o&&s>0&&(r[o].supportCount++,n.add(t.data.id))}),r.totalProblemPosts=n.size,r}
+function showSamplePosts(e,t,r,n){if(!t)return void console.warn("Assignments are not ready yet.");const o=window._summaries[e];if(!o)return;let s=[],a=new Set;let i=`Real Stories from Reddit: "${o.title}"`;const l=e=>{e&&e.data&&!n.has(e.data.id)&&!a.has(e.data.id)&&(s.push(e),a.add(e.data.id))};const c=t.filter(t=>t.finding===e+1).map(e=>e.postNumber);c.forEach(e=>{if(e-1<window._postsForAssignment.length){const t=window._postsForAssignment[e-1];l(t)}});if(s.length<10){const e=r.filter(e=>!n.has(e.data.id)&&!a.has(e.data.id)),t=e.map(e=>({post:e,score:calculateRelevanceScore(e,o)})).filter(e=>e.score>=4).sort((e,t)=>t.score-e.score);for(const u of t){if(s.length>=10)break;l(u.post)}}let d;if(0===s.length)d='<div style="font-style: italic; color: #555;">Could not find any relevant Reddit posts.</div>';else{const e=s.slice(0,10);e.forEach(e=>n.add(e.data.id)),d=e.map(e=>` <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;"> <a href="https://www.reddit.com${e.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${e.data.title}</a> <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${e.data.selftext?e.data.selftext.substring(0,150)+"...":"No content."}</p> <small>r/${e.data.subreddit} | 👍 ${e.data.ups.toLocaleString()} | 💬 ${e.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(e.data.created_utc)}</small> </div> `).join("")}const p=document.getElementById(`reddit-div${e+1}`);p&&(p.innerHTML=`<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">${i}</div><div class="reddit-samples-posts">${d}</div>`)}
+function renderPosts(e){const t=document.getElementById("posts-container");if(!t)return;t.innerHTML="";const r=e.map(e=>` <div class="insight" style="border:1px solid #ccc; padding:12px; margin-bottom:12px; background:#fafafa; border-radius:8px;"> <a href="https://www.reddit.com${e.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1.1rem; color:#007bff; text-decoration:none;"> ${e.data.title} </a> <p style="font-size:0.9rem; margin:0.75rem 0; color:#333; line-height:1.5;"> ${e.data.selftext?e.data.selftext.substring(0,200)+"...":"No additional content."} </p> <small style="color:#555; font-size:0.8rem;"> r/${e.data.subreddit} | 👍 ${e.data.ups.toLocaleString()} | 💬 ${e.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(e.data.created_utc)} </small> </div> `).join("");t.innerHTML=r}
 
 </script>

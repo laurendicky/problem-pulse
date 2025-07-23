@@ -298,10 +298,85 @@ function parseAIAssignments(aiResponse) {
       return sentences.slice(0, 2).join(' ').trim();
     }
 
-    async function assignPostsToFindings(summaries, posts, keywordsString, userNiche, combinedTexts, maxFindings = 5) {
-      // This function remains exactly as in your original code
-      // ...
+   // ====================================================================================
+// PASTE THIS ENTIRE FUNCTION TO REPLACE THE EMPTY `assignPostsToFindings`
+// ====================================================================================
+
+async function assignPostsToFindings(summaries, posts, keywordsString, userNiche, combinedTexts, maxFindings = 5) {
+    // Limit the number of posts sent to the AI to avoid overly long prompts
+    const postsForAI = posts.slice(0, 75);
+
+    const prompt = `
+You are an expert data analyst. Your task is to categorize Reddit posts into the most relevant "Finding" from a provided list.
+
+Here are the ${summaries.length} findings you must use for categorization:
+${summaries.map((summary, index) => `
+Finding ${index + 1}:
+Title: ${summary.title}
+Summary: ${summary.body}`).join('\n')}
+
+Here are the ${postsForAI.length} Reddit posts to categorize. For each post, only consider its title and a short snippet of its body:
+${postsForAI.map((post, index) => `
+Post ${index + 1}:
+Title: ${post.data.title}
+Body Snippet: ${getFirstTwoSentences(post.data.selftext)}`).join('\n')}
+
+INSTRUCTIONS:
+For each post, decide which Finding (from 1 to ${summaries.length}) it best supports. A post should only be assigned if it is a strong and clear example of the finding. If a post is not relevant to any finding, do not include it in your output.
+
+You MUST provide your response ONLY as a JSON object. The object must contain a single key, "assignments", which is an array of objects. Each object in the array represents a single post-to-finding assignment and must have two keys: "postNumber" and "finding".
+
+Example of the required output format:
+{
+  "assignments": [
+    {"postNumber": 1, "finding": 2},
+    {"postNumber": 3, "finding": 1},
+    {"postNumber": 5, "finding": 2}
+  ]
+}
+`;
+
+    const openAIParams = {
+        model: "gpt-4o-mini",
+        messages: [
+            {
+                role: "system",
+                content: "You are a precise data categorization engine that outputs only JSON."
+            }, 
+            {
+                role: "user",
+                content: prompt
+            }
+        ],
+        temperature: 0,
+        max_tokens: 1500, // Allow enough tokens for a decent list of assignments
+        response_format: { "type": "json_object" }
+    };
+
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        });
+
+        if (!response.ok) {
+            const errorDetail = await response.text();
+            console.error("OpenAI Assignment API Error:", errorDetail);
+            throw new Error(`OpenAI API Error for assignments: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        // The `parseAIAssignments` function you already have will handle the response
+        return parseAIAssignments(data.openaiResponse);
+
+    } catch (error) {
+        console.error("Assignment function error:", error);
+        // Return an empty array on failure so the app doesn't crash
+        // The fallback logic in `showSamplePosts` will take over.
+        return []; 
     }
+}
 
     function getWordMatchRegex(word) {
         const escapedWord = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

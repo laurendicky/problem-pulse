@@ -43,13 +43,13 @@ exports.handler = async (event) => {
         const { searchTerm, niche, limit, timeFilter, after } = JSON.parse(event.body);
         const token = await getRedditToken();
         
-        // The 'niche' is now our specific subreddit query string
-        const query = encodeURIComponent(`${niche} ${searchTerm}`);
+        // ===================================================================
+        // *** THE DEFINITIVE FIX IS ON THIS LINE ***
+        // We are now wrapping the `niche` (the subreddit list) in parentheses
+        // to enforce the correct search logic: (subreddits) AND (searchTerm)
+        // ===================================================================
+        const query = encodeURIComponent(`( ${niche} ) ${searchTerm}`);
         
-        // ===================================================================
-        // *** THE CRITICAL FIX IS ON THIS LINE ***
-        // The `&restrict_sr=off` parameter has been REMOVED.
-        // ===================================================================
         let url = `https://oauth.reddit.com/search?q=${query}&limit=${limit}&t=${timeFilter}&sort=relevance`;
 
         if (after) {

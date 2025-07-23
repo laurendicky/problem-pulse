@@ -465,6 +465,10 @@ function renderPosts(posts) {
 // PASTE THIS ENTIRE FUNCTION TO REPLACE THE BUGGY `showSamplePosts`
 // ====================================================================================
 
+// ====================================================================================
+// PASTE THIS ENTIRE FUNCTION TO REPLACE YOUR EXISTING `showSamplePosts`
+// ====================================================================================
+
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
     // Guard Clause to prevent crash if assignments aren't ready
     if (!assignments) {
@@ -472,51 +476,55 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
         return; 
     }
 
+    // *** CHANGED: We are increasing the limits to allow more posts. ***
     const MIN_POSTS = 3; 
-    const MAX_POSTS = 6;
-    const MINIMUM_RELEVANCE_SCORE = 5; 
+    const MAX_POSTS = 10; // Previously 6, now we allow up to 8 posts.
+    const MINIMUM_RELEVANCE_SCORE = 4; // Previously 5, making it slightly less strict.
 
     const finding = window._summaries[summaryIndex];
     if (!finding) return;
 
-    // =======================================================
-    // *** THE FIX IS HERE ***
-    // These variables are now declared at the top of the function's scope,
-    // making them visible to the `addPost` helper function below.
     let relevantPosts = [];
     const addedPostIds = new Set();
-    // =======================================================
-
     let headerMessage = `Real Stories from Reddit: "${finding.title}"`;
 
     const addPost = (post) => {
-        // This function can now correctly see `relevantPosts` and `addedPostIds`
         if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) {
             relevantPosts.push(post);
             addedPostIds.add(post.data.id);
         }
     };
 
-    // --- Step 1: Add AI-Assigned Posts ---
+    // --- Step 1: Add the best AI-Assigned Posts first ---
     const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber);
     assignedPostNumbers.forEach(postNum => {
-        const post = window._postsForAssignment[postNum - 1]; 
-        addPost(post);
+        // Ensure the post number is valid for the array
+        if (postNum - 1 < window._postsForAssignment.length) {
+            const post = window._postsForAssignment[postNum - 1]; 
+            addPost(post);
+        }
     });
 
-    // --- Step 2: If we need more, run the scoring engine on ALL posts ---
-    if (relevantPosts.length < MIN_POSTS) {
+    // ============================================================================
+    // *** CHANGED: This is the biggest improvement. ***
+    // We will now ALWAYS run our own scoring to find more posts, instead of only
+    // running it if the AI found too few. This combines the AI's top picks with
+    // a broader, locally-scored search to fill up to the MAX_POSTS limit.
+    // ============================================================================
+    if (relevantPosts.length < MAX_POSTS) {
         const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id));
 
         const scoredCandidates = candidatePool.map(post => ({
             post: post,
-            score: calculateRelevanceScore(post, finding)
+            score: calculateRelevanceScore(post, finding) // Use our local scoring
         }))
-        .filter(item => item.score >= MINIMUM_RELEVANCE_SCORE)
-        .sort((a, b) => b.score - a.score);
+        .filter(item => item.score >= MINIMUM_RELEVANCE_SCORE) // Apply the quality gate
+        .sort((a, b) => b.score - a.score); // Sort by the best score
 
+        // Add the best-scoring candidates until we reach our maximum
         for (const candidate of scoredCandidates) {
-            if (relevantPosts.length >= MIN_POSTS) break;
+            // *** CHANGED: We now fill up to MAX_POSTS, not just MIN_POSTS. ***
+            if (relevantPosts.length >= MAX_POSTS) break;
             addPost(candidate.post);
         }
     }
@@ -526,6 +534,7 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
     if (relevantPosts.length === 0) {
         html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`;
     } else {
+        // The slice is still here as a final safety measure
         const finalPosts = relevantPosts.slice(0, MAX_POSTS);
         finalPosts.forEach(post => usedPostIds.add(post.data.id));
 
@@ -814,3 +823,4 @@ document.addEventListener('DOMContentLoaded', (event) => {
         });
     }
 });
+

@@ -431,15 +431,16 @@ Example of the required output format:
     }
 
   // This is the CORRECTED code
+// ====================================================================================
+// PASTE THIS ENTIRE FUNCTION TO REPLACE THE BUGGY `showSamplePosts`
+// ====================================================================================
+
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
-    // =======================================================
-    // NEW: Guard Clause to prevent crash
-    // If assignments aren't ready yet, do nothing.
+    // Guard Clause to prevent crash if assignments aren't ready
     if (!assignments) {
         console.warn("Assignments are not ready yet. Please wait a moment and try again.");
         return; 
     }
-    // =======================================================
 
     const MIN_POSTS = 3; 
     const MAX_POSTS = 6;
@@ -448,61 +449,70 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
     const finding = window._summaries[summaryIndex];
     if (!finding) return;
 
+    // =======================================================
+    // *** THE FIX IS HERE ***
+    // These variables are now declared at the top of the function's scope,
+    // making them visible to the `addPost` helper function below.
     let relevantPosts = [];
-        let headerMessage = `Real Stories from Reddit: "${finding.title}"`;
-        const addPost = (post) => {
-            if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) {
-                relevantPosts.push(post);
-                addedPostIds.add(post.data.id);
-            }
-        };
-        const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber);
-        assignedPostNumbers.forEach(postNum => {
-            const post = window._postsForAssignment[postNum - 1]; 
-            addPost(post);
-        });
-        if (relevantPosts.length < MIN_POSTS) {
-            const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id));
-            const scoredCandidates = candidatePool.map(post => ({
-                post: post,
-                score: calculateRelevanceScore(post, finding)
-            })).filter(item => item.score >= MINIMUM_RELEVANCE_SCORE).sort((a, b) => b.score - a.score);
-            for (const candidate of scoredCandidates) {
-                if (relevantPosts.length >= MIN_POSTS) break;
-                addPost(candidate.post);
-            }
+    const addedPostIds = new Set();
+    // =======================================================
+
+    let headerMessage = `Real Stories from Reddit: "${finding.title}"`;
+
+    const addPost = (post) => {
+        // This function can now correctly see `relevantPosts` and `addedPostIds`
+        if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) {
+            relevantPosts.push(post);
+            addedPostIds.add(post.data.id);
         }
-        let html;
-        if (relevantPosts.length === 0) {
-            html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`;
-        } else {
-            const finalPosts = relevantPosts.slice(0, MAX_POSTS);
-            finalPosts.forEach(post => usedPostIds.add(post.data.id));
-            html = finalPosts.map(post => `
-              <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;">
-                <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${post.data.title}</a>
-                <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${post.data.selftext ? post.data.selftext.substring(0, 150) + '...' : 'No content.'}</p>
-                <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</small>
-              </div>
-            `).join('');
-        }
-        const container = document.getElementById(`reddit-div${summaryIndex + 1}`);
-        if (container) {
-            container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">${headerMessage}</div><div class="reddit-samples-posts">${html}</div>`;
+    };
+
+    // --- Step 1: Add AI-Assigned Posts ---
+    const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber);
+    assignedPostNumbers.forEach(postNum => {
+        const post = window._postsForAssignment[postNum - 1]; 
+        addPost(post);
+    });
+
+    // --- Step 2: If we need more, run the scoring engine on ALL posts ---
+    if (relevantPosts.length < MIN_POSTS) {
+        const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id));
+
+        const scoredCandidates = candidatePool.map(post => ({
+            post: post,
+            score: calculateRelevanceScore(post, finding)
+        }))
+        .filter(item => item.score >= MINIMUM_RELEVANCE_SCORE)
+        .sort((a, b) => b.score - a.score);
+
+        for (const candidate of scoredCandidates) {
+            if (relevantPosts.length >= MIN_POSTS) break;
+            addPost(candidate.post);
         }
     }
     
-    function renderPosts(posts) {
-      const container = document.getElementById("posts-container");
-      if (!container) return;
-      container.innerHTML = posts.map(post => `
-        <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;">
-          <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${post.data.title}</a>
-          <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${post.data.selftext ? post.data.selftext.substring(0,200) + '...' : 'No content.'}</p>
-          <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</small>
-        </div>
-      `).join('');
+    // --- Step 3: Final Display ---
+    let html;
+    if (relevantPosts.length === 0) {
+        html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`;
+    } else {
+        const finalPosts = relevantPosts.slice(0, MAX_POSTS);
+        finalPosts.forEach(post => usedPostIds.add(post.data.id));
+
+        html = finalPosts.map(post => `
+          <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;">
+            <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${post.data.title}</a>
+            <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${post.data.selftext ? post.data.selftext.substring(0, 150) + '...' : 'No content.'}</p>
+            <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</small>
+          </div>
+        `).join('');
     }
+  
+    const container = document.getElementById(`reddit-div${summaryIndex + 1}`);
+    if (container) {
+        container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">${headerMessage}</div><div class="reddit-samples-posts">${html}</div>`;
+    }
+}
 
 // =============================================================
 // NEW & MODIFIED EVENT LISTENERS (The main logic controllers)
@@ -774,4 +784,3 @@ document.addEventListener('DOMContentLoaded', (event) => {
         });
     }
 });
-

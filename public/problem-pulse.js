@@ -532,19 +532,48 @@ document.getElementById("search-selected-btn").addEventListener("click", async f
 
         const openAIParams = {
             model: "gpt-4o-mini",
-            messages: [{
+            messages: [
+              {
                 role: "system",
-                content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles within a specific niche and provides three authentic, concise quotes for each struggle."
-            }, {
+                content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes."
+              }, 
+              {
                 role: "user",
-                content: `Using the top keywords [${keywordsString}], summarize the following content into between 1 and 5 core common struggles in the niche "${originalGroupName}". For each struggle, provide a concise title, a brief summary, and a count of mentions. Additionally, generate three authentic, raw, and short (no longer than 6 words) quotes that reflect the lived experience of each struggle. Provide keywords for each summary. Present the output in strict JSON format.
-                
-                Content:
-                \`\`\`
-                ${combinedTexts}
-                \`\`\`
-                `
-            }],
+                content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems.
+
+You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries".
+
+The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys:
+- "title": A concise title for the problem.
+- "body": A brief summary of the problem.
+- "count": An estimated number of times this problem was mentioned.
+- "quotes": An array of three authentic, short (max 6 words) quotes reflecting the problem.
+- "keywords": An array of relevant keywords for the problem.
+
+Here are the top keywords to guide your analysis: [${keywordsString}].
+
+Make sure the niche "${originalGroupName}" is naturally mentioned in each "body".
+
+Example of the required output format:
+{
+  "summaries": [
+    {
+      "title": "Example Title 1",
+      "body": "Example body text about the problem.",
+      "count": 50,
+      "quotes": ["Quote A", "Quote B", "Quote C"],
+      "keywords": ["keyword1", "keyword2"]
+    }
+  ]
+}
+
+Here is the text to analyze:
+\`\`\`
+${combinedTexts}
+\`\`\`
+`
+              }
+            ],
             temperature: 0.0,
             max_tokens: 1500,
             response_format: { "type": "json_object" }

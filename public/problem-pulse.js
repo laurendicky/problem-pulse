@@ -26,12 +26,32 @@ function renderPosts(posts) { const container = document.getElementById("posts-c
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if (!assignments) return; const finding = window._summaries[summaryIndex]; if (!finding) return; let relevantPosts = []; const addedPostIds = new Set(); const addPost = (post) => { if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) { relevantPosts.push(post); addedPostIds.add(post.data.id); } }; const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber); assignedPostNumbers.forEach(postNum => { if (postNum - 1 < window._postsForAssignment.length) { addPost(window._postsForAssignment[postNum - 1]); } }); if (relevantPosts.length < 8) { const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id)); const scoredCandidates = candidatePool.map(post => ({ post: post, score: calculateRelevanceScore(post, finding) })).filter(item => item.score >= 4).sort((a, b) => b.score - a.score); for (const candidate of scoredCandidates) { if (relevantPosts.length >= 8) break; addPost(candidate.post); } } let html; if (relevantPosts.length === 0) { html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`; } else { const finalPosts = relevantPosts.slice(0, 8); finalPosts.forEach(post => usedPostIds.add(post.data.id)); html = finalPosts.map(post => ` <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${post.data.title}</a> <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${post.data.selftext ? post.data.selftext.substring(0, 150) + '...' : 'No content.'}</p> <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</small> </div> `).join(''); } const container = document.getElementById(`reddit-div${summaryIndex + 1}`); if (container) { container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">Real Stories from Reddit: "${finding.title}"</div><div class="reddit-samples-posts">${html}</div>`; } }
 async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 10 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 200, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
+// ====================================================================================
+// PASTE THIS ENTIRE FUNCTION TO REPLACE THE `runProblemFinder` in your GitHub script
+// ====================================================================================
+
 async function runProblemFinder() {
+    const searchButton = document.getElementById('search-selected-btn');
+    // Early exit if elements are missing
+    if (!searchButton) {
+        console.error("Could not find the 'Find Their Problems' button.");
+        return;
+    }
+
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked');
-    if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
+    if (selectedCheckboxes.length === 0) {
+        alert("Please select at least one community.");
+        return;
+    }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
     const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
-    const resultsWrapper = document.getElementById('results-wrapper');
+
+    // --- Start Loading State ---
+    searchButton.classList.add('is-loading');
+    searchButton.disabled = true;
+
+    // --- UI Clearing and Loading ---
+    const resultsWrapper = document.getElementById('results-wrapper'); // This is your "section 21"
     if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
@@ -40,11 +60,13 @@ async function runProblemFinder() {
     const countHeaderDiv = document.getElementById("count-header");
     if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
     findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
+    
     const selectedTimeRaw = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
     const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
     const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
     const selectedTime = timeMap[selectedTimeRaw] || "all";
     const searchTerms = ["struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance", "frustration", "disappointed", "help", "advice", "solution", "workaround", "how to", "fix", "rant", "vent"];
+
     try {
         let allPosts = await fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 100, selectedTime);
         if (allPosts.length === 0) { throw new Error("No results found in the selected communities for these problem keywords."); }
@@ -52,11 +74,24 @@ async function runProblemFinder() {
         if (filteredPosts.length < 10) { throw new Error("Not enough high-quality posts found for analysis. Try selecting more communities."); }
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
+
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) {
             countHeaderDiv.textContent = userNicheCount === 1 ? `Found 1 post discussing problems related to "${originalGroupName}".` : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
-            if (resultsWrapper) { resultsWrapper.style.display = 'block'; setTimeout(() => { resultsWrapper.style.opacity = '1'; }, 50); }
+
+            // ===============================================
+            // *** NEW: Reveal and Scroll Logic ***
+            // ===============================================
+            if (resultsWrapper) {
+                resultsWrapper.style.display = 'flex'; // Changed from 'block' to 'flex' as requested
+                // Use a short timeout to let the browser render before scrolling
+                setTimeout(() => {
+                    resultsWrapper.style.opacity = '1';
+                    countHeaderDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 100);
+            }
         }
+        
         const topKeywords = getTopKeywords(filteredPosts, 10);
         const topPosts = filteredPosts.slice(0, 30);
         const combinedTexts = topPosts.map(post => `${post.data.title}. ${getFirstTwoSentences(post.data.selftext)}`).join("\n\n");
@@ -100,10 +135,14 @@ async function runProblemFinder() {
         }
     } catch (err) {
         console.error("Error in main analysis:", err);
-        const resultsMessageDiv = document.getElementById("results-message");
-        if(resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
+        if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
         findingDivs.forEach(div => { if (div) div.innerHTML = ""; });
-        if(countHeaderDiv) countHeaderDiv.innerHTML = "";
+        if (countHeaderDiv) countHeaderDiv.innerHTML = "";
+    } finally {
+        // --- End Loading State ---
+        // This 'finally' block ensures the button is ALWAYS restored, even if an error occurs.
+        searchButton.classList.remove('is-loading');
+        searchButton.disabled = false;
     }
 }
 

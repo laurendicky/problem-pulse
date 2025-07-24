@@ -27,21 +27,11 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if 
 async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 10 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 200, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
 
-// ====================================================================================
-// PASTE THIS ENTIRE FUNCTION TO REPLACE THE OLD `runProblemFinder` in your GitHub script
-// ====================================================================================
-
-// ====================================================================================
-// PASTE THIS ENTIRE FUNCTION TO REPLACE THE OLD `runProblemFinder` in your GitHub script
-// ====================================================================================
-
 async function runProblemFinder() {
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked');
     if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
     const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
-
-    // --- UI Clearing and Loading ---
     const resultsWrapper = document.getElementById('results-wrapper');
     if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
@@ -51,7 +41,6 @@ async function runProblemFinder() {
     const countHeaderDiv = document.getElementById("count-header");
     if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
     findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
-    
     const selectedTimeRaw = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
     const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
     const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
@@ -59,47 +48,32 @@ async function runProblemFinder() {
     const searchTerms = ["struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance", "frustration", "disappointed", "help", "advice", "solution", "workaround", "how to", "fix", "rant", "vent"];
 
     try {
-        // Step 1: Call our NEW orchestrator function on the server. This is the main change.
-        const analysisResponse = await fetch('/.netlify/functions/analyze-problems', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                subredditQueryString,
-                timeFilter: selectedTime,
-                minUpvotes: selectedMinUpvotes,
-                originalGroupName,
-                searchTerms
-            })
-        });
-
-        if (!analysisResponse.ok) {
-            const errorData = await analysisResponse.json();
-            throw new Error(errorData.error || 'Analysis on the server failed.');
-        }
-
-        const openAIData = await analysisResponse.json();
-        const summaries = openAIData.summaries; 
-        if (!summaries) { throw new Error("The analysis did not return valid summaries."); }
-
-        // Step 2: Fetch posts AGAIN, but only for DISPLAY purposes. This is very fast.
         let allPosts = await fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 100, selectedTime);
+        if (allPosts.length === 0) { throw new Error("No results found in the selected communities for these problem keywords."); }
         const filteredPosts = filterPosts(allPosts, selectedMinUpvotes);
+        if (filteredPosts.length < 10) { throw new Error("Not enough high-quality posts found for analysis. Try selecting more communities."); }
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
-
-        const userNicheCount = allPosts.length;
+        const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) {
             countHeaderDiv.textContent = userNicheCount === 1 ? `Found 1 post discussing problems related to "${originalGroupName}".` : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
             if (resultsWrapper) { resultsWrapper.style.display = 'block'; setTimeout(() => { resultsWrapper.style.opacity = '1'; }, 50); }
         }
         
+        const topKeywords = getTopKeywords(filteredPosts, 10);
+        const topPosts = filteredPosts.slice(0, 30); // Safe payload size
+        const combinedTexts = topPosts.map(post => `${post.data.title}. ${getFirstTwoSentences(post.data.selftext)}`).join("\n\n");
+        
+        const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", and "keywords". Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["Quote A", "Quote B", "Quote C"], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_tokens: 1500, response_format: { "type": "json_object" } };
+        const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!openAIResponse.ok) throw new Error('OpenAI summary generation failed.');
+        const openAIData = await openAIResponse.json();
+        const summaries = parseAISummary(openAIData.openaiResponse);
         const validatedSummaries = summaries.filter(finding => filteredPosts.filter(post => calculateRelevanceScore(post, finding) > 0).length >= 3);
         if (validatedSummaries.length === 0) { throw new Error("While posts were found, none formed a clear, common problem. Try a broader search."); }
-        
         const metrics = calculateFindingMetrics(validatedSummaries, filteredPosts);
-        const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index]?.supportCount / (metrics.totalProblemPosts || 1)) * 100) || 0, supportCount: metrics[index]?.supportCount || 0 })).sort((a, b) => b.prevalence - a.prevalence);
+        const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
         window._summaries = sortedFindings.map(item => item.summary);
-
         sortedFindings.forEach((findingData, index) => {
             const displayIndex = index + 1;
             if (displayIndex > 5) return;
@@ -120,7 +94,6 @@ async function runProblemFinder() {
             }
             if (btn) btn.onclick = function() { showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); };
         });
-
         window._postsForAssignment = filteredPosts.slice(0, 75);
         window._usedPostIds = new Set();
         const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment);
@@ -129,7 +102,6 @@ async function runProblemFinder() {
             if (i >= 5) break;
             showSamplePosts(i, assignments, filteredPosts, window._usedPostIds);
         }
-
     } catch (err) {
         console.error("Error in main analysis:", err);
         const resultsMessageDiv = document.getElementById("results-message");
@@ -138,3 +110,76 @@ async function runProblemFinder() {
         if(countHeaderDiv) countHeaderDiv.innerHTML = "";
     }
 }
+
+
+// --- 3. INITIALIZATION & EVENT LISTENERS ---
+document.addEventListener('DOMContentLoaded', () => {
+    // This function runs once when the page is fully loaded and sets up all interactions.
+    
+    // Find all the interactive elements on the page
+    const pillsContainer = document.getElementById('pf-suggestion-pills');
+    const groupInput = document.getElementById('group-input');
+    const findCommunitiesBtn = document.getElementById('find-communities-btn');
+    const searchSelectedBtn = document.getElementById('search-selected-btn');
+    const step1Container = document.getElementById('step-1-container');
+    const step2Container = document.getElementById('subreddit-selection-container');
+    const inspireButton = document.getElementById('inspire-me-button');
+    const choicesContainer = document.getElementById('subreddit-choices');
+
+    // Safety check for all elements
+    if (!pillsContainer || !groupInput || !findCommunitiesBtn || !searchSelectedBtn || !step1Container || !step2Container || !inspireButton || !choicesContainer) {
+        console.error("Initialization failed: One or more essential UI elements are missing from the HTML.");
+        return;
+    }
+
+    // --- UI Transition Logic ---
+    const transitionToStep2 = () => {
+        if (step2Container.classList.contains('visible')) return;
+        step1Container.classList.add('hidden');
+        step2Container.classList.add('visible');
+        const choicesDiv = document.getElementById('subreddit-choices');
+        if (choicesDiv) choicesDiv.innerHTML = '<p class="loading-text">Finding relevant communities...</p>';
+    };
+
+    // --- Event Listeners Setup ---
+    pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
+    
+    pillsContainer.addEventListener('click', (event) => {
+        if (event.target.classList.contains('pf-suggestion-pill')) {
+            groupInput.value = event.target.getAttribute('data-value');
+            findCommunitiesBtn.click();
+        }
+    });
+
+    inspireButton.addEventListener('click', () => {
+        pillsContainer.classList.toggle('visible');
+    });
+
+    findCommunitiesBtn.addEventListener("click", async (event) => {
+        event.preventDefault();
+        const groupName = groupInput.value.trim();
+        if (!groupName) {
+            alert("Please enter a group of people or select a suggestion.");
+            return;
+        }
+        originalGroupName = groupName;
+        transitionToStep2(); // Handle UI transition
+        const subreddits = await findSubredditsForGroup(groupName); // Handle data fetching
+        displaySubredditChoices(subreddits);
+    });
+
+    searchSelectedBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        runProblemFinder();
+    });
+    
+    choicesContainer.addEventListener('click', (event) => {
+        const choiceDiv = event.target.closest('.subreddit-choice');
+        if (choiceDiv) {
+            const checkbox = choiceDiv.querySelector('input[type="checkbox"]');
+            if (checkbox) {
+                checkbox.checked = !checkbox.checked;
+            }
+        }
+    });
+});

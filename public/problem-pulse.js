@@ -143,21 +143,21 @@ function initializeTool() {
     }
 
     // Attach listeners to the main buttons
-    findCommunitiesBtn.addEventListener("click", async (event) => {
-        event.preventDefault();
-        const groupName = groupInput.value.trim();
-        if (!groupName) {
-            alert("Please enter a group of people or select a suggestion.");
-            return;
-        }
-        originalGroupName = groupName;
-        const gridContainer = document.getElementById('expansion-grid-container');
-        const choicesDiv = document.getElementById('subreddit-choices');
-        choicesDiv.innerHTML = '<p class="loading-text">Finding relevant communities...</p>';
-        gridContainer.classList.add('visible');
-        const subreddits = await findSubredditsForGroup(groupName);
-        displaySubredditChoices(subreddits);
-    });
+// THIS IS THE CORRECTED VERSION
+findCommunitiesBtn.addEventListener("click", async (event) => {
+    event.preventDefault();
+    const groupName = groupInput.value.trim();
+    if (!groupName) {
+        alert("Please enter a group of people or select a suggestion.");
+        return;
+    }
+    originalGroupName = groupName;
+
+    // The local script in the embed handles the animation and loading text.
+    // This script now only focuses on fetching and displaying the data.
+    const subreddits = await findSubredditsForGroup(groupName);
+    displaySubredditChoices(subreddits);
+});
 
     document.getElementById("search-selected-btn").addEventListener("click", (event) => {
         event.preventDefault();
@@ -167,5 +167,4 @@ function initializeTool() {
 
 // Start the tool once the DOM is fully loaded
 document.addEventListener('DOMContentLoaded', initializeTool);
-
 

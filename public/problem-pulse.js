@@ -77,23 +77,15 @@ async function runProblemFinder() {
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
 
 if (countHeaderDiv) {
-    countHeaderDiv.textContent = userNicheCount === 1 ? `Found 1 post discussing problems related to "${originalGroupName}".` : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
-    
+    countHeaderDiv.textContent = userNicheCount === 1 ? /* ... */
     if (resultsWrapper) {
-        // Step 1: Immediately change the display property to make the element part of the layout
-        resultsWrapper.style.setProperty('display', 'flex', 'important');
-        
-        // Step 2: Use requestAnimationFrame to wait for the next repaint
-        // This ensures the browser has processed the 'display' change before we scroll
+        resultsWrapper.style.setProperty('display', 'flex', 'important'); // <-- OLD WAY
         requestAnimationFrame(() => {
-            // This code runs *after* the browser has acknowledged the new layout.
-            // We can now safely add the class for transitions and scroll.
             resultsWrapper.classList.add('is-visible');
             countHeaderDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
         });
     }
 }
-
 
         
         const topKeywords = getTopKeywords(filteredPosts, 10);

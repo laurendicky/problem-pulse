@@ -28,12 +28,13 @@ async function findSubredditsForGroup(groupName) { const prompt = `Given the use
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
 
 
-// ====================================================================================
-// PASTE THIS EN-TIRE FUNCTION TO REPLACE THE `runProblemFinder` in your GitHub script
-// ====================================================================================
 
 // ====================================================================================
 // PASTE THIS ENTIRE FUNCTION TO REPLACE THE BUGGY `runProblemFinder` in your GitHub script
+// ====================================================================================
+
+// ====================================================================================
+// PASTE THIS ENTIRE FUNCTION TO REPLACE THE `runProblemFinder` in your GitHub script
 // ====================================================================================
 
 async function runProblemFinder() {
@@ -41,7 +42,10 @@ async function runProblemFinder() {
     if (!searchButton) { console.error("Could not find the 'Find Their Problems' button."); return; }
 
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked');
-    if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
+    if (selectedCheckboxes.length === 0) {
+        alert("Please select at least one community.");
+        return;
+    }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
     const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
 
@@ -50,7 +54,7 @@ async function runProblemFinder() {
     searchButton.disabled = true;
 
     // UI Clearing
-    const resultsWrapper = document.getElementById('results-wrapper');
+    const resultsWrapper = document.getElementById('results-wrapper'); // This is your Section 21
     if (resultsWrapper) {
         resultsWrapper.style.display = 'none';
         resultsWrapper.classList.remove('is-visible');
@@ -62,7 +66,7 @@ async function runProblemFinder() {
     const countHeaderDiv = document.getElementById("count-header");
     if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
     findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
-    
+
     const selectedTimeRaw = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
     const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
     const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
@@ -80,17 +84,22 @@ async function runProblemFinder() {
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) {
             countHeaderDiv.textContent = userNicheCount === 1 ? `Found 1 post discussing problems related to "${originalGroupName}".` : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
+
+            // ================================================================
+            // *** THE DEFINITIVE FIX: Force the section to become visible ***
+            // ================================================================
             if (resultsWrapper) {
+                // Step 1: Use the most powerful command to override Webflow's display: none
                 resultsWrapper.style.setProperty('display', 'flex', 'important');
+
+                // Step 2: In the next frame, trigger the animation and scroll
                 setTimeout(() => {
                     resultsWrapper.classList.add('is-visible');
                     countHeaderDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }, 20);
+                }, 20); // This tiny delay is crucial
             }
         }
         
-        // *** THE FAULTY `if ("") { ... }` AROUND THIS BLOCK HAS BEEN REMOVED ***
-        // This entire block will now execute correctly.
         const topKeywords = getTopKeywords(filteredPosts, 10);
         const topPosts = filteredPosts.slice(0, 30);
         const combinedTexts = topPosts.map(post => `${post.data.title}. ${getFirstTwoSentences(post.data.selftext)}`).join("\n\n");

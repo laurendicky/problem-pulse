@@ -28,9 +28,6 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if 
 async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 10 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 200, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
 
-// ====================================================================================
-// PASTE THIS ENTIRE FUNCTION TO REPLACE THE BUGGY `runProblemFinder` in your GitHub script
-// ====================================================================================
 
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn');
@@ -47,10 +44,10 @@ async function runProblemFinder() {
     searchButton.classList.add('is-loading');
     searchButton.disabled = true;
 
+    // --- Reset UI elements before starting a new search ---
     const resultsWrapper = document.getElementById('results-wrapper');
     if (resultsWrapper) {
-        resultsWrapper.style.display = 'none';
-        resultsWrapper.style.opacity = '0'; // Reset opacity
+        resultsWrapper.classList.remove('is-visible');
     }
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
@@ -60,6 +57,7 @@ async function runProblemFinder() {
     if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
     findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
     
+    // --- Get user-selected filters ---
     const selectedTimeRaw = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
     const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
     const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
@@ -69,27 +67,41 @@ async function runProblemFinder() {
     try {
         let allPosts = await fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 100, selectedTime);
         if (allPosts.length === 0) { throw new Error("No results found in the selected communities for these problem keywords."); }
+        
         const filteredPosts = filterPosts(allPosts, selectedMinUpvotes);
-        if (filteredPosts.length < 10) { throw new Error("Not enough high-quality posts found for analysis. Try selecting more communities."); }
+        if (filteredPosts.length < 10) { throw new Error("Not enough high-quality posts found for analysis. Try selecting more communities or adjusting filters."); }
+        
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
 
+        // ============================
+        //  START OF THE CORRECTED BLOCK
+        // ============================
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
 
-if (countHeaderDiv) {
-    countHeaderDiv.textContent = userNicheCount === 1 ? /* ... */
-    if (resultsWrapper) {
-        resultsWrapper.style.setProperty('display', 'flex', 'important'); // <-- OLD WAY
-        requestAnimationFrame(() => {
-            resultsWrapper.classList.add('is-visible');
-            countHeaderDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        });
-    }
-}
+        if (countHeaderDiv) {
+            // This is the corrected ternary operator. It has the 'true' part and the 'false' part.
+            countHeaderDiv.textContent = userNicheCount === 1 
+                ? `Found 1 post discussing problems related to "${originalGroupName}".` 
+                : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
 
-        
+            if (resultsWrapper) {
+                // Add the class to trigger the CSS visibility transition
+                resultsWrapper.classList.add('is-visible');
+
+                // Use requestAnimationFrame to ensure the scroll happens after the browser starts the animation
+                requestAnimationFrame(() => {
+                    countHeaderDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                });
+            }
+        }
+        // ==========================
+        //  END OF THE CORRECTED BLOCK
+        // ==========================
+
         const topKeywords = getTopKeywords(filteredPosts, 10);
         const topPosts = filteredPosts.slice(0, 30);
+        // (The rest of your function logic follows here...)
         const combinedTexts = topPosts.map(post => `${post.data.title}. ${getFirstTwoSentences(post.data.selftext)}`).join("\n\n");
         const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", and "keywords". Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["Quote A", "Quote B", "Quote C"], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_tokens: 1500, response_format: { "type": "json_object" } };
         const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });

@@ -1,3 +1,6 @@
+// =================================================================================
+// FINAL, COMPLETE, AND CORRECTED SCRIPT FOR GITHUB
+// =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
@@ -129,32 +132,40 @@ document.addEventListener('DOMContentLoaded', () => {
     const choicesContainer = document.getElementById('subreddit-choices');
     const audienceTitle = document.getElementById('pf-audience-title');
     const backButton = document.getElementById('back-to-step1-btn');
+
     if (!pillsContainer || !groupInput || !findCommunitiesBtn || !searchSelectedBtn || !step1Container || !step2Container || !inspireButton || !choicesContainer || !audienceTitle || !backButton) {
         console.error("Initialization failed: One or more essential UI elements are missing from the HTML.");
         return;
     }
+
+    // --- UI Transition Logic ---
     const transitionToStep2 = () => {
         if (step2Container.classList.contains('visible')) return;
         step1Container.classList.add('hidden');
         step2Container.classList.add('visible');
         const choicesDiv = document.getElementById('subreddit-choices');
         if (choicesDiv) choicesDiv.innerHTML = '<p class="loading-text">Finding relevant communities...</p>';
-        if (audienceTitle) audienceTitle.textContent = `Searching for: "${originalGroupName}"`;
+        if (audienceTitle) audienceTitle.textContent = `For: "${originalGroupName}"`;
     };
     const transitionToStep1 = () => {
         step2Container.classList.remove('visible');
         step1Container.classList.remove('hidden');
     };
+
+    // --- Event Listeners Setup ---
     pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
+    
     pillsContainer.addEventListener('click', (event) => {
         if (event.target.classList.contains('pf-suggestion-pill')) {
             groupInput.value = event.target.getAttribute('data-value');
             findCommunitiesBtn.click();
         }
     });
+
     inspireButton.addEventListener('click', () => {
         pillsContainer.classList.toggle('visible');
     });
+
     findCommunitiesBtn.addEventListener("click", async (event) => {
         event.preventDefault();
         const groupName = groupInput.value.trim();
@@ -167,13 +178,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const subreddits = await findSubredditsForGroup(groupName);
         displaySubredditChoices(subreddits);
     });
+
     searchSelectedBtn.addEventListener("click", (event) => {
         event.preventDefault();
         runProblemFinder();
     });
+    
     backButton.addEventListener('click', () => {
         transitionToStep1();
     });
+
     choicesContainer.addEventListener('click', (event) => {
         const choiceDiv = event.target.closest('.subreddit-choice');
         if (choiceDiv) {
@@ -184,4 +198,3 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 });
-

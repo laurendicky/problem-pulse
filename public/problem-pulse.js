@@ -153,10 +153,16 @@ async function runProblemFinder() {
 }
 
 // --- 3. INITIALIZATION & EVENT LISTENERS ---
-// --- 3. INITIALIZATION & EVENT LISTENERS ---
-document.addEventListener('DOMContentLoaded', () => {
-    // This function will run once the page is ready.
-    // It finds all necessary elements and attaches event listeners.
+// =================== START OF BLOCK TO PASTE ===================
+
+// --- 3. INITIALIZATION & EVENT LISTENERS (ROBUST POLLING VERSION) ---
+
+/**
+ * This is the main setup function. It finds all elements and attaches event listeners.
+ * It will only be called AFTER we've confirmed the elements exist in the DOM.
+ */
+function initializeProblemFinderTool() {
+    console.log("Problem Finder elements found. Initializing...");
 
     const pillsContainer = document.getElementById('pf-suggestion-pills');
     const groupInput = document.getElementById('group-input');
@@ -168,29 +174,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const choicesContainer = document.getElementById('subreddit-choices');
     const audienceTitle = document.getElementById('pf-audience-title');
     const backButton = document.getElementById('back-to-step1-btn');
-    
-    // --- Robust Element Check ---
-    // Instead of crashing, this will tell you exactly which element is missing.
-    const elements = {
-        pillsContainer, groupInput, findCommunitiesBtn, searchSelectedBtn,
-        step1Container, step2Container, inspireButton, choicesContainer,
-        audienceTitle, backButton
-    };
 
-    let allElementsFound = true;
-    for (const key in elements) {
-        if (!elements[key]) {
-            console.error(`Initialization failed: The HTML element with the expected ID for "${key}" was not found on the page. Check if the ID is correct and if the HTML is loaded before this script runs.`);
-            allElementsFound = false;
-        }
+    // If any of these are null, something is still wrong, but the polling should prevent this.
+    if (!findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer) {
+        console.error("Critical error: A key element was null even after polling. Aborting initialization.");
+        return;
     }
 
-    if (!allElementsFound) {
-        // Stop the script if any essential element is missing.
-        return; 
-    }
-
-    // --- Transitions ---
+    // --- UI Transition Functions ---
     const transitionToStep2 = () => {
         if (step2Container.classList.contains('visible')) return;
         step1Container.classList.add('hidden');
@@ -206,7 +197,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (resultsWrapper) { resultsWrapper.classList.remove('is-visible'); }
     };
 
-    // --- Attach Event Listeners ---
+    // --- Attach All Event Listeners ---
     pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
     
     pillsContainer.addEventListener('click', (event) => {
@@ -251,6 +242,44 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
-    
-    console.log("Problem Finder tool initialized successfully.");
-});
+
+    console.log("Problem Finder tool successfully initialized and all listeners are active.");
+}
+
+
+/**
+ * This function waits for the main Problem Finder tool to be loaded into the page.
+ * It checks for a key element every 100ms. Once found, it calls the main init function.
+ */
+function waitForElementAndInit() {
+    const keyElementId = 'find-communities-btn'; // We wait for this specific button to exist.
+    let retries = 0;
+    const maxRetries = 50; // Try for 5 seconds (50 * 100ms)
+
+    const intervalId = setInterval(() => {
+        const keyElement = document.getElementById(keyElementId);
+
+        if (keyElement) {
+            // SUCCESS! The element is found.
+            clearInterval(intervalId); // Stop polling.
+            initializeProblemFinderTool(); // Run the real setup function.
+        } else {
+            // The element is not there yet.
+            retries++;
+            if (retries > maxRetries) {
+                // FAILED. The element never appeared.
+                clearInterval(intervalId); // Stop polling.
+                console.error(`Problem Finder initialization FAILED. The key element "#${keyElementId}" was not found in the DOM after 5 seconds. Please check that the HTML embed is correct and is loading on the page.`);
+            } else {
+                // Optional: Log a message so you can see it trying.
+                 console.log(`Waiting for Problem Finder tool... (Attempt ${retries})`);
+            }
+        }
+    }, 100); // Check every 100 milliseconds.
+}
+
+// --- SCRIPT ENTRY POINT ---
+// When the page is ready, start polling for our tool.
+document.addEventListener('DOMContentLoaded', waitForElementAndInit);
+
+// =================== END OF BLOCK TO PASTE ===================

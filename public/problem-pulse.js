@@ -28,15 +28,6 @@ async function findSubredditsForGroup(groupName) { const prompt = `Given the use
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
 
 
-
-// ====================================================================================
-// PASTE THIS ENTIRE FUNCTION TO REPLACE THE BUGGY `runProblemFinder` in your GitHub script
-// ====================================================================================
-
-// ====================================================================================
-// PASTE THIS ENTIRE FUNCTION TO REPLACE THE `runProblemFinder` in your GitHub script
-// ====================================================================================
-
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn');
     if (!searchButton) { console.error("Could not find the 'Find Their Problems' button."); return; }
@@ -49,16 +40,11 @@ async function runProblemFinder() {
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
     const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
 
-    // Start loading state
     searchButton.classList.add('is-loading');
     searchButton.disabled = true;
 
-    // UI Clearing
-    const resultsWrapper = document.getElementById('results-wrapper'); // This is your Section 21
-    if (resultsWrapper) {
-        resultsWrapper.style.display = 'none';
-        resultsWrapper.classList.remove('is-visible');
-    }
+    const resultsWrapper = document.getElementById('results-wrapper');
+    if (resultsWrapper) { resultsWrapper.classList.remove('is-visible'); } // Reset before starting
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
@@ -85,18 +71,17 @@ async function runProblemFinder() {
         if (countHeaderDiv) {
             countHeaderDiv.textContent = userNicheCount === 1 ? `Found 1 post discussing problems related to "${originalGroupName}".` : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
 
-            // ================================================================
-            // *** THE DEFINITIVE FIX: Force the section to become visible ***
-            // ================================================================
+            // ===============================================
+            // *** THE DEFINITIVE FIX: Use the powerful class to reveal the section ***
+            // ===============================================
             if (resultsWrapper) {
-                // Step 1: Use the most powerful command to override Webflow's display: none
-                resultsWrapper.style.setProperty('display', 'flex', 'important');
+                // Step 1: Add the class. The CSS will do all the work of overriding display:none.
+                resultsWrapper.classList.add('is-visible');
 
-                // Step 2: In the next frame, trigger the animation and scroll
+                // Step 2: Wait a moment for the animation to start, then scroll.
                 setTimeout(() => {
-                    resultsWrapper.classList.add('is-visible');
                     countHeaderDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }, 20); // This tiny delay is crucial
+                }, 100); // 100ms is a safe delay to ensure the animation has begun.
             }
         }
         
@@ -151,7 +136,6 @@ async function runProblemFinder() {
         searchButton.disabled = false;
     }
 }
-
 // --- 3. INITIALIZATION & EVENT LISTENERS ---
 document.addEventListener('DOMContentLoaded', () => {
     // This is the central function that runs once the page is fully loaded to set up all interactions.

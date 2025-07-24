@@ -32,6 +32,10 @@ function displaySubredditChoices(subreddits) { const choicesDiv = document.getEl
 // PASTE THIS ENTIRE FUNCTION TO REPLACE THE BUGGY `runProblemFinder` in your GitHub script
 // ====================================================================================
 
+// ====================================================================================
+// PASTE THIS ENTIRE FUNCTION TO REPLACE THE `runProblemFinder` in your GitHub script
+// ====================================================================================
+
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn');
     if (!searchButton) { console.error("Could not find the 'Find Their Problems' button."); return; }
@@ -44,15 +48,13 @@ async function runProblemFinder() {
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
     const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
 
-    // Start loading state
     searchButton.classList.add('is-loading');
     searchButton.disabled = true;
 
-    // UI Clearing
     const resultsWrapper = document.getElementById('results-wrapper');
     if (resultsWrapper) {
         resultsWrapper.style.display = 'none';
-        resultsWrapper.classList.remove('is-visible');
+        resultsWrapper.style.opacity = '0'; // Reset opacity
     }
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
@@ -79,17 +81,25 @@ async function runProblemFinder() {
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) {
             countHeaderDiv.textContent = userNicheCount === 1 ? `Found 1 post discussing problems related to "${originalGroupName}".` : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
+
+            // ========================================================================
+            // *** THIS IS THE DEFINITIVE FIX, COPIED FROM YOUR WORKING EXAMPLE ***
+            // ========================================================================
             if (resultsWrapper) {
-                resultsWrapper.style.setProperty('display', 'flex', 'important');
+                // Step 1: Force the wrapper into the layout. It's still invisible.
+                resultsWrapper.style.display = 'flex'; // Using flex as you requested
+
+                // Step 2: Wait a single frame for the browser to process the display change.
                 setTimeout(() => {
-                    resultsWrapper.classList.add('is-visible');
+                    // Step 3: Now that it exists, trigger the fade-in animation.
+                    resultsWrapper.style.opacity = '1';
+                    
+                    // Step 4: And now, scroll to the header inside it.
                     countHeaderDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }, 20);
+                }, 50); // 50ms is a safe delay
             }
         }
         
-        // *** THE FAULTY `if ("") { ... }` AROUND THIS BLOCK HAS BEEN REMOVED ***
-        // This entire block will now execute correctly.
         const topKeywords = getTopKeywords(filteredPosts, 10);
         const topPosts = filteredPosts.slice(0, 30);
         const combinedTexts = topPosts.map(post => `${post.data.title}. ${getFirstTwoSentences(post.data.selftext)}`).join("\n\n");

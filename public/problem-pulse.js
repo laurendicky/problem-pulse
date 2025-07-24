@@ -35,20 +35,32 @@ function displaySubredditChoices(subreddits) { const choicesDiv = document.getEl
 // PASTE THIS ENTIRE FUNCTION TO REPLACE THE `runProblemFinder` in your GitHub script
 // ====================================================================================
 
+// ====================================================================================
+// PASTE THIS EN-TIRE FUNCTION TO REPLACE THE `runProblemFinder` in your GitHub script
+// ====================================================================================
+
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn');
     if (!searchButton) { console.error("Could not find the 'Find Their Problems' button."); return; }
 
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked');
-    if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
+    if (selectedCheckboxes.length === 0) {
+        alert("Please select at least one community.");
+        return;
+    }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
     const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
 
+    // Start loading state
     searchButton.classList.add('is-loading');
     searchButton.disabled = true;
 
-    const resultsWrapper = document.getElementById('results-wrapper');
-    if (resultsWrapper) { resultsWrapper.classList.remove('is-visible'); }
+    // UI Clearing
+    const resultsWrapper = document.getElementById('results-wrapper'); // This is your Section 21
+    if (resultsWrapper) {
+        resultsWrapper.style.display = 'none';
+        resultsWrapper.classList.remove('is-visible');
+    }
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
@@ -56,7 +68,7 @@ async function runProblemFinder() {
     const countHeaderDiv = document.getElementById("count-header");
     if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
     findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
-    
+
     const selectedTimeRaw = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
     const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
     const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
@@ -74,18 +86,19 @@ async function runProblemFinder() {
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) {
             countHeaderDiv.textContent = userNicheCount === 1 ? `Found 1 post discussing problems related to "${originalGroupName}".` : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
-            
-            // ===============================================
-            // *** DEFINITIVE, CORRECTED Reveal and Scroll Logic ***
-            // ===============================================
-            if (resultsWrapper) {
-                // Step 1: Add the powerful class to make it visible. The CSS handles the animation.
-                resultsWrapper.classList.add('is-visible');
 
-                // Step 2: Use a tiny timeout to let the animation start, then scroll.
+            // ================================================================
+            // *** THE DEFINITIVE FIX: Force the section to become visible ***
+            // ================================================================
+            if (resultsWrapper) {
+                // Step 1: Use the most powerful command to override Webflow's display: none
+                resultsWrapper.style.setProperty('display', 'flex', 'important');
+
+                // Step 2: In the next frame, trigger the animation and scroll
                 setTimeout(() => {
+                    resultsWrapper.classList.add('is-visible');
                     countHeaderDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }, 100); // 100ms is a good value for the animation to begin.
+                }, 20); // This tiny delay is crucial
             }
         }
         

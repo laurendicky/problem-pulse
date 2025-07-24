@@ -27,15 +27,32 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if 
 async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 10 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 200, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
 
+// ====================================================================================
+// PASTE THIS ENTIRE FUNCTION TO REPLACE THE `runProblemFinder` in your GitHub script
+// ====================================================================================
+
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn');
-    searchButton.classList.add('is-loading'); searchButton.disabled = true;
+    if (!searchButton) { console.error("Could not find the 'Find Their Problems' button."); return; }
+
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked');
-    if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); searchButton.classList.remove('is-loading'); searchButton.disabled = false; return; }
+    if (selectedCheckboxes.length === 0) {
+        alert("Please select at least one community.");
+        return;
+    }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
     const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
-    const resultsWrapper = document.getElementById('results-wrapper');
-    if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.classList.remove('is-visible'); }
+
+    // Start loading state
+    searchButton.classList.add('is-loading');
+    searchButton.disabled = true;
+
+    // UI Clearing
+    const resultsWrapper = document.getElementById('results-wrapper'); // This is your Section 21
+    if (resultsWrapper) {
+        resultsWrapper.style.display = 'none'; // Ensure it's hidden before we start
+        resultsWrapper.classList.remove('is-visible');
+    }
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
@@ -43,6 +60,7 @@ async function runProblemFinder() {
     const countHeaderDiv = document.getElementById("count-header");
     if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
     findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
+
     const selectedTimeRaw = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
     const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
     const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
@@ -56,17 +74,24 @@ async function runProblemFinder() {
         if (filteredPosts.length < 10) { throw new Error("Not enough high-quality posts found for analysis. Try selecting more communities."); }
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
+
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) {
             countHeaderDiv.textContent = userNicheCount === 1 ? `Found 1 post discussing problems related to "${originalGroupName}".` : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
+
+            // ===============================================
+            // *** CORRECTED: Direct Reveal and Scroll Logic ***
+            // ===============================================
             if (resultsWrapper) {
+                // Step 1: Force the section to be visible. This robustly overrides Webflow's display: none.
                 resultsWrapper.style.display = 'flex';
-                setTimeout(() => {
-                    resultsWrapper.classList.add('is-visible');
-                    countHeaderDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }, 20);
+
+                // Step 2: Now that the section exists in the layout, scroll to the header inside it.
+                // The 'smooth' behavior gives it a nice feel as it scrolls.
+                countHeaderDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
         }
+        
         const topKeywords = getTopKeywords(filteredPosts, 10);
         const topPosts = filteredPosts.slice(0, 30);
         const combinedTexts = topPosts.map(post => `${post.data.title}. ${getFirstTwoSentences(post.data.selftext)}`).join("\n\n");

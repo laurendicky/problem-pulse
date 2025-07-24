@@ -26,7 +26,6 @@ function renderPosts(posts) { const container = document.getElementById("posts-c
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if (!assignments) return; const finding = window._summaries[summaryIndex]; if (!finding) return; let relevantPosts = []; const addedPostIds = new Set(); const addPost = (post) => { if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) { relevantPosts.push(post); addedPostIds.add(post.data.id); } }; const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber); assignedPostNumbers.forEach(postNum => { if (postNum - 1 < window._postsForAssignment.length) { addPost(window._postsForAssignment[postNum - 1]); } }); if (relevantPosts.length < 8) { const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id)); const scoredCandidates = candidatePool.map(post => ({ post: post, score: calculateRelevanceScore(post, finding) })).filter(item => item.score >= 4).sort((a, b) => b.score - a.score); for (const candidate of scoredCandidates) { if (relevantPosts.length >= 8) break; addPost(candidate.post); } } let html; if (relevantPosts.length === 0) { html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`; } else { const finalPosts = relevantPosts.slice(0, 8); finalPosts.forEach(post => usedPostIds.add(post.data.id)); html = finalPosts.map(post => ` <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${post.data.title}</a> <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${post.data.selftext ? post.data.selftext.substring(0, 150) + '...' : 'No content.'}</p> <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</small> </div> `).join(''); } const container = document.getElementById(`reddit-div${summaryIndex + 1}`); if (container) { container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">Real Stories from Reddit: "${finding.title}"</div><div class="reddit-samples-posts">${html}</div>`; } }
 async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 10 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 200, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
-
 async function runProblemFinder() {
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked');
     if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
@@ -46,7 +45,6 @@ async function runProblemFinder() {
     const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
     const selectedTime = timeMap[selectedTimeRaw] || "all";
     const searchTerms = ["struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance", "frustration", "disappointed", "help", "advice", "solution", "workaround", "how to", "fix", "rant", "vent"];
-
     try {
         let allPosts = await fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 100, selectedTime);
         if (allPosts.length === 0) { throw new Error("No results found in the selected communities for these problem keywords."); }
@@ -59,11 +57,9 @@ async function runProblemFinder() {
             countHeaderDiv.textContent = userNicheCount === 1 ? `Found 1 post discussing problems related to "${originalGroupName}".` : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
             if (resultsWrapper) { resultsWrapper.style.display = 'block'; setTimeout(() => { resultsWrapper.style.opacity = '1'; }, 50); }
         }
-        
         const topKeywords = getTopKeywords(filteredPosts, 10);
-        const topPosts = filteredPosts.slice(0, 50); // Safe payload size
+        const topPosts = filteredPosts.slice(0, 30);
         const combinedTexts = topPosts.map(post => `${post.data.title}. ${getFirstTwoSentences(post.data.selftext)}`).join("\n\n");
-        
         const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", and "keywords". Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["Quote A", "Quote B", "Quote C"], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_tokens: 1500, response_format: { "type": "json_object" } };
         const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!openAIResponse.ok) throw new Error('OpenAI summary generation failed.');
@@ -114,7 +110,7 @@ async function runProblemFinder() {
 
 // --- 3. INITIALIZATION & EVENT LISTENERS ---
 document.addEventListener('DOMContentLoaded', () => {
-    // This function runs once when the page is fully loaded and sets up all interactions.
+    // This is the central function that runs once the page is fully loaded to set up all interactions.
     
     // Find all the interactive elements on the page
     const pillsContainer = document.getElementById('pf-suggestion-pills');
@@ -125,9 +121,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const step2Container = document.getElementById('subreddit-selection-container');
     const inspireButton = document.getElementById('inspire-me-button');
     const choicesContainer = document.getElementById('subreddit-choices');
+    const audienceTitle = document.getElementById('pf-audience-title');
+    const backButton = document.getElementById('back-to-step1-btn');
 
     // Safety check for all elements
-    if (!pillsContainer || !groupInput || !findCommunitiesBtn || !searchSelectedBtn || !step1Container || !step2Container || !inspireButton || !choicesContainer) {
+    if (!pillsContainer || !groupInput || !findCommunitiesBtn || !searchSelectedBtn || !step1Container || !step2Container || !inspireButton || !choicesContainer || !audienceTitle || !backButton) {
         console.error("Initialization failed: One or more essential UI elements are missing from the HTML.");
         return;
     }
@@ -139,6 +137,14 @@ document.addEventListener('DOMContentLoaded', () => {
         step2Container.classList.add('visible');
         const choicesDiv = document.getElementById('subreddit-choices');
         if (choicesDiv) choicesDiv.innerHTML = '<p class="loading-text">Finding relevant communities...</p>';
+        if (audienceTitle) audienceTitle.textContent = `Searching for: "${originalGroupName}"`;
+    };
+
+    const transitionToStep1 = () => {
+        step2Container.classList.remove('visible');
+        step1Container.classList.remove('hidden');
+        const choicesDiv = document.getElementById('subreddit-choices');
+        if (choicesDiv) choicesDiv.innerHTML = ''; // Clear choices
     };
 
     // --- Event Listeners Setup ---
@@ -163,8 +169,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         originalGroupName = groupName;
-        transitionToStep2(); // Handle UI transition
-        const subreddits = await findSubredditsForGroup(groupName); // Handle data fetching
+        transitionToStep2();
+        const subreddits = await findSubredditsForGroup(groupName);
         displaySubredditChoices(subreddits);
     });
 
@@ -173,6 +179,10 @@ document.addEventListener('DOMContentLoaded', () => {
         runProblemFinder();
     });
     
+    backButton.addEventListener('click', () => {
+        transitionToStep1();
+    });
+
     choicesContainer.addEventListener('click', (event) => {
         const choiceDiv = event.target.closest('.subreddit-choice');
         if (choiceDiv) {

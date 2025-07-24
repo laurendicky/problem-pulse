@@ -26,7 +26,109 @@ function renderPosts(e){const t=document.getElementById("posts-container");if(!t
 function showSamplePosts(e,t,r,n){if(!t)return void console.warn("Assignments are not ready yet.");const o=window._summaries[e];if(!o)return;let s=[],a=new Set;let i=`Real Stories from Reddit: "${o.title}"`;const l=e=>{e&&e.data&&!n.has(e.data.id)&&!a.has(e.data.id)&&(s.push(e),a.add(e.data.id))};const c=t.filter(t=>t.finding===e+1).map(e=>e.postNumber);c.forEach(e=>{if(e-1<window._postsForAssignment.length){const t=window._postsForAssignment[e-1];l(t)}});if(s.length<8){const e=r.filter(e=>!n.has(e.data.id)&&!a.has(e.data.id)),t=e.map(e=>({post:e,score:calculateRelevanceScore(e,o)})).filter(e=>e.score>=4).sort((e,t)=>t.score-e.score);for(const u of t){if(s.length>=8)break;l(u.post)}}let d;if(0===s.length)d='<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>';else{const e=s.slice(0,8);e.forEach(e=>n.add(e.data.id)),d=e.map(e=>` <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;"> <a href="https://www.reddit.com${e.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${e.data.title}</a> <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${e.data.selftext?e.data.selftext.substring(0,150)+"...":"No content."}</p> <small>r/${e.data.subreddit} | 👍 ${e.data.ups.toLocaleString()} | 💬 ${e.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(e.data.created_utc)}</small> </div> `).join("")}const p=document.getElementById(`reddit-div${e+1}`);p&&(p.innerHTML=`<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">${i}</div><div class="reddit-samples-posts">${d}</div>`)}
 async function findSubredditsForGroup(e){const t=`Given the user-defined group "${e}", suggest up to 10 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`,r={model:"gpt-4o-mini",messages:[{role:"system",content:"You are an expert Reddit community finder providing answers in strict JSON format."},{role:"user",content:t}],temperature:.2,max_tokens:200,response_format:{type:"json_object"}};try{const e=await fetch(OPENAI_PROXY_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({openaiPayload:r})});if(!e.ok)throw new Error("OpenAI API request failed.");const t=await e.json(),n=JSON.parse(t.openaiResponse);if(!n.subreddits||!Array.isArray(n.subreddits))throw new Error("AI response did not contain a 'subreddits' array.");return n.subreddits}catch(o){return console.error("Error finding subreddits:",o),alert("Sorry, I couldn't find any relevant communities. Please try another group name."),[]}}
 function displaySubredditChoices(e){const t=document.getElementById("subreddit-choices");t&&(t.innerHTML="",0===e.length?t.innerHTML='<p class="loading-text">No communities found.</p>':t.innerHTML=e.map(e=>`<div class="subreddit-choice"><input type="checkbox" id="sub-${e}" value="${e}" checked><label for="sub-${e}">r/${e}</label></div>`).join(""))}
-async function runProblemFinder(){const e=document.querySelectorAll("#subreddit-choices input:checked");if(0===e.length)return void alert("Please select at least one community.");const t=Array.from(e).map(e=>e.value).map(e=>`subreddit:${e}`).join(" OR "),r=document.getElementById("results-wrapper");r&&(r.style.display="none",r.style.opacity="0"),["count-header","filter-header","findings-1","findings-2","findings-3","findings-4","findings-5","pulse-results","posts-container"].forEach(e=>{const t=document.getElementById(e);t&&(t.innerHTML="")});for(let n=1;n<=5;n++){const e=document.getElementById(`findings-block${n}`);e&&(e.style.display="none")}const o=[document.getElementById("findings-1"),document.getElementById("findings-2"),document.getElementById("findings-3"),document.getElementById("findings-4"),document.getElementById("findings-5")],s=document.getElementById("results-message"),a=document.getElementById("count-header");s&&(s.innerHTML=""),o.forEach(e=>{e&&(e.innerHTML="<p class='loading'>Brewing insights...</p>")});const i=document.querySelector('input[name="timePosted"]:checked')?.value||"all",l=parseInt(document.querySelector('input[name="minVotes"]:checked')?.value||"20",10),c={week:"week",month:"month","6months":"year",year:"year",all:"all"},d=c[i]||"all",u=["struggle","challenge","problem","issue","difficulty","pain point","pet peeve","annoyance","frustration","disappointed","help","advice","solution","workaround","how to","fix","rant","vent"];try{let e=await fetchMultipleRedditDataBatched(t,u,100,d);if(0===e.length)throw new Error("No results found for these problem keywords.");const n=filterPosts(e,l);if(n.length<10)throw new Error("Not enough high-quality posts found for analysis.");window._filteredPosts=n,renderPosts(n);const c=e.filter(e=>((e.data.title+e.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;if(a&&(a.textContent=1===c?`Found 1 post discussing problems related to "${originalGroupName}".`:`Found over ${c.toLocaleString()} posts discussing problems related to "${originalGroupName}".`,r&&(r.style.display="block",setTimeout(()=>{r.style.opacity="1"},50))),""){const e=getTopKeywords(n,10),t=n.slice(0,80).map(e=>`${e.data.title}. ${getFirstTwoSentences(e.data.selftext)}`).join("\n\n"),r={model:"gpt-4o-mini",messages:[{role:"system",content:"You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes."},{role:"user",content:`Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", and "keywords". Here are the top keywords to guide your analysis: [${e.join(", ")}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["Quote A", "Quote B", "Quote C"], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${t}\`\`\``}],temperature:0,max_tokens:1500,response_format:{type:"json_object"}},o=await fetch(OPENAI_PROXY_URL,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({openaiPayload:r})});if(!o.ok)throw new Error("OpenAI summary generation failed.");const s=await o.json(),i=parseAISummary(s.openaiResponse);const l=i.filter(e=>n.filter(t=>calculateRelevanceScore(t,e)>0).length>=3);if(0===l.length)throw new Error("While posts were found, none formed a clear, common problem.");const c=calculateFindingMetrics(l,n),d=l.map((e,t)=>({summary:e,prevalence:Math.round(c[t].supportCount/(c.totalProblemPosts||1)*100),supportCount:c[t].supportCount})).sort((e,t)=>t.prevalence-t.prevalence);window._summaries=d.map(e=>e.summary),d.forEach((e,t)=>{const r=t+1;if(r>5)return;const n=document.getElementById(`findings-block${r}`),o=document.getElementById(`findings-${r}`),s=document.getElementById(`button-sample${r}`);n&&(n.style.display="flex"),o&&(()=>{const t=e.summary,n=e.prevalence,s=e.supportCount,a=`summary-body-${r}-${Date.now()}`,i=t.body.length>95?t.body.substring(0,95)+"…":t.body;let l=1===d.length?`<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${s} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>`:`<div class="prevalence-container"><div class="prevalence-header">${n>=30?"High":n>=15?"Medium":"Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${n}%; background-color: ${n>=30?"#296fd3":n>=15?"#5b98eb":"#aecbfa"};">${n}%</div></div><div class="prevalence-subtitle">Represents ${n}% of all identified problems.</div></div>`;o.innerHTML=`<div class="section-title">${t.title}</div><div class="summary-expand-container"><span class="summary-teaser" id="${a}">${i}</span>${t.body.length>95?`<button class="see-more-btn" data-summary="${a}">See more</button>`:""}<span class="summary-full" id="${a}-full" style="display:none">${t.body}</span></div><div class="quotes-container">${t.quotes.map(e=>`<div class="quote">"${e}"</div>`).join("")}</div>${l}`,t.body.length>95&&(()=>{const e=o.querySelector(".see-more-btn");e&&e.addEventListener("click",function(){const t=o.querySelector(`#${a}`),r=o.querySelector(`#${a}-full`),n="none"!==t.style.display;t.style.display=n?"none":"inline",r.style.display=n?"inline":"none",e.textContent=n?"See less":"See more"})})()})(),s&&(s.onclick=function(){showSamplePosts(t,window._assignments,window._filteredPosts,window._usedPostIds)})}),window._postsForAssignment=n.slice(0,75),window._usedPostIds=new Set;const g=await assignPostsToFindings(window._summaries,window._postsForAssignment);window._assignments=g;for(let f=0;f<window._summaries.length;f++){if(f>=5)break;showSamplePosts(f,g,n,window._usedPostIds)}}}catch(p){console.error("Error in main analysis:",p),s&&(s.innerHTML=`<p class='error' style="color: red; text-align: center;">❌ ${p.message}</p>`),o.forEach(e=>{e&&(e.innerHTML="")}),a&&(a.innerHTML="")}}
+// ====================================================================================
+// PASTE THIS ENTIRE FUNCTION TO REPLACE THE BUGGY `runProblemFinder` in your GitHub script
+// ====================================================================================
+
+async function runProblemFinder() {
+    const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked');
+    if (selectedCheckboxes.length === 0) {
+        alert("Please select at least one community.");
+        return;
+    }
+    const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
+    const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
+
+    // UI Clearing and Loading
+    const resultsWrapper = document.getElementById('results-wrapper');
+    if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+    for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
+    const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
+    const resultsMessageDiv = document.getElementById("results-message");
+    const countHeaderDiv = document.getElementById("count-header");
+    if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
+    findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
+
+    const selectedTimeRaw = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
+    const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
+    const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
+    const selectedTime = timeMap[selectedTimeRaw] || "all";
+    const searchTerms = ["struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance", "frustration", "disappointed", "help", "advice", "solution", "workaround", "how to", "fix", "rant", "vent"];
+
+    try {
+        let allPosts = await fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 100, selectedTime);
+        if (allPosts.length === 0) { throw new Error("No results found in the selected communities for these problem keywords."); }
+        
+        const filteredPosts = filterPosts(allPosts, selectedMinUpvotes);
+        if (filteredPosts.length < 10) { throw new Error("Not enough high-quality posts found for analysis. Try selecting more communities."); }
+        
+        window._filteredPosts = filteredPosts;
+        renderPosts(filteredPosts);
+
+        const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
+        if (countHeaderDiv) {
+            countHeaderDiv.textContent = userNicheCount === 1 ? `Found 1 post discussing problems related to "${originalGroupName}".` : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
+            if (resultsWrapper) { resultsWrapper.style.display = 'block'; setTimeout(() => { resultsWrapper.style.opacity = '1'; }, 50); }
+        }
+
+        // *** THE FIX IS HERE: The faulty `if ("") { ... }` has been REMOVED ***
+        // All the code below will now execute correctly.
+        const topKeywords = getTopKeywords(filteredPosts, 10);
+        const topPosts = filteredPosts.slice(0, 80);
+        const combinedTexts = topPosts.map(post => `${post.data.title}. ${getFirstTwoSentences(post.data.selftext)}`).join("\n\n");
+        const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", and "keywords". Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["Quote A", "Quote B", "Quote C"], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_tokens: 1500, response_format: { "type": "json_object" } };
+        
+        const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!openAIResponse.ok) throw new Error('OpenAI summary generation failed.');
+        
+        const openAIData = await openAIResponse.json();
+        const summaries = parseAISummary(openAIData.openaiResponse);
+
+        const validatedSummaries = summaries.filter(finding => filteredPosts.filter(post => calculateRelevanceScore(post, finding) > 0).length >= 3);
+        if (validatedSummaries.length === 0) { throw new Error("While posts were found, none formed a clear, common problem. Try a broader search."); }
+        
+        const metrics = calculateFindingMetrics(validatedSummaries, filteredPosts);
+        const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
+        window._summaries = sortedFindings.map(item => item.summary);
+
+        sortedFindings.forEach((findingData, index) => {
+            const displayIndex = index + 1;
+            if (displayIndex > 5) return;
+            const block = document.getElementById(`findings-block${displayIndex}`);
+            const content = document.getElementById(`findings-${displayIndex}`);
+            const btn = document.getElementById(`button-sample${displayIndex}`);
+            if (block) block.style.display = "flex";
+            if (content) {
+                const { summary, prevalence, supportCount } = findingData;
+                const summaryId = `summary-body-${displayIndex}-${Date.now()}`;
+                const summaryShort = summary.body.length > 95 ? summary.body.substring(0, 95) + "…" : summary.body;
+                let metricsHtml = (sortedFindings.length === 1) ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
+                content.innerHTML = `<div class="section-title">${summary.title}</div><div class="summary-expand-container"><span class="summary-teaser" id="${summaryId}">${summaryShort}</span>${summary.body.length > 95 ? `<button class="see-more-btn" data-summary="${summaryId}">See more</button>` : ""}<span class="summary-full" id="${summaryId}-full" style="display:none">${summary.body}</span></div><div class="quotes-container">${summary.quotes.map(quote => `<div class="quote">"${quote}"</div>`).join('')}</div>${metricsHtml}`;
+                if (summary.body.length > 95) {
+                    const seeMoreBtn = content.querySelector(`.see-more-btn`);
+                    if(seeMoreBtn) seeMoreBtn.addEventListener('click', function() { const teaser = content.querySelector(`#${summaryId}`), full = content.querySelector(`#${summaryId}-full`); const isHidden = teaser.style.display !== 'none'; teaser.style.display = isHidden ? 'none' : 'inline'; full.style.display = isHidden ? 'inline' : 'none'; seeMoreBtn.textContent = isHidden ? 'See less' : 'See more'; });
+                }
+            }
+            if (btn) btn.onclick = function() { showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); };
+        });
+
+        window._postsForAssignment = filteredPosts.slice(0, 75);
+        window._usedPostIds = new Set();
+        const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment);
+        window._assignments = assignments;
+        for (let i = 0; i < window._summaries.length; i++) {
+            if (i >= 5) break;
+            showSamplePosts(i, assignments, filteredPosts, window._usedPostIds);
+        }
+
+    } catch (err) {
+        console.error("Error in main analysis:", err);
+        const resultsMessageDiv = document.getElementById("results-message");
+        if(resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
+        findingDivs.forEach(div => { if (div) div.innerHTML = ""; });
+        if(countHeaderDiv) countHeaderDiv.innerHTML = "";
+    }
 
 // --- 3. INITIALIZATION & EVENT LISTENERS ---
 document.addEventListener('DOMContentLoaded', () => {

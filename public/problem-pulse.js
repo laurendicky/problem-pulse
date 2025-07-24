@@ -153,8 +153,11 @@ async function runProblemFinder() {
 }
 
 // --- 3. INITIALIZATION & EVENT LISTENERS ---
+// --- 3. INITIALIZATION & EVENT LISTENERS ---
 document.addEventListener('DOMContentLoaded', () => {
-    // This is the central function that runs once the page is fully loaded to set up all interactions.
+    // This function will run once the page is ready.
+    // It finds all necessary elements and attaches event listeners.
+
     const pillsContainer = document.getElementById('pf-suggestion-pills');
     const groupInput = document.getElementById('group-input');
     const findCommunitiesBtn = document.getElementById('find-communities-btn');
@@ -165,20 +168,37 @@ document.addEventListener('DOMContentLoaded', () => {
     const choicesContainer = document.getElementById('subreddit-choices');
     const audienceTitle = document.getElementById('pf-audience-title');
     const backButton = document.getElementById('back-to-step1-btn');
+    
+    // --- Robust Element Check ---
+    // Instead of crashing, this will tell you exactly which element is missing.
+    const elements = {
+        pillsContainer, groupInput, findCommunitiesBtn, searchSelectedBtn,
+        step1Container, step2Container, inspireButton, choicesContainer,
+        audienceTitle, backButton
+    };
 
-    if (!pillsContainer || !groupInput || !findCommunitiesBtn || !searchSelectedBtn || !step1Container || !step2Container || !inspireButton || !choicesContainer || !audienceTitle || !backButton) {
-        console.error("Initialization failed: One or more essential UI elements are missing from the HTML.");
-        return;
+    let allElementsFound = true;
+    for (const key in elements) {
+        if (!elements[key]) {
+            console.error(`Initialization failed: The HTML element with the expected ID for "${key}" was not found on the page. Check if the ID is correct and if the HTML is loaded before this script runs.`);
+            allElementsFound = false;
+        }
     }
 
+    if (!allElementsFound) {
+        // Stop the script if any essential element is missing.
+        return; 
+    }
+
+    // --- Transitions ---
     const transitionToStep2 = () => {
         if (step2Container.classList.contains('visible')) return;
         step1Container.classList.add('hidden');
         step2Container.classList.add('visible');
-        const choicesDiv = document.getElementById('subreddit-choices');
-        if (choicesDiv) choicesDiv.innerHTML = '<p class="loading-text">Finding relevant communities...</p>';
-        if (audienceTitle) audienceTitle.textContent = `For: "${originalGroupName}"`;
+        choicesContainer.innerHTML = '<p class="loading-text">Finding relevant communities...</p>';
+        audienceTitle.textContent = `For: "${originalGroupName}"`;
     };
+    
     const transitionToStep1 = () => {
         step2Container.classList.remove('visible');
         step1Container.classList.remove('hidden');
@@ -186,6 +206,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (resultsWrapper) { resultsWrapper.classList.remove('is-visible'); }
     };
 
+    // --- Attach Event Listeners ---
     pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
     
     pillsContainer.addEventListener('click', (event) => {
@@ -230,4 +251,6 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         }
     });
+    
+    console.log("Problem Finder tool initialized successfully.");
 });

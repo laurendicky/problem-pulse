@@ -30,29 +30,24 @@ function displaySubredditChoices(subreddits) { const choicesDiv = document.getEl
 // PASTE THIS ENTIRE FUNCTION TO REPLACE THE `runProblemFinder` in your GitHub script
 // ====================================================================================
 
+// ====================================================================================
+// PASTE THIS ENTIRE FUNCTION TO REPLACE THE `runProblemFinder` in your GitHub script
+// ====================================================================================
+
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn');
-    // Early exit if elements are missing
-    if (!searchButton) {
-        console.error("Could not find the 'Find Their Problems' button.");
-        return;
-    }
+    if (!searchButton) { console.error("Could not find the 'Find Their Problems' button."); return; }
 
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked');
-    if (selectedCheckboxes.length === 0) {
-        alert("Please select at least one community.");
-        return;
-    }
+    if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
     const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
 
-    // --- Start Loading State ---
     searchButton.classList.add('is-loading');
     searchButton.disabled = true;
 
-    // --- UI Clearing and Loading ---
-    const resultsWrapper = document.getElementById('results-wrapper'); // This is your "section 21"
-    if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
+    const resultsWrapper = document.getElementById('results-wrapper');
+    if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.classList.remove('is-visible'); }
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
@@ -80,15 +75,22 @@ async function runProblemFinder() {
             countHeaderDiv.textContent = userNicheCount === 1 ? `Found 1 post discussing problems related to "${originalGroupName}".` : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
 
             // ===============================================
-            // *** NEW: Reveal and Scroll Logic ***
+            // *** NEW: Two-Step Animation and Scroll Logic ***
             // ===============================================
             if (resultsWrapper) {
-                resultsWrapper.style.display = 'flex'; // Changed from 'block' to 'flex' as requested
-                // Use a short timeout to let the browser render before scrolling
+                // Step A: Change display from 'none' to 'flex'.
+                // The CSS makes it start as transparent and slightly moved down.
+                resultsWrapper.style.display = 'flex';
+
+                // Step B: In the next frame, add the 'is-visible' class to trigger the animation.
                 setTimeout(() => {
-                    resultsWrapper.style.opacity = '1';
-                    countHeaderDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                }, 100);
+                    resultsWrapper.classList.add('is-visible');
+                    
+                    // After the animation starts, scroll smoothly to the header.
+                    setTimeout(() => {
+                        countHeaderDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    }, 50); // A small delay to ensure the scroll feels natural with the animation.
+                }, 20); // A tiny delay to ensure the browser processes the display change first.
             }
         }
         
@@ -139,8 +141,6 @@ async function runProblemFinder() {
         findingDivs.forEach(div => { if (div) div.innerHTML = ""; });
         if (countHeaderDiv) countHeaderDiv.innerHTML = "";
     } finally {
-        // --- End Loading State ---
-        // This 'finally' block ensures the button is ALWAYS restored, even if an error occurs.
         searchButton.classList.remove('is-loading');
         searchButton.disabled = false;
     }

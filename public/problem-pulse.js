@@ -48,7 +48,7 @@ async function runProblemFinder() {
     searchButton.disabled = true;
 
     // --- Reset UI elements before starting a new search ---
-    const resultsWrapper = document.getElementById('results-wrapper');
+    const resultsWrapper = document.getElementById('results-wrapper2nd');
     if (resultsWrapper) {
         // IMPORTANT: Force the wrapper to be hidden at the start of every new search.
         resultsWrapper.style.visibility = 'hidden';
@@ -207,7 +207,7 @@ function initializeProblemFinderTool() {
     const transitionToStep1 = () => {
         step2Container.classList.remove('visible');
         step1Container.classList.remove('hidden');
-        const resultsWrapper = document.getElementById('results-wrapper');
+        const resultsWrapper = document.getElementById('results-wrapper2nd');
         if (resultsWrapper) { resultsWrapper.classList.remove('is-visible'); }
     };
 

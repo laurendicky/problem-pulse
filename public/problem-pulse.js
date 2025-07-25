@@ -32,6 +32,9 @@ function displaySubredditChoices(subreddits) { const choicesDiv = document.getEl
 // ====================================================================================
 // FINAL, COMPLETE `runProblemFinder` FUNCTION — THIS IS THE CORRECTED VERSION
 // ====================================================================================
+// ====================================================================================
+// FINAL & COMPLETE `runProblemFinder` FUNCTION TO COPY & PASTE
+// ====================================================================================
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn');
     if (!searchButton) { console.error("Could not find the 'Find Their Problems' button."); return; }
@@ -48,10 +51,10 @@ async function runProblemFinder() {
     searchButton.disabled = true;
 
     // --- Reset UI elements before starting a new search ---
-    const resultsWrapper = document.getElementById('results-wrapper2nd');
+    const resultsWrapper = document.getElementById('results-wrapper');
     if (resultsWrapper) {
         // IMPORTANT: Force the wrapper to be hidden at the start of every new search.
-        resultsWrapper.style.visibility = 'hidden';
+        resultsWrapper.style.display = 'none';
         resultsWrapper.style.opacity = '0';
     }
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
@@ -79,9 +82,8 @@ async function runProblemFinder() {
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
 
+        // --- POPULATE THE COUNT HEADER (BUT KEEP IT HIDDEN FOR NOW) ---
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
-
-        // Populate the count header, but it's still inside the hidden wrapper
         if (countHeaderDiv) {
             countHeaderDiv.textContent = userNicheCount === 1 
                 ? `Found 1 post discussing problems related to "${originalGroupName}".` 
@@ -134,17 +136,29 @@ async function runProblemFinder() {
         }
 
         // =================================================================
-        // FINAL STEP: All content is built. Now, reveal the wrapper and scroll.
+        // THE REVEAL LOGIC, MOVED FROM THE END OF THE `try` BLOCK
+        // This runs only after all content has been built.
         // =================================================================
-        if (resultsWrapper && countHeaderDiv) {
-            // Use direct styling to override any CSS issues for maximum reliability.
-            resultsWrapper.style.visibility = 'visible';
-            resultsWrapper.style.opacity = '1';
+        if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
+            
+            // Phase 1: Make the wrapper part of the layout, but still invisible.
+            if (resultsWrapper) {
+                resultsWrapper.style.display = 'flex'; // Use 'flex' as per your layout.
+            }
 
-            // Use requestAnimationFrame for the smoothest scroll after the browser has rendered the content.
-            requestAnimationFrame(() => {
-                countHeaderDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            });
+            // Phase 2: Use a small delay to let the browser render.
+            setTimeout(() => {
+                if (resultsWrapper) {
+                    // 2a. Now fade it in.
+                    resultsWrapper.style.opacity = '1';
+                }
+
+                // 2b. Get the header's position and scroll to it.
+                countHeaderDiv.scrollIntoView({
+                    behavior: 'smooth',
+                    block: 'start'
+                });
+            }, 50); // A 50ms delay is a safe and reliable value.
         }
 
     } catch (err) {
@@ -155,7 +169,7 @@ async function runProblemFinder() {
 
         // If an error happens, we still need to make the wrapper visible to show the error message.
         if (resultsWrapper) {
-            resultsWrapper.style.visibility = 'visible';
+            resultsWrapper.style.display = 'flex'; // Use 'flex' here too
             resultsWrapper.style.opacity = '1';
         }
 
@@ -207,7 +221,7 @@ function initializeProblemFinderTool() {
     const transitionToStep1 = () => {
         step2Container.classList.remove('visible');
         step1Container.classList.remove('hidden');
-        const resultsWrapper = document.getElementById('results-wrapper2nd');
+        const resultsWrapper = document.getElementById('results-wrapper');
         if (resultsWrapper) { resultsWrapper.classList.remove('is-visible'); }
     };
 

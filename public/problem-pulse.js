@@ -33,6 +33,9 @@ function displaySubredditChoices(subreddits) { const choicesDiv = document.getEl
 // ====================================================================================
 
 
+// ====================================================================================
+// FINAL & COMPLETE `runProblemFinder` FUNCTION WITH SEARCH DEPTH OPTION
+// ====================================================================================
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn');
     if (!searchButton) { console.error("Could not find the 'Find Their Problems' button."); return; }
@@ -48,9 +51,42 @@ async function runProblemFinder() {
     searchButton.classList.add('is-loading');
     searchButton.disabled = true;
 
+    // --- NEW: Search Depth Logic ---
+    // 1. Define the two different sets of search terms.
+    const quickSearchTerms = [
+        "problem", "challenge", "frustration", "annoyance", 
+        "wish I could", "hate that", "help with", "solution for"
+    ];
+    const deepSearchTerms = [
+        "struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", 
+        "annoyance", "frustration", "disappointed", "help", "advice", "solution", 
+        "workaround", "how to", "fix", "rant", "vent"
+    ];
+
+    // 2. Check which radio button is selected by the user (defaults to 'quick').
+    const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
+
+    // 3. Set the variables for this run based on the user's choice.
+    let searchTerms;
+    let limitPerTerm;
+
+    if (searchDepth === 'deep') {
+        console.log("Starting a Deep Dive analysis...");
+        searchTerms = deepSearchTerms;
+        limitPerTerm = 100; // Fetch up to 100 posts for the deep dive
+    } else {
+        console.log("Starting a Quick Scan analysis...");
+        searchTerms = quickSearchTerms;
+        limitPerTerm = 50;  // Fetch only 50 posts for the quick scan
+    }
+    // --- END of Search Depth Logic ---
+
     // --- Reset UI elements before starting a new search ---
-    // UPDATED to use the new ID 'results-wrapper-b'
     const resultsWrapper = document.getElementById('results-wrapper-b');
+    if (resultsWrapper) {
+        resultsWrapper.style.display = 'none';
+        resultsWrapper.style.opacity = '0';
+    }
     
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
@@ -64,11 +100,11 @@ async function runProblemFinder() {
     const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
     const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
     const selectedTime = timeMap[selectedTimeRaw] || "all";
-    const searchTerms = ["struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance", "frustration", "disappointed", "help", "advice", "solution", "workaround", "how to", "fix", "rant", "vent"];
 
     try {
         // --- DATA FETCHING AND ANALYSIS ---
-        let allPosts = await fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 100, selectedTime);
+        // Use our new dynamic variables in the fetch call.
+        let allPosts = await fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, limitPerTerm, selectedTime);
         if (allPosts.length === 0) { throw new Error("No results found in the selected communities for these problem keywords."); }
         
         const filteredPosts = filterPosts(allPosts, selectedMinUpvotes);
@@ -77,7 +113,6 @@ async function runProblemFinder() {
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
 
-        // --- POPULATE THE COUNT HEADER ---
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) {
             countHeaderDiv.textContent = userNicheCount === 1 
@@ -85,7 +120,6 @@ async function runProblemFinder() {
                 : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
         }
         
-        // --- AI ANALYSIS AND CONTENT GENERATION ---
         const topKeywords = getTopKeywords(filteredPosts, 10);
         const topPosts = filteredPosts.slice(0, 30);
         const combinedTexts = topPosts.map(post => `${post.data.title}. ${getFirstTwoSentences(post.data.selftext)}`).join("\n\n");
@@ -100,7 +134,6 @@ async function runProblemFinder() {
         const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
         window._summaries = sortedFindings.map(item => item.summary);
         
-        // --- BUILD ALL THE HTML CONTENT FOR THE FINDINGS ---
         sortedFindings.forEach((findingData, index) => {
             const displayIndex = index + 1;
             if (displayIndex > 5) return;
@@ -130,24 +163,15 @@ async function runProblemFinder() {
             showSamplePosts(i, assignments, filteredPosts, window._usedPostIds);
         }
 
-        // =================================================================
-        // THE REVEAL LOGIC
-        // =================================================================
+        // --- REVEAL AND SCROLL LOGIC ---
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
-            
-            // Phase 1: Use JavaScript to directly set the display style.
             if (resultsWrapper) {
                 resultsWrapper.style.setProperty('display', 'flex', 'important');
             }
-
-            // Phase 2: Use a small delay to let the browser render the new layout.
             setTimeout(() => {
                 if (resultsWrapper) {
-                    // 2a. Now fade it in by setting opacity.
                     resultsWrapper.style.opacity = '1';
                 }
-
-                // 2b. Scroll to the header, which now has a stable position.
                 countHeaderDiv.scrollIntoView({
                     behavior: 'smooth',
                     block: 'start'
@@ -161,14 +185,12 @@ async function runProblemFinder() {
         findingDivs.forEach(div => { if (div) div.innerHTML = ""; });
         if (countHeaderDiv) countHeaderDiv.innerHTML = "";
 
-        // If an error happens, we still need to make the wrapper visible to show the error message.
         if (resultsWrapper) {
             resultsWrapper.style.setProperty('display', 'flex', 'important');
             resultsWrapper.style.opacity = '1';
         }
 
     } finally {
-        // This will always run, whether there was an error or not.
         searchButton.classList.remove('is-loading');
         searchButton.disabled = false;
     }

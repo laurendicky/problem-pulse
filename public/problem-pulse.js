@@ -29,6 +29,9 @@ async function findSubredditsForGroup(groupName) { const prompt = `Given the use
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
 
 
+// ====================================================================================
+// FINAL, COMPLETE `runProblemFinder` FUNCTION — THIS IS THE CORRECTED VERSION
+// ====================================================================================
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn');
     if (!searchButton) { console.error("Could not find the 'Find Their Problems' button."); return; }
@@ -47,7 +50,9 @@ async function runProblemFinder() {
     // --- Reset UI elements before starting a new search ---
     const resultsWrapper = document.getElementById('results-wrapper');
     if (resultsWrapper) {
-        resultsWrapper.classList.remove('is-visible');
+        // IMPORTANT: Force the wrapper to be hidden at the start of every new search.
+        resultsWrapper.style.visibility = 'hidden';
+        resultsWrapper.style.opacity = '0';
     }
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
@@ -56,8 +61,7 @@ async function runProblemFinder() {
     const countHeaderDiv = document.getElementById("count-header");
     if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
     findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
-    
-    // --- Get user-selected filters ---
+
     const selectedTimeRaw = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
     const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
     const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
@@ -65,6 +69,7 @@ async function runProblemFinder() {
     const searchTerms = ["struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance", "frustration", "disappointed", "help", "advice", "solution", "workaround", "how to", "fix", "rant", "vent"];
 
     try {
+        // --- DATA FETCHING AND ANALYSIS ---
         let allPosts = await fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 100, selectedTime);
         if (allPosts.length === 0) { throw new Error("No results found in the selected communities for these problem keywords."); }
         
@@ -74,34 +79,18 @@ async function runProblemFinder() {
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
 
-        // ============================
-        //  START OF THE CORRECTED BLOCK
-        // ============================
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
 
+        // Populate the count header, but it's still inside the hidden wrapper
         if (countHeaderDiv) {
-            // This is the corrected ternary operator. It has the 'true' part and the 'false' part.
             countHeaderDiv.textContent = userNicheCount === 1 
                 ? `Found 1 post discussing problems related to "${originalGroupName}".` 
                 : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
-
-            if (resultsWrapper) {
-                // Add the class to trigger the CSS visibility transition
-                resultsWrapper.classList.add('is-visible');
-
-                // Use requestAnimationFrame to ensure the scroll happens after the browser starts the animation
-                requestAnimationFrame(() => {
-                    countHeaderDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                });
-            }
         }
-        // ==========================
-        //  END OF THE CORRECTED BLOCK
-        // ==========================
-
+        
+        // --- AI ANALYSIS AND CONTENT GENERATION ---
         const topKeywords = getTopKeywords(filteredPosts, 10);
         const topPosts = filteredPosts.slice(0, 30);
-        // (The rest of your function logic follows here...)
         const combinedTexts = topPosts.map(post => `${post.data.title}. ${getFirstTwoSentences(post.data.selftext)}`).join("\n\n");
         const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", and "keywords". Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["Quote A", "Quote B", "Quote C"], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_tokens: 1500, response_format: { "type": "json_object" } };
         const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
@@ -113,6 +102,8 @@ async function runProblemFinder() {
         const metrics = calculateFindingMetrics(validatedSummaries, filteredPosts);
         const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
         window._summaries = sortedFindings.map(item => item.summary);
+        
+        // --- BUILD ALL THE HTML CONTENT FOR THE FINDINGS ---
         sortedFindings.forEach((findingData, index) => {
             const displayIndex = index + 1;
             if (displayIndex > 5) return;
@@ -141,12 +132,35 @@ async function runProblemFinder() {
             if (i >= 5) break;
             showSamplePosts(i, assignments, filteredPosts, window._usedPostIds);
         }
+
+        // =================================================================
+        // FINAL STEP: All content is built. Now, reveal the wrapper and scroll.
+        // =================================================================
+        if (resultsWrapper && countHeaderDiv) {
+            // Use direct styling to override any CSS issues for maximum reliability.
+            resultsWrapper.style.visibility = 'visible';
+            resultsWrapper.style.opacity = '1';
+
+            // Use requestAnimationFrame for the smoothest scroll after the browser has rendered the content.
+            requestAnimationFrame(() => {
+                countHeaderDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+        }
+
     } catch (err) {
         console.error("Error in main analysis:", err);
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
         findingDivs.forEach(div => { if (div) div.innerHTML = ""; });
         if (countHeaderDiv) countHeaderDiv.innerHTML = "";
+
+        // If an error happens, we still need to make the wrapper visible to show the error message.
+        if (resultsWrapper) {
+            resultsWrapper.style.visibility = 'visible';
+            resultsWrapper.style.opacity = '1';
+        }
+
     } finally {
+        // This will always run, whether there was an error or not.
         searchButton.classList.remove('is-loading');
         searchButton.disabled = false;
     }

@@ -36,11 +36,13 @@ function displaySubredditChoices(subreddits) { const choicesDiv = document.getEl
 // ====================================================================================
 // "SAFE MODE" `runProblemFinder` FUNCTION - This will NOT break your layout.
 // ====================================================================================
+// ====================================================================================
+// FINAL & COMPLETE `runProblemFinder` FUNCTION WITH SEARCH DEPTH OPTION
+// ====================================================================================
 async function runProblemFinder() {
-    // --- Basic setup ---
     const searchButton = document.getElementById('search-selected-btn');
     if (!searchButton) { console.error("Could not find the 'Find Their Problems' button."); return; }
-    
+
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked');
     if (selectedCheckboxes.length === 0) {
         alert("Please select at least one community.");
@@ -52,49 +54,75 @@ async function runProblemFinder() {
     searchButton.classList.add('is-loading');
     searchButton.disabled = true;
 
-    // --- Search Depth Logic ---
-    const quickSearchTerms = ["problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for"];
-    const deepSearchTerms = ["struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance", "frustration", "disappointed", "help", "advice", "solution", "workaround", "how to", "fix", "rant", "vent"];
+    // --- NEW: Search Depth Logic ---
+    // 1. Define the two different sets of search terms.
+    const quickSearchTerms = [
+        "problem", "challenge", "frustration", "annoyance", 
+        "wish I could", "hate that", "help with", "solution for"
+    ];
+    const deepSearchTerms = [
+        "struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", 
+        "annoyance", "frustration", "disappointed", "help", "advice", "solution", 
+        "workaround", "how to", "fix", "rant", "vent"
+    ];
+
+    // 2. Check which radio button is selected by the user (defaults to 'quick').
     const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
-    let searchTerms = (searchDepth === 'deep') ? deepSearchTerms : quickSearchTerms;
-    let limitPerTerm = (searchDepth === 'deep') ? 100 : 50;
-    console.log(`Starting a ${searchDepth === 'deep' ? 'Deep Dive' : 'Quick Scan'} analysis...`);
-    
-    // --- Get other variables ---
+
+    // 3. Set the variables for this run based on the user's choice.
+    let searchTerms;
+    let limitPerTerm;
+
+    if (searchDepth === 'deep') {
+        console.log("Starting a Deep Dive analysis...");
+        searchTerms = deepSearchTerms;
+        limitPerTerm = 100; // Fetch up to 100 posts for the deep dive
+    } else {
+        console.log("Starting a Quick Scan analysis...");
+        searchTerms = quickSearchTerms;
+        limitPerTerm = 50;  // Fetch only 50 posts for the quick scan
+    }
+    // --- END of Search Depth Logic ---
+
+    // --- Reset UI elements before starting a new search ---
     const resultsWrapper = document.getElementById('results-wrapper-b');
-    const countHeaderDiv = document.getElementById('count-header');
-    const resultsMessageDiv = document.getElementById('results-message');
+    if (resultsWrapper) {
+        resultsWrapper.style.display = 'none';
+        resultsWrapper.style.opacity = '0';
+    }
+    
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+    for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
+    const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
+    const resultsMessageDiv = document.getElementById("results-message");
+    const countHeaderDiv = document.getElementById("count-header");
+    if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
+    findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
+
     const selectedTimeRaw = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
     const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
     const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
     const selectedTime = timeMap[selectedTimeRaw] || "all";
 
-    // ==================================================================
-    // NOTE: THE ENTIRE UI RESET BLOCK HAS BEEN TEMPORARILY REMOVED.
-    // This is to guarantee we do not interfere with your page layout.
-    // If you run a second search, old results will appear briefly. This is OK for testing.
-    // ==================================================================
-
     try {
-        // --- DATA FETCHING & AI ANALYSIS (No changes here) ---
+        // --- DATA FETCHING AND ANALYSIS ---
+        // Use our new dynamic variables in the fetch call.
         let allPosts = await fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, limitPerTerm, selectedTime);
-        if (allPosts.length === 0) { throw new Error("No results found. Try a broader search."); }
+        if (allPosts.length === 0) { throw new Error("No results found in the selected communities for these problem keywords."); }
         
         const filteredPosts = filterPosts(allPosts, selectedMinUpvotes);
-        if (filteredPosts.length < 10) { throw new Error("Not enough high-quality posts found. Try adjusting filters."); }
+        if (filteredPosts.length < 10) { throw new Error("Not enough high-quality posts found for analysis. Try selecting more communities or adjusting filters."); }
         
-        // Clear ONLY the essential content areas right before adding new content.
-        if (countHeaderDiv) countHeaderDiv.innerHTML = "";
-        const findingsContainer = document.getElementById('findings-container'); // Assuming you have a container for all findings blocks
-        if (findingsContainer) findingsContainer.innerHTML = ""; // This is a safer way to clear old findings
+        window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
 
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) {
-            countHeaderDiv.textContent = userNicheCount === 1 ? `Found 1 post discussing problems related to "${originalGroupName}".` : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
+            countHeaderDiv.textContent = userNicheCount === 1 
+                ? `Found 1 post discussing problems related to "${originalGroupName}".` 
+                : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
         }
         
-        // ... (The rest of the AI and content generation logic remains the same) ...
         const topKeywords = getTopKeywords(filteredPosts, 10);
         const topPosts = filteredPosts.slice(0, 30);
         const combinedTexts = topPosts.map(post => `${post.data.title}. ${getFirstTwoSentences(post.data.selftext)}`).join("\n\n");
@@ -104,7 +132,7 @@ async function runProblemFinder() {
         const openAIData = await openAIResponse.json();
         const summaries = parseAISummary(openAIData.openaiResponse);
         const validatedSummaries = summaries.filter(finding => filteredPosts.filter(post => calculateRelevanceScore(post, finding) > 0).length >= 3);
-        if (validatedSummaries.length === 0) { throw new Error("While posts were found, none formed a clear, common problem."); }
+        if (validatedSummaries.length === 0) { throw new Error("While posts were found, none formed a clear, common problem. Try a broader search."); }
         const metrics = calculateFindingMetrics(validatedSummaries, filteredPosts);
         const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
         window._summaries = sortedFindings.map(item => item.summary);
@@ -112,20 +140,22 @@ async function runProblemFinder() {
         sortedFindings.forEach((findingData, index) => {
             const displayIndex = index + 1;
             if (displayIndex > 5) return;
-            // We need a container to append findings to. Let's assume it's 'findings-container'.
-            // This is a much safer way than manipulating individual display styles.
-            const findingsContainer = document.getElementById('findings-container');
-            if(findingsContainer) {
-                 const block = document.createElement('div');
-                 block.id = `findings-block${displayIndex}`;
-                 // Add your classes for styling the block here
-                 // block.className = 'your-finding-block-class'; 
-                 
-                 const { summary, prevalence, supportCount } = findingData;
-                 let metricsHtml = (sortedFindings.length === 1) ? `<div class="prevalence-container">...</div>` : `<div class="prevalence-container">...</div>`;
-                 block.innerHTML = `<div class="section-title">${summary.title}</div> ... ${metricsHtml}`; // Rebuild the innerHTML for each finding
-                 findingsContainer.appendChild(block);
+            const block = document.getElementById(`findings-block${displayIndex}`);
+            const content = document.getElementById(`findings-${displayIndex}`);
+            const btn = document.getElementById(`button-sample${displayIndex}`);
+            if (block) block.style.display = "flex";
+            if (content) {
+                const { summary, prevalence, supportCount } = findingData;
+                const summaryId = `summary-body-${displayIndex}-${Date.now()}`;
+                const summaryShort = summary.body.length > 95 ? summary.body.substring(0, 95) + "…" : summary.body;
+                let metricsHtml = (sortedFindings.length === 1) ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
+                content.innerHTML = `<div class="section-title">${summary.title}</div><div class="summary-expand-container"><span class="summary-teaser" id="${summaryId}">${summaryShort}</span>${summary.body.length > 95 ? `<button class="see-more-btn" data-summary="${summaryId}">See more</button>` : ""}<span class="summary-full" id="${summaryId}-full" style="display:none">${summary.body}</span></div><div class="quotes-container">${summary.quotes.map(quote => `<div class="quote">"${quote}"</div>`).join('')}</div>${metricsHtml}`;
+                if (summary.body.length > 95) {
+                    const seeMoreBtn = content.querySelector(`.see-more-btn`);
+                    if(seeMoreBtn) seeMoreBtn.addEventListener('click', function() { const teaser = content.querySelector(`#${summaryId}`), full = content.querySelector(`#${summaryId}-full`); const isHidden = teaser.style.display !== 'none'; teaser.style.display = isHidden ? 'none' : 'inline'; full.style.display = isHidden ? 'inline' : 'none'; seeMoreBtn.textContent = isHidden ? 'See less' : 'See more'; });
+                }
             }
+            if (btn) btn.onclick = function() { showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); };
         });
         window._postsForAssignment = filteredPosts.slice(0, 75);
         window._usedPostIds = new Set();
@@ -135,7 +165,6 @@ async function runProblemFinder() {
             if (i >= 5) break;
             showSamplePosts(i, assignments, filteredPosts, window._usedPostIds);
         }
-
 
         // --- REVEAL AND SCROLL LOGIC ---
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
@@ -155,7 +184,10 @@ async function runProblemFinder() {
 
     } catch (err) {
         console.error("Error in main analysis:", err);
-        if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error'>❌ ${err.message}</p>`;
+        if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
+        findingDivs.forEach(div => { if (div) div.innerHTML = ""; });
+        if (countHeaderDiv) countHeaderDiv.innerHTML = "";
+
         if (resultsWrapper) {
             resultsWrapper.style.setProperty('display', 'flex', 'important');
             resultsWrapper.style.opacity = '1';

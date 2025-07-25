@@ -29,12 +29,10 @@ async function findSubredditsForGroup(groupName) { const prompt = `Given the use
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
 
 
+// FINAL & COMPLETE `runProblemFinder` FUNCTION (Using ID "results-wrapper-b")
 // ====================================================================================
-// FINAL, COMPLETE `runProblemFinder` FUNCTION — THIS IS THE CORRECTED VERSION
-// ====================================================================================
-// ====================================================================================
-// FINAL & COMPLETE `runProblemFinder` FUNCTION TO COPY & PASTE
-// ====================================================================================
+
+
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn');
     if (!searchButton) { console.error("Could not find the 'Find Their Problems' button."); return; }
@@ -51,12 +49,9 @@ async function runProblemFinder() {
     searchButton.disabled = true;
 
     // --- Reset UI elements before starting a new search ---
-    const resultsWrapper = document.getElementById('results-wrapper');
-    if (resultsWrapper) {
-        // IMPORTANT: Force the wrapper to be hidden at the start of every new search.
-        resultsWrapper.style.display = 'none';
-        resultsWrapper.style.opacity = '0';
-    }
+    // UPDATED to use the new ID 'results-wrapper-b'
+    const resultsWrapper = document.getElementById('results-wrapper-b');
+    
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
@@ -82,7 +77,7 @@ async function runProblemFinder() {
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
 
-        // --- POPULATE THE COUNT HEADER (BUT KEEP IT HIDDEN FOR NOW) ---
+        // --- POPULATE THE COUNT HEADER ---
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) {
             countHeaderDiv.textContent = userNicheCount === 1 
@@ -136,29 +131,28 @@ async function runProblemFinder() {
         }
 
         // =================================================================
-        // THE REVEAL LOGIC, MOVED FROM THE END OF THE `try` BLOCK
-        // This runs only after all content has been built.
+        // THE REVEAL LOGIC
         // =================================================================
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
             
-            // Phase 1: Make the wrapper part of the layout, but still invisible.
+            // Phase 1: Use JavaScript to directly set the display style.
             if (resultsWrapper) {
-                resultsWrapper.style.display = 'flex'; // Use 'flex' as per your layout.
+                resultsWrapper.style.setProperty('display', 'flex', 'important');
             }
 
-            // Phase 2: Use a small delay to let the browser render.
+            // Phase 2: Use a small delay to let the browser render the new layout.
             setTimeout(() => {
                 if (resultsWrapper) {
-                    // 2a. Now fade it in.
+                    // 2a. Now fade it in by setting opacity.
                     resultsWrapper.style.opacity = '1';
                 }
 
-                // 2b. Get the header's position and scroll to it.
+                // 2b. Scroll to the header, which now has a stable position.
                 countHeaderDiv.scrollIntoView({
                     behavior: 'smooth',
                     block: 'start'
                 });
-            }, 50); // A 50ms delay is a safe and reliable value.
+            }, 50); 
         }
 
     } catch (err) {
@@ -169,7 +163,7 @@ async function runProblemFinder() {
 
         // If an error happens, we still need to make the wrapper visible to show the error message.
         if (resultsWrapper) {
-            resultsWrapper.style.display = 'flex'; // Use 'flex' here too
+            resultsWrapper.style.setProperty('display', 'flex', 'important');
             resultsWrapper.style.opacity = '1';
         }
 
@@ -221,7 +215,7 @@ function initializeProblemFinderTool() {
     const transitionToStep1 = () => {
         step2Container.classList.remove('visible');
         step1Container.classList.remove('hidden');
-        const resultsWrapper = document.getElementById('results-wrapper');
+        const resultsWrapper = document.getElementById('results-wrapper-b');
         if (resultsWrapper) { resultsWrapper.classList.remove('is-visible'); }
     };
 

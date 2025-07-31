@@ -28,15 +28,61 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if 
 async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 10 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 200, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
 
+// --- NEW FUNCTIONS FOR LANGUAGE CLOUD ---
+function generatePsychographicsCloudData(posts, topN = 50) {
+    const freqMap = {};
+    posts.forEach(post => {
+        // Combine title and selftext for a complete analysis
+        const text = `${post.data.title} ${post.data.selftext || ''}`;
+        
+        // Clean the text: lowercase, remove non-letters, split into words
+        const words = text.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/);
 
-// FINAL & COMPLETE `runProblemFinder` FUNCTION (Using ID "results-wrapper-b")
-// ====================================================================================
+        words.forEach(word => {
+            // Check if the word is meaningful (not a stop word and of reasonable length)
+            if (word.length > 3 && !stopWords.includes(word)) {
+                freqMap[word] = (freqMap[word] || 0) + 1;
+            }
+        });
+    });
 
+    // Convert the frequency map to a sorted array of [word, count]
+    return Object.entries(freqMap)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, topN);
+}
 
-// ====================================================================================
-// "SAFE MODE" `runProblemFinder` FUNCTION - This will NOT break your layout.
-// ====================================================================================
-// ====================================================================================
+function renderLanguageCloud(wordData) {
+    const container = document.getElementById('language-cloud');
+    if (!container || wordData.length === 0) {
+        if(container) container.innerHTML = '<p>Not enough text data to generate a language cloud.</p>';
+        return;
+    }
+
+    // Find the min and max counts to normalize font sizes
+    const counts = wordData.map(item => item[1]);
+    const maxCount = Math.max(...counts);
+    const minCount = Math.min(...counts);
+
+    // Define font size range
+    const minFontSize = 14; // pixels
+    const maxFontSize = 44; // pixels
+
+    const cloudHTML = wordData
+        .map(([word, count]) => {
+            // Calculate font size based on word frequency
+            // This ensures the most frequent words are the largest
+            const fontSize = minFontSize + 
+                ( (count - minCount) / (maxCount - minCount || 1) ) * 
+                (maxFontSize - minFontSize);
+
+            return `<span class="cloud-word" style="font-size: ${fontSize.toFixed(2)}px;">${word}</span>`;
+        })
+        .join('');
+
+    container.innerHTML = cloudHTML;
+}
+
 // FINAL & COMPLETE `runProblemFinder` FUNCTION WITH SEARCH DEPTH OPTION
 // ====================================================================================
 async function runProblemFinder() {
@@ -55,34 +101,20 @@ async function runProblemFinder() {
     searchButton.disabled = true;
 
     // --- NEW: Search Depth Logic ---
-    // 1. Define the two different sets of search terms.
-    const quickSearchTerms = [
-        "problem", "challenge", "frustration", "annoyance", 
-        "wish I could", "hate that", "help with", "solution for"
-    ];
-    const deepSearchTerms = [
-        "struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", 
-        "annoyance", "frustration", "disappointed", "help", "advice", "solution", 
-        "workaround", "how to", "fix", "rant", "vent"
-    ];
-
-    // 2. Check which radio button is selected by the user (defaults to 'quick').
+    const quickSearchTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
+    const deepSearchTerms = [ "struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance", "frustration", "disappointed", "help", "advice", "solution", "workaround", "how to", "fix", "rant", "vent" ];
     const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
-
-    // 3. Set the variables for this run based on the user's choice.
     let searchTerms;
     let limitPerTerm;
-
     if (searchDepth === 'deep') {
         console.log("Starting a Deep Dive analysis...");
         searchTerms = deepSearchTerms;
-        limitPerTerm = 100; // Fetch up to 100 posts for the deep dive
+        limitPerTerm = 100;
     } else {
         console.log("Starting a Quick Scan analysis...");
         searchTerms = quickSearchTerms;
-        limitPerTerm = 50;  // Fetch only 50 posts for the quick scan
+        limitPerTerm = 50;
     }
-    // --- END of Search Depth Logic ---
 
     // --- Reset UI elements before starting a new search ---
     const resultsWrapper = document.getElementById('results-wrapper-b');
@@ -91,7 +123,8 @@ async function runProblemFinder() {
         resultsWrapper.style.opacity = '0';
     }
     
-    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+    // MODIFIED: Added "language-cloud" to the array of elements to clear
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "language-cloud"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
     const resultsMessageDiv = document.getElementById("results-message");
@@ -105,8 +138,6 @@ async function runProblemFinder() {
     const selectedTime = timeMap[selectedTimeRaw] || "all";
 
     try {
-        // --- DATA FETCHING AND ANALYSIS ---
-        // Use our new dynamic variables in the fetch call.
         let allPosts = await fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, limitPerTerm, selectedTime);
         if (allPosts.length === 0) { throw new Error("No results found in the selected communities for these problem keywords."); }
         
@@ -115,6 +146,11 @@ async function runProblemFinder() {
         
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
+
+        // --- ADDED BLOCK FOR THE LANGUAGE CLOUD ---
+        const cloudData = generatePsychographicsCloudData(filteredPosts, 50); // Get top 50 words
+        renderLanguageCloud(cloudData);
+        // --- END OF LANGUAGE CLOUD BLOCK ---
 
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) {
@@ -199,8 +235,6 @@ async function runProblemFinder() {
     }
 }
 
-
-
 function initializeProblemFinderTool() {
     console.log("Problem Finder elements found. Initializing...");
 
@@ -215,19 +249,17 @@ function initializeProblemFinderTool() {
     const audienceTitle = document.getElementById('pf-audience-title');
     const backButton = document.getElementById('back-to-step1-btn');
 
-    // If any of these are null, something is still wrong, but the polling should prevent this.
     if (!findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer) {
         console.error("Critical error: A key element was null even after polling. Aborting initialization.");
         return;
     }
 
-    // --- UI Transition Functions ---
     const transitionToStep2 = () => {
         if (step2Container.classList.contains('visible')) return;
         step1Container.classList.add('hidden');
         step2Container.classList.add('visible');
         choicesContainer.innerHTML = '<p class="loading-text">Finding relevant communities...</p>';
-        audienceTitle.textContent = `For: "${originalGroupName}"`;
+        audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`;
     };
     
     const transitionToStep1 = () => {
@@ -237,7 +269,6 @@ function initializeProblemFinderTool() {
         if (resultsWrapper) { resultsWrapper.classList.remove('is-visible'); }
     };
 
-    // --- Attach All Event Listeners ---
     pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
     
     pillsContainer.addEventListener('click', (event) => {
@@ -286,40 +317,28 @@ function initializeProblemFinderTool() {
     console.log("Problem Finder tool successfully initialized and all listeners are active.");
 }
 
-
-/**
- * This function waits for the main Problem Finder tool to be loaded into the page.
- * It checks for a key element every 100ms. Once found, it calls the main init function.
- */
 function waitForElementAndInit() {
-    const keyElementId = 'find-communities-btn'; // We wait for this specific button to exist.
+    const keyElementId = 'find-communities-btn';
     let retries = 0;
-    const maxRetries = 50; // Try for 5 seconds (50 * 100ms)
+    const maxRetries = 50;
 
     const intervalId = setInterval(() => {
         const keyElement = document.getElementById(keyElementId);
 
         if (keyElement) {
-            // SUCCESS! The element is found.
-            clearInterval(intervalId); // Stop polling.
-            initializeProblemFinderTool(); // Run the real setup function.
+            clearInterval(intervalId);
+            initializeProblemFinderTool();
         } else {
-            // The element is not there yet.
             retries++;
             if (retries > maxRetries) {
-                // FAILED. The element never appeared.
-                clearInterval(intervalId); // Stop polling.
+                clearInterval(intervalId);
                 console.error(`Problem Finder initialization FAILED. The key element "#${keyElementId}" was not found in the DOM after 5 seconds. Please check that the HTML embed is correct and is loading on the page.`);
             } else {
-                // Optional: Log a message so you can see it trying.
                  console.log(`Waiting for Problem Finder tool... (Attempt ${retries})`);
             }
         }
-    }, 100); // Check every 100 milliseconds.
+    }, 100);
 }
 
 // --- SCRIPT ENTRY POINT ---
-// When the page is ready, start polling for our tool.
 document.addEventListener('DOMContentLoaded', waitForElementAndInit);
-
-// =================== END OF BLOCK TO PASTE ===================

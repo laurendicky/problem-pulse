@@ -1,5 +1,5 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 7.1 - LAYOUT FIX)
+// FINAL SCRIPT (VERSION 8 - ROBUST SNIPPETS & HIGHLIGHTING)
 // BLOCK 1 of 4: GLOBAL VARIABLES & HELPERS
 // =================================================================================
 
@@ -111,38 +111,31 @@ function renderContextContent(word, posts) {
     const contextBox = document.getElementById('context-box');
     if (!contextBox) return;
 
-    // This is the regex that will find all instances of the word, case-insensitively.
-    const highlightRegex = new RegExp(`\\b(${word})\\b`, 'gi');
+    // --- NEW: Plural-aware highlighting regex ---
+    // This will match 'issue' AND 'issues' when you click on 'issue'.
+    const highlightRegex = new RegExp(`\\b(${word}s?)\\b`, 'gi');
 
     const titleHTML = `<h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn" id="context-close-btn">×</button>`;
     
     const snippetsHTML = posts.slice(0, 10).map(post => {
         const fullText = `${post.data.title}. ${post.data.selftext || ''}`;
         
-        // --- NEW SNIPPET LOGIC ---
-        // 1. Find the first occurrence of the keyword.
-        const keywordIndex = fullText.toLowerCase().indexOf(word.toLowerCase());
-        
-        let textToShow;
-        if (keywordIndex === -1) {
-            // Fallback if word isn't found (should be rare), just take the start.
-            textToShow = getFirstTwoSentences(fullText);
-        } else {
-            // 2. Create a "window" of text around the keyword.
-            const windowSize = 80; // 80 chars on each side
-            const startIndex = Math.max(0, keywordIndex - windowSize);
-            const endIndex = Math.min(fullText.length, keywordIndex + word.length + windowSize);
-            textToShow = fullText.substring(startIndex, endIndex);
+        // --- NEW & IMPROVED SNIPPET LOGIC ---
+        const sentences = fullText.match(/[^.!?]+[.!?]+/g) || [];
+        const keywordRegex = new RegExp(`\\b${word}s?\\b`, 'i'); // Regex to find the word/plural
 
-            // 3. Add ellipses if we cut off the beginning or end.
-            if (startIndex > 0) textToShow = '... ' + textToShow;
-            if (endIndex < fullText.length) textToShow = textToShow + ' ...';
+        // Find the first sentence that actually contains the keyword or its plural
+        let relevantSentence = sentences.find(s => keywordRegex.test(s));
+        
+        // Fallback if no specific sentence is found (very rare)
+        if (!relevantSentence) {
+            relevantSentence = getFirstTwoSentences(fullText);
         }
+
+        // Highlight all instances in the final snippet
+        const textToShow = relevantSentence.replace(highlightRegex, `<strong>$1</strong>`);
         
-        // 4. Highlight ALL instances of the word in our final snippet.
-        textToShow = textToShow.replace(highlightRegex, `<strong>$1</strong>`);
-        
-        // --- NEW METADATA LINE ---
+        // --- Full metadata line ---
         const metaHTML = `
             <div class="context-snippet-meta">
                 <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span>
@@ -151,7 +144,7 @@ function renderContextContent(word, posts) {
 
         return `
             <div class="context-snippet">
-                <p class="context-snippet-text">${textToShow}</p>
+                <p class="context-snippet-text">... ${textToShow} ...</p>
                 ${metaHTML}
             </div>
         `;

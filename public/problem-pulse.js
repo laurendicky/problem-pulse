@@ -1,5 +1,6 @@
 // =================================================================================
-// FINAL, COMPLETE, ALL-IN-ONE SCRIPT FOR GITHUB
+// FINAL, COMPLETE, ALL-IN-ONE SCRIPT (VERSION 2 - ENHANCED CLOUD)
+// BLOCK 1 of 4: GLOBAL VARIABLES & SENTIMENT LISTS
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -7,10 +8,33 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 let originalGroupName = '';
 const suggestions = ["Dog Lovers", "Start-up Founders", "Fitness Beginners", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Developers", "Brides To Be"];
-const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still"];
+const colorPalette = ['#F26B6B', '#F19047', '#F5C943', '#3AB795', '#298ABF']; // Pink, Orange, Yellow, Teal, Blue
+
+// --- WORD LISTS FOR CLOUD ---
+const sentimentWords = [
+    // Positive High Arousal
+    'love', 'loved', 'loving', 'amazing', 'awesome', 'beautiful', 'best', 'brilliant', 'celebrate', 'charming', 'dope', 'excellent',
+    'excited', 'exciting', 'epic', 'fantastic', 'flawless', 'gorgeous', 'happy', 'impressed', 'incredible', 'insane', 'joy', 'keen', 'lit',
+    'perfect', 'phenomenal', 'proud', 'rad', 'super', 'stoked', 'thrilled', 'vibrant', 'wow', 'wonderful',
+    // Positive Low Arousal
+    'blessed', 'calm', 'chill', 'comfortable', 'cozy', 'grateful', 'loyal', 'peaceful', 'pleased', 'relaxed', 'relieved', 'satisfied', 'secure', 'thankful',
+    // Negative High Arousal
+    'angry', 'annoyed', 'anxious', 'awful', 'bad', 'broken', 'hate', 'challenge', 'confused', 'crazy', 'critical', 'danger', 'desperate',
+    'disappointed', 'disappointing', 'disgusted', 'dreadful', 'fear', 'frustrated', 'frustrating', 'furious', 'horrible', 'irritated', 'jealous',
+    'nightmare', 'outraged', 'pain', 'panic', 'problem', 'rage', 'rant', 'scared', 'shocked', 'stressful', 'terrible', 'terrified', 'trash', 'worst',
+    // Negative Low Arousal
+    'alone', 'ashamed', 'bored', 'depressed', 'discouraged', 'dull', 'empty', 'exhausted', 'failure', 'guilty',
+    'heartbroken', 'hopeless', 'hurt', 'insecure', 'lonely', 'miserable', 'sad', 'sorry', 'tired', 'unhappy', 'upset', 'weak',
+    // Verbs of Desire/Need
+    'need', 'needs', 'want', 'wants', 'wish', 'wishing', 'hope', 'hoping', 'desire', 'craving',
+    // Nouns of Quality/Value
+    'advantage', 'benefit', 'bonus', 'deal', 'disadvantage', 'issue', 'flaw', 'hack', 'improvement', 'quality', 'solution', 'strength', 'weakness',
+    'advice', 'tip', 'trick', 'recommend', 'recommendation'
+];
+const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
 
 // --- 2. ALL HELPER AND LOGIC FUNCTIONS ---
-// (All functions are defined first, before they are ever called)
+// (Functions are defined first, before they are ever called)
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
 function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); }
 async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all') { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after }) }); if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return []; } return allPosts.slice(0, totalLimit); }
@@ -27,64 +51,72 @@ function renderPosts(posts) { const container = document.getElementById("posts-c
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if (!assignments) return; const finding = window._summaries[summaryIndex]; if (!finding) return; let relevantPosts = []; const addedPostIds = new Set(); const addPost = (post) => { if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) { relevantPosts.push(post); addedPostIds.add(post.data.id); } }; const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber); assignedPostNumbers.forEach(postNum => { if (postNum - 1 < window._postsForAssignment.length) { addPost(window._postsForAssignment[postNum - 1]); } }); if (relevantPosts.length < 8) { const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id)); const scoredCandidates = candidatePool.map(post => ({ post: post, score: calculateRelevanceScore(post, finding) })).filter(item => item.score >= 4).sort((a, b) => b.score - a.score); for (const candidate of scoredCandidates) { if (relevantPosts.length >= 8) break; addPost(candidate.post); } } let html; if (relevantPosts.length === 0) { html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`; } else { const finalPosts = relevantPosts.slice(0, 8); finalPosts.forEach(post => usedPostIds.add(post.data.id)); html = finalPosts.map(post => ` <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${post.data.title}</a> <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${post.data.selftext ? post.data.selftext.substring(0, 150) + '...' : 'No content.'}</p> <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</small> </div> `).join(''); } const container = document.getElementById(`reddit-div${summaryIndex + 1}`); if (container) { container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">Real Stories from Reddit: "${finding.title}"</div><div class="reddit-samples-posts">${html}</div>`; } }
 async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 10 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 200, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
+// =================================================================================
+// BLOCK 2 of 4: REPLACED LANGUAGE CLOUD FUNCTIONS
+// =================================================================================
 
-// --- NEW FUNCTIONS FOR LANGUAGE CLOUD ---
-function generatePsychographicsCloudData(posts, topN = 50) {
+// NEW VERSION: Filters for specific sentiment words for a more useful cloud.
+function generatePsychographicsCloudData(posts, topN = 60) {
     const freqMap = {};
+    const sentimentSet = new Set(sentimentWords); // Faster lookups
+
     posts.forEach(post => {
-        // Combine title and selftext for a complete analysis
         const text = `${post.data.title} ${post.data.selftext || ''}`;
-        
-        // Clean the text: lowercase, remove non-letters, split into words
-        const words = text.toLowerCase().replace(/[^a-z\s]/g, '').split(/\s+/);
+        const words = text.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/);
 
         words.forEach(word => {
-            // Check if the word is meaningful (not a stop word and of reasonable length)
-            if (word.length > 3 && !stopWords.includes(word)) {
+            // Check if the word is in our curated sentiment list AND not a stop word
+            if (sentimentSet.has(word) && !stopWords.includes(word)) {
                 freqMap[word] = (freqMap[word] || 0) + 1;
             }
         });
     });
 
-    // Convert the frequency map to a sorted array of [word, count]
     return Object.entries(freqMap)
         .sort((a, b) => b[1] - a[1])
         .slice(0, topN);
 }
 
+// NEW VERSION: Renders cloud with colors and rotation for a more attractive look.
 function renderLanguageCloud(wordData) {
     const container = document.getElementById('language-cloud');
-    if (!container || wordData.length === 0) {
-        if(container) container.innerHTML = '<p>Not enough text data to generate a language cloud.</p>';
+    if (!container) return;
+    
+    if (wordData.length < 5) { // Need at least a few words to make a cloud
+        container.innerHTML = '<p style="font-family: sans-serif; color: #777;">Not enough emotive language found to build a psychographics cloud.</p>';
         return;
     }
 
-    // Find the min and max counts to normalize font sizes
     const counts = wordData.map(item => item[1]);
     const maxCount = Math.max(...counts);
     const minCount = Math.min(...counts);
 
-    // Define font size range
-    const minFontSize = 14; // pixels
-    const maxFontSize = 44; // pixels
+    const minFontSize = 16; // pixels
+    const maxFontSize = 50; // pixels
 
     const cloudHTML = wordData
         .map(([word, count]) => {
-            // Calculate font size based on word frequency
-            // This ensures the most frequent words are the largest
+            // Normalize font size based on frequency
             const fontSize = minFontSize + 
                 ( (count - minCount) / (maxCount - minCount || 1) ) * 
                 (maxFontSize - minFontSize);
+            
+            // Get a random color from our palette
+            const color = colorPalette[Math.floor(Math.random() * colorPalette.length)];
+            
+            // Get a slight random rotation
+            const rotation = Math.random() * 10 - 5; // -5 to +5 degrees
 
-            return `<span class="cloud-word" style="font-size: ${fontSize.toFixed(2)}px;">${word}</span>`;
+            return `<span class="cloud-word" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${word}</span>`;
         })
         .join('');
 
     container.innerHTML = cloudHTML;
 }
+// =================================================================================
+// BLOCK 3 of 4: MAIN ANALYSIS FUNCTION (UNCHANGED)
+// =================================================================================
 
-// FINAL & COMPLETE `runProblemFinder` FUNCTION WITH SEARCH DEPTH OPTION
-// ====================================================================================
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn');
     if (!searchButton) { console.error("Could not find the 'Find Their Problems' button."); return; }
@@ -100,7 +132,7 @@ async function runProblemFinder() {
     searchButton.classList.add('is-loading');
     searchButton.disabled = true;
 
-    // --- NEW: Search Depth Logic ---
+    // --- Search Depth Logic ---
     const quickSearchTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
     const deepSearchTerms = [ "struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance", "frustration", "disappointed", "help", "advice", "solution", "workaround", "how to", "fix", "rant", "vent" ];
     const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
@@ -123,7 +155,7 @@ async function runProblemFinder() {
         resultsWrapper.style.opacity = '0';
     }
     
-    // MODIFIED: Added "language-cloud" to the array of elements to clear
+    // MODIFIED IN PREVIOUS STEP: Includes "language-cloud"
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "language-cloud"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
@@ -147,10 +179,10 @@ async function runProblemFinder() {
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
 
-        // --- ADDED BLOCK FOR THE LANGUAGE CLOUD ---
-        const cloudData = generatePsychographicsCloudData(filteredPosts, 50); // Get top 50 words
+        // --- LANGUAGE CLOUD CALLS ---
+        const cloudData = generatePsychographicsCloudData(filteredPosts, 60); 
         renderLanguageCloud(cloudData);
-        // --- END OF LANGUAGE CLOUD BLOCK ---
+        // --- END OF LANGUAGE CLOUD ---
 
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) {
@@ -234,6 +266,9 @@ async function runProblemFinder() {
         searchButton.disabled = false;
     }
 }
+// =================================================================================
+// BLOCK 4 of 4: INITIALIZATION LOGIC (UNCHANGED)
+// =================================================================================
 
 function initializeProblemFinderTool() {
     console.log("Problem Finder elements found. Initializing...");

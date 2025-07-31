@@ -1,5 +1,5 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 6 - NO MODAL, USES CONTEXT BOX)
+// FINAL SCRIPT (VERSION 7 - IMPROVED CONTEXT BOX)
 // BLOCK 1 of 4: GLOBAL VARIABLES & HELPERS
 // =================================================================================
 
@@ -18,7 +18,7 @@ const stopWords = ["a", "about", "above", "after", "again", "against", "all", "a
 
 // --- 2. ALL HELPER AND LOGIC FUNCTIONS ---
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
-function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); }
+function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
 async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all') { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after }) }); if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return []; } return allPosts.slice(0, totalLimit); }
 async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all') { const allResults = []; for (let i = 0; i < searchTerms.length; i += 8) { const batchTerms = searchTerms.slice(i, i + 8); const batchPromises = batchTerms.map(term => fetchRedditForTermWithPagination(niche, term, limitPerTerm, timeFilter)); const batchResults = await Promise.all(batchPromises); batchResults.forEach(posts => { if (Array.isArray(posts)) { allResults.push(...posts); } }); if (i + 8 < searchTerms.length) { await new Promise(resolve => setTimeout(resolve, 500)); } } return deduplicatePosts(allResults); }
 function parseAISummary(aiResponse) { try { aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim(); const jsonMatch = aiResponse.match(/{[\s\S]*}/); if (!jsonMatch) { throw new Error("No JSON object in AI response."); } const parsed = JSON.parse(jsonMatch[0]); if (!parsed.summaries || !Array.isArray(parsed.summaries) || parsed.summaries.length < 1) { throw new Error("AI response lacks a 'summaries' array."); } parsed.summaries.forEach((summary, idx) => { const missingFields = []; if (!summary.title) missingFields.push("title"); if (!summary.body) missingFields.push("body"); if (typeof summary.count !== 'number') missingFields.push("count"); if (!summary.quotes || !Array.isArray(summary.quotes) || summary.quotes.length < 1) missingFields.push("quotes"); if (!summary.keywords || !Array.isArray(summary.keywords) || summary.keywords.length === 0) missingFields.push("keywords"); if (missingFields.length > 0) throw new Error(`Summary ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`); }); return parsed.summaries; } catch (error) { console.error("Parsing Error:", error); console.log("Raw AI Response:", aiResponse); throw new Error("Failed to parse AI response."); } }
@@ -34,7 +34,7 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if 
 async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 10 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 200, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
 // =================================================================================
-// BLOCK 2 of 4: NEW INTERACTIVE CONTEXT BOX FUNCTIONS
+// BLOCK 2 of 4: NEW INTERACTIVE CONTEXT BOX FUNCTIONS (REPLACED & IMPROVED)
 // =================================================================================
 
 function lemmatize(word) {
@@ -106,36 +106,69 @@ function renderSentimentCloud(containerId, wordData, colors) {
     container.innerHTML = cloudHTML;
 }
 
+// --- REPLACED & IMPROVED: This function now handles the close button and has robust highlighting ---
 function renderContextContent(word, posts) {
     const contextBox = document.getElementById('context-box');
     if (!contextBox) return;
 
-    const titleRegex = new RegExp(`\\b${word}\\b`, 'ig');
+    // This is the regex that will find all instances of the word, case-insensitively.
+    const highlightRegex = new RegExp(`\\b(${word})\\b`, 'gi');
+
+    const titleHTML = `<h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn" id="context-close-btn">×</button>`;
     
-    const titleHTML = `<h3 class="context-title">Context for: "${word}"</h3>`;
-    
-    const snippetsHTML = posts.slice(0, 10).map(post => { // Show up to 10 snippets
+    const snippetsHTML = posts.slice(0, 10).map(post => {
         const fullText = `${post.data.title}. ${post.data.selftext || ''}`;
-        // Find a sentence that contains the word for a better snippet
-        const snippetMatch = fullText.match(new RegExp(`[^.!?]*\\b${word}\\b[^.!?]*[.!?]`, 'i'));
-        let textToShow = snippetMatch ? snippetMatch[0] : getFirstTwoSentences(fullText);
         
-        // Highlight all instances of the word in the snippet
-        textToShow = textToShow.replace(titleRegex, `<strong>${word}</strong>`);
+        // --- NEW SNIPPET LOGIC ---
+        // 1. Find the first occurrence of the keyword.
+        const keywordIndex = fullText.toLowerCase().indexOf(word.toLowerCase());
+        
+        let textToShow;
+        if (keywordIndex === -1) {
+            // Fallback if word isn't found (should be rare), just take the start.
+            textToShow = getFirstTwoSentences(fullText);
+        } else {
+            // 2. Create a "window" of text around the keyword.
+            const windowSize = 80; // 80 chars on each side
+            const startIndex = Math.max(0, keywordIndex - windowSize);
+            const endIndex = Math.min(fullText.length, keywordIndex + word.length + windowSize);
+            textToShow = fullText.substring(startIndex, endIndex);
+
+            // 3. Add ellipses if we cut off the beginning or end.
+            if (startIndex > 0) textToShow = '... ' + textToShow;
+            if (endIndex < fullText.length) textToShow = textToShow + ' ...';
+        }
+        
+        // 4. Highlight ALL instances of the word in our final snippet.
+        textToShow = textToShow.replace(highlightRegex, `<strong>$1</strong>`);
+        
+        // --- NEW METADATA LINE ---
+        const metaHTML = `
+            <div class="context-snippet-meta">
+                <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span>
+            </div>
+        `;
 
         return `
             <div class="context-snippet">
                 <p class="context-snippet-text">${textToShow}</p>
-                <div class="context-snippet-meta">
-                    <span>👍 ${post.data.ups} | </span>
-                    <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer">View on Reddit</a>
-                </div>
+                ${metaHTML}
             </div>
         `;
     }).join('');
 
     contextBox.innerHTML = titleHTML + snippetsHTML;
     contextBox.style.display = 'block';
+    
+    // Add event listener to the new close button
+    const closeBtn = document.getElementById('context-close-btn');
+    if(closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+
     contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 // =================================================================================
@@ -261,7 +294,7 @@ async function runProblemFinder() {
     }
 }
 // =================================================================================
-// BLOCK 4 of 4: INITIALIZATION AND NEW CONTEXT BOX LOGIC
+// BLOCK 4 of 4: INITIALIZATION LOGIC
 // =================================================================================
 
 function initializeContextBox() {

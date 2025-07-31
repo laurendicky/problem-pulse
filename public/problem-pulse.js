@@ -1,5 +1,5 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 7 - IMPROVED CONTEXT BOX)
+// FINAL SCRIPT (VERSION 7.1 - LAYOUT FIX)
 // BLOCK 1 of 4: GLOBAL VARIABLES & HELPERS
 // =================================================================================
 
@@ -406,7 +406,7 @@ function initializeProblemFinderTool() {
         }
     });
     
-    initializeContextBox(); // Initialize the new context box listeners
+    initializeContextBox(); // Initialize the context box listeners
 
     console.log("Problem Finder tool successfully initialized.");
 }

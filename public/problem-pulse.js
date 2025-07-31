@@ -1,6 +1,6 @@
 // =================================================================================
-// FINAL, COMPLETE, ALL-IN-ONE SCRIPT (VERSION 2 - ENHANCED CLOUD)
-// BLOCK 1 of 4: GLOBAL VARIABLES & SENTIMENT LISTS
+// FINAL SCRIPT (VERSION 3 - SENTIMENT DASHBOARD)
+// BLOCK 1 of 4: GLOBAL VARIABLES & SENTIMENT MAPS
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -8,33 +8,20 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 let originalGroupName = '';
 const suggestions = ["Dog Lovers", "Start-up Founders", "Fitness Beginners", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Developers", "Brides To Be"];
-const colorPalette = ['#F26B6B', '#F19047', '#F5C943', '#3AB795', '#298ABF']; // Pink, Orange, Yellow, Teal, Blue
+const positiveColors = ['#2E7D32', '#388E3C', '#43A047', '#1B5E20']; // Shades of Green
+const negativeColors = ['#C62828', '#D32F2F', '#E53935', '#B71C1C']; // Shades of Red
 
-// --- WORD LISTS FOR CLOUD ---
-const sentimentWords = [
-    // Positive High Arousal
-    'love', 'loved', 'loving', 'amazing', 'awesome', 'beautiful', 'best', 'brilliant', 'celebrate', 'charming', 'dope', 'excellent',
-    'excited', 'exciting', 'epic', 'fantastic', 'flawless', 'gorgeous', 'happy', 'impressed', 'incredible', 'insane', 'joy', 'keen', 'lit',
-    'perfect', 'phenomenal', 'proud', 'rad', 'super', 'stoked', 'thrilled', 'vibrant', 'wow', 'wonderful',
-    // Positive Low Arousal
-    'blessed', 'calm', 'chill', 'comfortable', 'cozy', 'grateful', 'loyal', 'peaceful', 'pleased', 'relaxed', 'relieved', 'satisfied', 'secure', 'thankful',
-    // Negative High Arousal
-    'angry', 'annoyed', 'anxious', 'awful', 'bad', 'broken', 'hate', 'challenge', 'confused', 'crazy', 'critical', 'danger', 'desperate',
-    'disappointed', 'disappointing', 'disgusted', 'dreadful', 'fear', 'frustrated', 'frustrating', 'furious', 'horrible', 'irritated', 'jealous',
-    'nightmare', 'outraged', 'pain', 'panic', 'problem', 'rage', 'rant', 'scared', 'shocked', 'stressful', 'terrible', 'terrified', 'trash', 'worst',
-    // Negative Low Arousal
-    'alone', 'ashamed', 'bored', 'depressed', 'discouraged', 'dull', 'empty', 'exhausted', 'failure', 'guilty',
-    'heartbroken', 'hopeless', 'hurt', 'insecure', 'lonely', 'miserable', 'sad', 'sorry', 'tired', 'unhappy', 'upset', 'weak',
-    // Verbs of Desire/Need
-    'need', 'needs', 'want', 'wants', 'wish', 'wishing', 'hope', 'hoping', 'desire', 'craving',
-    // Nouns of Quality/Value
-    'advantage', 'benefit', 'bonus', 'deal', 'disadvantage', 'issue', 'flaw', 'hack', 'improvement', 'quality', 'solution', 'strength', 'weakness',
-    'advice', 'tip', 'trick', 'recommend', 'recommendation'
-];
+// --- NEW LEMMATIZATION MAP & SENTIMENT CATEGORIES ---
+const lemmaMap = {
+    'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': 'love', 'loving': 'love', 'hates': 'hate',
+    'wishes': 'wish', 'wishing': 'wish', 'hoped': 'hope', 'hoping': 'hope', 'challenged': 'challenge',
+    'recommended': 'recommend', 'disappointed': 'disappoint', 'frustrated': 'frustrate', 'annoyed': 'annoy', 'recommended': 'recommend', 'recommends': 'recommend'
+};
+const positiveWords = new Set(['love', 'amazing', 'awesome', 'beautiful', 'best', 'brilliant', 'celebrate', 'charming', 'dope', 'excellent', 'excited', 'exciting', 'epic', 'fantastic', 'flawless', 'gorgeous', 'happy', 'impressed', 'incredible', 'insane', 'joy', 'keen', 'lit', 'perfect', 'phenomenal', 'proud', 'rad', 'super', 'stoked', 'thrilled', 'vibrant', 'wow', 'wonderful', 'blessed', 'calm', 'chill', 'comfortable', 'cozy', 'grateful', 'loyal', 'peaceful', 'pleased', 'relaxed', 'relieved', 'satisfied', 'secure', 'thankful', 'want', 'wish', 'hope', 'desire', 'craving', 'benefit', 'bonus', 'deal', 'hack', 'improvement', 'quality', 'solution', 'strength', 'advice', 'tip', 'trick', 'recommend']);
+const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'broken', 'hate', 'challenge', 'confused', 'crazy', 'critical', 'danger', 'desperate', 'disappoint', 'disgusted', 'dreadful', 'fear', 'frustrate', 'furious', 'horrible', 'irritated', 'jealous', 'nightmare', 'outraged', 'pain', 'panic', 'problem', 'rage', 'rant', 'scared', 'shocked', 'stressful', 'terrible', 'terrified', 'trash', 'worst', 'alone', 'ashamed', 'bored', 'depressed', 'discouraged', 'dull', 'empty', 'exhausted', 'failure', 'guilty', 'heartbroken', 'hopeless', 'hurt', 'insecure', 'lonely', 'miserable', 'sad', 'sorry', 'tired', 'unhappy', 'upset', 'weak', 'need', 'disadvantage', 'issue', 'flaw']);
 const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
 
 // --- 2. ALL HELPER AND LOGIC FUNCTIONS ---
-// (Functions are defined first, before they are ever called)
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
 function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); }
 async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all') { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after }) }); if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return []; } return allPosts.slice(0, totalLimit); }
@@ -52,38 +39,58 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if 
 async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 10 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 200, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
 // =================================================================================
-// BLOCK 2 of 4: REPLACED LANGUAGE CLOUD FUNCTIONS
+// BLOCK 2 of 4: REPLACED SENTIMENT DASHBOARD FUNCTIONS
 // =================================================================================
 
-// NEW VERSION: Filters for specific sentiment words for a more useful cloud.
-function generatePsychographicsCloudData(posts, topN = 60) {
-    const freqMap = {};
-    const sentimentSet = new Set(sentimentWords); // Faster lookups
+function lemmatize(word) {
+    // Return from map if it exists (e.g., 'wants' -> 'want')
+    if (lemmaMap[word]) {
+        return lemmaMap[word];
+    }
+    // Simple rule-based lemmatization for regular forms
+    if (word.endsWith('ing')) {
+        return word.slice(0, -3);
+    }
+    if (word.endsWith('s')) {
+        return word.slice(0, -1);
+    }
+    return word;
+}
+
+function generateSentimentData(posts) {
+    const positiveFreq = {};
+    const negativeFreq = {};
 
     posts.forEach(post => {
         const text = `${post.data.title} ${post.data.selftext || ''}`;
         const words = text.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/);
 
-        words.forEach(word => {
-            // Check if the word is in our curated sentiment list AND not a stop word
-            if (sentimentSet.has(word) && !stopWords.includes(word)) {
-                freqMap[word] = (freqMap[word] || 0) + 1;
+        words.forEach(rawWord => {
+            if (rawWord.length < 3 || stopWords.includes(rawWord)) return;
+
+            const lemma = lemmatize(rawWord);
+            if (positiveWords.has(lemma)) {
+                positiveFreq[lemma] = (positiveFreq[lemma] || 0) + 1;
+            } else if (negativeWords.has(lemma)) {
+                negativeFreq[lemma] = (negativeFreq[lemma] || 0) + 1;
             }
         });
     });
 
-    return Object.entries(freqMap)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, topN);
+    // Return an object with two sorted arrays
+    return {
+        positive: Object.entries(positiveFreq).sort((a, b) => b[1] - a[1]).slice(0, 30),
+        negative: Object.entries(negativeFreq).sort((a, b) => b[1] - a[1]).slice(0, 30)
+    };
 }
 
-// NEW VERSION: Renders cloud with colors and rotation for a more attractive look.
-function renderLanguageCloud(wordData) {
-    const container = document.getElementById('language-cloud');
+
+function renderSentimentCloud(containerId, wordData, colors) {
+    const container = document.getElementById(containerId);
     if (!container) return;
-    
-    if (wordData.length < 5) { // Need at least a few words to make a cloud
-        container.innerHTML = '<p style="font-family: sans-serif; color: #777;">Not enough emotive language found to build a psychographics cloud.</p>';
+
+    if (wordData.length < 3) {
+        container.innerHTML = `<p style="font-family: sans-serif; color: #777; padding: 1rem; text-align: center;">Not enough distinct terms found for this category.</p>`;
         return;
     }
 
@@ -91,30 +98,21 @@ function renderLanguageCloud(wordData) {
     const maxCount = Math.max(...counts);
     const minCount = Math.min(...counts);
 
-    const minFontSize = 16; // pixels
-    const maxFontSize = 50; // pixels
+    const minFontSize = 16;
+    const maxFontSize = 42;
 
-    const cloudHTML = wordData
-        .map(([word, count]) => {
-            // Normalize font size based on frequency
-            const fontSize = minFontSize + 
-                ( (count - minCount) / (maxCount - minCount || 1) ) * 
-                (maxFontSize - minFontSize);
-            
-            // Get a random color from our palette
-            const color = colorPalette[Math.floor(Math.random() * colorPalette.length)];
-            
-            // Get a slight random rotation
-            const rotation = Math.random() * 10 - 5; // -5 to +5 degrees
+    const cloudHTML = wordData.map(([word, count]) => {
+        const fontSize = minFontSize + ((count - minCount) / (maxCount - minCount || 1)) * (maxFontSize - minFontSize);
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        const rotation = Math.random() * 8 - 4; // -4 to +4 degrees
 
-            return `<span class="cloud-word" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${word}</span>`;
-        })
-        .join('');
+        return `<span class="cloud-word" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${word}</span>`;
+    }).join('');
 
     container.innerHTML = cloudHTML;
 }
 // =================================================================================
-// BLOCK 3 of 4: MAIN ANALYSIS FUNCTION (UNCHANGED)
+// BLOCK 3 of 4: MAIN ANALYSIS FUNCTION
 // =================================================================================
 
 async function runProblemFinder() {
@@ -155,8 +153,8 @@ async function runProblemFinder() {
         resultsWrapper.style.opacity = '0';
     }
     
-    // MODIFIED IN PREVIOUS STEP: Includes "language-cloud"
-    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "language-cloud"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+    // Clear old results, including the new cloud containers
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "positive-cloud", "negative-cloud"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
     const resultsMessageDiv = document.getElementById("results-message");
@@ -179,10 +177,11 @@ async function runProblemFinder() {
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
 
-        // --- LANGUAGE CLOUD CALLS ---
-        const cloudData = generatePsychographicsCloudData(filteredPosts, 60); 
-        renderLanguageCloud(cloudData);
-        // --- END OF LANGUAGE CLOUD ---
+        // --- SENTIMENT DASHBOARD CALLS ---
+        const sentimentData = generateSentimentData(filteredPosts);
+        renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
+        renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
+        // --- END OF SENTIMENT DASHBOARD ---
 
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) {
@@ -267,7 +266,7 @@ async function runProblemFinder() {
     }
 }
 // =================================================================================
-// BLOCK 4 of 4: INITIALIZATION LOGIC (UNCHANGED)
+// BLOCK 4 of 4: INITIALIZATION LOGIC
 // =================================================================================
 
 function initializeProblemFinderTool() {

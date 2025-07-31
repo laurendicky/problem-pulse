@@ -1,5 +1,5 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 8 - ROBUST SNIPPETS & HIGHLIGHTING)
+// FINAL SCRIPT (VERSION 8.1 - ROBUST SNIPPETS & HIGHLIGHTING)
 // BLOCK 1 of 4: GLOBAL VARIABLES & HELPERS
 // =================================================================================
 
@@ -111,23 +111,28 @@ function renderContextContent(word, posts) {
     const contextBox = document.getElementById('context-box');
     if (!contextBox) return;
 
-    // --- NEW: Plural-aware highlighting regex ---
-    // This will match 'issue' AND 'issues' when you click on 'issue'.
-    const highlightRegex = new RegExp(`\\b(${word}s?)\\b`, 'gi');
+    // --- NEW: Plural-aware and variation-aware highlighting regex ---
+    // This will match 'frustrate', 'frustrated', 'frustrates', 'frustrating' etc.
+    const highlightRegex = new RegExp(`\\b(${word}\\w*)\\b`, 'gi');
 
-    const titleHTML = `<h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn" id="context-close-btn">×</button>`;
+    const headerHTML = `
+        <div class="context-header">
+            <h3 class="context-title">Context for: "${word}"</h3>
+            <button class="context-close-btn" id="context-close-btn">×</button>
+        </div>
+    `;
     
     const snippetsHTML = posts.slice(0, 10).map(post => {
         const fullText = `${post.data.title}. ${post.data.selftext || ''}`;
         
         // --- NEW & IMPROVED SNIPPET LOGIC ---
         const sentences = fullText.match(/[^.!?]+[.!?]+/g) || [];
-        const keywordRegex = new RegExp(`\\b${word}s?\\b`, 'i'); // Regex to find the word/plural
+        const keywordRegex = new RegExp(`\\b${word}\\w*\\b`, 'i'); // Regex to find the word and its variations
 
-        // Find the first sentence that actually contains the keyword or its plural
+        // Find the first sentence that actually contains the keyword or its variations
         let relevantSentence = sentences.find(s => keywordRegex.test(s));
         
-        // Fallback if no specific sentence is found (very rare)
+        // Fallback if no specific sentence is found
         if (!relevantSentence) {
             relevantSentence = getFirstTwoSentences(fullText);
         }
@@ -150,7 +155,7 @@ function renderContextContent(word, posts) {
         `;
     }).join('');
 
-    contextBox.innerHTML = titleHTML + snippetsHTML;
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
     contextBox.style.display = 'block';
     
     // Add event listener to the new close button

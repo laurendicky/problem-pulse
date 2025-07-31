@@ -1,6 +1,6 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 3 - SENTIMENT DASHBOARD)
-// BLOCK 1 of 4: GLOBAL VARIABLES & SENTIMENT MAPS
+// FINAL SCRIPT (VERSION 6 - NO MODAL, USES CONTEXT BOX)
+// BLOCK 1 of 4: GLOBAL VARIABLES & HELPERS
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -8,17 +8,12 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 let originalGroupName = '';
 const suggestions = ["Dog Lovers", "Start-up Founders", "Fitness Beginners", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Developers", "Brides To Be"];
-const positiveColors = ['#2E7D32', '#388E3C', '#43A047', '#1B5E20']; // Shades of Green
-const negativeColors = ['#C62828', '#D32F2F', '#E53935', '#B71C1C']; // Shades of Red
+const positiveColors = ['#2E7D32', '#388E3C', '#43A047', '#1B5E20'];
+const negativeColors = ['#C62828', '#D32F2F', '#E53935', '#B71C1C'];
 
-// --- NEW LEMMATIZATION MAP & SENTIMENT CATEGORIES ---
-const lemmaMap = {
-    'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': 'love', 'loving': 'love', 'hates': 'hate',
-    'wishes': 'wish', 'wishing': 'wish', 'hoped': 'hope', 'hoping': 'hope', 'challenged': 'challenge',
-    'recommended': 'recommend', 'disappointed': 'disappoint', 'frustrated': 'frustrate', 'annoyed': 'annoy', 'recommended': 'recommend', 'recommends': 'recommend'
-};
+const lemmaMap = { 'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': 'love', 'loving': 'love', 'hates': 'hate', 'wishes': 'wish', 'wishing': 'wish', 'solutions': 'solution', 'challenges': 'challenge', 'recommended': 'recommend', 'disappointed': 'disappoint', 'frustrated': 'frustrate', 'annoyed': 'annoy' };
 const positiveWords = new Set(['love', 'amazing', 'awesome', 'beautiful', 'best', 'brilliant', 'celebrate', 'charming', 'dope', 'excellent', 'excited', 'exciting', 'epic', 'fantastic', 'flawless', 'gorgeous', 'happy', 'impressed', 'incredible', 'insane', 'joy', 'keen', 'lit', 'perfect', 'phenomenal', 'proud', 'rad', 'super', 'stoked', 'thrilled', 'vibrant', 'wow', 'wonderful', 'blessed', 'calm', 'chill', 'comfortable', 'cozy', 'grateful', 'loyal', 'peaceful', 'pleased', 'relaxed', 'relieved', 'satisfied', 'secure', 'thankful', 'want', 'wish', 'hope', 'desire', 'craving', 'benefit', 'bonus', 'deal', 'hack', 'improvement', 'quality', 'solution', 'strength', 'advice', 'tip', 'trick', 'recommend']);
-const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'broken', 'hate', 'challenge', 'confused', 'crazy', 'critical', 'danger', 'desperate', 'disappoint', 'disgusted', 'dreadful', 'fear', 'frustrate', 'furious', 'horrible', 'irritated', 'jealous', 'nightmare', 'outraged', 'pain', 'panic', 'problem', 'rage', 'rant', 'scared', 'shocked', 'stressful', 'terrible', 'terrified', 'trash', 'worst', 'alone', 'ashamed', 'bored', 'depressed', 'discouraged', 'dull', 'empty', 'exhausted', 'failure', 'guilty', 'heartbroken', 'hopeless', 'hurt', 'insecure', 'lonely', 'miserable', 'sad', 'sorry', 'tired', 'unhappy', 'upset', 'weak', 'need', 'disadvantage', 'issue', 'flaw']);
+const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'broken', 'hate', 'challenge', 'confused', 'crazy', 'critical', 'danger', 'desperate', 'disappoint', 'disgusted', 'dreadful', 'fear', 'frustrate', 'furious', 'horrible', 'irritated', 'jealous', 'nightmare', 'outraged', 'pain', 'panic', 'problem', 'rant', 'scared', 'shocked', 'stressful', 'terrible', 'terrified', 'trash', 'worst', 'alone', 'ashamed', 'bored', 'depressed', 'discouraged', 'dull', 'empty', 'exhausted', 'failure', 'guilty', 'heartbroken', 'hopeless', 'hurt', 'insecure', 'lonely', 'miserable', 'sad', 'sorry', 'tired', 'unhappy', 'upset', 'weak', 'need', 'disadvantage', 'issue', 'flaw']);
 const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
 
 // --- 2. ALL HELPER AND LOGIC FUNCTIONS ---
@@ -39,27 +34,20 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if 
 async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 10 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 200, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
 // =================================================================================
-// BLOCK 2 of 4: REPLACED SENTIMENT DASHBOARD FUNCTIONS
+// BLOCK 2 of 4: NEW INTERACTIVE CONTEXT BOX FUNCTIONS
 // =================================================================================
 
 function lemmatize(word) {
-    // Return from map if it exists (e.g., 'wants' -> 'want')
-    if (lemmaMap[word]) {
-        return lemmaMap[word];
-    }
-    // Simple rule-based lemmatization for regular forms
-    if (word.endsWith('ing')) {
-        return word.slice(0, -3);
-    }
-    if (word.endsWith('s')) {
-        return word.slice(0, -1);
-    }
+    if (lemmaMap[word]) return lemmaMap[word];
+    if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1);
     return word;
 }
 
 function generateSentimentData(posts) {
-    const positiveFreq = {};
-    const negativeFreq = {};
+    const data = {
+        positive: {},
+        negative: {}
+    };
 
     posts.forEach(post => {
         const text = `${post.data.title} ${post.data.selftext || ''}`;
@@ -69,47 +57,86 @@ function generateSentimentData(posts) {
             if (rawWord.length < 3 || stopWords.includes(rawWord)) return;
 
             const lemma = lemmatize(rawWord);
-            if (positiveWords.has(lemma)) {
-                positiveFreq[lemma] = (positiveFreq[lemma] || 0) + 1;
-            } else if (negativeWords.has(lemma)) {
-                negativeFreq[lemma] = (negativeFreq[lemma] || 0) + 1;
+
+            let category = null;
+            if (positiveWords.has(lemma)) category = 'positive';
+            else if (negativeWords.has(lemma)) category = 'negative';
+            
+            if (category) {
+                if (!data[category][lemma]) {
+                    data[category][lemma] = { count: 0, posts: new Set() };
+                }
+                data[category][lemma].count++;
+                data[category][lemma].posts.add(post);
             }
         });
     });
 
-    // Return an object with two sorted arrays
+    window._sentimentData = data; // Store globally for context access
+
     return {
-        positive: Object.entries(positiveFreq).sort((a, b) => b[1] - a[1]).slice(0, 30),
-        negative: Object.entries(negativeFreq).sort((a, b) => b[1] - a[1]).slice(0, 30)
+        positive: Object.entries(data.positive).sort((a, b) => b[1].count - a[1].count).slice(0, 30),
+        negative: Object.entries(data.negative).sort((a, b) => b[1].count - a[1].count).slice(0, 30)
     };
 }
-
 
 function renderSentimentCloud(containerId, wordData, colors) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
     if (wordData.length < 3) {
-        container.innerHTML = `<p style="font-family: sans-serif; color: #777; padding: 1rem; text-align: center;">Not enough distinct terms found for this category.</p>`;
+        container.innerHTML = `<p style="font-family: sans-serif; color: #777; padding: 1rem; text-align: center;">Not enough distinct terms found.</p>`;
         return;
     }
 
-    const counts = wordData.map(item => item[1]);
+    const counts = wordData.map(item => item[1].count);
     const maxCount = Math.max(...counts);
     const minCount = Math.min(...counts);
 
-    const minFontSize = 16;
-    const maxFontSize = 42;
+    const minFontSize = 16, maxFontSize = 42;
 
-    const cloudHTML = wordData.map(([word, count]) => {
-        const fontSize = minFontSize + ((count - minCount) / (maxCount - minCount || 1)) * (maxFontSize - minFontSize);
+    const cloudHTML = wordData.map(([word, data]) => {
+        const fontSize = minFontSize + ((data.count - minCount) / (maxCount - minCount || 1)) * (maxFontSize - minFontSize);
         const color = colors[Math.floor(Math.random() * colors.length)];
-        const rotation = Math.random() * 8 - 4; // -4 to +4 degrees
+        const rotation = Math.random() * 8 - 4;
 
-        return `<span class="cloud-word" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${word}</span>`;
+        return `<span class="cloud-word" data-word="${word}" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${word}</span>`;
     }).join('');
 
     container.innerHTML = cloudHTML;
+}
+
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+
+    const titleRegex = new RegExp(`\\b${word}\\b`, 'ig');
+    
+    const titleHTML = `<h3 class="context-title">Context for: "${word}"</h3>`;
+    
+    const snippetsHTML = posts.slice(0, 10).map(post => { // Show up to 10 snippets
+        const fullText = `${post.data.title}. ${post.data.selftext || ''}`;
+        // Find a sentence that contains the word for a better snippet
+        const snippetMatch = fullText.match(new RegExp(`[^.!?]*\\b${word}\\b[^.!?]*[.!?]`, 'i'));
+        let textToShow = snippetMatch ? snippetMatch[0] : getFirstTwoSentences(fullText);
+        
+        // Highlight all instances of the word in the snippet
+        textToShow = textToShow.replace(titleRegex, `<strong>${word}</strong>`);
+
+        return `
+            <div class="context-snippet">
+                <p class="context-snippet-text">${textToShow}</p>
+                <div class="context-snippet-meta">
+                    <span>👍 ${post.data.ups} | </span>
+                    <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer">View on Reddit</a>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    contextBox.innerHTML = titleHTML + snippetsHTML;
+    contextBox.style.display = 'block';
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 // =================================================================================
 // BLOCK 3 of 4: MAIN ANALYSIS FUNCTION
@@ -117,44 +144,26 @@ function renderSentimentCloud(containerId, wordData, colors) {
 
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn');
-    if (!searchButton) { console.error("Could not find the 'Find Their Problems' button."); return; }
+    if (!searchButton) { console.error("Could not find button."); return; }
 
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked');
-    if (selectedCheckboxes.length === 0) {
-        alert("Please select at least one community.");
-        return;
-    }
+    if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
     const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
 
     searchButton.classList.add('is-loading');
     searchButton.disabled = true;
 
-    // --- Search Depth Logic ---
     const quickSearchTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
     const deepSearchTerms = [ "struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance", "frustration", "disappointed", "help", "advice", "solution", "workaround", "how to", "fix", "rant", "vent" ];
     const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
-    let searchTerms;
-    let limitPerTerm;
-    if (searchDepth === 'deep') {
-        console.log("Starting a Deep Dive analysis...");
-        searchTerms = deepSearchTerms;
-        limitPerTerm = 100;
-    } else {
-        console.log("Starting a Quick Scan analysis...");
-        searchTerms = quickSearchTerms;
-        limitPerTerm = 50;
-    }
-
-    // --- Reset UI elements before starting a new search ---
-    const resultsWrapper = document.getElementById('results-wrapper-b');
-    if (resultsWrapper) {
-        resultsWrapper.style.display = 'none';
-        resultsWrapper.style.opacity = '0';
-    }
+    let searchTerms = (searchDepth === 'deep') ? deepSearchTerms : quickSearchTerms;
+    let limitPerTerm = (searchDepth === 'deep') ? 100 : 50;
     
-    // Clear old results, including the new cloud containers
-    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "positive-cloud", "negative-cloud"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+    const resultsWrapper = document.getElementById('results-wrapper-b');
+    if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
+    
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "positive-cloud", "negative-cloud", "context-box"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; if(id === 'context-box') el.style.display = 'none'; } });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
     const resultsMessageDiv = document.getElementById("results-message");
@@ -169,10 +178,10 @@ async function runProblemFinder() {
 
     try {
         let allPosts = await fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, limitPerTerm, selectedTime);
-        if (allPosts.length === 0) { throw new Error("No results found in the selected communities for these problem keywords."); }
+        if (allPosts.length === 0) { throw new Error("No results found."); }
         
         const filteredPosts = filterPosts(allPosts, selectedMinUpvotes);
-        if (filteredPosts.length < 10) { throw new Error("Not enough high-quality posts found for analysis. Try selecting more communities or adjusting filters."); }
+        if (filteredPosts.length < 10) { throw new Error("Not enough high-quality posts found."); }
         
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
@@ -184,11 +193,7 @@ async function runProblemFinder() {
         // --- END OF SENTIMENT DASHBOARD ---
 
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
-        if (countHeaderDiv) {
-            countHeaderDiv.textContent = userNicheCount === 1 
-                ? `Found 1 post discussing problems related to "${originalGroupName}".` 
-                : `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
-        }
+        if (countHeaderDiv) countHeaderDiv.textContent = `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
         
         const topKeywords = getTopKeywords(filteredPosts, 10);
         const topPosts = filteredPosts.slice(0, 30);
@@ -199,7 +204,7 @@ async function runProblemFinder() {
         const openAIData = await openAIResponse.json();
         const summaries = parseAISummary(openAIData.openaiResponse);
         const validatedSummaries = summaries.filter(finding => filteredPosts.filter(post => calculateRelevanceScore(post, finding) > 0).length >= 3);
-        if (validatedSummaries.length === 0) { throw new Error("While posts were found, none formed a clear, common problem. Try a broader search."); }
+        if (validatedSummaries.length === 0) { throw new Error("While posts were found, none formed a clear, common problem."); }
         const metrics = calculateFindingMetrics(validatedSummaries, filteredPosts);
         const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
         window._summaries = sortedFindings.map(item => item.summary);
@@ -233,41 +238,63 @@ async function runProblemFinder() {
             showSamplePosts(i, assignments, filteredPosts, window._usedPostIds);
         }
 
-        // --- REVEAL AND SCROLL LOGIC ---
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
-            if (resultsWrapper) {
-                resultsWrapper.style.setProperty('display', 'flex', 'important');
-            }
+            if (resultsWrapper) resultsWrapper.style.setProperty('display', 'flex', 'important');
             setTimeout(() => {
                 if (resultsWrapper) {
                     resultsWrapper.style.opacity = '1';
+                    resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }
-                countHeaderDiv.scrollIntoView({
-                    behavior: 'smooth',
-                    block: 'start'
-                });
             }, 50); 
         }
 
     } catch (err) {
         console.error("Error in main analysis:", err);
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
-        findingDivs.forEach(div => { if (div) div.innerHTML = ""; });
-        if (countHeaderDiv) countHeaderDiv.innerHTML = "";
-
         if (resultsWrapper) {
             resultsWrapper.style.setProperty('display', 'flex', 'important');
             resultsWrapper.style.opacity = '1';
         }
-
     } finally {
         searchButton.classList.remove('is-loading');
         searchButton.disabled = false;
     }
 }
 // =================================================================================
-// BLOCK 4 of 4: INITIALIZATION LOGIC
+// BLOCK 4 of 4: INITIALIZATION AND NEW CONTEXT BOX LOGIC
 // =================================================================================
+
+function initializeContextBox() {
+    const positiveCloud = document.getElementById('positive-cloud');
+    const negativeCloud = document.getElementById('negative-cloud');
+
+    if (!positiveCloud || !negativeCloud) {
+        console.error("Cloud containers not found. Interactivity will not work.");
+        return;
+    }
+
+    const showContext = (word, category) => {
+        const postsData = window._sentimentData?.[category]?.[word]?.posts;
+        if (!postsData || postsData.size === 0) {
+            console.log(`No context posts found for "${word}" in category "${category}".`);
+            return;
+        };
+
+        renderContextContent(word, Array.from(postsData));
+    };
+
+    const handleCloudClick = (event, category) => {
+        const wordEl = event.target.closest('.cloud-word');
+        if (wordEl) {
+            const word = wordEl.dataset.word;
+            showContext(word, category);
+        }
+    };
+
+    positiveCloud.addEventListener('click', (e) => handleCloudClick(e, 'positive'));
+    negativeCloud.addEventListener('click', (e) => handleCloudClick(e, 'negative'));
+}
+
 
 function initializeProblemFinderTool() {
     console.log("Problem Finder elements found. Initializing...");
@@ -284,7 +311,7 @@ function initializeProblemFinderTool() {
     const backButton = document.getElementById('back-to-step1-btn');
 
     if (!findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer) {
-        console.error("Critical error: A key element was null even after polling. Aborting initialization.");
+        console.error("Critical error: A key element was null. Aborting initialization.");
         return;
     }
 
@@ -300,7 +327,7 @@ function initializeProblemFinderTool() {
         step2Container.classList.remove('visible');
         step1Container.classList.remove('hidden');
         const resultsWrapper = document.getElementById('results-wrapper-b');
-        if (resultsWrapper) { resultsWrapper.classList.remove('is-visible'); }
+        if (resultsWrapper) { resultsWrapper.style.display = 'none'; }
     };
 
     pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
@@ -342,13 +369,13 @@ function initializeProblemFinderTool() {
         const choiceDiv = event.target.closest('.subreddit-choice');
         if (choiceDiv) {
             const checkbox = choiceDiv.querySelector('input[type="checkbox"]');
-            if (checkbox) {
-                checkbox.checked = !checkbox.checked;
-            }
+            if (checkbox) checkbox.checked = !checkbox.checked;
         }
     });
+    
+    initializeContextBox(); // Initialize the new context box listeners
 
-    console.log("Problem Finder tool successfully initialized and all listeners are active.");
+    console.log("Problem Finder tool successfully initialized.");
 }
 
 function waitForElementAndInit() {
@@ -366,9 +393,7 @@ function waitForElementAndInit() {
             retries++;
             if (retries > maxRetries) {
                 clearInterval(intervalId);
-                console.error(`Problem Finder initialization FAILED. The key element "#${keyElementId}" was not found in the DOM after 5 seconds. Please check that the HTML embed is correct and is loading on the page.`);
-            } else {
-                 console.log(`Waiting for Problem Finder tool... (Attempt ${retries})`);
+                console.error(`Initialization FAILED. Key element "#${keyElementId}" not found.`);
             }
         }
     }, 100);

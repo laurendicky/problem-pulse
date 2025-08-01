@@ -1,5 +1,5 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 10.1 - EMOTION POLARITY MAP FIX)
+// FINAL SCRIPT (VERSION 10.2 - EMOTION POLARITY MAP STABLE FIX)
 // COMPLETE CODE IN ONE BLOCK
 // =================================================================================
 
@@ -8,12 +8,6 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 let originalGroupName = '';
 const suggestions = ["Dog Lovers", "Start-up Founders", "Fitness Beginners", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Developers", "Brides To Be"];
-const positiveColors = ['#2E7D32', '#388E3C', '#43A047', '#1B5E20'];
-const negativeColors = ['#C62828', '#D32F2F', '#E53935', '#B71C1C'];
-
-const lemmaMap = { 'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': 'love', 'loving': 'love', 'hates': 'hate', 'wishes': 'wish', 'wishing': 'wish', 'solutions': 'solution', 'challenges': 'challenge', 'recommended': 'recommend', 'disappointed': 'disappoint', 'frustrated': 'frustrate', 'annoyed': 'annoy' };
-const positiveWords = new Set(['love', 'amazing', 'awesome', 'beautiful', 'best', 'brilliant', 'celebrate', 'charming', 'dope', 'excellent', 'excited', 'exciting', 'epic', 'fantastic', 'flawless', 'gorgeous', 'happy', 'impressed', 'incredible', 'insane', 'joy', 'keen', 'lit', 'perfect', 'phenomenal', 'proud', 'rad', 'super', 'stoked', 'thrilled', 'vibrant', 'wow', 'wonderful', 'blessed', 'calm', 'chill', 'comfortable', 'cozy', 'grateful', 'loyal', 'peaceful', 'pleased', 'relaxed', 'relieved', 'satisfied', 'secure', 'thankful', 'want', 'wish', 'hope', 'desire', 'craving', 'benefit', 'bonus', 'deal', 'hack', 'improvement', 'quality', 'solution', 'strength', 'advice', 'tip', 'trick', 'recommend']);
-const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'broken', 'hate', 'challenge', 'confused', 'crazy', 'critical', 'danger', 'desperate', 'disappoint', 'disgusted', 'dreadful', 'fear', 'frustrate', 'furious', 'horrible', 'irritated', 'jealous', 'nightmare', 'outraged', 'pain', 'panic', 'problem', 'rant', 'scared', 'shocked', 'stressful', 'terrible', 'terrified', 'trash', 'worst', 'alone', 'ashamed', 'bored', 'depressed', 'discouraged', 'dull', 'empty', 'exhausted', 'failure', 'guilty', 'heartbroken', 'hopeless', 'hurt', 'insecure', 'lonely', 'miserable', 'sad', 'sorry', 'tired', 'unhappy', 'upset', 'weak', 'need', 'disadvantage', 'issue', 'flaw']);
 const emotionalIntensityScores = {
     'annoy': 3, 'irritated': 3, 'bored': 2, 'issue': 3, 'sad': 4, 'bad': 3, 'confused': 4, 'tired': 3, 'upset': 5,
     'unhappy': 5, 'disappoint': 6, 'frustrate': 6, 'stressful': 6, 'awful': 7, 'hate': 8, 'angry': 7, 'broken': 5,
@@ -24,6 +18,8 @@ const emotionalIntensityScores = {
     'hopeless': 8, 'insecure': 5, 'lonely': 6, 'weak': 4, 'need': 5, 'disadvantage': 4, 'flaw': 4
 };
 const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
+const lemmaMap = { 'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': 'love', 'loving': 'love', 'hates': 'hate', 'wishes': 'wish', 'wishing': 'wish', 'solutions': 'solution', 'challenges': 'challenge', 'recommended': 'recommend', 'disappointed': 'disappoint', 'frustrated': 'frustrate', 'annoyed': 'annoy' };
+
 
 // --- 2. ALL HELPER AND LOGIC FUNCTIONS ---
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
@@ -78,19 +74,24 @@ function renderEmotionMap(data) {
     const container = document.getElementById('emotion-map');
     if (!container) return;
     
-    container.innerHTML = '<canvas id="emotion-chart-canvas"></canvas>';
+    // Clear previous chart and add new canvas
+    container.innerHTML = '<h3 class="dashboard-section-title">Emotion Polarity Map</h3><canvas id="emotion-chart-canvas"></canvas>';
     const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d');
     
     if (!ctx) return;
 
+    // Destroy any existing chart instance to prevent memory leaks
     if (window.myEmotionChart) {
         window.myEmotionChart.destroy();
     }
 
     if (data.length < 3) {
-        container.innerHTML = '<p style="font-family: Inter, sans-serif; color: #777;">Not enough emotional data to build a polarity map.</p>';
+        container.innerHTML = '<h3 class="dashboard-section-title">Emotion Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777;">Not enough emotional data to build a polarity map.</p>';
         return;
     }
+    
+    // Make bubble size relative to its own frequency data, not all posts
+    const maxFreq = Math.max(...data.map(p => p.x));
 
     window.myEmotionChart = new Chart(ctx, {
         type: 'scatter',
@@ -101,8 +102,8 @@ function renderEmotionMap(data) {
                 backgroundColor: 'rgba(229, 57, 53, 0.7)',
                 borderColor: 'rgba(198, 40, 40, 1)',
                 borderWidth: 1,
-                pointRadius: data.map(d => 5 + (d.x / Math.max(...data.map(p => p.x))) * 15),
-                pointHoverRadius: data.map(d => 8 + (d.x / Math.max(...data.map(p => p.x))) * 15),
+                pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20,
+                pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20,
             }]
         },
         options: {
@@ -119,23 +120,24 @@ function renderEmotionMap(data) {
                     displayColors: false,
                     titleFont: { size: 14, weight: 'bold' },
                     bodyFont: { size: 12 }
-                },
-                annotation: {
-                    annotations: {
-                        line1: { type: 'line', xMin: Chart.getChart("emotion-chart-canvas").scales.x.getPixelForValue(Chart.getChart("emotion-chart-canvas").scales.x.max / 2), xMax: Chart.getChart("emotion-chart-canvas").scales.x.getPixelForValue(Chart.getChart("emotion-chart-canvas").scales.x.max / 2), borderColor: 'rgba(0, 0, 0, 0.1)', borderWidth: 1 },
-                        line2: { type: 'line', yMin: 5, yMax: 5, borderColor: 'rgba(0, 0, 0, 0.1)', borderWidth: 1 }
-                    }
                 }
+                // REMOVED THE BROKEN ANNOTATION PLUGIN
             },
             scales: {
                 x: {
-                    title: { display: true, text: 'Frequency of Mention' },
-                    min: 0
+                    title: { display: true, text: 'Frequency of Mention', font: { weight: 'bold' } },
+                    min: 0,
+                    grid: {
+                        color: '#f0f0f0'
+                    }
                 },
                 y: {
-                    title: { display: true, text: 'Emotional Intensity' },
+                    title: { display: true, text: 'Emotional Intensity', font: { weight: 'bold' } },
                     min: 0,
-                    max: 10
+                    max: 10,
+                    grid: {
+                        color: '#f0f0f0'
+                    }
                 }
             }
         }
@@ -266,29 +268,6 @@ async function runProblemFinder() {
 // BLOCK 4 of 4: INITIALIZATION LOGIC
 // =================================================================================
 
-function initializeDashboardInteractivity() {
-    const dashboard = document.getElementById('results-wrapper-b');
-    if (!dashboard) return;
-
-    dashboard.addEventListener('click', (e) => {
-        const cloudWordEl = e.target.closest('.cloud-word');
-        const entityEl = e.target.closest('.discovery-list-item');
-
-        if (cloudWordEl) {
-            const word = cloudWordEl.dataset.word;
-            const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
-            const postsData = window._sentimentData?.[category]?.[word]?.posts;
-            if (postsData) renderContextContent(word, Array.from(postsData));
-        } else if (entityEl) {
-            const word = entityEl.dataset.word;
-            const type = entityEl.dataset.type;
-            const postsData = window._entityData?.[type]?.[word]?.posts;
-            if (postsData) renderContextContent(word, postsData);
-        }
-    });
-}
-
-
 function initializeProblemFinderTool() {
     console.log("Problem Finder elements found. Initializing...");
 
@@ -366,10 +345,6 @@ function initializeProblemFinderTool() {
         }
     });
     
-    // NOTE: This is now empty as we removed the dashboard features.
-    // We can add new interactivity here later if needed.
-    // initializeDashboardInteractivity(); 
-
     console.log("Problem Finder tool successfully initialized.");
 }
 

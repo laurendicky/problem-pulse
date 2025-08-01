@@ -1,5 +1,5 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 9.6 - TRENDING ANNOYANCES FEATURE)
+// FINAL SCRIPT (VERSION 9.7 - TRENDING ANNOYANCES FIX)
 // COMPLETE CODE IN ONE BLOCK
 // =================================================================================
 
@@ -186,46 +186,26 @@ async function generateFAQs(posts) {
     }
 }
 
-// THIS IS THE NEW "SIEVE & FILTER" HYBRID APPROACH
+// --- THIS IS THE NEW, SUPERCHARGED AI PROMPT & LOGIC ---
 async function extractAndValidateEntities(posts, nicheContext) {
-    // 1. The "Sieve": Quickly find all potential candidates using regex.
-    const candidates = {};
-    const brandRegex = /\b([A-Z][a-z]+(?:[A-Z][a-zA-Z]*)?|[A-Z]{2,}(?![a-z]))\b/g;
+    const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 800)}`).join('\n---\n');
 
-    posts.forEach(post => {
-        const text = `${post.data.title} ${post.data.selftext || ''}`;
-        let match;
-        while((match = brandRegex.exec(text)) !== null) {
-            const brand = match[0];
-            if(brand.length > 2 && !COMMON_NON_BRANDS.has(brand)) {
-                candidates[brand] = (candidates[brand] || 0) + 1;
-            }
-        }
-    });
-
-    const potentialBrands = Object.keys(candidates).sort((a,b) => candidates[b] - candidates[a]).slice(0, 60); // Get top 60 candidates
-
-    if (potentialBrands.length === 0) {
-        return { topBrands: [], topProducts: [] };
-    }
-
-    // 2. The "Filter": Send the candidates to the AI for validation.
-    const prompt = `You are a market research analyst for the '${nicheContext}' audience. From the following list of potential brand and product names, please identify and categorize them.
-
-List of Candidates: [${potentialBrands.join(', ')}]
-
-Your Task:
-1. Identify the specific, proper-noun BRAND names (e.g., "Stripe", "KitchenAid", "The Knot").
-2. Identify the generic PRODUCT categories (e.g., "CRM software", "stand mixer", "wedding dress").
+    const prompt = `You are a world-class market research analyst reviewing Reddit posts from the '${nicheContext}' community. From the text provided, extract the following:
+1. "brands": Specific, proper-noun company, brand, or service names (e.g., "KitchenAid", "Stripe", "The Knot", "Canva").
+2. "products": Common, generic product or service categories that are frequently discussed (e.g., "stand mixer", "CRM software", "wedding dress", "sourdough starter", "leash", "collar").
 
 CRITICAL RULES:
-- Only return items from the provided list.
-- Discard any items that are not brands or products (e.g., acronyms like 'MOH', generic words like 'UPDATE').
+- BE STRICT. Do not include acronyms (like MOH, AITA), generic words (like UPDATE, EDIT), or terms that are not tangible products or brands.
+- For "start-up founders", brands are often software (e.g., "AWS", "Stripe", "Slack").
+- For "home baking", products are often ingredients or equipment (e.g., "flour", "vanilla extract", "stand mixer").
 
-Respond ONLY with a JSON object with two keys: "brands" and "products". Each key should hold an array of the valid strings from the candidate list. If none are valid for a category, return an empty array.`;
+Respond ONLY with a JSON object with two keys: "brands" and "products". Each key must hold an array of the identified strings. If no entities are found for a category, return an empty array.
+
+Text to analyze:
+${topPostsText}`;
 
     const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1000, response_format: { "type": "json_object" } };
-    
+
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('AI entity extraction failed.');
@@ -237,7 +217,7 @@ Respond ONLY with a JSON object with two keys: "brands" and "products". Each key
             products: parsed.products || []
         };
         
-        window._entityData = {};
+        window._entityData = {}; // Store data for interactivity
         for (const type in allEntities) {
             window._entityData[type] = {};
             allEntities[type].forEach(name => {
@@ -256,11 +236,13 @@ Respond ONLY with a JSON object with two keys: "brands" and "products". Each key
             topBrands: Object.entries(window._entityData.brands || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8),
             topProducts: Object.entries(window._entityData.products || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8)
         };
+
     } catch (error) {
         console.error("Entity extraction error:", error);
         return { topBrands: [], topProducts: [] };
     }
 }
+
 
 function renderDiscoveryList(containerId, data, title, type) {
     const container = document.getElementById(containerId);
@@ -363,15 +345,18 @@ async function runProblemFinder() {
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
 
+        // --- Run all dashboard analyses ---
         const sentimentData = generateSentimentData(filteredPosts);
         renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
         renderIncludedSubreddits(selectedSubreddits);
         
-        extractAndValidateEntities(filteredPosts, originalGroupName).then(entities => {
+        // Asynchronously run AI-heavy tasks
+        extractAndValidateEntities(filteredPosts, originalGroupName, selectedSubreddits).then(entities => {
             renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands');
             renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products');
+            // NOTE: Similar communities is no longer called/rendered
         });
         generateFAQs(filteredPosts).then(faqs => renderFAQs(faqs));
 
@@ -392,7 +377,6 @@ async function runProblemFinder() {
         const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
         window._summaries = sortedFindings.map(item => item.summary);
         
-        // --- NEW: Pass core problem titles to the trending annoyances function ---
         const coreProblemTitles = sortedFindings.map(f => f.summary.title);
         findTrendingAnnoyances(filteredPosts, coreProblemTitles).then(trending => {
             renderTrendingAnnoyances(trending);
@@ -454,7 +438,7 @@ async function runProblemFinder() {
 // =================================================================================
 
 function initializeDashboardInteractivity() {
-    const dashboard = document.getElementById('results-wrapper-b'); // Use a parent container
+    const dashboard = document.getElementById('results-wrapper-b');
     if (!dashboard) return;
 
     dashboard.addEventListener('click', (e) => {

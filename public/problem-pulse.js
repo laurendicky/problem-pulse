@@ -67,20 +67,18 @@ function generateEmotionMapData(posts) {
         };
     });
 
-    return chartData.sort((a, b) => b.x - a.x).slice(0, 25); // Return top 25 emotions
+    return chartData.sort((a, b) => b.x - a.x).slice(0, 25);
 }
 
 function renderEmotionMap(data) {
-    const container = document.getElementById('emotion-map');
+    const container = document.getElementById('emotion-map-container');
     if (!container) return;
     
-    // Clear previous chart and add new canvas
-    container.innerHTML = '<h3 class="dashboard-section-title">Emotion Polarity Map</h3><canvas id="emotion-chart-canvas"></canvas>';
+    container.innerHTML = '<h3 class="dashboard-section-title">Emotion Polarity Map</h3><div id="emotion-map"><canvas id="emotion-chart-canvas"></canvas></div>';
     const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d');
     
     if (!ctx) return;
 
-    // Destroy any existing chart instance to prevent memory leaks
     if (window.myEmotionChart) {
         window.myEmotionChart.destroy();
     }
@@ -90,7 +88,6 @@ function renderEmotionMap(data) {
         return;
     }
     
-    // Make bubble size relative to its own frequency data, not all posts
     const maxFreq = Math.max(...data.map(p => p.x));
 
     window.myEmotionChart = new Chart(ctx, {
@@ -121,23 +118,18 @@ function renderEmotionMap(data) {
                     titleFont: { size: 14, weight: 'bold' },
                     bodyFont: { size: 12 }
                 }
-                // REMOVED THE BROKEN ANNOTATION PLUGIN
             },
             scales: {
                 x: {
                     title: { display: true, text: 'Frequency of Mention', font: { weight: 'bold' } },
                     min: 0,
-                    grid: {
-                        color: '#f0f0f0'
-                    }
+                    grid: { color: '#f0f0f0' }
                 },
                 y: {
                     title: { display: true, text: 'Emotional Intensity', font: { weight: 'bold' } },
                     min: 0,
                     max: 10,
-                    grid: {
-                        color: '#f0f0f0'
-                    }
+                    grid: { color: '#f0f0f0' }
                 }
             }
         }
@@ -169,7 +161,7 @@ async function runProblemFinder() {
     const resultsWrapper = document.getElementById('results-wrapper-b');
     if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
     
-    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; if(id === 'emotion-map') el.style.display = 'block'; } });
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; } });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
     const resultsMessageDiv = document.getElementById("results-message");
@@ -192,7 +184,7 @@ async function runProblemFinder() {
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
 
-        // --- NEW: Generate and render the Emotion Map ---
+        // --- Generate and render the Emotion Map ---
         const emotionMapData = generateEmotionMapData(filteredPosts);
         renderEmotionMap(emotionMapData);
 
@@ -202,7 +194,7 @@ async function runProblemFinder() {
         const topKeywords = getTopKeywords(filteredPosts, 10);
         const topPosts = filteredPosts.slice(0, 30);
         const combinedTexts = topPosts.map(post => `${post.data.title}. ${getFirstTwoSentences(post.data.selftext)}`).join("\n\n");
-        const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", and "keywords". Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["Quote A", "Quote B", "Quote C"], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_tokens: 1500, response_format: { "type": "json_object" } };
+        const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["Quote A", "Quote B", "Quote C"], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_tokens: 1500, response_format: { "type": "json_object" } };
         const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!openAIResponse.ok) throw new Error('OpenAI summary generation failed.');
         const openAIData = await openAIResponse.json();

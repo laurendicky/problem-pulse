@@ -1,7 +1,4 @@
-// =================================================================================
-// FINAL SCRIPT (VERSION 10.3 - ALL FEATURES INTEGRATED & STABLE)
-// COMPLETE CODE IN ONE BLOCK
-// =================================================================================
+
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';

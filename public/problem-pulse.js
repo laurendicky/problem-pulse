@@ -46,6 +46,7 @@ function lemmatize(word) {
     return word;
 }
 
+// --- THIS IS THE NEW FUNCTION THAT WAS MISSING ---
 function generateEmotionMapData(posts) {
     const emotionFreq = {};
     posts.forEach(post => {
@@ -70,6 +71,7 @@ function generateEmotionMapData(posts) {
     return chartData.sort((a, b) => b.x - a.x).slice(0, 25);
 }
 
+// --- THIS IS THE FIXED FUNCTION THAT CAUSED THE CRASH ---
 function renderEmotionMap(data) {
     const container = document.getElementById('emotion-map-container');
     if (!container) return;
@@ -118,6 +120,7 @@ function renderEmotionMap(data) {
                     titleFont: { size: 14, weight: 'bold' },
                     bodyFont: { size: 12 }
                 }
+                // THE BROKEN ANNOTATION PLUGIN IS REMOVED
             },
             scales: {
                 x: {

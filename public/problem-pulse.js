@@ -1,5 +1,5 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 9 - FULL INSIGHTS DASHBOARD)
+// FINAL SCRIPT (VERSION 9.1 - AI BRAND VALIDATION)
 // BLOCK 1 of 4: GLOBAL VARIABLES & HELPERS
 // =================================================================================
 
@@ -15,6 +15,7 @@ const lemmaMap = { 'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': '
 const positiveWords = new Set(['love', 'amazing', 'awesome', 'beautiful', 'best', 'brilliant', 'celebrate', 'charming', 'dope', 'excellent', 'excited', 'exciting', 'epic', 'fantastic', 'flawless', 'gorgeous', 'happy', 'impressed', 'incredible', 'insane', 'joy', 'keen', 'lit', 'perfect', 'phenomenal', 'proud', 'rad', 'super', 'stoked', 'thrilled', 'vibrant', 'wow', 'wonderful', 'blessed', 'calm', 'chill', 'comfortable', 'cozy', 'grateful', 'loyal', 'peaceful', 'pleased', 'relaxed', 'relieved', 'satisfied', 'secure', 'thankful', 'want', 'wish', 'hope', 'desire', 'craving', 'benefit', 'bonus', 'deal', 'hack', 'improvement', 'quality', 'solution', 'strength', 'advice', 'tip', 'trick', 'recommend']);
 const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'broken', 'hate', 'challenge', 'confused', 'crazy', 'critical', 'danger', 'desperate', 'disappoint', 'disgusted', 'dreadful', 'fear', 'frustrate', 'furious', 'horrible', 'irritated', 'jealous', 'nightmare', 'outraged', 'pain', 'panic', 'problem', 'rant', 'scared', 'shocked', 'stressful', 'terrible', 'terrified', 'trash', 'worst', 'alone', 'ashamed', 'bored', 'depressed', 'discouraged', 'dull', 'empty', 'exhausted', 'failure', 'guilty', 'heartbroken', 'hopeless', 'hurt', 'insecure', 'lonely', 'miserable', 'sad', 'sorry', 'tired', 'unhappy', 'upset', 'weak', 'need', 'disadvantage', 'issue', 'flaw']);
 const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
+const COMMON_NON_BRANDS = new Set(['EDIT', 'UPDATE', 'OP', 'AITA', 'TLDR', 'IMO', 'IMHO', 'IAMA', 'AMA', 'PSA', 'DIY', 'FAQ', 'TIL', 'MOH', 'MIL', 'SIL', 'FIL', 'SO', 'RSVP', 'EOD', 'TBD', 'FYI', 'PM', 'DM', 'MOD', 'BOT', 'USA', 'UK', 'EU']);
 
 // --- 2. ALL HELPER AND LOGIC FUNCTIONS ---
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
@@ -115,7 +116,6 @@ function renderSentimentCloud(containerId, wordData, colors) {
     container.innerHTML = cloudHTML;
 }
 
-// --- REPLACED & IMPROVED: This function now handles the close button and has robust highlighting ---
 function renderContextContent(word, posts) {
     const contextBox = document.getElementById('context-box');
     if (!contextBox) return;
@@ -196,10 +196,10 @@ async function generateFAQs(posts) {
     }
 }
 
-function extractEntities(posts, currentSubreddits) {
+function extractPotentialEntities(posts, currentSubreddits) {
     const brands = {};
     const communities = {};
-    const brandRegex = /\b([A-Z][a-z]+[A-Z][a-zA-Z]*|[A-Z]{2,}(?![a-z]))\b/g; // Catches CamelCase and ALLCAPS words
+    const brandRegex = /\b([A-Z][a-z]+[A-Z][a-zA-Z]*|[A-Z]{2,}(?![a-z]))\b/g;
     const communityRegex = /r\/(\w+)/g;
     const currentSubSet = new Set(currentSubreddits);
 
@@ -208,7 +208,9 @@ function extractEntities(posts, currentSubreddits) {
         let match;
         while((match = brandRegex.exec(text)) !== null) {
             const brand = match[0];
-            if(brand.length > 2 && brand.toLowerCase() !== 'i') brands[brand] = (brands[brand] || 0) + 1;
+            if(brand.length > 2 && !COMMON_NON_BRANDS.has(brand)) {
+                brands[brand] = (brands[brand] || 0) + 1;
+            }
         }
         while((match = communityRegex.exec(text)) !== null) {
             const community = match[1];
@@ -219,27 +221,47 @@ function extractEntities(posts, currentSubreddits) {
     });
 
     return {
-        topBrands: Object.entries(brands).sort((a, b) => b[1] - a[1]).slice(0, 8),
+        potentialBrands: Object.keys(brands).sort((a,b) => brands[b] - brands[a]).slice(0, 50), // Send top 50 candidates to AI
         similarCommunities: Object.entries(communities).sort((a, b) => b[1] - a[1]).slice(0, 8)
     };
 }
 
-function renderSentimentScore(positiveCount, negativeCount) {
-    const container = document.getElementById('sentiment-score-container');
-    if(!container) return;
-    const total = positiveCount + negativeCount;
-    if (total === 0) return;
-    const positivePercent = Math.round((positiveCount / total) * 100);
-    const negativePercent = 100 - positivePercent;
-    container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`;
+async function validateBrandsWithAI(potentialBrands, nicheContext) {
+    if (potentialBrands.length === 0) return [];
+    const prompt = `You are a brand identification expert. For the audience "${nicheContext}", analyze this list of capitalized words: [${potentialBrands.join(', ')}]. Identify which are actual brand, product, or company names relevant to this audience. Ignore common acronyms, locations, and generic words. Respond ONLY with a JSON object with a single key "brands", containing an array of the valid brand names. If none are valid, return an empty array.`;
+    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise brand identification engine that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 400, response_format: { "type": "json_object" } };
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('OpenAI brand validation failed.');
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        return parsed.brands || [];
+    } catch (error) {
+        console.error("Brand validation error:", error);
+        return [];
+    }
+}
+
+function countValidatedBrands(validatedBrands, posts) {
+    if (validatedBrands.length === 0) return [];
+    const brandCounts = {};
+    validatedBrands.forEach(brand => {
+        const regex = new RegExp(`\\b${brand}\\b`, 'g');
+        let count = 0;
+        posts.forEach(post => {
+            count += ((post.data.title + ' ' + post.data.selftext).match(regex) || []).length;
+        });
+        if (count > 0) brandCounts[brand] = count;
+    });
+    return Object.entries(brandCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
 }
 
 function renderDiscoveryList(containerId, data, title) {
     const container = document.getElementById(containerId);
     if(!container) return;
-    let listItems = '<p>No significant mentions found.</p>';
+    let listItems = '<p style="font-family: Inter, sans-serif; color: #777;">No significant mentions found.</p>';
     if (data.length > 0) {
-        listItems = data.map(([name, count], index) => `<li><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${count} mentions</span></li>`).join('');
+        listItems = data.map(([name, count], index) => `<li class="discovery-list-item"><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${count} mentions</span></li>`).join('');
     }
     container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`;
 }
@@ -247,13 +269,12 @@ function renderDiscoveryList(containerId, data, title) {
 function renderFAQs(faqs) {
     const container = document.getElementById('faq-container');
     if(!container) return;
-    let faqItems = '<p>Could not generate common questions.</p>';
+    let faqItems = '<p style="font-family: Inter, sans-serif; color: #777;">Could not generate common questions from the text.</p>';
     if (faqs.length > 0) {
         faqItems = faqs.map((faq, index) => `<div class="faq-item"><button class="faq-question">${faq}</button><div class="faq-answer"><p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p></div></div>`).join('');
     }
     container.innerHTML = `<h3 class="dashboard-section-title">Frequently Asked Questions</h3>${faqItems}`;
     
-    // Add accordion functionality
     container.querySelectorAll('.faq-question').forEach(button => {
         button.addEventListener('click', () => {
             const answer = button.nextElementSibling;
@@ -326,16 +347,19 @@ async function runProblemFinder() {
 
         // --- NEW: Run all dashboard analyses ---
         const sentimentData = generateSentimentData(filteredPosts);
-        const entities = extractEntities(filteredPosts, selectedSubreddits);
+        const { potentialBrands, similarCommunities } = extractPotentialEntities(filteredPosts, selectedSubreddits);
         
-        // Render all dashboard components
-        renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
-        renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Products');
-        renderDiscoveryList('similar-communities-container', entities.similarCommunities, 'Similar Communities');
+        renderDiscoveryList('similar-communities-container', similarCommunities, 'Similar Communities');
         renderIncludedSubreddits(selectedSubreddits);
-        generateFAQs(filteredPosts).then(faqs => renderFAQs(faqs)); // Run this in parallel
+        
+        // Asynchronously validate brands and generate FAQs so the UI feels faster
+        validateBrandsWithAI(potentialBrands, originalGroupName).then(validatedBrands => {
+            const topBrands = countValidatedBrands(validatedBrands, filteredPosts);
+            renderDiscoveryList('top-brands-container', topBrands, 'Top Brands & Products');
+        });
+        generateFAQs(filteredPosts).then(faqs => renderFAQs(faqs));
 
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) countHeaderDiv.textContent = `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;

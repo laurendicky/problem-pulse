@@ -1,5 +1,5 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 8.1 - ROBUST SNIPPETS & HIGHLIGHTING)
+// FINAL SCRIPT (VERSION 9 - FULL INSIGHTS DASHBOARD)
 // BLOCK 1 of 4: GLOBAL VARIABLES & HELPERS
 // =================================================================================
 
@@ -48,6 +48,8 @@ function generateSentimentData(posts) {
         positive: {},
         negative: {}
     };
+    let positiveCount = 0;
+    let negativeCount = 0;
 
     posts.forEach(post => {
         const text = `${post.data.title} ${post.data.selftext || ''}`;
@@ -59,8 +61,13 @@ function generateSentimentData(posts) {
             const lemma = lemmatize(rawWord);
 
             let category = null;
-            if (positiveWords.has(lemma)) category = 'positive';
-            else if (negativeWords.has(lemma)) category = 'negative';
+            if (positiveWords.has(lemma)) {
+                category = 'positive';
+                positiveCount++;
+            } else if (negativeWords.has(lemma)) {
+                category = 'negative';
+                negativeCount++;
+            }
             
             if (category) {
                 if (!data[category][lemma]) {
@@ -76,7 +83,9 @@ function generateSentimentData(posts) {
 
     return {
         positive: Object.entries(data.positive).sort((a, b) => b[1].count - a[1].count).slice(0, 30),
-        negative: Object.entries(data.negative).sort((a, b) => b[1].count - a[1].count).slice(0, 30)
+        negative: Object.entries(data.negative).sort((a, b) => b[1].count - a[1].count).slice(0, 30),
+        positiveCount,
+        negativeCount
     };
 }
 
@@ -169,6 +178,103 @@ function renderContextContent(word, posts) {
 
     contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
+
+// --- NEW FUNCTIONS FOR NEW FEATURES ---
+async function generateFAQs(posts) {
+    const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title}\nContent: ${p.data.selftext.substring(0, 500)}`).join('\n---\n');
+    const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. The questions should be direct and actionable. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?", "What is the best tool for Y?"]}\n\nPosts:\n${topPostsText}`;
+    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 500, response_format: { "type": "json_object" } };
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('OpenAI FAQ generation failed.');
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        return parsed.faqs || [];
+    } catch (error) {
+        console.error("FAQ generation error:", error);
+        return [];
+    }
+}
+
+function extractEntities(posts, currentSubreddits) {
+    const brands = {};
+    const communities = {};
+    const brandRegex = /\b([A-Z][a-z]+[A-Z][a-zA-Z]*|[A-Z]{2,}(?![a-z]))\b/g; // Catches CamelCase and ALLCAPS words
+    const communityRegex = /r\/(\w+)/g;
+    const currentSubSet = new Set(currentSubreddits);
+
+    posts.forEach(post => {
+        const text = `${post.data.title} ${post.data.selftext || ''}`;
+        let match;
+        while((match = brandRegex.exec(text)) !== null) {
+            const brand = match[0];
+            if(brand.length > 2 && brand.toLowerCase() !== 'i') brands[brand] = (brands[brand] || 0) + 1;
+        }
+        while((match = communityRegex.exec(text)) !== null) {
+            const community = match[1];
+            if (!currentSubSet.has(community)) {
+                 communities[community] = (communities[community] || 0) + 1;
+            }
+        }
+    });
+
+    return {
+        topBrands: Object.entries(brands).sort((a, b) => b[1] - a[1]).slice(0, 8),
+        similarCommunities: Object.entries(communities).sort((a, b) => b[1] - a[1]).slice(0, 8)
+    };
+}
+
+function renderSentimentScore(positiveCount, negativeCount) {
+    const container = document.getElementById('sentiment-score-container');
+    if(!container) return;
+    const total = positiveCount + negativeCount;
+    if (total === 0) return;
+    const positivePercent = Math.round((positiveCount / total) * 100);
+    const negativePercent = 100 - positivePercent;
+    container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`;
+}
+
+function renderDiscoveryList(containerId, data, title) {
+    const container = document.getElementById(containerId);
+    if(!container) return;
+    let listItems = '<p>No significant mentions found.</p>';
+    if (data.length > 0) {
+        listItems = data.map(([name, count], index) => `<li><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${count} mentions</span></li>`).join('');
+    }
+    container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`;
+}
+
+function renderFAQs(faqs) {
+    const container = document.getElementById('faq-container');
+    if(!container) return;
+    let faqItems = '<p>Could not generate common questions.</p>';
+    if (faqs.length > 0) {
+        faqItems = faqs.map((faq, index) => `<div class="faq-item"><button class="faq-question">${faq}</button><div class="faq-answer"><p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p></div></div>`).join('');
+    }
+    container.innerHTML = `<h3 class="dashboard-section-title">Frequently Asked Questions</h3>${faqItems}`;
+    
+    // Add accordion functionality
+    container.querySelectorAll('.faq-question').forEach(button => {
+        button.addEventListener('click', () => {
+            const answer = button.nextElementSibling;
+            button.classList.toggle('active');
+            if (answer.style.maxHeight) {
+                answer.style.maxHeight = null;
+                answer.style.padding = '0 1.5rem';
+            } else {
+                answer.style.padding = '1rem 1.5rem';
+                answer.style.maxHeight = answer.scrollHeight + "px";
+            }
+        });
+    });
+}
+
+function renderIncludedSubreddits(subreddits) {
+    const container = document.getElementById('included-subreddits-container');
+    if(!container) return;
+    const tags = subreddits.map(sub => `<div class="subreddit-tag">r/${sub}</div>`).join('');
+    container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list">${tags}</div>`;
+}
 // =================================================================================
 // BLOCK 3 of 4: MAIN ANALYSIS FUNCTION
 // =================================================================================
@@ -194,7 +300,8 @@ async function runProblemFinder() {
     const resultsWrapper = document.getElementById('results-wrapper-b');
     if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
     
-    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "positive-cloud", "negative-cloud", "context-box"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; if(id === 'context-box') el.style.display = 'none'; } });
+    // Clear all results containers
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "positive-cloud", "negative-cloud", "context-box", "sentiment-score-container", "top-brands-container", "similar-communities-container", "faq-container", "included-subreddits-container"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; if(id === 'context-box') el.style.display = 'none'; } });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
     const resultsMessageDiv = document.getElementById("results-message");
@@ -217,11 +324,18 @@ async function runProblemFinder() {
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
 
-        // --- SENTIMENT DASHBOARD CALLS ---
+        // --- NEW: Run all dashboard analyses ---
         const sentimentData = generateSentimentData(filteredPosts);
+        const entities = extractEntities(filteredPosts, selectedSubreddits);
+        
+        // Render all dashboard components
+        renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
-        // --- END OF SENTIMENT DASHBOARD ---
+        renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Products');
+        renderDiscoveryList('similar-communities-container', entities.similarCommunities, 'Similar Communities');
+        renderIncludedSubreddits(selectedSubreddits);
+        generateFAQs(filteredPosts).then(faqs => renderFAQs(faqs)); // Run this in parallel
 
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) countHeaderDiv.textContent = `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;

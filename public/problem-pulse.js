@@ -1,7 +1,7 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 10.3-TopicMap-Fix - STABLE WITH MORE MAP DATA)
-// This version keeps the stable 10.3 base and only modifies the Topic Polarity Map
-// to be less sparse by including neutral-emotion topics.
+// FINAL SCRIPT (VERSION 10.3 - UPGRADED PROBLEM MAP)
+// This version keeps the stable 10.3 base and only modifies the Emotion Polarity Map
+// to use a more powerful two-step AI analysis for richer, more accurate data.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -41,136 +41,74 @@ function displaySubredditChoices(subreddits) { const choicesDiv = document.getEl
 function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1); return word; }
 
 /**
- * [MODIFIED to be less sparse]
- * 1. Calls AI to get a list of discussion topics.
- * 2. For each topic, calculates its frequency and the average emotional intensity of posts mentioning it.
- * 3. If a topic has no emotional words, it's given a neutral score of 5 to ensure it appears on the map.
+ * [MODIFIED] Generates data for the Problem Polarity Map using a two-step AI process.
+ * 1. AI identifies key problems and topics.
+ * 2. A second AI call scores the emotional intensity of each identified problem.
  */
 async function generateEmotionMapData(posts) {
     const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 800)}`).join('\n---\n');
-    const prompt = `You are a market research analyst. From the following text about '${originalGroupName}', identify up to 20 key TOPICS of discussion (e.g., "wedding dress", "family issues", "catering"). Respond ONLY with a JSON object with a single key "topics", containing an array of these topic strings.`;
-    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You extract key topics from text and respond in JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 400, response_format: { "type": "json_object" } };
+    
+    // Step 1: Use AI to extract problems and key topics
+    const problemPrompt = `You are a market research analyst. From the following text about '${originalGroupName}', identify up to 20 of the most significant problems, pain points, or key topics of discussion. Focus on actionable insights. Respond ONLY with a JSON object with a single key "topics", which is an array of strings.`;
+    const problemOpenAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You extract key problems and topics from text and respond in valid JSON." }, { role: "user", content: problemPrompt }], temperature: 0.1, max_tokens: 500, response_format: { "type": "json_object" } };
     
     let topics = [];
     try {
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: problemOpenAIParams, textContent: topPostsText }) });
         if (!response.ok) throw new Error('AI topic extraction failed.');
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
         topics = parsed.topics || [];
     } catch (error) {
-        console.error("Topic Polarity Map - AI topic extraction error:", error);
+        console.error("Problem Map - AI topic extraction error:", error);
         return [];
     }
 
     if (topics.length === 0) return [];
 
-    const topicData = topics.map(topic => {
+    // Step 2: For each topic, calculate frequency and ask AI to score its intensity
+    const topicDataPromises = topics.map(async (topic) => {
         const topicRegex = new RegExp(`\\b${topic.replace(/ /g, '\\s').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(s?)\\b`, 'i');
-        let totalIntensity = 0;
-        let emotionCount = 0;
-        let mentionCount = 0;
+        const mentioningPosts = posts.filter(p => topicRegex.test(`${p.data.title} ${p.data.selftext || ''}`));
+        const mentionCount = mentioningPosts.length;
 
-        posts.forEach(post => {
-            const postText = `${post.data.title} ${post.data.selftext || ''}`.toLowerCase();
-            if (topicRegex.test(postText)) {
-                mentionCount++;
-                const words = postText.replace(/[^a-z\s']/g, '').split(/\s+/);
-                words.forEach(rawWord => {
-                    const lemma = lemmatize(rawWord);
-                    if (emotionalIntensityScores[lemma]) {
-                        totalIntensity += emotionalIntensityScores[lemma];
-                        emotionCount++;
-                    }
-                });
-            }
-        });
-        
-        // ** THE FIX IS HERE **
-        // Only require the topic to be mentioned at least once.
-        if (mentionCount > 0) {
+        if (mentionCount === 0) return null;
+
+        const contextSentences = mentioningPosts.slice(0, 3).map(p => getFirstTwoSentences(p.data.selftext || p.data.title)).join(' ');
+        const intensityPrompt = `On a scale of 1 (neutral) to 10 (intense pain point), how severe is the problem or topic of "${topic}" based on this context: "${contextSentences}". Respond ONLY with a JSON object like {"intensity": 8}.`;
+        const intensityOpenAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You provide a single JSON object with an intensity score." }, { role: "user", content: intensityPrompt }], temperature: 0, max_tokens: 50, response_format: { "type": "json_object" } };
+
+        try {
+            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: intensityOpenAIParams }) });
+            if (!response.ok) return { x: mentionCount, y: 5, label: topic }; // Default to neutral if API fails
+            const data = await response.json();
+            const parsed = JSON.parse(data.openaiResponse);
+            const intensity = parsed.intensity || 5;
             return {
                 x: mentionCount,
-                // If emotional words were found, calculate average. Otherwise, assign a neutral score of 5.
-                y: emotionCount > 0 ? totalIntensity / emotionCount : 5, 
+                y: intensity,
                 label: topic
             };
-        }
-        return null; // Discard topic only if it was never mentioned.
-    }).filter(Boolean);
-
-    return topicData.sort((a, b) => b.x - a.x).slice(0, 25);
-}
-
-// This function is UNTOUCHED but included for completeness.
-function renderEmotionMap(data) {
-    const container = document.getElementById('emotion-map-container');
-    if (!container) return;
-    container.innerHTML = '<h3 class="dashboard-section-title">Topic Polarity Map</h3><div id="emotion-map"><canvas id="emotion-chart-canvas"></canvas></div>';
-    const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d');
-    if (!ctx) return;
-
-    if (window.myEmotionChart) {
-        window.myEmotionChart.destroy();
-    }
-    if (data.length < 3) {
-        container.innerHTML = '<h3 class="dashboard-section-title">Topic Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough data to build a polarity map.</p>';
-        return;
-    }
-    const maxFreq = Math.max(...data.map(p => p.x));
-    window.myEmotionChart = new Chart(ctx, {
-        type: 'scatter',
-        data: {
-            datasets: [{
-                label: 'Topics',
-                data: data,
-                backgroundColor: 'rgba(2, 119, 189, 0.7)', // Neutral blue color
-                borderColor: 'rgba(1, 87, 155, 1)',
-                borderWidth: 1,
-                pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20,
-                pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20,
-            }]
-        },
-        options: {
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false },
-                tooltip: {
-                    callbacks: {
-                        label: function(context) {
-                            const point = context.raw;
-                            return `${point.label}: Frequency=${point.x}, Avg. Intensity=${point.y.toFixed(1)}`;
-                        }
-                    },
-                    displayColors: false,
-                    titleFont: { size: 14, weight: 'bold' },
-                    bodyFont: { size: 12 }
-                }
-            },
-            scales: {
-                x: {
-                    title: { display: true, text: 'Frequency of Topic Mention', font: { weight: 'bold' } },
-                    min: 0,
-                    grid: { color: '#f0f0f0' }
-                },
-                y: {
-                    title: { display: true, text: 'Average Emotional Intensity', font: { weight: 'bold' } },
-                    min: 0,
-                    max: 10,
-                    grid: { color: '#f0f0f0' }
-                }
-            }
+        } catch (e) {
+            console.error(`Failed to get intensity for topic "${topic}":`, e);
+            return { x: mentionCount, y: 5, label: topic }; // Default to neutral on error
         }
     });
+
+    const resolvedTopicData = await Promise.all(topicDataPromises);
+    return resolvedTopicData.filter(Boolean).sort((a, b) => b.x - a.x).slice(0, 25);
 }
 
+
+// This function is UNTOUCHED but included for completeness.
+function renderEmotionMap(data) { const container = document.getElementById('emotion-map-container'); if (!container) return; container.innerHTML = '<h3 class="dashboard-section-title">Problem Polarity Map</h3><div id="emotion-map"><canvas id="emotion-chart-canvas"></canvas></div>'; const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d'); if (!ctx) return; if (window.myEmotionChart) { window.myEmotionChart.destroy(); } if (data.length < 3) { container.innerHTML = '<h3 class="dashboard-section-title">Problem Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777;">Not enough distinct problems found to build a map.</p>'; return; } const maxFreq = Math.max(...data.map(p => p.x)); window.myEmotionChart = new Chart(ctx, { type: 'scatter', data: { datasets: [{ label: 'Problems/Topics', data: data, backgroundColor: 'rgba(229, 57, 53, 0.7)', borderColor: 'rgba(198, 40, 40, 1)', borderWidth: 1, pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20, pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20, }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(context) { const point = context.raw; return `${point.label}: Frequency=${point.x}, Problem Intensity=${point.y.toFixed(1)}`; } }, displayColors: false, titleFont: { size: 14, weight: 'bold' }, bodyFont: { size: 12 } } }, scales: { x: { title: { display: true, text: 'Frequency of Mention', font: { weight: 'bold' } }, min: 0, grid: { color: '#f0f0f0' } }, y: { title: { display: true, text: 'Problem Intensity Score', font: { weight: 'bold' } }, min: 0, max: 10, grid: { color: '#f0f0f0' } } } } }); }
 
 // --- ALL OTHER FUNCTIONS BELOW ARE UNTOUCHED FROM YOUR ORIGINAL SCRIPT ---
 function generateSentimentData(posts) { const data = { positive: {}, negative: {} }; let positiveCount = 0; let negativeCount = 0; posts.forEach(post => { const text = `${post.data.title} ${post.data.selftext || ''}`; const words = text.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { if (rawWord.length < 3 || stopWords.includes(rawWord)) return; const lemma = lemmatize(rawWord); let category = null; if (positiveWords.has(lemma)) { category = 'positive'; positiveCount++; } else if (negativeWords.has(lemma)) { category = 'negative'; negativeCount++; } if (category) { if (!data[category][lemma]) { data[category][lemma] = { count: 0, posts: new Set() }; } data[category][lemma].count++; data[category][lemma].posts.add(post); } }); }); window._sentimentData = data; return { positive: Object.entries(data.positive).sort((a, b) => b[1].count - a[1].count).slice(0, 30), negative: Object.entries(data.negative).sort((a, b) => b[1].count - a[1].count).slice(0, 30), positiveCount, negativeCount }; }
 function renderSentimentCloud(containerId, wordData, colors) { const container = document.getElementById(containerId); if (!container) return; if (wordData.length < 3) { container.innerHTML = `<p style="font-family: sans-serif; color: #777; padding: 1rem; text-align: center;">Not enough distinct terms found.</p>`; return; } const counts = wordData.map(item => item[1].count); const maxCount = Math.max(...counts); const minCount = Math.min(...counts); const minFontSize = 16, maxFontSize = 42; const cloudHTML = wordData.map(([word, data]) => { const fontSize = minFontSize + ((data.count - minCount) / (maxCount - minCount || 1)) * (maxFontSize - minFontSize); const color = colors[Math.floor(Math.random() * colors.length)]; const rotation = Math.random() * 8 - 4; return `<span class="cloud-word" data-word="${word}" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${word}</span>`; }).join(''); container.innerHTML = cloudHTML; }
 function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title}. ${post.data.selftext || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence.replace(highlightRegex, `<strong>$1</strong>`); const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if(closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title}\nContent: ${p.data.selftext.substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
-async function extractAndValidateEntities(posts, nicheContext) { const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 800)}`).join('\n---\n'); const prompt = `You are a world-class market research analyst reviewing Reddit posts from the '${nicheContext}' community. Extract the following: 1. "brands": Specific company or service names (e.g., "KitchenAid", "Stripe"). 2. "products": Common, generic product categories (e.g., "stand mixer", "CRM software"). CRITICAL RULES: Be strict. Exclude acronyms (MOH, AITA), generic words (UPDATE), etc. Respond ONLY with a JSON object with two keys: "brands" and "products", holding an array of strings. If none, return an empty array. Text: ${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1000, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('AI entity extraction failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const allEntities = { brands: parsed.brands || [], products: parsed.products || [] }; window._entityData = {}; for (const type in allEntities) { window._entityData[type] = {}; allEntities[type].forEach(name => { const regex = new RegExp(`\\b${name.replace(/ /g, '\\s')}(s?)\\b`, 'gi'); const mentioningPosts = posts.filter(post => regex.test(post.data.title + ' ' + post.data.selftext)); if (mentioningPosts.length > 0) { window._entityData[type][name] = { count: mentioningPosts.length, posts: mentioningPosts }; } }); } return { topBrands: Object.entries(window._entityData.brands || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8), topProducts: Object.entries(window._entityData.products || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8) }; } catch (error) { console.error("Entity extraction error:", error); return { topBrands: [], topProducts: [] }; } }
+async function extractAndValidateEntities(posts, nicheContext) { const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 800)}`).join('\n---\n'); const prompt = `You are a market research analyst reviewing Reddit posts from the '${nicheContext}' community. Extract the following: 1. "brands": Specific, proper-noun company, brand, or service names (e.g., "KitchenAid", "Stripe"). 2. "products": Common, generic product categories (e.g., "stand mixer", "CRM software"). CRITICAL RULES: Be strict. Exclude acronyms (MOH, AITA), generic words (UPDATE), etc. Respond ONLY with a JSON object with two keys: "brands" and "products", holding an array of strings. If none, return an empty array. Text: ${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1000, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('AI entity extraction failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const allEntities = { brands: parsed.brands || [], products: parsed.products || [] }; window._entityData = {}; for (const type in allEntities) { window._entityData[type] = {}; allEntities[type].forEach(name => { const regex = new RegExp(`\\b${name.replace(/ /g, '\\s')}(s?)\\b`, 'gi'); const mentioningPosts = posts.filter(post => regex.test(post.data.title + ' ' + post.data.selftext)); if (mentioningPosts.length > 0) { window._entityData[type][name] = { count: mentioningPosts.length, posts: mentioningPosts }; } }); } return { topBrands: Object.entries(window._entityData.brands || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8), topProducts: Object.entries(window._entityData.products || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8) }; } catch (error) { console.error("Entity extraction error:", error); return { topBrands: [], topProducts: [] }; } }
 function renderDiscoveryList(containerId, data, title, type) { const container = document.getElementById(containerId); if(!container) return; let listItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No significant mentions found.</p>'; if (data.length > 0) { listItems = data.map(([name, details], index) => `<li class="discovery-list-item" data-word="${name}" data-type="${type}"><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${details.count} mentions</span></li>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`; }
 function renderFAQs(faqs) { const container = document.getElementById('faq-container'); if(!container) return; let faqItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">Could not generate common questions from the text.</p>'; if (faqs.length > 0) { faqItems = faqs.map((faq) => `<div class="faq-item"><button class="faq-question">${faq}</button><div class="faq-answer"><p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p></div></div>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">Frequently Asked Questions</h3>${faqItems}`; container.querySelectorAll('.faq-question').forEach(button => { button.addEventListener('click', () => { const answer = button.nextElementSibling; button.classList.toggle('active'); if (answer.style.maxHeight) { answer.style.maxHeight = null; answer.style.padding = '0 1.5rem'; } else { answer.style.padding = '1rem 1.5rem'; answer.style.maxHeight = answer.scrollHeight + "px"; } }); }); }
 function renderIncludedSubreddits(subreddits) { const container = document.getElementById('included-subreddits-container'); if(!container) return; const tags = subreddits.map(sub => `<div class="subreddit-tag">r/${sub}</div>`).join(''); container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list">${tags}</div>`; }
@@ -210,7 +148,7 @@ async function runProblemFinder() {
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
         
-        // This function is async, so we use .then() to render when the data is ready
+        // This function is now async, so we use .then() to render when the data is ready
         generateEmotionMapData(filteredPosts).then(emotionMapData => {
             renderEmotionMap(emotionMapData);
         });

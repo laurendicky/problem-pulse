@@ -1,5 +1,5 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 9.4 - HYBRID ENTITY EXTRACTION)
+// FINAL SCRIPT (VERSION 9.5 - DEEP SCAN WITH COMMENTS)
 // BLOCK 1 of 4: GLOBAL VARIABLES & HELPERS
 // =================================================================================
 
@@ -186,7 +186,6 @@ async function generateFAQs(posts) {
     }
 }
 
-// --- THIS IS THE NEW, SUPERCHARGED AI PROMPT & LOGIC ---
 async function extractAndValidateEntities(posts, nicheContext, currentSubreddits) {
     const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 800)}`).join('\n---\n');
     const currentSubSet = new Set(currentSubreddits);
@@ -254,6 +253,7 @@ function renderDiscoveryList(containerId, data, title, type) {
     if(!container) return;
     let listItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No significant mentions found.</p>';
     if (data.length > 0) {
+        // Use details.rank if it exists, otherwise use index
         listItems = data.map(([name, details], index) => `<li class="discovery-list-item" data-word="${name}" data-type="${type}"><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${details.count} mentions</span></li>`).join('');
     }
     container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`;

@@ -1,5 +1,5 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 9.3 - AI ENTITY EXTRACTION)
+// FINAL SCRIPT (VERSION 9.3 - SUPERCHARGED ENTITY EXTRACTION)
 // BLOCK 1 of 4: GLOBAL VARIABLES & HELPERS
 // =================================================================================
 
@@ -31,7 +31,8 @@ function calculateRelevanceScore(post, finding) { let score = 0; const postTitle
 function calculateFindingMetrics(validatedSummaries, filteredPosts) { const metrics = {}; const allProblemPostIds = new Set(); validatedSummaries.forEach((finding, index) => { metrics[index] = { supportCount: 0 }; }); filteredPosts.forEach(post => { let bestFindingIndex = -1; let maxScore = 0; validatedSummaries.forEach((finding, index) => { const score = calculateRelevanceScore(post, finding); if (score > maxScore) { maxScore = score; bestFindingIndex = index; } }); if (bestFindingIndex !== -1 && maxScore > 0) { metrics[bestFindingIndex].supportCount++; allProblemPostIds.add(post.data.id); } }); metrics.totalProblemPosts = allProblemPostIds.size; return metrics; }
 function renderPosts(posts) { const container = document.getElementById("posts-container"); if (!container) { return; } container.innerHTML = posts.map(post => ` <div class="insight" style="border:1px solid #ccc; padding:12px; margin-bottom:12px; background:#fafafa; border-radius:8px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1.1rem; color:#007bff; text-decoration:none;"> ${post.data.title} </a> <p style="font-size:0.9rem; margin:0.75rem 0; color:#333; line-height:1.5;"> ${post.data.selftext ? post.data.selftext.substring(0, 200) + '...' : 'No additional content.'} </p> <small style="color:#555; font-size:0.8rem;"> r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)} </small> </div> `).join(''); }
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if (!assignments) return; const finding = window._summaries[summaryIndex]; if (!finding) return; let relevantPosts = []; const addedPostIds = new Set(); const addPost = (post) => { if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) { relevantPosts.push(post); addedPostIds.add(post.data.id); } }; const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber); assignedPostNumbers.forEach(postNum => { if (postNum - 1 < window._postsForAssignment.length) { addPost(window._postsForAssignment[postNum - 1]); } }); if (relevantPosts.length < 8) { const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id)); const scoredCandidates = candidatePool.map(post => ({ post: post, score: calculateRelevanceScore(post, finding) })).filter(item => item.score >= 4).sort((a, b) => b.score - a.score); for (const candidate of scoredCandidates) { if (relevantPosts.length >= 8) break; addPost(candidate.post); } } let html; if (relevantPosts.length === 0) { html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`; } else { const finalPosts = relevantPosts.slice(0, 8); finalPosts.forEach(post => usedPostIds.add(post.data.id)); html = finalPosts.map(post => ` <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${post.data.title}</a> <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${post.data.selftext ? post.data.selftext.substring(0, 150) + '...' : 'No content.'}</p> <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</small> </div> `).join(''); } const container = document.getElementById(`reddit-div${summaryIndex + 1}`); if (container) { container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">Real Stories from Reddit: "${finding.title}"</div><div class="reddit-samples-posts">${html}</div>`; } }
-async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 10 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 200, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
+// --- CHANGE 1: Increase subreddit suggestions from 10 to 15 ---
+async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 15 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 250, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
 // =================================================================================
 // BLOCK 2 of 4: NEW INTERACTIVE CONTEXT BOX FUNCTIONS (REPLACED & IMPROVED)
@@ -185,25 +186,31 @@ async function generateFAQs(posts) {
     }
 }
 
+// --- CHANGE 2: Radically improved AI prompt and logic for entity extraction ---
 async function extractAndValidateEntities(posts, nicheContext, currentSubreddits) {
-    const topPostsText = posts.slice(0, 30).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 600)}`).join('\n---\n');
+    // --- CHANGE 3: Send more text to the AI for better analysis ---
+    const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 800)}`).join('\n---\n');
     const currentSubSet = new Set(currentSubreddits);
 
-    const prompt = `You are a market research analyst reviewing Reddit posts from the '${nicheContext}' community. From the text provided, extract the following:
-1.  "brands": Specific, proper-noun company, brand, or service names (e.g., "Kong", "Purina", "The Knot").
-2.  "products": Common, generic product categories discussed (e.g., "leash", "collar", "crate", "dress", "venue").
+    const prompt = `You are a world-class market research analyst tasked with extracting commercial and community intelligence from a collection of Reddit posts about '${nicheContext}'.
+
+Your job is to identify and categorize the following entities from the provided text:
+1.  "brands": Specific, proper-noun company, brand, or service names (e.g., "KitchenAid", "Stripe", "The Knot", "Canva").
+2.  "products": Common, generic product or service categories that are frequently discussed (e.g., "stand mixer", "CRM software", "wedding dress", "sourdough starter").
 3.  "communities": Other subreddit names mentioned (formatted without "r/").
 
-RULES:
-- Be strict. Do not include acronyms (MOH, SIL), generic words (UPDATE, EDIT), or things that are not products/brands.
-- For communities, only include names of other subreddits.
+CRITICAL RULES:
+- BE STRICT. Do not include acronyms (like MOH, AITA), generic words (like UPDATE, EDIT), or terms that are not tangible products, brands, or communities.
+- For "start-up founders", brands are often software (e.g., "AWS", "Stripe", "Slack").
+- For "home baking", products are often ingredients or equipment (e.g., "flour", "vanilla extract", "stand mixer").
+- For communities, ONLY include names that are clearly other subreddits.
 
-Respond ONLY with a JSON object with three keys: "brands", "products", and "communities". Each key should hold an array of strings. If nothing is found for a category, return an empty array.
+Please review the text carefully and provide your response ONLY as a JSON object with three keys: "brands", "products", and "communities". Each key must hold an array of the identified strings. If no entities are found for a category, return an empty array.
 
 Text to analyze:
 ${topPostsText}`;
 
-    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 800, response_format: { "type": "json_object" } };
+    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1000, response_format: { "type": "json_object" } };
 
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
@@ -217,7 +224,7 @@ ${topPostsText}`;
             communities: (parsed.communities || []).filter(c => !currentSubSet.has(c))
         };
         
-        window._entityData = {};
+        window._entityData = {}; // Store data for interactivity
         for (const type in allEntities) {
             window._entityData[type] = {};
             allEntities[type].forEach(name => {
@@ -249,7 +256,7 @@ function renderDiscoveryList(containerId, data, title, type) {
     if(!container) return;
     let listItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No significant mentions found.</p>';
     if (data.length > 0) {
-        listItems = data.map(([name, details], index) => `<li class="discovery-list-item" data-word="${name}" data-type="${type}"><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${details.count} mentions</span></li>`).join('');
+        listItems = data.map(([name, details]) => `<li class="discovery-list-item" data-word="${name}" data-type="${type}"><span class="rank">${(details.rank || 0) + 1}.</span><span class="name">${name}</span><span class="count">${details.count} mentions</span></li>`).join('');
     }
     container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`;
 }
@@ -322,7 +329,8 @@ async function runProblemFinder() {
     const resultsWrapper = document.getElementById('results-wrapper-b');
     if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
     
-    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "positive-cloud", "negative-cloud", "context-box", "sentiment-score-container", "top-brands-container", "similar-communities-container", "faq-container", "included-subreddits-container"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; if(id === 'context-box') el.style.display = 'none'; } });
+    // Clear all results containers
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "positive-cloud", "negative-cloud", "context-box", "sentiment-score-container", "top-brands-container", "top-products-container", "similar-communities-container", "faq-container", "included-subreddits-container"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; if(id === 'context-box') el.style.display = 'none'; } });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
     const resultsMessageDiv = document.getElementById("results-message");
@@ -345,9 +353,9 @@ async function runProblemFinder() {
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
 
-        // --- NEW: Run all dashboard analyses ---
+        // --- Run all dashboard analyses ---
         const sentimentData = generateSentimentData(filteredPosts);
-        renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount); // SENTIMENT SCORE FIX
+        renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
         renderIncludedSubreddits(selectedSubreddits);
@@ -355,7 +363,7 @@ async function runProblemFinder() {
         // Asynchronously run AI-heavy tasks
         extractAndValidateEntities(filteredPosts, originalGroupName, selectedSubreddits).then(entities => {
             renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands');
-            renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); // You'll need a new div with id="top-products-container"
+            renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products');
             renderDiscoveryList('similar-communities-container', entities.similarCommunities, 'Similar Communities', 'communities');
         });
         generateFAQs(filteredPosts).then(faqs => renderFAQs(faqs));
@@ -433,48 +441,25 @@ async function runProblemFinder() {
 // =================================================================================
 
 function initializeDashboardInteractivity() {
-    const positiveCloud = document.getElementById('positive-cloud');
-    const negativeCloud = document.getElementById('negative-cloud');
-    const topBrandsContainer = document.getElementById('top-brands-container');
-    const topProductsContainer = document.getElementById('top-products-container');
-    const similarCommunitiesContainer = document.getElementById('similar-communities-container');
+    const dashboard = document.getElementById('results-wrapper-b'); // Use a parent container
+    if (!dashboard) return;
 
-    const showSentimentContext = (word, category) => {
-        const postsData = window._sentimentData?.[category]?.[word]?.posts;
-        if (!postsData || postsData.size === 0) return;
-        renderContextContent(word, Array.from(postsData));
-    };
+    dashboard.addEventListener('click', (e) => {
+        const cloudWordEl = e.target.closest('.cloud-word');
+        const entityEl = e.target.closest('.discovery-list-item');
 
-    const showEntityContext = (word, type) => {
-        const postsData = window._entityData?.[type]?.[word]?.posts;
-        if (!postsData) return;
-        renderContextContent(word, postsData);
-    };
-
-    positiveCloud.addEventListener('click', (e) => {
-        const wordEl = e.target.closest('.cloud-word');
-        if (wordEl) showSentimentContext(wordEl.dataset.word, 'positive');
-    });
-
-    negativeCloud.addEventListener('click', (e) => {
-        const wordEl = e.target.closest('.cloud-word');
-        if (wordEl) showSentimentContext(wordEl.dataset.word, 'negative');
-    });
-
-    const addEntityListListener = (container) => {
-        if (container) {
-            container.addEventListener('click', (e) => {
-                const itemEl = e.target.closest('.discovery-list-item');
-                if(itemEl) {
-                    showEntityContext(itemEl.dataset.word, itemEl.dataset.type);
-                }
-            });
+        if (cloudWordEl) {
+            const word = cloudWordEl.dataset.word;
+            const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
+            const postsData = window._sentimentData?.[category]?.[word]?.posts;
+            if (postsData) renderContextContent(word, Array.from(postsData));
+        } else if (entityEl) {
+            const word = entityEl.dataset.word;
+            const type = entityEl.dataset.type;
+            const postsData = window._entityData?.[type]?.[word]?.posts;
+            if (postsData) renderContextContent(word, postsData);
         }
-    };
-    
-    addEntityListListener(topBrandsContainer);
-    addEntityListListener(topProductsContainer);
-    addEntityListListener(similarCommunitiesContainer);
+    });
 }
 
 

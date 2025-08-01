@@ -1,5 +1,5 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 9.2 - AI BRAND VALIDATION V2)
+// FINAL SCRIPT (VERSION 9.3 - AI ENTITY EXTRACTION)
 // BLOCK 1 of 4: GLOBAL VARIABLES & HELPERS
 // =================================================================================
 
@@ -15,7 +15,6 @@ const lemmaMap = { 'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': '
 const positiveWords = new Set(['love', 'amazing', 'awesome', 'beautiful', 'best', 'brilliant', 'celebrate', 'charming', 'dope', 'excellent', 'excited', 'exciting', 'epic', 'fantastic', 'flawless', 'gorgeous', 'happy', 'impressed', 'incredible', 'insane', 'joy', 'keen', 'lit', 'perfect', 'phenomenal', 'proud', 'rad', 'super', 'stoked', 'thrilled', 'vibrant', 'wow', 'wonderful', 'blessed', 'calm', 'chill', 'comfortable', 'cozy', 'grateful', 'loyal', 'peaceful', 'pleased', 'relaxed', 'relieved', 'satisfied', 'secure', 'thankful', 'want', 'wish', 'hope', 'desire', 'craving', 'benefit', 'bonus', 'deal', 'hack', 'improvement', 'quality', 'solution', 'strength', 'advice', 'tip', 'trick', 'recommend']);
 const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'broken', 'hate', 'challenge', 'confused', 'crazy', 'critical', 'danger', 'desperate', 'disappoint', 'disgusted', 'dreadful', 'fear', 'frustrate', 'furious', 'horrible', 'irritated', 'jealous', 'nightmare', 'outraged', 'pain', 'panic', 'problem', 'rant', 'scared', 'shocked', 'stressful', 'terrible', 'terrified', 'trash', 'worst', 'alone', 'ashamed', 'bored', 'depressed', 'discouraged', 'dull', 'empty', 'exhausted', 'failure', 'guilty', 'heartbroken', 'hopeless', 'hurt', 'insecure', 'lonely', 'miserable', 'sad', 'sorry', 'tired', 'unhappy', 'upset', 'weak', 'need', 'disadvantage', 'issue', 'flaw']);
 const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
-const COMMON_NON_BRANDS = new Set(['EDIT', 'UPDATE', 'OP', 'AITA', 'TLDR', 'IMO', 'IMHO', 'IAMA', 'AMA', 'PSA', 'DIY', 'FAQ', 'TIL', 'MOH', 'MIL', 'SIL', 'FIL', 'SO', 'RSVP', 'EOD', 'TBD', 'FYI', 'PM', 'DM', 'MOD', 'BOT', 'USA', 'UK', 'EU', 'COVID', 'HTML', 'CSS', 'JSON', 'API']);
 
 // --- 2. ALL HELPER AND LOGIC FUNCTIONS ---
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
@@ -120,7 +119,7 @@ function renderContextContent(word, posts) {
     const contextBox = document.getElementById('context-box');
     if (!contextBox) return;
 
-    const highlightRegex = new RegExp(`\\b(${word}\\w*)\\b`, 'gi');
+    const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi');
 
     const headerHTML = `
         <div class="context-header">
@@ -132,7 +131,7 @@ function renderContextContent(word, posts) {
     const snippetsHTML = posts.slice(0, 10).map(post => {
         const fullText = `${post.data.title}. ${post.data.selftext || ''}`;
         const sentences = fullText.match(/[^.!?]+[.!?]+/g) || [];
-        const keywordRegex = new RegExp(`\\b${word}\\w*\\b`, 'i');
+        const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i');
         let relevantSentence = sentences.find(s => keywordRegex.test(s));
         
         if (!relevantSentence) {
@@ -186,87 +185,71 @@ async function generateFAQs(posts) {
     }
 }
 
-function extractPotentialEntities(posts, currentSubreddits) {
-    const brands = {};
-    const communities = {};
-    const brandRegex = /\b([A-Z][a-z]+(?:[A-Z][a-zA-Z]*)?|[A-Z]{2,}(?![a-z]))\b/g;
-    const communityRegex = /r\/(\w+)/g;
+async function extractAndValidateEntities(posts, nicheContext, currentSubreddits) {
+    const topPostsText = posts.slice(0, 30).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 600)}`).join('\n---\n');
     const currentSubSet = new Set(currentSubreddits);
 
-    posts.forEach(post => {
-        const text = `${post.data.title} ${post.data.selftext || ''}`;
-        let match;
-        while((match = brandRegex.exec(text)) !== null) {
-            const brand = match[0];
-            if(brand.length > 2 && !COMMON_NON_BRANDS.has(brand)) {
-                brands[brand] = (brands[brand] || 0) + 1;
-            }
-        }
-        while((match = communityRegex.exec(text)) !== null) {
-            const community = match[1];
-            if (!currentSubSet.has(community)) {
-                 communities[community] = (communities[community] || 0) + 1;
-            }
-        }
-    });
+    const prompt = `You are a market research analyst reviewing Reddit posts from the '${nicheContext}' community. From the text provided, extract the following:
+1.  "brands": Specific, proper-noun company, brand, or service names (e.g., "Kong", "Purina", "The Knot").
+2.  "products": Common, generic product categories discussed (e.g., "leash", "collar", "crate", "dress", "venue").
+3.  "communities": Other subreddit names mentioned (formatted without "r/").
 
-    return {
-        potentialBrands: Object.keys(brands).sort((a,b) => brands[b] - brands[a]).slice(0, 50),
-        similarCommunities: Object.entries(communities).sort((a, b) => b[1] - a[1]).slice(0, 8)
-    };
-}
+RULES:
+- Be strict. Do not include acronyms (MOH, SIL), generic words (UPDATE, EDIT), or things that are not products/brands.
+- For communities, only include names of other subreddits.
 
-async function validateBrandsWithAI(potentialBrands, nicheContext) {
-    if (potentialBrands.length === 0) return [];
-    // --- THIS IS THE NEW, EXPERT-LEVEL PROMPT ---
-    const prompt = `You are a meticulous market research analyst specializing in brand identification from social media text. The text comes from Reddit discussions within the '${nicheContext}' community.
-    
-    Your task is to filter the following list of capitalized words and return only the ones that are actual brand, product, or company names relevant to this audience.
+Respond ONLY with a JSON object with three keys: "brands", "products", and "communities". Each key should hold an array of strings. If nothing is found for a category, return an empty array.
 
-    Crucially, you MUST EXCLUDE:
-    - Names of subreddits (e.g., 'WedditGetsFit', 'AskReddit')
-    - Common internet and niche-specific acronyms (e.g., 'AITA', 'MOH', 'DIY')
-    - Generic capitalized words that are not brands (e.g., 'UPDATE', 'EDIT', 'ALL')
+Text to analyze:
+${topPostsText}`;
 
-    Return only the names of actual companies, products, or services.
+    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 800, response_format: { "type": "json_object" } };
 
-    Here is the list of candidates: [${potentialBrands.join(', ')}]
-
-    Respond ONLY with a JSON object with a single key "brands", containing an array of the valid brand names. If none are valid, return an empty array.`;
-
-    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise brand identification engine that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 400, response_format: { "type": "json_object" } };
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        if (!response.ok) throw new Error('OpenAI brand validation failed.');
+        if (!response.ok) throw new Error('AI entity extraction failed.');
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
-        return parsed.brands || [];
+
+        const allEntities = {
+            brands: parsed.brands || [],
+            products: parsed.products || [],
+            communities: (parsed.communities || []).filter(c => !currentSubSet.has(c))
+        };
+        
+        window._entityData = {};
+        for (const type in allEntities) {
+            window._entityData[type] = {};
+            allEntities[type].forEach(name => {
+                const regex = new RegExp(`\\b${name.replace(/ /g, '\\s')}(s?)\\b`, 'gi');
+                const mentioningPosts = posts.filter(post => regex.test(post.data.title + ' ' + post.data.selftext));
+                if (mentioningPosts.length > 0) {
+                    window._entityData[type][name] = {
+                        count: mentioningPosts.length,
+                        posts: mentioningPosts
+                    };
+                }
+            });
+        }
+        
+        return {
+            topBrands: Object.entries(window._entityData.brands || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8),
+            topProducts: Object.entries(window._entityData.products || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8),
+            similarCommunities: Object.entries(window._entityData.communities || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8)
+        };
+
     } catch (error) {
-        console.error("Brand validation error:", error);
-        return [];
+        console.error("Entity extraction error:", error);
+        return { topBrands: [], topProducts: [], similarCommunities: [] };
     }
 }
 
-function countValidatedBrands(validatedBrands, posts) {
-    if (validatedBrands.length === 0) return [];
-    const brandCounts = {};
-    validatedBrands.forEach(brand => {
-        const regex = new RegExp(`\\b${brand}\\b`, 'g');
-        let count = 0;
-        posts.forEach(post => {
-            count += ((post.data.title + ' ' + post.data.selftext).match(regex) || []).length;
-        });
-        if (count > 0) brandCounts[brand] = count;
-    });
-    return Object.entries(brandCounts).sort((a, b) => b[1] - a[1]).slice(0, 8);
-}
-
-function renderDiscoveryList(containerId, data, title) {
+function renderDiscoveryList(containerId, data, title, type) {
     const container = document.getElementById(containerId);
     if(!container) return;
     let listItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No significant mentions found.</p>';
     if (data.length > 0) {
-        listItems = data.map(([name, count], index) => `<li><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${count} mentions</span></li>`).join('');
+        listItems = data.map(([name, details], index) => `<li class="discovery-list-item" data-word="${name}" data-type="${type}"><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${details.count} mentions</span></li>`).join('');
     }
     container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`;
 }
@@ -276,7 +259,7 @@ function renderFAQs(faqs) {
     if(!container) return;
     let faqItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">Could not generate common questions from the text.</p>';
     if (faqs.length > 0) {
-        faqItems = faqs.map((faq, index) => `<div class="faq-item"><button class="faq-question">${faq}</button><div class="faq-answer"><p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p></div></div>`).join('');
+        faqItems = faqs.map((faq) => `<div class="faq-item"><button class="faq-question">${faq}</button><div class="faq-answer"><p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p></div></div>`).join('');
     }
     container.innerHTML = `<h3 class="dashboard-section-title">Frequently Asked Questions</h3>${faqItems}`;
     
@@ -339,7 +322,6 @@ async function runProblemFinder() {
     const resultsWrapper = document.getElementById('results-wrapper-b');
     if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
     
-    // Clear all results containers
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "positive-cloud", "negative-cloud", "context-box", "sentiment-score-container", "top-brands-container", "similar-communities-container", "faq-container", "included-subreddits-container"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; if(id === 'context-box') el.style.display = 'none'; } });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
@@ -365,20 +347,16 @@ async function runProblemFinder() {
 
         // --- NEW: Run all dashboard analyses ---
         const sentimentData = generateSentimentData(filteredPosts);
-        const { potentialBrands, similarCommunities } = extractPotentialEntities(filteredPosts, selectedSubreddits);
-        
-        // --- THIS IS THE FIX: Call renderSentimentScore ---
-        renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
-
+        renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount); // SENTIMENT SCORE FIX
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
-        renderDiscoveryList('similar-communities-container', similarCommunities, 'Similar Communities');
         renderIncludedSubreddits(selectedSubreddits);
         
-        // Asynchronously validate brands and generate FAQs so the UI feels faster
-        validateBrandsWithAI(potentialBrands, originalGroupName).then(validatedBrands => {
-            const topBrands = countValidatedBrands(validatedBrands, filteredPosts);
-            renderDiscoveryList('top-brands-container', topBrands, 'Top Brands & Products');
+        // Asynchronously run AI-heavy tasks
+        extractAndValidateEntities(filteredPosts, originalGroupName, selectedSubreddits).then(entities => {
+            renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands');
+            renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); // You'll need a new div with id="top-products-container"
+            renderDiscoveryList('similar-communities-container', entities.similarCommunities, 'Similar Communities', 'communities');
         });
         generateFAQs(filteredPosts).then(faqs => renderFAQs(faqs));
 
@@ -454,35 +432,49 @@ async function runProblemFinder() {
 // BLOCK 4 of 4: INITIALIZATION LOGIC
 // =================================================================================
 
-function initializeContextBox() {
+function initializeDashboardInteractivity() {
     const positiveCloud = document.getElementById('positive-cloud');
     const negativeCloud = document.getElementById('negative-cloud');
+    const topBrandsContainer = document.getElementById('top-brands-container');
+    const topProductsContainer = document.getElementById('top-products-container');
+    const similarCommunitiesContainer = document.getElementById('similar-communities-container');
 
-    if (!positiveCloud || !negativeCloud) {
-        console.error("Cloud containers not found. Interactivity will not work.");
-        return;
-    }
-
-    const showContext = (word, category) => {
+    const showSentimentContext = (word, category) => {
         const postsData = window._sentimentData?.[category]?.[word]?.posts;
-        if (!postsData || postsData.size === 0) {
-            console.log(`No context posts found for "${word}" in category "${category}".`);
-            return;
-        };
-
+        if (!postsData || postsData.size === 0) return;
         renderContextContent(word, Array.from(postsData));
     };
 
-    const handleCloudClick = (event, category) => {
-        const wordEl = event.target.closest('.cloud-word');
-        if (wordEl) {
-            const word = wordEl.dataset.word;
-            showContext(word, category);
-        }
+    const showEntityContext = (word, type) => {
+        const postsData = window._entityData?.[type]?.[word]?.posts;
+        if (!postsData) return;
+        renderContextContent(word, postsData);
     };
 
-    positiveCloud.addEventListener('click', (e) => handleCloudClick(e, 'positive'));
-    negativeCloud.addEventListener('click', (e) => handleCloudClick(e, 'negative'));
+    positiveCloud.addEventListener('click', (e) => {
+        const wordEl = e.target.closest('.cloud-word');
+        if (wordEl) showSentimentContext(wordEl.dataset.word, 'positive');
+    });
+
+    negativeCloud.addEventListener('click', (e) => {
+        const wordEl = e.target.closest('.cloud-word');
+        if (wordEl) showSentimentContext(wordEl.dataset.word, 'negative');
+    });
+
+    const addEntityListListener = (container) => {
+        if (container) {
+            container.addEventListener('click', (e) => {
+                const itemEl = e.target.closest('.discovery-list-item');
+                if(itemEl) {
+                    showEntityContext(itemEl.dataset.word, itemEl.dataset.type);
+                }
+            });
+        }
+    };
+    
+    addEntityListListener(topBrandsContainer);
+    addEntityListListener(topProductsContainer);
+    addEntityListListener(similarCommunitiesContainer);
 }
 
 
@@ -563,7 +555,7 @@ function initializeProblemFinderTool() {
         }
     });
     
-    initializeContextBox(); // Initialize the context box listeners
+    initializeDashboardInteractivity();
 
     console.log("Problem Finder tool successfully initialized.");
 }

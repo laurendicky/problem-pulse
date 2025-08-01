@@ -1,6 +1,7 @@
-// =================================================================================
-// FINAL SCRIPT (VERSION 10.3 - UPGRADED PROBLEM MAP v2)
-// This version uses a single, robust AI call to generate a rich and accurate Problem Polarity Map.
+// = a================================================================================
+// FINAL SCRIPT (VERSION 10.3 - HYBRID PROBLEM MAP)
+// This version uses a robust HYBRID approach for the Problem Polarity Map,
+// combining a reliable keyword analysis with an intelligent AI analysis.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -40,74 +41,80 @@ function displaySubredditChoices(subreddits) { const choicesDiv = document.getEl
 function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1); return word; }
 
 /**
- * [UPGRADED] Generates data for the Problem Polarity Map using a single, efficient AI call.
- * 1. AI analyzes post text to identify key problems and assign an intensity score to each.
- * 2. The script then calculates the frequency of each problem locally.
+ * [UPGRADED] Generates data for the Problem Polarity Map using a robust Hybrid Approach.
+ * 1. Runs a reliable keyword-based analysis to create a guaranteed baseline of data.
+ * 2. Runs a single, efficient AI call to add nuanced, high-level problems.
+ * 3. Merges the results for a rich, dense, and reliable map.
  */
 async function generateEmotionMapData(posts) {
-    const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 1000)}`).join('\n---\n');
-    
-    // A single, powerful prompt to get problems and their intensity scores in one shot.
-    const prompt = `You are a world-class market research analyst. Analyze the following Reddit posts from the '${originalGroupName}' community. Your task is to identify the 15 most significant and distinct problems, pain points, or key topics of discussion.
+    // --- Part 1: Reliable Keyword Foundation ---
+    const emotionFreq = {};
+    posts.forEach(post => {
+        const text = `${post.data.title} ${post.data.selftext || ''}`.toLowerCase();
+        const words = text.replace(/[^a-z\s']/g, '').split(/\s+/);
+        words.forEach(rawWord => {
+            const lemma = lemmatize(rawWord);
+            if (emotionalIntensityScores[lemma]) {
+                emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1;
+            }
+        });
+    });
+    const keywordData = Object.entries(emotionFreq).map(([word, freq]) => ({
+        x: freq,
+        y: emotionalIntensityScores[word],
+        label: word
+    }));
 
-For each one you identify, you must provide a concise name for the problem and rate its emotional intensity based on the context.
-
-Respond ONLY with a valid JSON object. The object must have a single key "problems", which is an array of objects. Each object in the array MUST have two keys:
-1. "problem": A short, descriptive name for the problem (e.g., "Finding a Reliable Vendor", "Budgeting Anxiety", "Dealing with Family Opinions"). This will be the chart label.
-2. "intensity": A number from 1 (mild annoyance) to 10 (major pain point) representing the severity of this problem for the user.
-
-Example format:
-{
-  "problems": [
-    { "problem": "Catering Costs", "intensity": 8 },
-    { "problem": "Dress Fitting Issues", "intensity": 6 }
-  ]
-}
-
-Here is the text to analyze:
-${topPostsText}`;
+    // --- Part 2: Intelligent AI Enhancement ---
+    const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 1000)}`).join('\n---\n');
+    const prompt = `You are a market research analyst. Analyze the following Reddit posts from the '${originalGroupName}' community. Identify the 15 most significant problems or pain points.
+Respond ONLY with a valid JSON object. The object must have a single key "problems", which is an array of objects. Each object MUST have two keys:
+1. "problem": A short name for the problem (e.g., "Finding Reliable Vendors", "Budgeting Anxiety").
+2. "intensity": A number from 1 (mild) to 10 (severe) representing the problem's severity.
+Example: { "problems": [{ "problem": "Catering Costs", "intensity": 8 }] }
+Text to analyze: ${topPostsText}`;
 
     const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 1500, response_format: { "type": "json_object" } };
     
-    let aiProblems = [];
+    let aiProblemData = [];
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        if (!response.ok) throw new Error('AI problem analysis failed.');
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
-        aiProblems = parsed.problems || [];
+        if (response.ok) {
+            const data = await response.json();
+            const parsed = JSON.parse(data.openaiResponse);
+            const aiProblems = parsed.problems || [];
+
+            aiProblemData = aiProblems.map(item => {
+                if (!item.problem || typeof item.intensity !== 'number') return null;
+                const problemRegex = new RegExp(`\\b${item.problem.replace(/ /g, '\\s').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(s?)\\b`, 'i');
+                const mentionCount = posts.filter(p => problemRegex.test(`${p.data.title} ${p.data.selftext || ''}`)).length;
+                if (mentionCount > 0) {
+                    return { x: mentionCount, y: item.intensity, label: item.problem };
+                }
+                return null;
+            }).filter(Boolean);
+        } else {
+             console.warn("AI enhancement for Problem Map failed. Falling back to keyword analysis.");
+        }
     } catch (error) {
-        console.error("Problem Polarity Map - AI analysis error:", error);
-        return []; // Return empty array on failure
+        console.error("Problem Polarity Map - AI enhancement error:", error);
     }
 
-    if (aiProblems.length === 0) return [];
-
-    // Now, calculate the frequency for each problem identified by the AI
-    const chartData = aiProblems.map(item => {
-        if (!item.problem || typeof item.intensity !== 'number') return null;
-
-        const problemRegex = new RegExp(`\\b${item.problem.replace(/ /g, '\\s').replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(s?)\\b`, 'i');
-        let mentionCount = 0;
-        posts.forEach(post => {
-            if (problemRegex.test(`${post.data.title} ${post.data.selftext || ''}`)) {
-                mentionCount++;
-            }
-        });
-
-        // Only include problems that were actually found in the text
-        if (mentionCount > 0) {
-            return {
-                x: mentionCount,        // Frequency of mention
-                y: item.intensity,      // Intensity score from AI
-                label: item.problem     // Name of the problem from AI
-            };
+    // --- Part 3: Combine and Finalize ---
+    const combinedData = [...keywordData, ...aiProblemData];
+    const uniqueDataMap = new Map();
+    combinedData.forEach(item => {
+        // Use a case-insensitive label to avoid duplicates like "Problem" and "problem"
+        const label = item.label.toLowerCase();
+        if (!uniqueDataMap.has(label)) {
+            uniqueDataMap.set(label, item);
         }
-        return null;
-    }).filter(Boolean); // Filter out any null entries
+    });
 
-    return chartData.sort((a, b) => b.x - a.x);
+    const finalData = Array.from(uniqueDataMap.values());
+    return finalData.sort((a, b) => b.x - a.x).slice(0, 25);
 }
+
 
 /**
  * [MODIFIED] Renders the Problem Polarity Map with updated labels.
@@ -115,7 +122,7 @@ ${topPostsText}`;
 function renderEmotionMap(data) {
     const container = document.getElementById('emotion-map-container');
     if (!container) return;
-    container.innerHTML = '<h3 class="dashboard-section-title">Problem Polarity Map</h3><div id="emotion-map"><canvas id="emotion-chart-canvas"></canvas></div>';
+    container.innerHTML = '<h3 class="dashboard-section-title">Problem & Topic Polarity Map</h3><div id="emotion-map"><canvas id="emotion-chart-canvas"></canvas></div>';
     const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d');
     if (!ctx) return;
 
@@ -123,7 +130,7 @@ function renderEmotionMap(data) {
         window.myEmotionChart.destroy();
     }
     if (data.length < 3) {
-        container.innerHTML = '<h3 class="dashboard-section-title">Problem Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough distinct problems were found to build a map.</p>';
+        container.innerHTML = '<h3 class="dashboard-section-title">Problem & Topic Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough distinct problems or topics were found to build a map.</p>';
         return;
     }
     const maxFreq = Math.max(...data.map(p => p.x));
@@ -133,8 +140,8 @@ function renderEmotionMap(data) {
             datasets: [{
                 label: 'Problems/Topics',
                 data: data,
-                backgroundColor: 'rgba(229, 57, 53, 0.7)', // Red color to signify problems
-                borderColor: 'rgba(198, 40, 40, 1)',
+                backgroundColor: 'rgba(2, 119, 189, 0.7)', // A more neutral blue for mixed data
+                borderColor: 'rgba(1, 87, 155, 1)',
                 borderWidth: 1,
                 pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20,
                 pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20,
@@ -148,7 +155,7 @@ function renderEmotionMap(data) {
                     callbacks: {
                         label: function(context) {
                             const point = context.raw;
-                            return `${point.label}: Frequency=${point.x}, Problem Intensity=${point.y.toFixed(1)}`;
+                            return `${point.label}: Frequency=${point.x}, Intensity Score=${point.y.toFixed(1)}`;
                         }
                     },
                     displayColors: false,
@@ -163,7 +170,7 @@ function renderEmotionMap(data) {
                     grid: { color: '#f0f0f0' }
                 },
                 y: {
-                    title: { display: true, text: 'Problem Intensity Score (1-10)', font: { weight: 'bold' } },
+                    title: { display: true, text: 'Problem Intensity (1-10)', font: { weight: 'bold' } },
                     min: 0,
                     max: 10,
                     grid: { color: '#f0f0f0' }
@@ -172,6 +179,7 @@ function renderEmotionMap(data) {
         }
     });
 }
+
 
 // --- ALL OTHER FUNCTIONS BELOW ARE UNTOUCHED FROM YOUR ORIGINAL SCRIPT ---
 function generateSentimentData(posts) { const data = { positive: {}, negative: {} }; let positiveCount = 0; let negativeCount = 0; posts.forEach(post => { const text = `${post.data.title} ${post.data.selftext || ''}`; const words = text.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { if (rawWord.length < 3 || stopWords.includes(rawWord)) return; const lemma = lemmatize(rawWord); let category = null; if (positiveWords.has(lemma)) { category = 'positive'; positiveCount++; } else if (negativeWords.has(lemma)) { category = 'negative'; negativeCount++; } if (category) { if (!data[category][lemma]) { data[category][lemma] = { count: 0, posts: new Set() }; } data[category][lemma].count++; data[category][lemma].posts.add(post); } }); }); window._sentimentData = data; return { positive: Object.entries(data.positive).sort((a, b) => b[1].count - a[1].count).slice(0, 30), negative: Object.entries(data.negative).sort((a, b) => b[1].count - a[1].count).slice(0, 30), positiveCount, negativeCount }; }

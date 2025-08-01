@@ -1,6 +1,6 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 10.4 - FIXED & MERGED)
-// Contains the new AI Topic Polarity Map AND all other restored dashboard functions.
+// FINAL SCRIPT (VERSION 10.3 - ALL FEATURES INTEGRATED & STABLE)
+// COMPLETE CODE IN ONE BLOCK
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -8,12 +8,21 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 let originalGroupName = '';
 const suggestions = ["Dog Lovers", "Start-up Founders", "Fitness Beginners", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Developers", "Brides To Be"];
-const positiveColors = ['#2E7D32', '#388E3C', '#43A047', '#1B5E20', '#66BB6A', '#81C784'];
-const negativeColors = ['#C62828', '#D32F2F', '#E53935', '#B71C1C', '#EF5350', '#F44336'];
+const positiveColors = ['#2E7D32', '#388E3C', '#43A047', '#1B5E20'];
+const negativeColors = ['#C62828', '#D32F2F', '#E53935', '#B71C1C'];
+
 const lemmaMap = { 'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': 'love', 'loving': 'love', 'hates': 'hate', 'wishes': 'wish', 'wishing': 'wish', 'solutions': 'solution', 'challenges': 'challenge', 'recommended': 'recommend', 'disappointed': 'disappoint', 'frustrated': 'frustrate', 'annoyed': 'annoy' };
 const positiveWords = new Set(['love', 'amazing', 'awesome', 'beautiful', 'best', 'brilliant', 'celebrate', 'charming', 'dope', 'excellent', 'excited', 'exciting', 'epic', 'fantastic', 'flawless', 'gorgeous', 'happy', 'impressed', 'incredible', 'insane', 'joy', 'keen', 'lit', 'perfect', 'phenomenal', 'proud', 'rad', 'super', 'stoked', 'thrilled', 'vibrant', 'wow', 'wonderful', 'blessed', 'calm', 'chill', 'comfortable', 'cozy', 'grateful', 'loyal', 'peaceful', 'pleased', 'relaxed', 'relieved', 'satisfied', 'secure', 'thankful', 'want', 'wish', 'hope', 'desire', 'craving', 'benefit', 'bonus', 'deal', 'hack', 'improvement', 'quality', 'solution', 'strength', 'advice', 'tip', 'trick', 'recommend']);
 const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'broken', 'hate', 'challenge', 'confused', 'crazy', 'critical', 'danger', 'desperate', 'disappoint', 'disgusted', 'dreadful', 'fear', 'frustrate', 'furious', 'horrible', 'irritated', 'jealous', 'nightmare', 'outraged', 'pain', 'panic', 'problem', 'rant', 'scared', 'shocked', 'stressful', 'terrible', 'terrified', 'trash', 'worst', 'alone', 'ashamed', 'bored', 'depressed', 'discouraged', 'dull', 'empty', 'exhausted', 'failure', 'guilty', 'heartbroken', 'hopeless', 'hurt', 'insecure', 'lonely', 'miserable', 'sad', 'sorry', 'tired', 'unhappy', 'upset', 'weak', 'need', 'disadvantage', 'issue', 'flaw']);
-const emotionalIntensityScores = { 'annoy': 3, 'irritated': 3, 'bored': 2, 'issue': 3, 'sad': 4, 'bad': 3, 'confused': 4, 'tired': 3, 'upset': 5, 'unhappy': 5, 'disappoint': 6, 'frustrate': 6, 'stressful': 6, 'awful': 7, 'hate': 8, 'angry': 7, 'broken': 5, 'exhausted': 5, 'pain': 7, 'miserable': 8, 'terrible': 8, 'worst': 9, 'horrible': 8, 'furious': 9, 'outraged': 9, 'dreadful': 8, 'terrified': 10, 'nightmare': 10, 'heartbroken': 9, 'desperate': 8, 'rage': 10, 'problem': 4, 'challenge': 5, 'critical': 6, 'danger': 7, 'fear': 7, 'panic': 8, 'scared': 6, 'shocked': 7, 'trash': 5, 'alone': 4, 'ashamed': 5, 'depressed': 8, 'discouraged': 5, 'dull': 2, 'empty': 6, 'failure': 7, 'guilty': 6, 'hopeless': 8, 'insecure': 5, 'lonely': 6, 'weak': 4, 'need': 5, 'disadvantage': 4, 'flaw': 4 };
+const emotionalIntensityScores = {
+    'annoy': 3, 'irritated': 3, 'bored': 2, 'issue': 3, 'sad': 4, 'bad': 3, 'confused': 4, 'tired': 3, 'upset': 5,
+    'unhappy': 5, 'disappoint': 6, 'frustrate': 6, 'stressful': 6, 'awful': 7, 'hate': 8, 'angry': 7, 'broken': 5,
+    'exhausted': 5, 'pain': 7, 'miserable': 8, 'terrible': 8, 'worst': 9, 'horrible': 8, 'furious': 9, 'outraged': 9,
+    'dreadful': 8, 'terrified': 10, 'nightmare': 10, 'heartbroken': 9, 'desperate': 8, 'rage': 10, 'problem': 4,
+    'challenge': 5, 'critical': 6, 'danger': 7, 'fear': 7, 'panic': 8, 'scared': 6, 'shocked': 7, 'trash': 5,
+    'alone': 4, 'ashamed': 5, 'depressed': 8, 'discouraged': 5, 'dull': 2, 'empty': 6, 'failure': 7, 'guilty': 6,
+    'hopeless': 8, 'insecure': 5, 'lonely': 6, 'weak': 4, 'need': 5, 'disadvantage': 4, 'flaw': 4
+};
 const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
 
 // --- 2. ALL HELPER AND LOGIC FUNCTIONS ---
@@ -34,78 +43,37 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if 
 async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 15 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 250, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
 
-// --- BLOCK 2: ALL DASHBOARD FUNCTIONS (RESTORED & MERGED) ---
-function lemmatize(word) {
-    const lowerWord = word.toLowerCase();
-    if (lemmaMap[lowerWord]) return lemmaMap[lowerWord];
-    if (lowerWord.endsWith('s') && !lowerWord.endsWith('ss')) return lowerWord.slice(0, -1);
-    return lowerWord;
-}
+// --- BLOCK 2: ALL DASHBOARD FUNCTIONS (RE-INTEGRATED) ---
+function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1); return word; }
 
-// THIS IS YOUR NEW, WORKING EMOTION MAP FUNCTION
-async function generateEmotionMapData(posts) {
-    const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 800)}`).join('\n---\n');
-    const prompt = `You are a market research analyst. From the following text about '${originalGroupName}', identify up to 20 key TOPICS of discussion (e.g., "wedding dress", "family issues", "catering"). Respond ONLY with a JSON object with a single key "topics", containing an array of these topic strings.`;
-    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You extract key topics from text and respond in JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 400, response_format: { "type": "json_object" } };
-    
-    let topics = [];
-    try {
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        if (!response.ok) throw new Error('AI topic extraction failed.');
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
-        topics = parsed.topics || [];
-    } catch (error) {
-        console.error("Emotion Map topic extraction error:", error);
-        return [];
-    }
-
-    if (topics.length === 0) return [];
-
-    const topicData = topics.map(topic => {
-        const topicRegex = new RegExp(`\\b${topic.replace(/ /g, '\\s')}(s?)\\b`, 'i');
-        let totalIntensity = 0;
-        let emotionCount = 0;
-        let mentionCount = 0;
-
-        posts.forEach(post => {
-            const postText = `${post.data.title} ${post.data.selftext || ''}`.toLowerCase();
-            if (topicRegex.test(postText)) {
-                mentionCount++;
-                const words = postText.replace(/[^a-z\s']/g, '').split(/\s+/);
-                words.forEach(rawWord => {
-                    const lemma = lemmatize(rawWord);
-                    if (emotionalIntensityScores[lemma]) {
-                        totalIntensity += emotionalIntensityScores[lemma];
-                        emotionCount++;
-                    }
-                });
+function generateEmotionMapData(posts) {
+    const emotionFreq = {};
+    posts.forEach(post => {
+        const text = `${post.data.title} ${post.data.selftext || ''}`.toLowerCase();
+        const words = text.replace(/[^a-z\s']/g, '').split(/\s+/);
+        words.forEach(rawWord => {
+            const lemma = lemmatize(rawWord);
+            if (emotionalIntensityScores[lemma]) {
+                emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1;
             }
         });
-        
-        if (mentionCount > 0 && emotionCount > 0) {
-            return {
-                x: mentionCount,
-                y: totalIntensity / emotionCount,
-                label: topic
-            };
-        }
-        return null;
-    }).filter(Boolean);
-
-    return topicData.sort((a, b) => b.x - a.x).slice(0, 25);
+    });
+    const chartData = Object.entries(emotionFreq).map(([word, freq]) => ({ x: freq, y: emotionalIntensityScores[word], label: word }));
+    return chartData.sort((a, b) => b.x - a.x).slice(0, 25);
 }
 
-// THIS IS YOUR NEW, WORKING RENDER MAP FUNCTION
 function renderEmotionMap(data) {
     const container = document.getElementById('emotion-map-container');
     if (!container) return;
-    container.innerHTML = '<h3 class="dashboard-section-title">Topic Polarity Map</h3><div id="emotion-map"><canvas id="emotion-chart-canvas"></canvas></div>';
+    container.innerHTML = '<h3 class="dashboard-section-title">Emotion Polarity Map</h3><div id="emotion-map"><canvas id="emotion-chart-canvas"></canvas></div>';
     const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d');
     if (!ctx) return;
-    if (window.myEmotionChart) { window.myEmotionChart.destroy(); }
+
+    if (window.myEmotionChart) {
+        window.myEmotionChart.destroy();
+    }
     if (data.length < 3) {
-        container.innerHTML = '<h3 class="dashboard-section-title">Topic Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough data to build a polarity map.</p>';
+        container.innerHTML = '<h3 class="dashboard-section-title">Emotion Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777;">Not enough emotional data to build a polarity map.</p>';
         return;
     }
     const maxFreq = Math.max(...data.map(p => p.x));
@@ -113,10 +81,10 @@ function renderEmotionMap(data) {
         type: 'scatter',
         data: {
             datasets: [{
-                label: 'Topics',
+                label: 'Negative Emotions',
                 data: data,
-                backgroundColor: 'rgba(2, 119, 189, 0.7)',
-                borderColor: 'rgba(1, 87, 155, 1)',
+                backgroundColor: 'rgba(229, 57, 53, 0.7)',
+                borderColor: 'rgba(198, 40, 40, 1)',
                 borderWidth: 1,
                 pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20,
                 pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20,
@@ -130,7 +98,7 @@ function renderEmotionMap(data) {
                     callbacks: {
                         label: function(context) {
                             const point = context.raw;
-                            return `${point.label}: Frequency=${point.x}, Avg. Intensity=${point.y.toFixed(1)}`;
+                            return `${point.label}: Frequency=${point.x}, Intensity=${point.y}`;
                         }
                     },
                     displayColors: false,
@@ -139,96 +107,27 @@ function renderEmotionMap(data) {
                 }
             },
             scales: {
-                x: { title: { display: true, text: 'Frequency of Topic Mention', font: { weight: 'bold' } }, min: 0, grid: { color: '#f0f0f0' } },
-                y: { title: { display: true, text: 'Average Emotional Intensity', font: { weight: 'bold' } }, min: 0, max: 10, grid: { color: '#f0f0f0' } }
+                x: { title: { display: true, text: 'Frequency of Mention', font: { weight: 'bold' } }, min: 0, grid: { color: '#f0f0f0' } },
+                y: { title: { display: true, text: 'Emotional Intensity', font: { weight: 'bold' } }, min: 0, max: 10, grid: { color: '#f0f0f0' } }
             }
         }
     });
 }
 
-// THE REST OF THE DASHBOARD FUNCTIONS ARE NOW RESTORED
-function generateSentimentData(posts) {
-    const sentiment = { positive: {}, negative: {}, positiveCount: 0, negativeCount: 0 };
-    posts.forEach(post => {
-        const text = `${post.data.title} ${post.data.selftext || ''}`;
-        const words = text.replace(/[^a-zA-Z\s']/g, '').toLowerCase().split(/\s+/);
-        const uniqueWordsInPost = new Set();
-        words.forEach(word => { const lemma = lemmatize(word); if (stopWords.includes(lemma)) return; uniqueWordsInPost.add(lemma); });
-        uniqueWordsInPost.forEach(lemma => {
-            if (positiveWords.has(lemma)) { sentiment.positiveCount++; if (!sentiment.positive[lemma]) sentiment.positive[lemma] = { count: 0, posts: new Set() }; sentiment.positive[lemma].count++; sentiment.positive[lemma].posts.add(post); }
-            else if (negativeWords.has(lemma)) { sentiment.negativeCount++; if (!sentiment.negative[lemma]) sentiment.negative[lemma] = { count: 0, posts: new Set() }; sentiment.negative[lemma].count++; sentiment.negative[lemma].posts.add(post); }
-        });
-    });
-    return sentiment;
-}
-
-function renderSentimentCloud(containerId, wordData, colors) {
-    const container = document.getElementById(containerId); if (!container) return;
-    const words = Object.entries(wordData).sort(([, a], [, b]) => b.count - a.count).slice(0, 30);
-    if (words.length === 0) { container.innerHTML = `<p style="font-family: Inter, sans-serif; color: #777; text-align: center;">No significant terms found.</p>`; return; }
-    const maxCount = Math.max(...words.map(([, data]) => data.count)); const minCount = Math.min(...words.map(([, data]) => data.count));
-    const cloudHTML = words.map(([word, data]) => { const fontSize = 12 + 28 * ((data.count - minCount) / (maxCount - minCount || 1)); const color = colors[Math.floor(Math.random() * colors.length)]; return `<span class="cloud-word" data-word="${word}" style="font-size:${fontSize}px; color:${color}; margin: 2px 5px; cursor: pointer; display: inline-block;">${word}</span>`; }).join('');
-    container.innerHTML = `<div style="display: flex; flex-wrap: wrap; justify-content: center; align-items: center;">${cloudHTML}</div>`;
-}
-
-function renderContextContent(word, posts) {
-    const container = document.getElementById('context-box'); if (!container) return;
-    const uniquePosts = Array.from(new Set(posts.map(p => p.data.id))).map(id => posts.find(p => p.data.id === id)).slice(0, 5);
-    const regex = new RegExp(`\\b(${word})\\b`, 'gi');
-    const html = uniquePosts.map(post => { const textSnippet = getFirstTwoSentences(post.data.selftext || post.data.title); const highlightedSnippet = textSnippet.replace(regex, `<mark>$1</mark>`); return ` <div class="context-item" style="border-bottom: 1px solid #eee; padding: 8px 0; margin-bottom: 8px;"> <a href="https://reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight: bold; color: #007bff; text-decoration: none;">${post.data.title}</a> <p style="font-size: 0.9em; color: #555; margin: 4px 0 0;">...${highlightedSnippet}...</p> </div> `; }).join('');
-    container.innerHTML = `<h4 style="margin-top:0; margin-bottom: 12px;">Context for "${word}"</h4>${html || '<p>No specific context found.</p>'}`;
-    container.scrollIntoView({ behavior: 'smooth', block: 'center' });
-}
-
-async function generateFAQs(posts) {
-    const content = posts.slice(0, 15).map(p => `Title: ${p.data.title}\nContent: ${p.data.selftext}`).join('\n\n---\n\n');
-    const prompt = `Based on the following Reddit posts about "${originalGroupName}", generate 3-5 frequently asked questions (FAQs) that a person in this group might have. For each question, provide a concise, helpful answer derived from the posts. Respond ONLY in a JSON format with a single key "faqs", containing an array of objects. Each object must have a "question" and an "answer" key. \n\nPOSTS:\n${content}`;
-    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an FAQ generation assistant. Output ONLY valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 1000, response_format: { "type": "json_object" } };
-    try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', body: JSON.stringify({ openaiPayload: openAIParams }), headers: { 'Content-Type': 'application/json' } }); if (!response.ok) return []; const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return (parsed && parsed.faqs) ? parsed.faqs : []; } catch (e) { console.error("FAQ generation failed:", e); return []; }
-}
-
-async function extractAndValidateEntities(posts, nicheContext) {
-    const content = posts.slice(0, 25).map(p => p.data.title + ". " + p.data.selftext).join("\n");
-    const prompt = `Analyze the following text from discussions about "${nicheContext}". Extract specific brand names and common generic product types mentioned. Respond ONLY in a JSON format with two keys: "brands" and "products". Each key should contain an array of strings. - "brands": List specific company or brand names (e.g., "Nike", "Sony", "Canva"). - "products": List generic product categories (e.g., "running shoes", "camera", "graphic design tool"). TEXT: ${content}`;
-    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "user", content: prompt }], temperature: 0.1, response_format: { "type": "json_object" } };
-    try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', body: JSON.stringify({ openaiPayload: openAIParams }), headers: { 'Content-Type': 'application/json' } }); if (!response.ok) return { topBrands: [], topProducts: [] }; const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const processEntities = (entityList) => { const counts = {}; entityList.forEach(entity => { const e = entity.trim().toLowerCase(); if (e && e.length > 2 && !stopWords.includes(e)) { counts[e] = (counts[e] || 0) + 1; } }); return Object.entries(counts).sort((a, b) => b[1] - a[1]).slice(0, 10); }; const topBrands = processEntities(parsed.brands || []); const topProducts = processEntities(parsed.products || []); return { topBrands, topProducts }; } catch (e) { console.error("Entity extraction failed:", e); return { topBrands: [], topProducts: [] }; }
-}
-
-function renderDiscoveryList(containerId, data, title, type) {
-    const container = document.getElementById(containerId); if (!container) return;
-    let html = `<h3 class="dashboard-section-title">${title}</h3>`;
-    if (data.length > 0) { html += `<ul class="discovery-list">` + data.map(([name, count]) => `<li class="discovery-list-item" data-word="${name}" data-type="${type}" style="cursor: pointer;"> <span class="discovery-item-name">${name}</span> <span class="discovery-item-count">${count}</span> </li>`).join('') + `</ul>`; }
-    else { html += `<p style="font-family: Inter, sans-serif; color: #777;">None discovered.</p>`; }
-    container.innerHTML = html;
-}
-
-function renderFAQs(faqs) {
-    const container = document.getElementById('faq-container'); if (!container) return;
-    let html = '<h3 class="dashboard-section-title">Common Questions</h3>';
-    if (faqs && faqs.length > 0) { html += faqs.map(faq => `<div class="faq-item"> <p class="faq-question">${faq.question}</p> <p class="faq-answer">${faq.answer}</p> </div>`).join(''); }
-    else { html += `<p style="font-family: Inter, sans-serif; color: #777;">No common questions could be generated.</p>`; }
-    container.innerHTML = html;
-}
-
-function renderIncludedSubreddits(subreddits) {
-    const container = document.getElementById('included-subreddits-container'); if (!container) return;
-    let html = '<h3 class="dashboard-section-title">Communities Analyzed</h3>';
-    if (subreddits && subreddits.length > 0) { html += `<div class="subreddit-pills-container">` + subreddits.map(sub => `<span class="subreddit-pill">r/${sub}</span>`).join('') + `</div>`; }
-    else { html += `<p>No subreddits were analyzed.</p>`; }
-    container.innerHTML = html;
-}
-
-function renderSentimentScore(positiveCount, negativeCount) {
-    const container = document.getElementById('sentiment-score-container'); if (!container) return;
-    const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = '<h3 class="dashboard-section-title">Problem Score</h3><p>Not enough data.</p>'; return; }
-    const score = Math.round((negativeCount / total) * 100); const scoreColor = score > 60 ? '#D32F2F' : score > 40 ? '#F57C00' : '#388E3C';
-    container.innerHTML = ` <h3 class="dashboard-section-title">Problem Score</h3> <div class="sentiment-score-value" style="color: ${scoreColor};">${score}</div> <div class="sentiment-score-bar-background"> <div class="sentiment-score-bar-foreground" style="width: ${score}%; background-color: ${scoreColor};"></div> </div> <p class="sentiment-score-label">A higher score indicates a higher proportion of negative sentiment in the discussions.</p> `;
-}
-
+function generateSentimentData(posts) { const data = { positive: {}, negative: {} }; let positiveCount = 0; let negativeCount = 0; posts.forEach(post => { const text = `${post.data.title} ${post.data.selftext || ''}`; const words = text.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { if (rawWord.length < 3 || stopWords.includes(rawWord)) return; const lemma = lemmatize(rawWord); let category = null; if (positiveWords.has(lemma)) { category = 'positive'; positiveCount++; } else if (negativeWords.has(lemma)) { category = 'negative'; negativeCount++; } if (category) { if (!data[category][lemma]) { data[category][lemma] = { count: 0, posts: new Set() }; } data[category][lemma].count++; data[category][lemma].posts.add(post); } }); }); window._sentimentData = data; return { positive: Object.entries(data.positive).sort((a, b) => b[1].count - a[1].count).slice(0, 30), negative: Object.entries(data.negative).sort((a, b) => b[1].count - a[1].count).slice(0, 30), positiveCount, negativeCount }; }
+function renderSentimentCloud(containerId, wordData, colors) { const container = document.getElementById(containerId); if (!container) return; if (wordData.length < 3) { container.innerHTML = `<p style="font-family: sans-serif; color: #777; padding: 1rem; text-align: center;">Not enough distinct terms found.</p>`; return; } const counts = wordData.map(item => item[1].count); const maxCount = Math.max(...counts); const minCount = Math.min(...counts); const minFontSize = 16, maxFontSize = 42; const cloudHTML = wordData.map(([word, data]) => { const fontSize = minFontSize + ((data.count - minCount) / (maxCount - minCount || 1)) * (maxFontSize - minFontSize); const color = colors[Math.floor(Math.random() * colors.length)]; const rotation = Math.random() * 8 - 4; return `<span class="cloud-word" data-word="${word}" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${word}</span>`; }).join(''); container.innerHTML = cloudHTML; }
+function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title}. ${post.data.selftext || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence.replace(highlightRegex, `<strong>$1</strong>`); const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if(closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title}\nContent: ${p.data.selftext.substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
+async function extractAndValidateEntities(posts, nicheContext) { const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 800)}`).join('\n---\n'); const prompt = `You are a market research analyst reviewing Reddit posts from the '${nicheContext}' community. Extract the following: 1. "brands": Specific, proper-noun company, brand, or service names (e.g., "KitchenAid", "Stripe"). 2. "products": Common, generic product categories (e.g., "stand mixer", "CRM software"). CRITICAL RULES: Be strict. Exclude acronyms (MOH, AITA), generic words (UPDATE), etc. Respond ONLY with a JSON object with two keys: "brands" and "products", holding an array of strings. If none, return an empty array. Text: ${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1000, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('AI entity extraction failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const allEntities = { brands: parsed.brands || [], products: parsed.products || [] }; window._entityData = {}; for (const type in allEntities) { window._entityData[type] = {}; allEntities[type].forEach(name => { const regex = new RegExp(`\\b${name.replace(/ /g, '\\s')}(s?)\\b`, 'gi'); const mentioningPosts = posts.filter(post => regex.test(post.data.title + ' ' + post.data.selftext)); if (mentioningPosts.length > 0) { window._entityData[type][name] = { count: mentioningPosts.length, posts: mentioningPosts }; } }); } return { topBrands: Object.entries(window._entityData.brands || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8), topProducts: Object.entries(window._entityData.products || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8) }; } catch (error) { console.error("Entity extraction error:", error); return { topBrands: [], topProducts: [] }; } }
+function renderDiscoveryList(containerId, data, title, type) { const container = document.getElementById(containerId); if(!container) return; let listItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No significant mentions found.</p>'; if (data.length > 0) { listItems = data.map(([name, details], index) => `<li class="discovery-list-item" data-word="${name}" data-type="${type}"><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${details.count} mentions</span></li>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`; }
+function renderFAQs(faqs) { const container = document.getElementById('faq-container'); if(!container) return; let faqItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">Could not generate common questions from the text.</p>'; if (faqs.length > 0) { faqItems = faqs.map((faq) => `<div class="faq-item"><button class="faq-question">${faq}</button><div class="faq-answer"><p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p></div></div>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">Frequently Asked Questions</h3>${faqItems}`; container.querySelectorAll('.faq-question').forEach(button => { button.addEventListener('click', () => { const answer = button.nextElementSibling; button.classList.toggle('active'); if (answer.style.maxHeight) { answer.style.maxHeight = null; answer.style.padding = '0 1.5rem'; } else { answer.style.padding = '1rem 1.5rem'; answer.style.maxHeight = answer.scrollHeight + "px"; } }); }); }
+function renderIncludedSubreddits(subreddits) { const container = document.getElementById('included-subreddits-container'); if(!container) return; const tags = subreddits.map(sub => `<div class="subreddit-tag">r/${sub}</div>`).join(''); container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list">${tags}</div>`; }
+function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
 // =================================================================================
 // BLOCK 3 of 4: MAIN ANALYSIS FUNCTION
 // =================================================================================
+
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn');
     if (!searchButton) { console.error("Could not find button."); return; }
@@ -250,8 +149,8 @@ async function runProblemFinder() {
     const resultsWrapper = document.getElementById('results-wrapper-b');
     if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
     
-    // Clear all dashboard containers
-    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "positive-cloud", "negative-cloud", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; } });
+    // Clear all results containers
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; } });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
     const resultsMessageDiv = document.getElementById("results-message");
@@ -269,25 +168,23 @@ async function runProblemFinder() {
         if (allPosts.length === 0) { throw new Error("No results found."); }
         
         const filteredPosts = filterPosts(allPosts, selectedMinUpvotes);
-        if (filteredPosts.length < 10) { throw new Error("Not enough high-quality posts found to analyze."); }
+        if (filteredPosts.length < 10) { throw new Error("Not enough high-quality posts found."); }
         
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
 
         // --- RENDER ALL DASHBOARD COMPONENTS ---
         const sentimentData = generateSentimentData(filteredPosts);
-        window._sentimentData = sentimentData;
         renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
         
-        // This now uses your new AI-powered function
         generateEmotionMapData(filteredPosts).then(emotionMapData => {
             renderEmotionMap(emotionMapData);
         });
 
         renderIncludedSubreddits(selectedSubreddits);
-        
+
         extractAndValidateEntities(filteredPosts, originalGroupName).then(entities => {
             renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands');
             renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products');
@@ -352,8 +249,7 @@ async function runProblemFinder() {
 
     } catch (err) {
         console.error("Error in main analysis:", err);
-        const resultsMessageDiv = document.getElementById("results-message");
-        if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center; padding: 1rem; background-color: #fff0f0; border: 1px solid red; border-radius: 8px;">❌ ${err.message}</p>`;
+        if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
         if (resultsWrapper) {
             resultsWrapper.style.setProperty('display', 'flex', 'important');
             resultsWrapper.style.opacity = '1';
@@ -363,29 +259,36 @@ async function runProblemFinder() {
         searchButton.disabled = false;
     }
 }
-
-
 // =================================================================================
 // BLOCK 4 of 4: INITIALIZATION LOGIC
 // =================================================================================
+
 function initializeDashboardInteractivity() {
     const dashboard = document.getElementById('results-wrapper-b');
     if (!dashboard) return;
+
     dashboard.addEventListener('click', (e) => {
         const cloudWordEl = e.target.closest('.cloud-word');
+        const entityEl = e.target.closest('.discovery-list-item');
+
         if (cloudWordEl) {
             const word = cloudWordEl.dataset.word;
             const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
             const postsData = window._sentimentData?.[category]?.[word]?.posts;
-            if (postsData) {
-                renderContextContent(word, Array.from(postsData));
-            }
+            if (postsData) renderContextContent(word, Array.from(postsData));
+        } else if (entityEl) {
+            const word = entityEl.dataset.word;
+            const type = entityEl.dataset.type;
+            const postsData = window._entityData?.[type]?.[word]?.posts;
+            if (postsData) renderContextContent(word, postsData);
         }
     });
 }
 
+
 function initializeProblemFinderTool() {
     console.log("Problem Finder elements found. Initializing...");
+
     const pillsContainer = document.getElementById('pf-suggestion-pills');
     const groupInput = document.getElementById('group-input');
     const findCommunitiesBtn = document.getElementById('find-communities-btn');
@@ -396,19 +299,72 @@ function initializeProblemFinderTool() {
     const choicesContainer = document.getElementById('subreddit-choices');
     const audienceTitle = document.getElementById('pf-audience-title');
     const backButton = document.getElementById('back-to-step1-btn');
-    if (!findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer) { console.error("Critical error: A key element for the tool's UI was not found. Aborting initialization."); return; }
-    const transitionToStep2 = () => { if (!step1Container || !step2Container || !choicesContainer || !audienceTitle) return; if (step2Container.classList.contains('visible')) return; step1Container.classList.add('hidden'); step2Container.classList.add('visible'); choicesContainer.innerHTML = '<p class="loading-text">Finding relevant communities...</p>'; audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`; };
-    const transitionToStep1 = () => { if (!step1Container || !step2Container) return; step2Container.classList.remove('visible'); step1Container.classList.remove('hidden'); const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; } };
-    if (pillsContainer) {
-        pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
-        pillsContainer.addEventListener('click', (event) => { if (event.target.classList.contains('pf-suggestion-pill') && groupInput) { groupInput.value = event.target.getAttribute('data-value'); findCommunitiesBtn.click(); } });
+
+    if (!findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer) {
+        console.error("Critical error: A key element was null. Aborting initialization.");
+        return;
     }
-    if (inspireButton) { inspireButton.addEventListener('click', () => { if (pillsContainer) pillsContainer.classList.toggle('visible'); }); }
-    findCommunitiesBtn.addEventListener("click", async (event) => { event.preventDefault(); const groupName = groupInput ? groupInput.value.trim() : ''; if (!groupName) { alert("Please enter a group of people or select a suggestion."); return; } originalGroupName = groupName; transitionToStep2(); const subreddits = await findSubredditsForGroup(groupName); displaySubredditChoices(subreddits); });
-    searchSelectedBtn.addEventListener("click", (event) => { event.preventDefault(); runProblemFinder(); });
-    backButton.addEventListener('click', (e) => { e.preventDefault(); transitionToStep1(); });
-    choicesContainer.addEventListener('click', (event) => { const choiceDiv = event.target.closest('.subreddit-choice'); if (choiceDiv) { const checkbox = choiceDiv.querySelector('input[type="checkbox"]'); if (checkbox) { if (event.target.tagName !== 'INPUT') { checkbox.checked = !checkbox.checked; } } } });
+
+    const transitionToStep2 = () => {
+        if (step2Container.classList.contains('visible')) return;
+        step1Container.classList.add('hidden');
+        step2Container.classList.add('visible');
+        choicesContainer.innerHTML = '<p class="loading-text">Finding relevant communities...</p>';
+        audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`;
+    };
+    
+    const transitionToStep1 = () => {
+        step2Container.classList.remove('visible');
+        step1Container.classList.remove('hidden');
+        const resultsWrapper = document.getElementById('results-wrapper-b');
+        if (resultsWrapper) { resultsWrapper.style.display = 'none'; }
+    };
+
+    pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
+    
+    pillsContainer.addEventListener('click', (event) => {
+        if (event.target.classList.contains('pf-suggestion-pill')) {
+            groupInput.value = event.target.getAttribute('data-value');
+            findCommunitiesBtn.click();
+        }
+    });
+
+    inspireButton.addEventListener('click', () => {
+        pillsContainer.classList.toggle('visible');
+    });
+
+    findCommunitiesBtn.addEventListener("click", async (event) => {
+        event.preventDefault();
+        const groupName = groupInput.value.trim();
+        if (!groupName) {
+            alert("Please enter a group of people or select a suggestion.");
+            return;
+        }
+        originalGroupName = groupName;
+        transitionToStep2();
+        const subreddits = await findSubredditsForGroup(groupName);
+        displaySubredditChoices(subreddits);
+    });
+
+    searchSelectedBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        runProblemFinder();
+    });
+    
+    backButton.addEventListener('click', () => {
+        transitionToStep1();
+    });
+
+    choicesContainer.addEventListener('click', (event) => {
+        const choiceDiv = event.target.closest('.subreddit-choice');
+        if (choiceDiv) {
+            const checkbox = choiceDiv.querySelector('input[type="checkbox"]');
+            if (checkbox) checkbox.checked = !checkbox.checked;
+        }
+    });
+    
     initializeDashboardInteractivity();
+
     console.log("Problem Finder tool successfully initialized.");
 }
 
@@ -416,10 +372,20 @@ function waitForElementAndInit() {
     const keyElementId = 'find-communities-btn';
     let retries = 0;
     const maxRetries = 50;
+
     const intervalId = setInterval(() => {
         const keyElement = document.getElementById(keyElementId);
-        if (keyElement) { clearInterval(intervalId); initializeProblemFinderTool(); }
-        else { retries++; if (retries > maxRetries) { clearInterval(intervalId); console.error(`Initialization FAILED. Key element "#${keyElementId}" not found after ${maxRetries} retries.`); } }
+
+        if (keyElement) {
+            clearInterval(intervalId);
+            initializeProblemFinderTool();
+        } else {
+            retries++;
+            if (retries > maxRetries) {
+                clearInterval(intervalId);
+                console.error(`Initialization FAILED. Key element "#${keyElementId}" not found.`);
+            }
+        }
     }, 100);
 }
 

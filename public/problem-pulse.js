@@ -1,5 +1,5 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 9.7 - TRENDING ANNOYANCES FIX)
+// FINAL SCRIPT (VERSION 9.8 - TRENDING ANNOYANCES FEATURE FIX)
 // COMPLETE CODE IN ONE BLOCK
 // =================================================================================
 
@@ -186,7 +186,6 @@ async function generateFAQs(posts) {
     }
 }
 
-// --- THIS IS THE NEW, SUPERCHARGED AI PROMPT & LOGIC ---
 async function extractAndValidateEntities(posts, nicheContext) {
     const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 800)}`).join('\n---\n');
 
@@ -243,7 +242,6 @@ ${topPostsText}`;
     }
 }
 
-
 function renderDiscoveryList(containerId, data, title, type) {
     const container = document.getElementById(containerId);
     if(!container) return;
@@ -296,6 +294,62 @@ function renderSentimentScore(positiveCount, negativeCount) {
     const positivePercent = Math.round((positiveCount / total) * 100);
     const negativePercent = 100 - positivePercent;
     container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`;
+}
+
+// --- NEW FUNCTIONS FOR TRENDING ANNOYANCES ---
+async function findTrendingAnnoyances(posts, coreProblemTitles) {
+    const oneMonthAgo = new Date();
+    oneMonthAgo.setMonth(oneMonthAgo.getMonth() - 1);
+    const oneMonthAgoSeconds = oneMonthAgo.getTime() / 1000;
+
+    const recentAnnoyanceKeywords = ['annoying', 'frustrating', 'hate', 'bug', 'glitch', 'issue', 'worst', 'broken'];
+    const recentPosts = posts.filter(p => {
+        return p.data.created_utc > oneMonthAgoSeconds && 
+               recentAnnoyanceKeywords.some(keyword => (p.data.title + ' ' + p.data.selftext).toLowerCase().includes(keyword));
+    });
+
+    if (recentPosts.length < 5) {
+        return []; // Not enough data to find a trend
+    }
+    
+    const sortedRecent = recentPosts.sort((a, b) => (b.data.ups + b.data.num_comments) - (a.data.ups + a.data.num_comments));
+    const topRecentText = sortedRecent.slice(0, 15).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 500)}`).join('\n---\n');
+
+    const prompt = `You are a market trend analyst for the '${originalGroupName}' community. I have already identified the following major, evergreen problems:
+- ${coreProblemTitles.join('\n- ')}
+
+Now, analyze the following RECENT and highly-engaged posts. Your task is to identify 1-3 NEW, emerging, or specific annoyances that are DIFFERENT from the core problems listed above. These should be fresh, specific complaints that represent a current trend.
+
+For each trend, provide a concise title and a one-sentence explanation.
+
+Respond ONLY with a JSON object with a single key "trends", containing an array of objects, each with "title" and "explanation".
+Example: {"trends": [{"title": "Glitch in the new update", "explanation": "Users are complaining that the latest software update has introduced a specific bug."}]}
+
+Recent Posts to Analyze:
+${topRecentText}`;
+
+    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise trend analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 600, response_format: { "type": "json_object" } };
+
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('AI trend analysis failed.');
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        return parsed.trends || [];
+    } catch (error) {
+        console.error("Trending Annoyances error:", error);
+        return [];
+    }
+}
+
+function renderTrendingAnnoyances(trends) {
+    const container = document.getElementById('trending-container');
+    if(!container) return;
+    let trendItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No new or emerging annoyances found in recent discussions.</p>';
+    if (trends.length > 0) {
+        trendItems = trends.map(trend => `<div class="faq-item"><div class="faq-question">${trend.title}</div><div class="faq-answer" style="max-height: fit-content; padding: 1rem 1.5rem;"><p>${trend.explanation}</p></div></div>`).join('');
+    }
+    container.innerHTML = `<h3 class="dashboard-section-title">New & Emerging Annoyances</h3>${trendItems}`;
 }
 // =================================================================================
 // BLOCK 3 of 4: MAIN ANALYSIS FUNCTION
@@ -356,7 +410,7 @@ async function runProblemFinder() {
         extractAndValidateEntities(filteredPosts, originalGroupName, selectedSubreddits).then(entities => {
             renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands');
             renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products');
-            // NOTE: Similar communities is no longer called/rendered
+            // REMOVED: Similar communities is no longer called/rendered
         });
         generateFAQs(filteredPosts).then(faqs => renderFAQs(faqs));
 
@@ -366,7 +420,7 @@ async function runProblemFinder() {
         const topKeywords = getTopKeywords(filteredPosts, 10);
         const topPosts = filteredPosts.slice(0, 30);
         const combinedTexts = topPosts.map(post => `${post.data.title}. ${getFirstTwoSentences(post.data.selftext)}`).join("\n\n");
-        const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", and "keywords". Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["Quote A", "Quote B", "Quote C"], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_tokens: 1500, response_format: { "type": "json_object" } };
+        const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["Quote A", "Quote B", "Quote C"], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_tokens: 1500, response_format: { "type": "json_object" } };
         const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!openAIResponse.ok) throw new Error('OpenAI summary generation failed.');
         const openAIData = await openAIResponse.json();
@@ -377,6 +431,7 @@ async function runProblemFinder() {
         const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
         window._summaries = sortedFindings.map(item => item.summary);
         
+        // --- THIS IS THE FIX: This code was missing ---
         const coreProblemTitles = sortedFindings.map(f => f.summary.title);
         findTrendingAnnoyances(filteredPosts, coreProblemTitles).then(trending => {
             renderTrendingAnnoyances(trending);

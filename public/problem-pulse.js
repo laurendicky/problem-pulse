@@ -1,5 +1,5 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 9.1 - AI BRAND VALIDATION)
+// FINAL SCRIPT (VERSION 9.2 - AI BRAND VALIDATION V2)
 // BLOCK 1 of 4: GLOBAL VARIABLES & HELPERS
 // =================================================================================
 
@@ -15,7 +15,7 @@ const lemmaMap = { 'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': '
 const positiveWords = new Set(['love', 'amazing', 'awesome', 'beautiful', 'best', 'brilliant', 'celebrate', 'charming', 'dope', 'excellent', 'excited', 'exciting', 'epic', 'fantastic', 'flawless', 'gorgeous', 'happy', 'impressed', 'incredible', 'insane', 'joy', 'keen', 'lit', 'perfect', 'phenomenal', 'proud', 'rad', 'super', 'stoked', 'thrilled', 'vibrant', 'wow', 'wonderful', 'blessed', 'calm', 'chill', 'comfortable', 'cozy', 'grateful', 'loyal', 'peaceful', 'pleased', 'relaxed', 'relieved', 'satisfied', 'secure', 'thankful', 'want', 'wish', 'hope', 'desire', 'craving', 'benefit', 'bonus', 'deal', 'hack', 'improvement', 'quality', 'solution', 'strength', 'advice', 'tip', 'trick', 'recommend']);
 const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'broken', 'hate', 'challenge', 'confused', 'crazy', 'critical', 'danger', 'desperate', 'disappoint', 'disgusted', 'dreadful', 'fear', 'frustrate', 'furious', 'horrible', 'irritated', 'jealous', 'nightmare', 'outraged', 'pain', 'panic', 'problem', 'rant', 'scared', 'shocked', 'stressful', 'terrible', 'terrified', 'trash', 'worst', 'alone', 'ashamed', 'bored', 'depressed', 'discouraged', 'dull', 'empty', 'exhausted', 'failure', 'guilty', 'heartbroken', 'hopeless', 'hurt', 'insecure', 'lonely', 'miserable', 'sad', 'sorry', 'tired', 'unhappy', 'upset', 'weak', 'need', 'disadvantage', 'issue', 'flaw']);
 const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
-const COMMON_NON_BRANDS = new Set(['EDIT', 'UPDATE', 'OP', 'AITA', 'TLDR', 'IMO', 'IMHO', 'IAMA', 'AMA', 'PSA', 'DIY', 'FAQ', 'TIL', 'MOH', 'MIL', 'SIL', 'FIL', 'SO', 'RSVP', 'EOD', 'TBD', 'FYI', 'PM', 'DM', 'MOD', 'BOT', 'USA', 'UK', 'EU']);
+const COMMON_NON_BRANDS = new Set(['EDIT', 'UPDATE', 'OP', 'AITA', 'TLDR', 'IMO', 'IMHO', 'IAMA', 'AMA', 'PSA', 'DIY', 'FAQ', 'TIL', 'MOH', 'MIL', 'SIL', 'FIL', 'SO', 'RSVP', 'EOD', 'TBD', 'FYI', 'PM', 'DM', 'MOD', 'BOT', 'USA', 'UK', 'EU', 'COVID', 'HTML', 'CSS', 'JSON', 'API']);
 
 // --- 2. ALL HELPER AND LOGIC FUNCTIONS ---
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
@@ -120,8 +120,6 @@ function renderContextContent(word, posts) {
     const contextBox = document.getElementById('context-box');
     if (!contextBox) return;
 
-    // --- NEW: Plural-aware and variation-aware highlighting regex ---
-    // This will match 'frustrate', 'frustrated', 'frustrates', 'frustrating' etc.
     const highlightRegex = new RegExp(`\\b(${word}\\w*)\\b`, 'gi');
 
     const headerHTML = `
@@ -133,23 +131,16 @@ function renderContextContent(word, posts) {
     
     const snippetsHTML = posts.slice(0, 10).map(post => {
         const fullText = `${post.data.title}. ${post.data.selftext || ''}`;
-        
-        // --- NEW & IMPROVED SNIPPET LOGIC ---
         const sentences = fullText.match(/[^.!?]+[.!?]+/g) || [];
-        const keywordRegex = new RegExp(`\\b${word}\\w*\\b`, 'i'); // Regex to find the word and its variations
-
-        // Find the first sentence that actually contains the keyword or its variations
+        const keywordRegex = new RegExp(`\\b${word}\\w*\\b`, 'i');
         let relevantSentence = sentences.find(s => keywordRegex.test(s));
         
-        // Fallback if no specific sentence is found
         if (!relevantSentence) {
             relevantSentence = getFirstTwoSentences(fullText);
         }
 
-        // Highlight all instances in the final snippet
         const textToShow = relevantSentence.replace(highlightRegex, `<strong>$1</strong>`);
         
-        // --- Full metadata line ---
         const metaHTML = `
             <div class="context-snippet-meta">
                 <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span>
@@ -167,7 +158,6 @@ function renderContextContent(word, posts) {
     contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
     contextBox.style.display = 'block';
     
-    // Add event listener to the new close button
     const closeBtn = document.getElementById('context-close-btn');
     if(closeBtn) {
         closeBtn.addEventListener('click', () => {
@@ -179,7 +169,7 @@ function renderContextContent(word, posts) {
     contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
-// --- NEW FUNCTIONS FOR NEW FEATURES ---
+// --- NEW & IMPROVED BRAND EXTRACTION LOGIC ---
 async function generateFAQs(posts) {
     const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title}\nContent: ${p.data.selftext.substring(0, 500)}`).join('\n---\n');
     const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. The questions should be direct and actionable. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?", "What is the best tool for Y?"]}\n\nPosts:\n${topPostsText}`;
@@ -199,7 +189,7 @@ async function generateFAQs(posts) {
 function extractPotentialEntities(posts, currentSubreddits) {
     const brands = {};
     const communities = {};
-    const brandRegex = /\b([A-Z][a-z]+[A-Z][a-zA-Z]*|[A-Z]{2,}(?![a-z]))\b/g;
+    const brandRegex = /\b([A-Z][a-z]+(?:[A-Z][a-zA-Z]*)?|[A-Z]{2,}(?![a-z]))\b/g;
     const communityRegex = /r\/(\w+)/g;
     const currentSubSet = new Set(currentSubreddits);
 
@@ -221,14 +211,29 @@ function extractPotentialEntities(posts, currentSubreddits) {
     });
 
     return {
-        potentialBrands: Object.keys(brands).sort((a,b) => brands[b] - brands[a]).slice(0, 50), // Send top 50 candidates to AI
+        potentialBrands: Object.keys(brands).sort((a,b) => brands[b] - brands[a]).slice(0, 50),
         similarCommunities: Object.entries(communities).sort((a, b) => b[1] - a[1]).slice(0, 8)
     };
 }
 
 async function validateBrandsWithAI(potentialBrands, nicheContext) {
     if (potentialBrands.length === 0) return [];
-    const prompt = `You are a brand identification expert. For the audience "${nicheContext}", analyze this list of capitalized words: [${potentialBrands.join(', ')}]. Identify which are actual brand, product, or company names relevant to this audience. Ignore common acronyms, locations, and generic words. Respond ONLY with a JSON object with a single key "brands", containing an array of the valid brand names. If none are valid, return an empty array.`;
+    // --- THIS IS THE NEW, EXPERT-LEVEL PROMPT ---
+    const prompt = `You are a meticulous market research analyst specializing in brand identification from social media text. The text comes from Reddit discussions within the '${nicheContext}' community.
+    
+    Your task is to filter the following list of capitalized words and return only the ones that are actual brand, product, or company names relevant to this audience.
+
+    Crucially, you MUST EXCLUDE:
+    - Names of subreddits (e.g., 'WedditGetsFit', 'AskReddit')
+    - Common internet and niche-specific acronyms (e.g., 'AITA', 'MOH', 'DIY')
+    - Generic capitalized words that are not brands (e.g., 'UPDATE', 'EDIT', 'ALL')
+
+    Return only the names of actual companies, products, or services.
+
+    Here is the list of candidates: [${potentialBrands.join(', ')}]
+
+    Respond ONLY with a JSON object with a single key "brands", containing an array of the valid brand names. If none are valid, return an empty array.`;
+
     const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise brand identification engine that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 400, response_format: { "type": "json_object" } };
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
@@ -259,9 +264,9 @@ function countValidatedBrands(validatedBrands, posts) {
 function renderDiscoveryList(containerId, data, title) {
     const container = document.getElementById(containerId);
     if(!container) return;
-    let listItems = '<p style="font-family: Inter, sans-serif; color: #777;">No significant mentions found.</p>';
+    let listItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No significant mentions found.</p>';
     if (data.length > 0) {
-        listItems = data.map(([name, count], index) => `<li class="discovery-list-item"><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${count} mentions</span></li>`).join('');
+        listItems = data.map(([name, count], index) => `<li><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${count} mentions</span></li>`).join('');
     }
     container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`;
 }
@@ -269,7 +274,7 @@ function renderDiscoveryList(containerId, data, title) {
 function renderFAQs(faqs) {
     const container = document.getElementById('faq-container');
     if(!container) return;
-    let faqItems = '<p style="font-family: Inter, sans-serif; color: #777;">Could not generate common questions from the text.</p>';
+    let faqItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">Could not generate common questions from the text.</p>';
     if (faqs.length > 0) {
         faqItems = faqs.map((faq, index) => `<div class="faq-item"><button class="faq-question">${faq}</button><div class="faq-answer"><p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p></div></div>`).join('');
     }
@@ -295,6 +300,19 @@ function renderIncludedSubreddits(subreddits) {
     if(!container) return;
     const tags = subreddits.map(sub => `<div class="subreddit-tag">r/${sub}</div>`).join('');
     container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list">${tags}</div>`;
+}
+
+function renderSentimentScore(positiveCount, negativeCount) {
+    const container = document.getElementById('sentiment-score-container');
+    if(!container) return;
+    const total = positiveCount + negativeCount;
+    if (total === 0) {
+        container.innerHTML = ''; // Don't show if no sentiment words
+        return;
+    };
+    const positivePercent = Math.round((positiveCount / total) * 100);
+    const negativePercent = 100 - positivePercent;
+    container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`;
 }
 // =================================================================================
 // BLOCK 3 of 4: MAIN ANALYSIS FUNCTION
@@ -349,6 +367,9 @@ async function runProblemFinder() {
         const sentimentData = generateSentimentData(filteredPosts);
         const { potentialBrands, similarCommunities } = extractPotentialEntities(filteredPosts, selectedSubreddits);
         
+        // --- THIS IS THE FIX: Call renderSentimentScore ---
+        renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
+
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
         renderDiscoveryList('similar-communities-container', similarCommunities, 'Similar Communities');

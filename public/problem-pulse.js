@@ -126,6 +126,9 @@ Example: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequenc
 /**
  * [FINAL, ROBUST VERSION] Renders a visually enhanced and fully functional Problem Polarity Map.
  */
+/**
+ * [FINAL, ROBUST VERSION 2] Renders a visually enhanced and fully functional Problem Polarity Map.
+ */
 function renderEmotionMap(data) {
     const container = document.getElementById('emotion-map-container');
     if (!container) return;
@@ -139,14 +142,11 @@ function renderEmotionMap(data) {
         return;
     }
 
-    // --- FIX 1: RESTRUCTURED HTML FOR BUTTON VISIBILITY ---
-    // The button is now placed *after* the chart's div to prevent Chart.js from interfering with it.
-    // The parent container gets a 'relative' position via CSS so the button can be placed correctly.
     container.innerHTML = `
         <h3 class="dashboard-section-title">Problem Polarity Map</h3>
         <p id="problem-map-description">The most frequent and emotionally intense problems appear in the top-right quadrant.</p>
         <div id="emotion-map-wrapper"> 
-            <div id="emotion-map" style="height: 400px; background: #2c3e50; padding: 10px; border-radius: 8px;">
+            <div id="emotion-map" style="height: 400px; padding: 10px; border-radius: 8px;">
                 <canvas id="emotion-chart-canvas"></canvas>
             </div>
             <button id="chart-zoom-btn" style="display: none;"></button>
@@ -181,8 +181,6 @@ function renderEmotionMap(data) {
             plugins: {
                 legend: { display: false },
                 tooltip: {
-                    // --- FIX 2: PREVENT REPEATING TOOLTIP DATA ---
-                    // This ensures the tooltip only ever triggers for the single nearest point.
                     mode: 'nearest',
                     intersect: false,
                     
@@ -190,9 +188,19 @@ function renderEmotionMap(data) {
                         title: function(tooltipItems) {
                             return tooltipItems[0].raw.label;
                         },
+                        
+                        // --- DEFINITIVE TOOLTIP FIX ---
+                        // This function now checks if it's the first item in the tooltip.
+                        // If it is, it returns the details. For all others, it returns nothing.
                         label: function(context) {
-                            const point = context.raw;
-                            return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`;
+                            // Check if this data point is the *first one* the tooltip is trying to show.
+                            if (context.dataIndex === context.chart.tooltip.dataPoints[0].dataIndex) {
+                                const point = context.raw;
+                                return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`;
+                            } else {
+                                // For any other data points under the cursor, return nothing.
+                                return;
+                            }
                         }
                     },
                     displayColors: false,

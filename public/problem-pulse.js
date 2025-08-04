@@ -120,11 +120,13 @@ Example: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequenc
 /**
  * [FINAL, RELIABLE VERSION] Renders the Problem Polarity Map with a fully functional, collapsible X-axis.
  */
+/**
+ * [FINAL, STYLED VERSION] Renders a visually enhanced Problem Polarity Map.
+ */
 function renderEmotionMap(data) {
     const container = document.getElementById('emotion-map-container');
     if (!container) return;
 
-    // Destroy any existing chart and its event listeners to ensure a clean slate.
     if (window.myEmotionChart) {
         window.myEmotionChart.destroy();
     }
@@ -134,30 +136,26 @@ function renderEmotionMap(data) {
         return;
     }
 
+    // --- CHANGE 1: ADD A DEDICATED BUTTON FOR THE ZOOM CONTROL ---
+    // The button is added here and will be controlled via JavaScript.
     container.innerHTML = `
         <h3 class="dashboard-section-title">Problem Polarity Map</h3>
         <p id="problem-map-description">The most frequent and emotionally intense problems appear in the top-right quadrant.</p>
-        <div id="emotion-map" style="position: relative; height: 400px;"><canvas id="emotion-chart-canvas"></canvas></div>
+        <div id="emotion-map" style="position: relative; height: 400px; background: #2c3e50; padding: 10px; border-radius: 8px;">
+            <canvas id="emotion-chart-canvas"></canvas>
+            <button id="chart-zoom-btn" style="display: none;"></button>
+        </div>
     `;
     
     const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d');
     if (!ctx) return;
 
     const maxFreq = Math.max(...data.map(p => p.x));
-    
     const allFrequencies = data.map(p => p.x);
     const minObservedFreq = Math.min(...allFrequencies);
-    
     const collapsedMinX = 5; 
     const isCollapseFeatureEnabled = minObservedFreq >= collapsedMinX;
     const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0;
-    
-    const getAxisTitle = (isCurrentlyCollapsed) => {
-        if (!isCollapseFeatureEnabled) return 'Frequency (1-10)';
-        return isCurrentlyCollapsed 
-            ? 'Frequency (1-10) [Click Axis to Zoom Out]' 
-            : 'Frequency (1-10) [Click Axis to Zoom In]';
-    };
     
     window.myEmotionChart = new Chart(ctx, {
         type: 'scatter',
@@ -165,8 +163,9 @@ function renderEmotionMap(data) {
             datasets: [{
                 label: 'Problems/Topics',
                 data: data,
-                backgroundColor: 'rgba(2, 119, 189, 0.7)',
-                borderColor: 'rgba(1, 87, 155, 1)',
+                // --- CHANGE 2: MAKE CIRCLE COLORS MORE VIVID ---
+                backgroundColor: 'rgba(52, 152, 219, 0.9)', // A more vivid blue
+                borderColor: 'rgba(41, 128, 185, 1)',
                 borderWidth: 1,
                 pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20,
                 pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20,
@@ -176,65 +175,82 @@ function renderEmotionMap(data) {
             maintainAspectRatio: false,
             plugins: {
                 legend: { display: false },
+                // --- CHANGE 3: MAKE THE FIRST BIT OF TOOLTIP TEXT BOLD ---
+                // We use the 'title' callback for the problem name, which is bold by default.
                 tooltip: {
                     callbacks: {
+                        title: function(tooltipItems) {
+                            // This will be the bolded text, e.g., "Weather concerns"
+                            return tooltipItems[0].raw.label;
+                        },
                         label: function(context) {
+                            // This will be the regular text below the title.
                             const point = context.raw;
-                            return `${point.label}: Frequency Score=${point.x}, Intensity Score=${point.y.toFixed(1)}`;
+                            return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`;
                         }
                     },
                     displayColors: false,
                     titleFont: { size: 14, weight: 'bold' },
-                    bodyFont: { size: 12 }
+                    bodyFont: { size: 12 },
+                    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+                    titleColor: '#ffffff',
+                    bodyColor: '#dddddd',
                 }
             },
             scales: {
                 x: {
                     title: { 
                         display: true, 
-                        text: getAxisTitle(isCollapseFeatureEnabled),
+                        text: 'Frequency (1-10)', // The [Click...] text is now on the button
+                        // --- CHANGE 4: MAKE AXIS TEXT WHITE & BOLD ---
+                        color: 'white',
                         font: { weight: 'bold' } 
                     },
                     min: initialMinX,
                     max: 10,
-                    grid: { color: '#f0f0f0' }
+                    grid: { color: 'rgba(255, 255, 255, 0.15)' },
+                    // --- CHANGE 5: MAKE AXIS NUMBERS WHITE ---
+                    ticks: { color: 'white' }
                 },
                 y: {
-                    title: { display: true, text: 'Problem Intensity (1-10)', font: { weight: 'bold' } },
+                    title: { 
+                        display: true, 
+                        text: 'Problem Intensity (1-10)',
+                        color: 'white', 
+                        font: { weight: 'bold' }
+                    },
                     min: 0,
                     max: 10,
-                    grid: { color: '#f0f0f0' }
+                    grid: { color: 'rgba(255, 255, 255, 0.15)' },
+                    ticks: { color: 'white' }
                 }
             }
-            // NO onClick property here. It will be handled by a direct DOM event listener.
         }
     });
 
-    // --- NEW, RELIABLE CLICK HANDLING LOGIC ---
-    // We attach a standard event listener to the canvas, which is more robust.
-    const canvas = window.myEmotionChart.canvas;
-    canvas.addEventListener('click', (e) => {
-        // If the zoom feature isn't enabled for this data, do nothing.
-        if (!isCollapseFeatureEnabled) return;
-
-        const chart = window.myEmotionChart;
-        const rect = canvas.getBoundingClientRect();
-        const y = e.clientY - rect.top;
-
-        // If the click is below the main chart drawing area, it's on the x-axis.
-        if (y > chart.chartArea.bottom) { 
+    // --- FINALIZED CLICK HANDLING VIA THE DEDICATED BUTTON ---
+    const zoomButton = document.getElementById('chart-zoom-btn');
+    if (isCollapseFeatureEnabled) {
+        zoomButton.style.display = 'block'; // Make button visible
+        const updateButtonText = () => {
+             const isCurrentlyCollapsed = window.myEmotionChart.options.scales.x.min !== 0;
+             zoomButton.textContent = isCurrentlyCollapsed ? 'Zoom Out to See Full Range' : 'Zoom In to High-Frequency';
+        };
+        
+        zoomButton.addEventListener('click', () => {
+            const chart = window.myEmotionChart;
             const isCurrentlyCollapsed = chart.options.scales.x.min !== 0;
-
             if (isCurrentlyCollapsed) {
-                chart.options.scales.x.min = 0; // Expand to show 0
-                chart.options.scales.x.title.text = getAxisTitle(false);
+                chart.options.scales.x.min = 0;
             } else {
-                chart.options.scales.x.min = collapsedMinX; // Re-collapse to 5
-                chart.options.scales.x.title.text = getAxisTitle(true);
+                chart.options.scales.x.min = collapsedMinX;
             }
-            chart.update('none'); // Update without animation for a snappy response.
-        }
-    });
+            chart.update('none');
+            updateButtonText(); // Update text after click
+        });
+        
+        updateButtonText(); // Set initial text
+    }
 }
 
 

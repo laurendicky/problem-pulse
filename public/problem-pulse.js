@@ -114,20 +114,11 @@ Example: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequenc
 
 
 
-/**
- * [FINAL VERSION] Renders the Problem Polarity Map with a description and a functional, collapsible X-axis.
- */
-/**
- * [FINAL, RELIABLE VERSION] Renders the Problem Polarity Map with a fully functional, collapsible X-axis.
- */
-/**
- * [FINAL, STYLED VERSION] Renders a visually enhanced Problem Polarity Map.
- */
-/**
- * [FINAL, ROBUST VERSION] Renders a visually enhanced and fully functional Problem Polarity Map.
- */
-/**
+
  * [FINAL, ROBUST VERSION 2] Renders a visually enhanced and fully functional Problem Polarity Map.
+ */
+/**
+ * [FINAL, CORRECTED VERSION] Renders a visually enhanced and fully functional Problem Polarity Map.
  */
 function renderEmotionMap(data) {
     const container = document.getElementById('emotion-map-container');
@@ -146,7 +137,7 @@ function renderEmotionMap(data) {
         <h3 class="dashboard-section-title">Problem Polarity Map</h3>
         <p id="problem-map-description">The most frequent and emotionally intense problems appear in the top-right quadrant.</p>
         <div id="emotion-map-wrapper"> 
-            <div id="emotion-map" style="height: 400px; padding: 10px; border-radius: 8px;">
+            <div id="emotion-map" style="height: 400px; background: #2c3e50; padding: 10px; border-radius: 8px;">
                 <canvas id="emotion-chart-canvas"></canvas>
             </div>
             <button id="chart-zoom-btn" style="display: none;"></button>
@@ -167,7 +158,7 @@ function renderEmotionMap(data) {
         type: 'scatter',
         data: {
             datasets: [{
-                label: 'Problems/Topics',
+                label: 'Problems/Topics', // This is the label that was repeating
                 data: data,
                 backgroundColor: 'rgba(52, 152, 219, 0.9)',
                 borderColor: 'rgba(41, 128, 185, 1)',
@@ -184,25 +175,25 @@ function renderEmotionMap(data) {
                     mode: 'nearest',
                     intersect: false,
                     
+                    // --- THE DEFINITIVE 3-PART TOOLTIP FIX ---
                     callbacks: {
+                        // 1. This correctly sets the one, bold title.
                         title: function(tooltipItems) {
                             return tooltipItems[0].raw.label;
                         },
-                        
-                        // --- DEFINITIVE TOOLTIP FIX ---
-                        // This function now checks if it's the first item in the tooltip.
-                        // If it is, it returns the details. For all others, it returns nothing.
+
+                        // 2. "The Kill Switch": This stops the default label (including "Problems/Topics") from ever rendering.
                         label: function(context) {
-                            // Check if this data point is the *first one* the tooltip is trying to show.
-                            if (context.dataIndex === context.chart.tooltip.dataPoints[0].dataIndex) {
-                                const point = context.raw;
-                                return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`;
-                            } else {
-                                // For any other data points under the cursor, return nothing.
-                                return;
-                            }
+                            return '';
+                        },
+
+                        // 3. "The Clean Slate": This runs ONCE after the (now suppressed) label, and draws the details cleanly.
+                        afterBody: function(tooltipItems) {
+                            const point = tooltipItems[0].raw;
+                            return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`;
                         }
                     },
+                    
                     displayColors: false,
                     titleFont: { size: 14, weight: 'bold' },
                     bodyFont: { size: 12 },

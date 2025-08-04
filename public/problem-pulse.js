@@ -37,19 +37,77 @@ async function findSubredditsForGroup(groupName) { const prompt = `Given the use
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
 
 // --- BLOCK 2: ALL DASHBOARD FUNCTIONS ---
-// The two functions below are the ONLY part of the script that has been changed.
 function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1); return word; }
 
 /**
- * [DEFINITIVE VERSION] Generates data for the Problem Polarity Map using the "AI-First with Keyword Fallback" model.
- * It attempts an advanced AI analysis and reverts to a reliable keyword analysis if the AI fails,
- * ensuring the map is always populated.
+ * [CORRECTED] Generates data for the Problem Polarity Map, ensuring the fallback method provides rich data.
  */
-/**
- * [DEFINITIVE VERSION] Generates data for the Problem Polarity Map using the "AI-First with Keyword Fallback" model.
- * It attempts an advanced AI analysis and reverts to a reliable keyword analysis if the AI fails,
- * ensuring the map is always populated.
- */
+async function generateEmotionMapData(posts) {
+    try {
+        // --- PRIMARY METHOD: One-Shot AI Analysis ---
+        const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 1000)}`).join('\n---\n');
+        const prompt = `You are a world-class market research analyst for '${originalGroupName}'. Analyze the following text to identify the 15 most significant problems, pain points, or key topics.
+        
+For each one, provide:
+1. "problem": A short, descriptive name for the problem (e.g., "Finding Reliable Vendors", "Budgeting Anxiety").
+2. "intensity": A score from 1 (mild) to 10 (severe) of how big a problem this is.
+3. "frequency": A score from 1 (rarely mentioned) to 10 (frequently mentioned) based on its prevalence in the text.
+
+Respond ONLY with a valid JSON object with a single key "problems", which is an array of these objects.
+Example: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequency": 9 }] }`;
+
+        const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 1500, response_format: { "type": "json_object" } };
+        
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        
+        if (!response.ok) {
+            throw new Error(`AI API failed with status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        const aiProblems = parsed.problems || [];
+
+        if (aiProblems.length >= 3) {
+            console.log("Successfully used AI analysis for Problem Map.");
+            const chartData = aiProblems.map(item => {
+                if (!item.problem || typeof item.intensity !== 'number' || typeof item.frequency !== 'number') return null;
+                return {
+                    x: item.frequency,
+                    y: item.intensity,
+                    label: item.problem
+                };
+            }).filter(Boolean);
+            return chartData.sort((a, b) => b.x - a.x);
+        } else {
+             console.warn("AI analysis returned too few problems. Falling back to keyword analysis.");
+        }
+    } catch (error) {
+        console.error("AI analysis for Problem Map failed:", error, "Falling back to reliable keyword-based analysis.");
+    }
+    
+    const emotionFreq = {};
+    posts.forEach(post => {
+        const text = `${post.data.title} ${post.data.selftext || ''}`.toLowerCase();
+        const words = text.replace(/[^a-z\s']/g, '').split(/\s+/);
+        words.forEach(rawWord => {
+            const lemma = lemmatize(rawWord);
+            if (emotionalIntensityScores[lemma]) {
+                emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1;
+            }
+        });
+    });
+    const chartData = Object.entries(emotionFreq).map(([word, freq]) => ({
+        x: freq,
+        y: emotionalIntensityScores[word],
+        label: word
+    }));
+    
+    // --- FIX: Ensure fallback method returns a rich dataset ---
+    return chartData.sort((a, b) => b.x - a.x).slice(0, 50);
+}
+
+
 /**
  * [FINAL, CORRECTED VERSION] Renders the map with a RELIABLE zoom button and correct tooltips.
  */
@@ -158,8 +216,8 @@ function renderEmotionMap(data) {
     
     // Set the initial text correctly based on the chart's starting state.
     updateButtonText();
-
 }
+
 
 // --- ALL OTHER FUNCTIONS BELOW ARE UNTOUCHED FROM YOUR ORIGINAL SCRIPT ---
 function generateSentimentData(posts) { const data = { positive: {}, negative: {} }; let positiveCount = 0; let negativeCount = 0; posts.forEach(post => { const text = `${post.data.title} ${post.data.selftext || ''}`; const words = text.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { if (rawWord.length < 3 || stopWords.includes(rawWord)) return; const lemma = lemmatize(rawWord); let category = null; if (positiveWords.has(lemma)) { category = 'positive'; positiveCount++; } else if (negativeWords.has(lemma)) { category = 'negative'; negativeCount++; } if (category) { if (!data[category][lemma]) { data[category][lemma] = { count: 0, posts: new Set() }; } data[category][lemma].count++; data[category][lemma].posts.add(post); } }); }); window._sentimentData = data; return { positive: Object.entries(data.positive).sort((a, b) => b[1].count - a[1].count).slice(0, 30), negative: Object.entries(data.negative).sort((a, b) => b[1].count - a[1].count).slice(0, 30), positiveCount, negativeCount }; }

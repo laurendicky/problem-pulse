@@ -114,23 +114,51 @@ Example: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequenc
 
 
 /**
- * [MODIFIED] Renders the Problem Polarity Map with updated labels.
+ * [MODIFIED] Renders the Problem Polarity Map with a description and collapsible X-axis.
  */
 function renderEmotionMap(data) {
     const container = document.getElementById('emotion-map-container');
     if (!container) return;
-    container.innerHTML = '<h3 class="dashboard-section-title">Problem Polarity Map</h3><div id="emotion-map"><canvas id="emotion-chart-canvas"></canvas></div>';
-    const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d');
-    if (!ctx) return;
 
     if (window.myEmotionChart) {
         window.myEmotionChart.destroy();
     }
+    
+    // First, handle the case where there is not enough data.
     if (data.length < 3) {
         container.innerHTML = '<h3 class="dashboard-section-title">Problem Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough distinct problems were found to build a map.</p>';
         return;
     }
+
+    // --- REQUIREMENT 1: Add descriptive sentence ---
+    // Now that we know we have data, build the full container HTML.
+    container.innerHTML = `
+        <h3 class="dashboard-section-title">Problem Polarity Map</h3>
+        <p style="font-family: Inter, sans-serif; color: #555; margin-top: -8px; margin-bottom: 12px; font-size: 0.9em;">The most frequent and emotionally intense problems appear in the top-right quadrant.</p>
+        <div id="emotion-map"><canvas id="emotion-chart-canvas"></canvas></div>
+    `;
+    
+    const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d');
+    if (!ctx) return;
+
     const maxFreq = Math.max(...data.map(p => p.x));
+    
+    // --- REQUIREMENT 2: Collapsible X-axis logic ---
+    const allFrequencies = data.map(p => p.x);
+    const minObservedFreq = Math.min(...allFrequencies);
+    
+    const collapsedMinX = 4;
+    // Only enable the collapse feature if all data points have a frequency of 5 or more.
+    const isCollapseFeatureEnabled = minObservedFreq >= 5;
+    const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0;
+    
+    const getAxisTitle = (isCurrentlyCollapsed) => {
+        if (!isCollapseFeatureEnabled) return 'Frequency (1-10)';
+        return isCurrentlyCollapsed 
+            ? 'Frequency (1-10) [Click Axis to Zoom Out]' 
+            : 'Frequency (1-10) [Click Axis to Zoom In]';
+    };
+    
     window.myEmotionChart = new Chart(ctx, {
         type: 'scatter',
         data: {
@@ -162,8 +190,12 @@ function renderEmotionMap(data) {
             },
             scales: {
                 x: {
-                    title: { display: true, text: 'Frequency (1-10)', font: { weight: 'bold' } },
-                    min: 0,
+                    title: { 
+                        display: true, 
+                        text: getAxisTitle(isCollapseFeatureEnabled),
+                        font: { weight: 'bold' } 
+                    },
+                    min: initialMinX,
                     max: 10,
                     grid: { color: '#f0f0f0' }
                 },
@@ -172,6 +204,28 @@ function renderEmotionMap(data) {
                     min: 0,
                     max: 10,
                     grid: { color: '#f0f0f0' }
+                }
+            },
+            onClick: (e, elements, chart) => {
+                if (!isCollapseFeatureEnabled) return;
+
+                const xAxis = chart.scales.x;
+                const rect = chart.canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                // Check if the click is on the x-axis area (labels or title)
+                if (x >= xAxis.left && x <= xAxis.right && y >= xAxis.bottom && y <= chart.height) {
+                    const isCurrentlyCollapsed = chart.options.scales.x.min !== 0;
+
+                    if (isCurrentlyCollapsed) {
+                        chart.options.scales.x.min = 0; // Expand
+                        chart.options.scales.x.title.text = getAxisTitle(false);
+                    } else {
+                        chart.options.scales.x.min = collapsedMinX; // Collapse
+                        chart.options.scales.x.title.text = getAxisTitle(true);
+                    }
+                    chart.update('none'); // Update without animation for a snappy feel
                 }
             }
         }

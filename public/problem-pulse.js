@@ -115,11 +115,7 @@ Example: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequenc
 
 
 
- * [FINAL, ROBUST VERSION 2] Renders a visually enhanced and fully functional Problem Polarity Map.
- */
-/**
- * [FINAL, CORRECTED VERSION] Renders a visually enhanced and fully functional Problem Polarity Map.
- */
+
 function renderEmotionMap(data) {
     const container = document.getElementById('emotion-map-container');
     if (!container) return;

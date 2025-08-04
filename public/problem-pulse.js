@@ -114,6 +114,9 @@ Example: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequenc
 
 
 
+/**
+ * [FINAL VERSION] Renders the Problem Polarity Map with a description and a functional, collapsible X-axis.
+ */
 function renderEmotionMap(data) {
     const container = document.getElementById('emotion-map-container');
     if (!container) return;
@@ -127,12 +130,11 @@ function renderEmotionMap(data) {
         return;
     }
 
-    // --- REQUIREMENT 1 (REVISED): Add descriptive paragraph with a CSS-friendly ID ---
-    // The ID "problem-map-description" is now added, and inline styles are removed.
+    // Add descriptive paragraph with the ID "problem-map-description" for CSS styling.
     container.innerHTML = `
         <h3 class="dashboard-section-title">Problem Polarity Map</h3>
         <p id="problem-map-description">The most frequent and emotionally intense problems appear in the top-right quadrant.</p>
-        <div id="emotion-map"><canvas id="emotion-chart-canvas"></canvas></div>
+        <div id="emotion-map" style="position: relative; height: 400px;"><canvas id="emotion-chart-canvas"></canvas></div>
     `;
     
     const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d');
@@ -140,12 +142,13 @@ function renderEmotionMap(data) {
 
     const maxFreq = Math.max(...data.map(p => p.x));
     
-    // --- REQUIREMENT 2 (REVISED): Collapsible X-axis logic ---
+    // --- FINALIZED AXIS COLLAPSE LOGIC ---
     const allFrequencies = data.map(p => p.x);
     const minObservedFreq = Math.min(...allFrequencies);
     
-    const collapsedMinX = 4;
-    const isCollapseFeatureEnabled = minObservedFreq >= 5;
+    // The range 0-5 should be collapsed, so the chart should start at 5.
+    const collapsedMinX = 5; 
+    const isCollapseFeatureEnabled = minObservedFreq >= collapsedMinX;
     const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0;
     
     const getAxisTitle = (isCurrentlyCollapsed) => {
@@ -202,30 +205,28 @@ function renderEmotionMap(data) {
                     grid: { color: '#f0f0f0' }
                 }
             },
+            // --- FINALIZED CLICK-TO-ZOOM LOGIC ---
             onClick: (e, elements, chart) => {
                 if (!isCollapseFeatureEnabled) return;
 
-                const xAxis = chart.scales.x;
+                // Get click coordinates relative to the canvas
                 const canvas = chart.canvas;
                 const rect = canvas.getBoundingClientRect();
-                
-                // Use event coordinates relative to the canvas
-                const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
 
-                // --- FIXED CLICK DETECTION LOGIC ---
-                // This now correctly checks if the click is within the entire x-axis bounding box.
-                if (x >= xAxis.left && x <= xAxis.right && y >= xAxis.top && y <= xAxis.bottom) {
+                // If the click is below the main chart drawing area, it's on the x-axis.
+                // This is a much more reliable detection method.
+                if (y > chart.chartArea.bottom) { 
                     const isCurrentlyCollapsed = chart.options.scales.x.min !== 0;
 
                     if (isCurrentlyCollapsed) {
-                        chart.options.scales.x.min = 0; // Expand
+                        chart.options.scales.x.min = 0; // Expand to show 0
                         chart.options.scales.x.title.text = getAxisTitle(false);
                     } else {
-                        chart.options.scales.x.min = collapsedMinX; // Collapse
+                        chart.options.scales.x.min = collapsedMinX; // Re-collapse to 5
                         chart.options.scales.x.title.text = getAxisTitle(true);
                     }
-                    chart.update('none'); // Update without animation for a snappy feel
+                    chart.update('none'); // Update without animation
                 }
             }
         }

@@ -113,9 +113,7 @@ Example: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequenc
 }
 
 
-/**
- * [MODIFIED] Renders the Problem Polarity Map with a description and collapsible X-axis.
- */
+
 function renderEmotionMap(data) {
     const container = document.getElementById('emotion-map-container');
     if (!container) return;
@@ -124,17 +122,16 @@ function renderEmotionMap(data) {
         window.myEmotionChart.destroy();
     }
     
-    // First, handle the case where there is not enough data.
     if (data.length < 3) {
         container.innerHTML = '<h3 class="dashboard-section-title">Problem Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough distinct problems were found to build a map.</p>';
         return;
     }
 
-    // --- REQUIREMENT 1: Add descriptive sentence ---
-    // Now that we know we have data, build the full container HTML.
+    // --- REQUIREMENT 1 (REVISED): Add descriptive paragraph with a CSS-friendly ID ---
+    // The ID "problem-map-description" is now added, and inline styles are removed.
     container.innerHTML = `
         <h3 class="dashboard-section-title">Problem Polarity Map</h3>
-        <p style="font-family: Inter, sans-serif; color: #555; margin-top: -8px; margin-bottom: 12px; font-size: 0.9em;">The most frequent and emotionally intense problems appear in the top-right quadrant.</p>
+        <p id="problem-map-description">The most frequent and emotionally intense problems appear in the top-right quadrant.</p>
         <div id="emotion-map"><canvas id="emotion-chart-canvas"></canvas></div>
     `;
     
@@ -143,12 +140,11 @@ function renderEmotionMap(data) {
 
     const maxFreq = Math.max(...data.map(p => p.x));
     
-    // --- REQUIREMENT 2: Collapsible X-axis logic ---
+    // --- REQUIREMENT 2 (REVISED): Collapsible X-axis logic ---
     const allFrequencies = data.map(p => p.x);
     const minObservedFreq = Math.min(...allFrequencies);
     
     const collapsedMinX = 4;
-    // Only enable the collapse feature if all data points have a frequency of 5 or more.
     const isCollapseFeatureEnabled = minObservedFreq >= 5;
     const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0;
     
@@ -210,12 +206,16 @@ function renderEmotionMap(data) {
                 if (!isCollapseFeatureEnabled) return;
 
                 const xAxis = chart.scales.x;
-                const rect = chart.canvas.getBoundingClientRect();
+                const canvas = chart.canvas;
+                const rect = canvas.getBoundingClientRect();
+                
+                // Use event coordinates relative to the canvas
                 const x = e.clientX - rect.left;
                 const y = e.clientY - rect.top;
 
-                // Check if the click is on the x-axis area (labels or title)
-                if (x >= xAxis.left && x <= xAxis.right && y >= xAxis.bottom && y <= chart.height) {
+                // --- FIXED CLICK DETECTION LOGIC ---
+                // This now correctly checks if the click is within the entire x-axis bounding box.
+                if (x >= xAxis.left && x <= xAxis.right && y >= xAxis.top && y <= xAxis.bottom) {
                     const isCurrentlyCollapsed = chart.options.scales.x.min !== 0;
 
                     if (isCurrentlyCollapsed) {

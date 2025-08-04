@@ -202,38 +202,39 @@ function renderEmotionMap(data) {
 function generateSentimentData(posts) { const data = { positive: {}, negative: {} }; let positiveCount = 0; let negativeCount = 0; posts.forEach(post => { const text = `${post.data.title} ${post.data.selftext || ''}`; const words = text.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { if (rawWord.length < 3 || stopWords.includes(rawWord)) return; const lemma = lemmatize(rawWord); let category = null; if (positiveWords.has(lemma)) { category = 'positive'; positiveCount++; } else if (negativeWords.has(lemma)) { category = 'negative'; negativeCount++; } if (category) { if (!data[category][lemma]) { data[category][lemma] = { count: 0, posts: new Set() }; } data[category][lemma].count++; data[category][lemma].posts.add(post); } }); }); window._sentimentData = data; return { positive: Object.entries(data.positive).sort((a, b) => b[1].count - a[1].count).slice(0, 30), negative: Object.entries(data.negative).sort((a, b) => b[1].count - a[1].count).slice(0, 30), positiveCount, negativeCount }; }
 function renderSentimentCloud(containerId, wordData, colors) { const container = document.getElementById(containerId); if (!container) return; if (wordData.length < 3) { container.innerHTML = `<p style="font-family: sans-serif; color: #777; padding: 1rem; text-align: center;">Not enough distinct terms found.</p>`; return; } const counts = wordData.map(item => item[1].count); const maxCount = Math.max(...counts); const minCount = Math.min(...counts); const minFontSize = 16, maxFontSize = 42; const cloudHTML = wordData.map(([word, data]) => { const fontSize = minFontSize + ((data.count - minCount) / (maxCount - minCount || 1)) * (maxFontSize - minFontSize); const color = colors[Math.floor(Math.random() * colors.length)]; const rotation = Math.random() * 8 - 4; return `<span class="cloud-word" data-word="${word}" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${word}</span>`; }).join(''); container.innerHTML = cloudHTML; }
 
-// --- MODIFIED for slide-in panels ---
+
 function renderContextContent(word, posts, category) {
-    // Determine which panel to use based on the category
+    // 1. Determine which panel to use and find the DOM element.
     const panelId = `${category}-context-box`;
     const contextBox = document.getElementById(panelId);
     if (!contextBox) return;
 
-    // Close the other panel if it's open
+    // 2. Close the other panel if it's open to avoid overlap.
     const otherPanelId = (category === 'positive' ? 'negative' : 'positive') + '-context-box';
     const otherContextBox = document.getElementById(otherPanelId);
-    if (otherContextBox) otherContextBox.classList.remove('visible');
+    if (otherContextBox) {
+        otherContextBox.classList.remove('visible');
+    }
 
-    // Build the content for the panel
+    // 3. Build the inner HTML for the panel.
     const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi');
-    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn">×</button> </div> `;
+    const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`;
     const snippetsHTML = posts.slice(0, 10).map(post => {
         const fullText = `${post.data.title}. ${post.data.selftext || ''}`;
         const sentences = fullText.match(/[^.!?]+[.!?]+/g) || [];
         const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i');
-        let relevantSentence = sentences.find(s => keywordRegex.test(s));
-        if (!relevantSentence) {
-            relevantSentence = getFirstTwoSentences(fullText);
-        }
+        let relevantSentence = sentences.find(s => keywordRegex.test(s)) || getFirstTwoSentences(fullText);
         const textToShow = relevantSentence.replace(highlightRegex, `<strong>$1</strong>`);
-        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
-        return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `;
+        const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`;
+        return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`;
     }).join('');
-    
+
     contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
     
-    // Add the 'visible' class to trigger the slide-in animation
-    contextBox.classList.add('visible');
+    // 4. Use a tiny timeout to ensure the panel is ready, then add the 'visible' class to slide it in.
+    setTimeout(() => {
+        contextBox.classList.add('visible');
+    }, 10);
 }
 
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title}\nContent: ${p.data.selftext.substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
@@ -328,39 +329,42 @@ async function runProblemFinder() {
     }
 }
 
-// =================================================================================
-// BLOCK 4 of 4: INITIALIZATION LOGIC
-// =================================================================================
-// --- MODIFIED for slide-in panels ---
-function initializeDashboardInteractivity() {
-    // This listener now covers the whole document to catch clicks on panels
-    document.body.addEventListener('click', (e) => {
-        const cloudWordEl = e.target.closest('.cloud-word');
-        const entityEl = e.target.closest('.discovery-list-item');
-        const closeBtnEl = e.target.closest('.context-close-btn');
 
-        // Handle clicking a word in a word cloud
-        if (cloudWordEl) {
-            const word = cloudWordEl.dataset.word;
-            const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
-            const postsData = window._sentimentData?.[category]?.[word]?.posts;
-            if (postsData) {
-                renderContextContent(word, Array.from(postsData), category);
+/**
+ * [CORRECTED] Initializes two separate event listeners for robust interactivity.
+ */
+function initializeDashboardInteractivity() {
+    // --- Listener 1: For clicks INSIDE the main dashboard area ---
+    const dashboard = document.getElementById('results-wrapper-b');
+    if (dashboard) {
+        dashboard.addEventListener('click', (e) => {
+            const cloudWordEl = e.target.closest('.cloud-word');
+            const entityEl = e.target.closest('.discovery-list-item');
+
+            if (cloudWordEl) {
+                const word = cloudWordEl.dataset.word;
+                const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
+                const postsData = window._sentimentData?.[category]?.[word]?.posts;
+                if (postsData) {
+                    renderContextContent(word, Array.from(postsData), category);
+                }
+            } else if (entityEl) {
+                const word = entityEl.dataset.word;
+                const type = entityEl.dataset.type;
+                const postsData = window._entityData?.[type]?.[word]?.posts;
+                // For brands/products, we'll just use the right (negative) panel for consistency.
+                if (postsData) {
+                    renderContextContent(word, postsData, 'negative');
+                }
             }
-        }
-        // Handle clicking an entity (brand/product)
-        else if (entityEl) {
-            const word = entityEl.dataset.word;
-            const type = entityEl.dataset.type;
-            const postsData = window._entityData?.[type]?.[word]?.posts;
-            // For entities, we'll just use the negative (right) panel for consistency
-            if (postsData) {
-                renderContextContent(word, postsData, 'negative');
-            }
-        }
-        // Handle clicking a close button on any panel
-        else if (closeBtnEl) {
-            const panel = closeBtnEl.closest('.context-panel');
+        });
+    }
+
+    // --- Listener 2: For clicks ANYWHERE on the page, specifically to find a close button ---
+    // This ensures the close buttons on the panels always work.
+    document.body.addEventListener('click', (e) => {
+        if (e.target.classList.contains('context-close-btn')) {
+            const panel = e.target.closest('.context-panel');
             if (panel) {
                 panel.classList.remove('visible');
             }

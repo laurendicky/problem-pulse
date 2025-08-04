@@ -45,6 +45,11 @@ function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.e
  * It attempts an advanced AI analysis and reverts to a reliable keyword analysis if the AI fails,
  * ensuring the map is always populated.
  */
+/**
+ * [DEFINITIVE VERSION] Generates data for the Problem Polarity Map using the "AI-First with Keyword Fallback" model.
+ * It attempts an advanced AI analysis and reverts to a reliable keyword analysis if the AI fails,
+ * ensuring the map is always populated.
+ */
 async function generateEmotionMapData(posts) {
     try {
         // --- PRIMARY METHOD: One-Shot AI Analysis ---
@@ -64,7 +69,6 @@ Example: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequenc
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         
         if (!response.ok) {
-            // This will trigger the catch block and run the fallback
             throw new Error(`AI API failed with status: ${response.status}`);
         }
 
@@ -84,7 +88,6 @@ Example: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequenc
             }).filter(Boolean);
             return chartData.sort((a, b) => b.x - a.x);
         } else {
-             // AI returned too few items, so we'll fall through to the keyword method
              console.warn("AI analysis returned too few problems. Falling back to keyword analysis.");
         }
     } catch (error) {
@@ -92,7 +95,6 @@ Example: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequenc
     }
     
     // --- SAFETY NET / FALLBACK METHOD: Your Original Keyword Analysis ---
-    // This code runs ONLY if the AI method fails or returns too few results.
     const emotionFreq = {};
     posts.forEach(post => {
         const text = `${post.data.title} ${post.data.selftext || ''}`.toLowerCase();
@@ -109,7 +111,9 @@ Example: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequenc
         y: emotionalIntensityScores[word],
         label: word
     }));
-    return chartData.sort((a, b) => b.x - a.x).slice(0, 25);
+    
+    // --- THE FIX: Increased the limit from 25 to 50 to ensure a rich map ---
+    return chartData.sort((a, b) => b.x - a.x).slice(0, 50);
 }
 
 
@@ -133,7 +137,7 @@ function renderEmotionMap(data) {
         <h3 class="dashboard-section-title">Problem Polarity Map</h3>
         <p id="problem-map-description">The most frequent and emotionally intense problems appear in the top-right quadrant.</p>
         <div id="emotion-map-wrapper"> 
-            <div id="emotion-map" style="height: 400px; background: #2c3e50; padding: 10px; border-radius: 8px;">
+            <div id="emotion-map" style="height: 400px; padding: 10px; border-radius: 8px;">
                 <canvas id="emotion-chart-canvas"></canvas>
             </div>
             <button id="chart-zoom-btn" style="display: none;"></button>

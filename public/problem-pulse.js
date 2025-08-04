@@ -117,10 +117,14 @@ Example: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequenc
 /**
  * [FINAL VERSION] Renders the Problem Polarity Map with a description and a functional, collapsible X-axis.
  */
+/**
+ * [FINAL, RELIABLE VERSION] Renders the Problem Polarity Map with a fully functional, collapsible X-axis.
+ */
 function renderEmotionMap(data) {
     const container = document.getElementById('emotion-map-container');
     if (!container) return;
 
+    // Destroy any existing chart and its event listeners to ensure a clean slate.
     if (window.myEmotionChart) {
         window.myEmotionChart.destroy();
     }
@@ -130,7 +134,6 @@ function renderEmotionMap(data) {
         return;
     }
 
-    // Add descriptive paragraph with the ID "problem-map-description" for CSS styling.
     container.innerHTML = `
         <h3 class="dashboard-section-title">Problem Polarity Map</h3>
         <p id="problem-map-description">The most frequent and emotionally intense problems appear in the top-right quadrant.</p>
@@ -142,11 +145,9 @@ function renderEmotionMap(data) {
 
     const maxFreq = Math.max(...data.map(p => p.x));
     
-    // --- FINALIZED AXIS COLLAPSE LOGIC ---
     const allFrequencies = data.map(p => p.x);
     const minObservedFreq = Math.min(...allFrequencies);
     
-    // The range 0-5 should be collapsed, so the chart should start at 5.
     const collapsedMinX = 5; 
     const isCollapseFeatureEnabled = minObservedFreq >= collapsedMinX;
     const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0;
@@ -204,31 +205,34 @@ function renderEmotionMap(data) {
                     max: 10,
                     grid: { color: '#f0f0f0' }
                 }
-            },
-            // --- FINALIZED CLICK-TO-ZOOM LOGIC ---
-            onClick: (e, elements, chart) => {
-                if (!isCollapseFeatureEnabled) return;
-
-                // Get click coordinates relative to the canvas
-                const canvas = chart.canvas;
-                const rect = canvas.getBoundingClientRect();
-                const y = e.clientY - rect.top;
-
-                // If the click is below the main chart drawing area, it's on the x-axis.
-                // This is a much more reliable detection method.
-                if (y > chart.chartArea.bottom) { 
-                    const isCurrentlyCollapsed = chart.options.scales.x.min !== 0;
-
-                    if (isCurrentlyCollapsed) {
-                        chart.options.scales.x.min = 0; // Expand to show 0
-                        chart.options.scales.x.title.text = getAxisTitle(false);
-                    } else {
-                        chart.options.scales.x.min = collapsedMinX; // Re-collapse to 5
-                        chart.options.scales.x.title.text = getAxisTitle(true);
-                    }
-                    chart.update('none'); // Update without animation
-                }
             }
+            // NO onClick property here. It will be handled by a direct DOM event listener.
+        }
+    });
+
+    // --- NEW, RELIABLE CLICK HANDLING LOGIC ---
+    // We attach a standard event listener to the canvas, which is more robust.
+    const canvas = window.myEmotionChart.canvas;
+    canvas.addEventListener('click', (e) => {
+        // If the zoom feature isn't enabled for this data, do nothing.
+        if (!isCollapseFeatureEnabled) return;
+
+        const chart = window.myEmotionChart;
+        const rect = canvas.getBoundingClientRect();
+        const y = e.clientY - rect.top;
+
+        // If the click is below the main chart drawing area, it's on the x-axis.
+        if (y > chart.chartArea.bottom) { 
+            const isCurrentlyCollapsed = chart.options.scales.x.min !== 0;
+
+            if (isCurrentlyCollapsed) {
+                chart.options.scales.x.min = 0; // Expand to show 0
+                chart.options.scales.x.title.text = getAxisTitle(false);
+            } else {
+                chart.options.scales.x.min = collapsedMinX; // Re-collapse to 5
+                chart.options.scales.x.title.text = getAxisTitle(true);
+            }
+            chart.update('none'); // Update without animation for a snappy response.
         }
     });
 }

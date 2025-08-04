@@ -123,6 +123,9 @@ Example: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequenc
 /**
  * [FINAL, STYLED VERSION] Renders a visually enhanced Problem Polarity Map.
  */
+/**
+ * [FINAL, ROBUST VERSION] Renders a visually enhanced and fully functional Problem Polarity Map.
+ */
 function renderEmotionMap(data) {
     const container = document.getElementById('emotion-map-container');
     if (!container) return;
@@ -136,13 +139,16 @@ function renderEmotionMap(data) {
         return;
     }
 
-    // --- CHANGE 1: ADD A DEDICATED BUTTON FOR THE ZOOM CONTROL ---
-    // The button is added here and will be controlled via JavaScript.
+    // --- FIX 1: RESTRUCTURED HTML FOR BUTTON VISIBILITY ---
+    // The button is now placed *after* the chart's div to prevent Chart.js from interfering with it.
+    // The parent container gets a 'relative' position via CSS so the button can be placed correctly.
     container.innerHTML = `
         <h3 class="dashboard-section-title">Problem Polarity Map</h3>
         <p id="problem-map-description">The most frequent and emotionally intense problems appear in the top-right quadrant.</p>
-        <div id="emotion-map" style="position: relative; height: 400px; background: #2c3e50; padding: 10px; border-radius: 8px;">
-            <canvas id="emotion-chart-canvas"></canvas>
+        <div id="emotion-map-wrapper"> 
+            <div id="emotion-map" style="height: 400px; background: #2c3e50; padding: 10px; border-radius: 8px;">
+                <canvas id="emotion-chart-canvas"></canvas>
+            </div>
             <button id="chart-zoom-btn" style="display: none;"></button>
         </div>
     `;
@@ -163,8 +169,7 @@ function renderEmotionMap(data) {
             datasets: [{
                 label: 'Problems/Topics',
                 data: data,
-                // --- CHANGE 2: MAKE CIRCLE COLORS MORE VIVID ---
-                backgroundColor: 'rgba(52, 152, 219, 0.9)', // A more vivid blue
+                backgroundColor: 'rgba(52, 152, 219, 0.9)',
                 borderColor: 'rgba(41, 128, 185, 1)',
                 borderWidth: 1,
                 pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20,
@@ -175,16 +180,17 @@ function renderEmotionMap(data) {
             maintainAspectRatio: false,
             plugins: {
                 legend: { display: false },
-                // --- CHANGE 3: MAKE THE FIRST BIT OF TOOLTIP TEXT BOLD ---
-                // We use the 'title' callback for the problem name, which is bold by default.
                 tooltip: {
+                    // --- FIX 2: PREVENT REPEATING TOOLTIP DATA ---
+                    // This ensures the tooltip only ever triggers for the single nearest point.
+                    mode: 'nearest',
+                    intersect: false,
+                    
                     callbacks: {
                         title: function(tooltipItems) {
-                            // This will be the bolded text, e.g., "Weather concerns"
                             return tooltipItems[0].raw.label;
                         },
                         label: function(context) {
-                            // This will be the regular text below the title.
                             const point = context.raw;
                             return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`;
                         }
@@ -201,15 +207,13 @@ function renderEmotionMap(data) {
                 x: {
                     title: { 
                         display: true, 
-                        text: 'Frequency (1-10)', // The [Click...] text is now on the button
-                        // --- CHANGE 4: MAKE AXIS TEXT WHITE & BOLD ---
+                        text: 'Frequency (1-10)',
                         color: 'white',
                         font: { weight: 'bold' } 
                     },
                     min: initialMinX,
                     max: 10,
                     grid: { color: 'rgba(255, 255, 255, 0.15)' },
-                    // --- CHANGE 5: MAKE AXIS NUMBERS WHITE ---
                     ticks: { color: 'white' }
                 },
                 y: {
@@ -228,10 +232,9 @@ function renderEmotionMap(data) {
         }
     });
 
-    // --- FINALIZED CLICK HANDLING VIA THE DEDICATED BUTTON ---
     const zoomButton = document.getElementById('chart-zoom-btn');
     if (isCollapseFeatureEnabled) {
-        zoomButton.style.display = 'block'; // Make button visible
+        zoomButton.style.display = 'block';
         const updateButtonText = () => {
              const isCurrentlyCollapsed = window.myEmotionChart.options.scales.x.min !== 0;
              zoomButton.textContent = isCurrentlyCollapsed ? 'Zoom Out to See Full Range' : 'Zoom In to High-Frequency';
@@ -240,19 +243,14 @@ function renderEmotionMap(data) {
         zoomButton.addEventListener('click', () => {
             const chart = window.myEmotionChart;
             const isCurrentlyCollapsed = chart.options.scales.x.min !== 0;
-            if (isCurrentlyCollapsed) {
-                chart.options.scales.x.min = 0;
-            } else {
-                chart.options.scales.x.min = collapsedMinX;
-            }
+            chart.options.scales.x.min = isCurrentlyCollapsed ? 0 : collapsedMinX;
             chart.update('none');
-            updateButtonText(); // Update text after click
+            updateButtonText();
         });
         
-        updateButtonText(); // Set initial text
+        updateButtonText();
     }
 }
-
 
 // --- ALL OTHER FUNCTIONS BELOW ARE UNTOUCHED FROM YOUR ORIGINAL SCRIPT ---
 function generateSentimentData(posts) { const data = { positive: {}, negative: {} }; let positiveCount = 0; let negativeCount = 0; posts.forEach(post => { const text = `${post.data.title} ${post.data.selftext || ''}`; const words = text.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { if (rawWord.length < 3 || stopWords.includes(rawWord)) return; const lemma = lemmatize(rawWord); let category = null; if (positiveWords.has(lemma)) { category = 'positive'; positiveCount++; } else if (negativeWords.has(lemma)) { category = 'negative'; negativeCount++; } if (category) { if (!data[category][lemma]) { data[category][lemma] = { count: 0, posts: new Set() }; } data[category][lemma].count++; data[category][lemma].posts.add(post); } }); }); window._sentimentData = data; return { positive: Object.entries(data.positive).sort((a, b) => b[1].count - a[1].count).slice(0, 30), negative: Object.entries(data.negative).sort((a, b) => b[1].count - a[1].count).slice(0, 30), positiveCount, negativeCount }; }

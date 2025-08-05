@@ -1,13 +1,14 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 10.5 - VERIFIABLE REDDIT ANSWERS)
-// This version links FAQ answers directly to the source Reddit post, including the
-// author and a permalink, ensuring authenticity and allowing for context review.
+// FINAL SCRIPT (VERSION 10.3 - DEFINITIVE PROBLEM MAP FIX)
+// This version uses a robust "AI-First with Keyword Fallback" model to guarantee
+// a rich, populated map of actual problems, while being resilient to errors.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 let originalGroupName = '';
+let _selectedSubreddits = []; // Global store for selected subreddits
 const suggestions = ["Dog Lovers", "Start-up Founders", "Fitness Beginners", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Developers", "Brides To Be"];
 const positiveColors = ['#2E7D32', '#388E3C', '#43A047', '#1B5E20'];
 const negativeColors = ['#C62828', '#D32F2F', '#E53935', '#B71C1C'];
@@ -26,12 +27,12 @@ async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm =
 function parseAISummary(aiResponse) { try { aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim(); const jsonMatch = aiResponse.match(/{[\s\S]*}/); if (!jsonMatch) { throw new Error("No JSON object in AI response."); } const parsed = JSON.parse(jsonMatch[0]); if (!parsed.summaries || !Array.isArray(parsed.summaries) || parsed.summaries.length < 1) { throw new Error("AI response lacks a 'summaries' array."); } parsed.summaries.forEach((summary, idx) => { const missingFields = []; if (!summary.title) missingFields.push("title"); if (!summary.body) missingFields.push("body"); if (typeof summary.count !== 'number') missingFields.push("count"); if (!summary.quotes || !Array.isArray(summary.quotes) || summary.quotes.length < 1) missingFields.push("quotes"); if (!summary.keywords || !Array.isArray(summary.keywords) || summary.keywords.length === 0) missingFields.push("keywords"); if (missingFields.length > 0) throw new Error(`Summary ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`); }); return parsed.summaries; } catch (error) { console.error("Parsing Error:", error); console.log("Raw AI Response:", aiResponse); throw new Error("Failed to parse AI response."); } }
 function parseAIAssignments(aiResponse) { try { aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim(); const jsonMatch = aiResponse.match(/{[\s\S]*}/); if (!jsonMatch) { throw new Error("No JSON object in AI response."); } const parsed = JSON.parse(jsonMatch[0]); if (!parsed.assignments || !Array.isArray(parsed.assignments)) { throw new Error("AI response lacks an 'assignments' array."); } parsed.assignments.forEach((assignment, idx) => { const missingFields = []; if (typeof assignment.postNumber !== 'number') missingFields.push("postNumber"); if (typeof assignment.finding !== 'number') missingFields.push("finding"); if (missingFields.length > 0) throw new Error(`Assignment ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`); }); return parsed.assignments; } catch (error) { console.error("Parsing Error:", error); console.log("Raw AI Response:", aiResponse); throw new Error("Failed to parse AI response."); } }
 function filterPosts(posts, minUpvotes = 20) { return posts.filter(post => { const title = post.data.title.toLowerCase(); const selftext = post.data.selftext || ''; if (title.includes('[ad]') || title.includes('sponsored') || post.data.upvote_ratio < 0.2 || post.data.ups < minUpvotes || !selftext || selftext.length < 100) return false; const isRamblingOrNoisy = (text) => { if (!text) return false; return /&#x[0-9a-fA-F]+;/g.test(text) || /[^a-zA-Z0-9\s]{5,}/g.test(text) || /(.)\1{6,}/g.test(text); }; return !isRamblingOrNoisy(title) && !isRamblingOrNoisy(selftext); }); }
-function getTopKeywords(posts, topN = 10) { const freqMap = {}; posts.forEach(post => { const cleanedText = `${post.data.title} ${post.data.selftext}`.replace(/<[^>]+>/g, '').replace(/[^a-zA-Z0-9\s.,!?]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); const words = cleanedText.split(/\s+/); words.forEach(word => { if (!stopWords.includes(word) && word.length > 2) { freqMap[word] = (freqMap[word] || 0) + 1; } }); }); return Object.keys(freqMap).sort((a, b) => freqMap[b] - a).slice(0, topN); }
+function getTopKeywords(posts, topN = 10) { const freqMap = {}; posts.forEach(post => { const cleanedText = `${post.data.title} ${post.data.selftext}`.replace(/<[^>]+>/g, '').replace(/[^a-zA-Z0-9\s.,!?]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); const words = cleanedText.split(/\s+/); words.forEach(word => { if (!stopWords.includes(word) && word.length > 2) { freqMap[word] = (freqMap[word] || 0) + 1; } }); }); return Object.keys(freqMap).sort((a, b) => freqMap[b] - freqMap[a]).slice(0, topN); }
 function getFirstTwoSentences(text) { if (!text) return ''; const sentences = text.match(/[^\.!\?]+[\.!\?]+(?:\s|$)/g); return sentences ? sentences.slice(0, 2).join(' ').trim() : text; }
 async function assignPostsToFindings(summaries, posts) { const postsForAI = posts.slice(0, 75); const prompt = `You are an expert data analyst. Your task is to categorize Reddit posts into the most relevant "Finding" from a provided list.\n\nHere are the ${summaries.length} findings:\n${summaries.map((s, i) => `Finding ${i + 1}: ${s.title}`).join('\n')}\n\nHere are the ${postsForAI.length} Reddit posts:\n${postsForAI.map((p, i) => `Post ${i + 1}: ${p.data.title}`).join('\n')}\n\nINSTRUCTIONS: For each post, assign it to the most relevant Finding (from 1 to ${summaries.length}). Respond ONLY with a JSON object with a single key "assignments", which is an array of objects like {"postNumber": 1, "finding": 2}.`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data categorization engine that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error(`OpenAI API Error for assignments: ${response.statusText}`); const data = await response.json(); return parseAIAssignments(data.openaiResponse); } catch (error) { console.error("Assignment function error:", error); return []; } }
 function calculateRelevanceScore(post, finding) { let score = 0; const postTitle = post.data.title || ""; const postBody = post.data.selftext || ""; const findingTitleWords = finding.title.toLowerCase().split(' ').filter(word => word.length > 3 && !stopWords.includes(word)); const findingKeywords = (finding.keywords || []).map(k => k.toLowerCase()); let titleWordMatched = false, keywordMatched = false; for (const word of findingTitleWords) { const regex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'); if (regex.test(postTitle)) { score += 5; titleWordMatched = true; } if (regex.test(postBody)) { score += 2; titleWordMatched = true; } } for (const keyword of findingKeywords) { const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'); if (regex.test(postTitle)) { score += 3; keywordMatched = true; } if (regex.test(postBody)) { score += 1; keywordMatched = true; } } if (titleWordMatched && keywordMatched) { score += 10; } return score; }
 function calculateFindingMetrics(validatedSummaries, filteredPosts) { const metrics = {}; const allProblemPostIds = new Set(); validatedSummaries.forEach((finding, index) => { metrics[index] = { supportCount: 0 }; }); filteredPosts.forEach(post => { let bestFindingIndex = -1; let maxScore = 0; validatedSummaries.forEach((finding, index) => { const score = calculateRelevanceScore(post, finding); if (score > maxScore) { maxScore = score; bestFindingIndex = index; } }); if (bestFindingIndex !== -1 && maxScore > 0) { metrics[bestFindingIndex].supportCount++; allProblemPostIds.add(post.data.id); } }); metrics.totalProblemPosts = allProblemPostIds.size; return metrics; }
-function renderPosts(posts) { const container = document.getElementById("posts-container"); if (!container) { return; } container.innerHTML = posts.map(post => ` <div class="insight" style="border:1px solid #ccc; padding:12px; margin-bottom:12px; background:#fafafa; border-radius:8px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1.1rem; color:#007bff; text-decoration:none;"> ${post.data.title} </a> <p style="font-size:0.9rem; margin:0.75rem 0; color:#333; line-height:1.5;"> ${post.data.selftext ? post.data.selftext.substring(0, 200) + '...' : 'No additional content.'} </p <small style="color:#555; font-size:0.8rem;"> r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)} </small> </div> `).join(''); }
+function renderPosts(posts) { const container = document.getElementById("posts-container"); if (!container) { return; } container.innerHTML = posts.map(post => ` <div class="insight" style="border:1px solid #ccc; padding:12px; margin-bottom:12px; background:#fafafa; border-radius:8px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1.1rem; color:#007bff; text-decoration:none;"> ${post.data.title} </a> <p style="font-size:0.9rem; margin:0.75rem 0; color:#333; line-height:1.5;"> ${post.data.selftext ? post.data.selftext.substring(0, 200) + '...' : 'No additional content.'} </p> <small style="color:#555; font-size:0.8rem;"> r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)} </small> </div> `).join(''); }
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if (!assignments) return; const finding = window._summaries[summaryIndex]; if (!finding) return; let relevantPosts = []; const addedPostIds = new Set(); const addPost = (post) => { if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) { relevantPosts.push(post); addedPostIds.add(post.data.id); } }; const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber); assignedPostNumbers.forEach(postNum => { if (postNum - 1 < window._postsForAssignment.length) { addPost(window._postsForAssignment[postNum - 1]); } }); if (relevantPosts.length < 8) { const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id)); const scoredCandidates = candidatePool.map(post => ({ post: post, score: calculateRelevanceScore(post, finding) })).filter(item => item.score >= 4).sort((a, b) => b.score - a.score); for (const candidate of scoredCandidates) { if (relevantPosts.length >= 8) break; addPost(candidate.post); } } let html; if (relevantPosts.length === 0) { html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`; } else { const finalPosts = relevantPosts.slice(0, 8); finalPosts.forEach(post => usedPostIds.add(post.data.id)); html = finalPosts.map(post => ` <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${post.data.title}</a> <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${post.data.selftext ? post.data.selftext.substring(0, 150) + '...' : 'No content.'}</p> <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</small> </div> `).join(''); } const container = document.getElementById(`reddit-div${summaryIndex + 1}`); if (container) { container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">Real Stories from Reddit: "${finding.title}"</div><div class="reddit-samples-posts">${html}</div>`; } }
 async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 15 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 250, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
@@ -48,121 +49,102 @@ async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map
 async function extractAndValidateEntities(posts, nicheContext) { const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 800)}`).join('\n---\n'); const prompt = `You are a market research analyst reviewing Reddit posts from the '${nicheContext}' community. Extract the following: 1. "brands": Specific, proper-noun company, brand, or service names (e.g., "KitchenAid", "Stripe"). 2. "products": Common, generic product categories (e.g., "stand mixer", "CRM software"). CRITICAL RULES: Be strict. Exclude acronyms (MOH, AITA), generic words (UPDATE), etc. Respond ONLY with a JSON object with two keys: "brands" and "products", holding an array of strings. If none, return an empty array. Text: ${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1000, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('AI entity extraction failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const allEntities = { brands: parsed.brands || [], products: parsed.products || [] }; window._entityData = {}; for (const type in allEntities) { window._entityData[type] = {}; allEntities[type].forEach(name => { const regex = new RegExp(`\\b${name.replace(/ /g, '\\s')}(s?)\\b`, 'gi'); const mentioningPosts = posts.filter(post => regex.test(post.data.title + ' ' + post.data.selftext)); if (mentioningPosts.length > 0) { window._entityData[type][name] = { count: mentioningPosts.length, posts: mentioningPosts }; } }); } return { topBrands: Object.entries(window._entityData.brands || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8), topProducts: Object.entries(window._entityData.products || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8) }; } catch (error) { console.error("Entity extraction error:", error); return { topBrands: [], topProducts: [] }; } }
 function renderDiscoveryList(containerId, data, title, type) { const container = document.getElementById(containerId); if(!container) return; let listItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No significant mentions found.</p>'; if (data.length > 0) { listItems = data.map(([name, details], index) => `<li class="discovery-list-item" data-word="${name}" data-type="${type}"><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${details.count} mentions</span></li>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`; }
 
-// --- MODIFIED --- Functions for fetching and rendering VERIFIABLE Reddit answers to FAQs
-async function getAnswersForFAQ(question) {
-    if (!window._filteredPosts || window._filteredPosts.length === 0) {
-        console.error("No posts available to search for answers.");
-        return [];
-    }
-    const postsForAnalysis = window._filteredPosts.slice(0, 40);
-    const postsText = postsForAnalysis.map((p, i) => `Post ${i + 1}:\nTitle: ${p.data.title}\nContent: ${p.data.selftext.substring(0, 1000)}`).join('\n---\n');
-
-    const prompt = `You are an expert research assistant for the '${originalGroupName}' community.
-A user wants to know the answer to the following question: "${question}"
-Your task is to analyze the following Reddit discussions (numbered Post 1, Post 2, etc.) and find real, direct quotes from users that provide a helpful answer, advice, or perspective on this question.
-Extract up to 5 of the most relevant and clear answers.
-CRITICAL: For each answer you find, you MUST identify the post it came from.
-Respond ONLY with a valid JSON object with a single key "answers". This key should hold an array of objects. Each object must have two keys:
-1. "quote": The direct quote from the user.
-2. "sourcePostNumber": The number of the post (e.g., 1, 2, 3...) from which the quote was taken.
-
-Example Response:
-{
-  "answers": [
-    { "quote": "I found that using a ceramic bowl works best for proving dough.", "sourcePostNumber": 3 },
-    { "quote": "You should definitely try the no-knead method, it's a game changer.", "sourcePostNumber": 8 }
-  ]
-}
-
-If you cannot find any relevant answers, return an empty array for "answers".
-
-Discussions to analyze:\n${postsText}`;
-
-    const openAIParams = {
-        model: "gpt-4o-mini",
-        messages: [{ role: "system", content: "You are a research assistant that finds and extracts direct quotes from text and their source post number, outputting only JSON." }, { role: "user", content: prompt }],
-        temperature: 0.1,
-        max_tokens: 1000,
-        response_format: { "type": "json_object" }
-    };
-
-    try {
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        if (!response.ok) throw new Error('OpenAI FAQ answer extraction failed.');
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
-
-        if (!parsed.answers || !Array.isArray(parsed.answers)) {
-            return [];
-        }
-
-        // Map AI response back to the original post data
-        return parsed.answers.map(answer => {
-            const postIndex = answer.sourcePostNumber - 1;
-            if (postIndex >= 0 && postIndex < postsForAnalysis.length) {
-                return {
-                    quote: answer.quote,
-                    source: postsForAnalysis[postIndex].data
-                };
-            }
-            return null;
-        }).filter(Boolean); // Filter out any nulls from invalid post numbers
-
-    } catch (error) {
-        console.error("FAQ answer extraction error:", error);
-        return [];
-    }
-}
-
-function renderRedditAnswers(answers, question) {
-    const container = document.getElementById('faq-answers');
-    if (!container) {
+// --- COMPLETELY REBUILT FUNCTION ---
+// Finds ONLY real answers from real users using a keyword-based search.
+async function findRedditAnswersForFAQ(faqText) {
+    const answersContainer = document.getElementById('faq-answers');
+    if (!answersContainer) {
         console.error("The 'faq-answers' container was not found in the DOM.");
         return;
     }
-    let contentHTML;
-    if (answers && answers.length > 0) {
-        const answerItems = answers.map(answer => `
-            <div class="reddit-answer-item" style="background: #f9f9f9; border-left: 3px solid #5b98eb; padding: 12px 15px; margin-bottom: 12px; border-radius: 0 4px 4px 0;">
-                <p style="margin: 0 0 8px 0; font-style: italic; color: #333;">"${answer.quote}"</p>
-                <div class="source-info" style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85em; color: #666;">
-                    <span>by u/${answer.source.author} in r/${answer.source.subreddit}</span>
-                    <a href="https://www.reddit.com${answer.source.permalink}" target="_blank" rel="noopener noreferrer" class="source-link" style="font-weight: bold; color: #007bff; text-decoration: none;">See on Reddit →</a>
-                </div>
-            </div>`
-        ).join('');
-        contentHTML = `
-            <h4 class="faq-answers-title" style="margin-bottom: 1rem; font-size: 1.2rem; color: #2c3e50;">Real Answers for: "${question}"</h4>
-            <div class="reddit-answer-list">${answerItems}</div>`;
-    } else {
-        contentHTML = `
-            <h4 class="faq-answers-title" style="margin-bottom: 1rem; font-size: 1.2rem; color: #2c3e50;">Real Answers for: "${question}"</h4>
-            <p class="no-answers-found" style="color: #555;">Could not find specific answers for this question in the analyzed discussions. Try a 'deep search' for more comprehensive results.</p>`;
+
+    answersContainer.innerHTML = `<h3 class="dashboard-section-title">Finding Real Discussions for: "${faqText}"</h3><p class="loading-text" style="text-align:center; padding: 2rem;">Searching Reddit for real user discussions...</p>`;
+    answersContainer.style.display = 'block';
+    answersContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    try {
+        // Step 1: Use AI to get the best search keywords from the question.
+        const keywordPrompt = `From the following question, extract the 4-5 most important and unique keywords for a search engine. Exclude common words like "how", "what", "is". Question: "${faqText}". Respond ONLY with a valid JSON object with a single key "keywords", which is an array of strings. Example: {"keywords": ["budget", "anxiety", "wedding", "planning"]}`;
+        const keywordParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a keyword extraction tool that outputs only JSON." }, { role: "user", content: keywordPrompt }], temperature: 0, max_tokens: 100, response_format: { "type": "json_object" } };
+        const keywordResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: keywordParams }) });
+
+        if (!keywordResponse.ok) throw new Error('AI keyword extraction failed.');
+        const keywordData = await keywordResponse.json();
+        const parsedKeywords = JSON.parse(keywordData.openaiResponse);
+        const keywords = parsedKeywords.keywords;
+
+        if (!keywords || keywords.length === 0) {
+            throw new Error("Could not extract keywords from the question.");
+        }
+
+        // Step 2: Use the keywords to perform a broad search on Reddit.
+        const redditSearchQuery = keywords.join(' OR ');
+        const subredditQueryString = _selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
+        const realPosts = await fetchRedditForTermWithPagination(subredditQueryString, redditSearchQuery, 100, 'all');
+
+        // Step 3: Filter and rank the results to find the best ones.
+        let realPostsHTML = `<p><em>No highly relevant live discussions found for these keywords. You can try another question.</em></p>`;
+        if (realPosts && realPosts.length > 0) {
+            // Rank by a mix of upvotes and comments to find the most engaging content
+            const sortedPosts = realPosts
+                .sort((a, b) => {
+                    const scoreA = (a.data.ups || 0) + (a.data.num_comments || 0) * 2;
+                    const scoreB = (b.data.ups || 0) + (b.data.num_comments || 0) * 2;
+                    return scoreB - scoreA;
+                });
+                
+            const topPosts = sortedPosts.slice(0, 7); // Get the top 7 discussions
+
+            if (topPosts.length > 0) {
+                 realPostsHTML = topPosts.map(post => `
+                    <div class="real-discussion-item" style="border: 1px solid #ccc; border-radius: 8px; padding: 12px; margin-bottom: 12px; background: #fafafa;">
+                        <p style="font-weight: bold; margin: 0 0 8px 0;">${post.data.title}</p>
+                        <small style="color:#555; font-size:0.8rem;">r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()}</small>
+                        <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" class="see-live-post-btn" style="display: block; margin-top: 10px; text-align: center; background-color: #007bff; color: white; padding: 8px; border-radius: 5px; text-decoration: none; font-weight: bold;">See Live Post</a>
+                    </div>
+                `).join('');
+            }
+        }
+        
+        // Step 4: Display the results.
+        answersContainer.innerHTML = `<h3 class="dashboard-section-title">Real Discussions for: "${faqText}"</h3>${realPostsHTML}`;
+
+    } catch (error) {
+        console.error("Error finding real Reddit answers:", error);
+        answersContainer.innerHTML = `<h3 class="dashboard-section-title">Real Discussions for: "${faqText}"</h3><p style="color: red;">Sorry, there was an error finding real discussions. Please try again.</p>`;
     }
-    container.innerHTML = contentHTML;
-    container.style.display = 'block';
-    container.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 
 function renderFAQs(faqs) {
     const container = document.getElementById('faq-container');
-    if(!container) return;
+    if (!container) return;
     let faqItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">Could not generate common questions from the text.</p>';
     if (faqs.length > 0) {
-        faqItems = faqs.map((faq) => `
-            <div class="faq-item">
-                <div class="faq-question">${faq}</div>
+        faqItems = faqs.map((faq) =>
+            `<div class="faq-item">
+                <button class="faq-question">
+                    <span class="faq-text">${faq}</span>
+                    <span class="see-reddit-answers-btn" data-faq-text="${encodeURIComponent(faq)}">See Real Discussions</span>
+                </button>
                 <div class="faq-answer">
                     <p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p>
-                    <button class="see-reddit-answers-btn" data-faq-question="${faq}">See Reddit's Answers</button>
                 </div>
-            </div>`).join('');
+            </div>`
+        ).join('');
     }
     container.innerHTML = `<h3 class="dashboard-section-title">Frequently Asked Questions</h3>${faqItems}`;
 
     container.querySelectorAll('.faq-question').forEach(button => {
-        button.addEventListener('click', () => {
+        button.addEventListener('click', (event) => {
+            if (event.target.closest('.see-reddit-answers-btn')) {
+                event.stopPropagation();
+                const btn = event.target.closest('.see-reddit-answers-btn');
+                const faqText = decodeURIComponent(btn.dataset.faqText);
+                findRedditAnswersForFAQ(faqText);
+                return;
+            }
+
             const answer = button.nextElementSibling;
             button.classList.toggle('active');
             if (answer.style.maxHeight) {
@@ -174,48 +156,22 @@ function renderFAQs(faqs) {
             }
         });
     });
-
-    container.querySelectorAll('.see-reddit-answers-btn').forEach(button => {
-        button.addEventListener('click', async (event) => {
-            const question = event.target.dataset.faqQuestion;
-            const answersContainer = document.getElementById('faq-answers');
-            if (!answersContainer) {
-                console.error("Could not find the 'faq-answers' div.");
-                return;
-            }
-            answersContainer.innerHTML = `<p class="loading-text" style="text-align: center; padding: 1rem;">Searching for real user answers on Reddit...</p>`;
-            answersContainer.style.display = 'block';
-            answersContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            try {
-                const answers = await getAnswersForFAQ(question);
-                renderRedditAnswers(answers, question);
-            } catch (error) {
-                console.error("Failed to fetch and render Reddit answers:", error);
-                answersContainer.innerHTML = `<p class="error" style="color: red;">Sorry, an error occurred while fetching answers.</p>`;
-            }
-        });
-    });
 }
+
 function renderIncludedSubreddits(subreddits) { const container = document.getElementById('included-subreddits-container'); if(!container) return; const tags = subreddits.map(sub => `<div class="subreddit-tag">r/${sub}</div>`).join(''); container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list">${tags}</div>`; }
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
-// --- NEW --- Functions for finding and rendering "Purchase Intent"
 async function findPurchaseIntent(posts) {
     const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nContent: ${p.data.selftext.substring(0, 1000)}`).join('\n---\n');
     const prompt = `You are an expert market researcher for the '${originalGroupName}' niche, tasked with identifying explicit purchase intent.
 Analyze the following Reddit posts. Extract up to 5 direct quotes where users express a clear willingness to pay for a solution, a product, or a service.
 Look for phrases like "I would pay for", "take my money", "where can I buy this", "shut up and take my money", "I'd happily pay", "need this now", or "instant buy".
-
 For each quote you find, also provide a very brief summary of the problem the user wants to solve.
-
 Respond ONLY with a valid JSON object with a single key "signals". This key should hold an array of objects, where each object has two keys: "problem" and "quote".
 Example: { "signals": [{ "problem": "A durable dog toy", "quote": "I would literally pay $50 for a chew toy my dog can't destroy in an hour." }] }
-
 If no such signals are found, return an empty array for "signals".
-
 Posts to analyze:
 ${topPostsText}`;
-
     const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a market researcher that outputs only valid JSON for purchase intent signals." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 800, response_format: { "type": "json_object" } };
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
@@ -232,9 +188,7 @@ ${topPostsText}`;
 function renderPurchaseIntent(signals) {
     const container = document.getElementById('purchase-intent-container');
     if (!container) return;
-
     let contentHTML = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No direct purchase intent signals were found in the top posts.</p>';
-
     if (signals && signals.length > 0) {
         contentHTML = signals.map(signal => `
             <div class="purchase-intent-item">
@@ -243,7 +197,6 @@ function renderPurchaseIntent(signals) {
             </div>
         `).join('');
     }
-
     container.innerHTML = `<h3 class="dashboard-section-title">Purchase Intent Signals</h3>${contentHTML}`;
 }
 
@@ -254,7 +207,10 @@ function renderPurchaseIntent(signals) {
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn'); if (!searchButton) { console.error("Could not find button."); return; }
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked'); if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
-    const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value); const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
+    
+    _selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
+    const subredditQueryString = _selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
+    
     searchButton.classList.add('is-loading'); searchButton.disabled = true;
     const quickSearchTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
     const deepSearchTerms = [ "struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance", "frustration", "disappointed", "help", "advice", "solution", "workaround", "how to", "fix", "rant", "vent" ];
@@ -288,7 +244,7 @@ async function runProblemFinder() {
             renderEmotionMap(emotionMapData);
         });
 
-        renderIncludedSubreddits(selectedSubreddits);
+        renderIncludedSubreddits(_selectedSubreddits);
         extractAndValidateEntities(filteredPosts, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredPosts).then(faqs => renderFAQs(faqs));
         

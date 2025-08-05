@@ -1,8 +1,7 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 10.6 - AUTHENTIC Q&A FROM COMMENTS)
-// This version fundamentally changes the FAQ system. It now finds real posts that are
-// questions, and upon user click, fetches the real comments for that post,
-// extracts the best answers, and provides direct links to each source comment.
+// FINAL SCRIPT (VERSION 10.7 - CORRECT COMMENT FETCHING)
+// This version uses an updated proxy logic to reliably fetch real comments for
+// real user questions, providing authentic, verifiable answers with direct links.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -48,96 +47,63 @@ function showSlidingPanel(word, posts, category) { const positivePanel = documen
 async function extractAndValidateEntities(posts, nicheContext) { const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 800)}`).join('\n---\n'); const prompt = `You are a market research analyst reviewing Reddit posts from the '${nicheContext}' community. Extract the following: 1. "brands": Specific, proper-noun company, brand, or service names (e.g., "KitchenAid", "Stripe"). 2. "products": Common, generic product categories (e.g., "stand mixer", "CRM software"). CRITICAL RULES: Be strict. Exclude acronyms (MOH, AITA), generic words (UPDATE), etc. Respond ONLY with a JSON object with two keys: "brands" and "products", holding an array of strings. If none, return an empty array. Text: ${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1000, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('AI entity extraction failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const allEntities = { brands: parsed.brands || [], products: parsed.products || [] }; window._entityData = {}; for (const type in allEntities) { window._entityData[type] = {}; allEntities[type].forEach(name => { const regex = new RegExp(`\\b${name.replace(/ /g, '\\s')}(s?)\\b`, 'gi'); const mentioningPosts = posts.filter(post => regex.test(post.data.title + ' ' + post.data.selftext)); if (mentioningPosts.length > 0) { window._entityData[type][name] = { count: mentioningPosts.length, posts: mentioningPosts }; } }); } return { topBrands: Object.entries(window._entityData.brands || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8), topProducts: Object.entries(window._entityData.products || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8) }; } catch (error) { console.error("Entity extraction error:", error); return { topBrands: [], topProducts: [] }; } }
 function renderDiscoveryList(containerId, data, title, type) { const container = document.getElementById(containerId); if(!container) return; let listItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No significant mentions found.</p>'; if (data.length > 0) { listItems = data.map(([name, details], index) => `<li class="discovery-list-item" data-word="${name}" data-type="${type}"><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${details.count} mentions</span></li>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`; }
 
-// --- NEW AUTHENTIC Q&A FUNCTIONS ---
+// --- AUTHENTIC Q&A FUNCTIONS ---
 
-// 1. Find real posts that are questions
 function findTopQuestionPosts(posts) {
     return posts
         .filter(p => p.data.title.trim().endsWith('?') && p.data.num_comments > 10)
-        .sort((a, b) => b.data.ups - a.data.ups)
+        .sort((a, b) => b.data.num_comments - a.data.num_comments) // Sort by comments for better discussions
         .slice(0, 5);
 }
 
-// 2. Fetch comments for a specific post
-async function fetchCommentsForPost(postId) {
+async function fetchCommentsForPost(permalink) {
     try {
         const response = await fetch(REDDIT_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ postId: postId }) // The proxy needs to handle this new key
+            body: JSON.stringify({ commentUrl: permalink }) // Send the permalink to the updated proxy
         });
         if (!response.ok) {
             throw new Error(`Proxy Error for comments: Server returned status ${response.status}`);
         }
         const data = await response.json();
-        // The second element in the response array is the comment data
         if (Array.isArray(data) && data.length > 1 && data[1].data && data[1].data.children) {
             return data[1].data.children
                 .map(c => c.data)
-                .filter(c => c.body && c.body.length > 20 && c.author !== 'AutoModerator' && c.body !== '[deleted]' && c.body !== '[removed]');
+                .filter(c => c && c.body && c.body.length > 25 && c.author !== 'AutoModerator' && c.body !== '[deleted]' && c.body !== '[removed]');
         }
         return [];
     } catch (err) {
-        console.error(`Failed to fetch comments for post "${postId}" via proxy:`, err.message);
+        console.error(`Failed to fetch comments for permalink "${permalink}" via proxy:`, err);
         return [];
     }
 }
 
-// 3. Use AI to extract the best answers from the comments
 async function extractAnswersFromComments(questionTitle, comments) {
     if (!comments || comments.length === 0) return [];
-
-    const commentsForAI = comments.slice(0, 30).map((c, i) => `Comment ${i + 1} (by u/${c.author}):\n${c.body.substring(0, 500)}`);
-    const prompt = `The original question was: "${questionTitle}"
-    
-Here are the comments from that Reddit post. Your job is to identify up to 8 of the best, most helpful, and direct answers to the question.
-    
-Respond ONLY with a valid JSON object with a single key "answers", which is an array of objects. Each object must have one key: "commentIndex", which is the number of the comment that you've identified as a good answer.
-    
-Example: { "answers": [ { "commentIndex": 2 }, { "commentIndex": 5 }, { "commentIndex": 9 } ] }
-
-Here are the comments to analyze:
----
-${commentsForAI.join('\n\n---\n')}
+    const commentsForAI = comments.slice(0, 40).map((c, i) => `Comment ${i + 1} (by u/${c.author}):\n${c.body.substring(0, 500)}`);
+    const prompt = `The original question was: "${questionTitle}"\n\nHere are the comments from that Reddit post. Your job is to identify up to 8 of the best, most helpful, and direct answers to the question.\n\nRespond ONLY with a valid JSON object with a single key "answers", which is an array of objects. Each object must have one key: "commentIndex", which is the number of the comment that you've identified as a good answer.\n\nExample: { "answers": [ { "commentIndex": 2 }, { "commentIndex": 5 } ] }\n\nHere are the comments to analyze:\n---\n${commentsForAI.join('\n\n---\n')}
 ---`;
-
-    const openAIParams = {
-        model: "gpt-4o-mini",
-        messages: [{ role: "system", content: "You are an expert at identifying the best answers in a comments section. You output only JSON." }, { role: "user", content: prompt }],
-        temperature: 0,
-        max_tokens: 500,
-        response_format: { "type": "json_object" }
-    };
-
+    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert at identifying the best answers in a comments section. You output only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 500, response_format: { "type": "json_object" } };
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('OpenAI comment analysis failed.');
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
-
         if (!parsed.answers || !Array.isArray(parsed.answers)) return [];
-
-        // Map the indices from the AI response back to the full comment objects
         return parsed.answers.map(answer => {
             const commentIndex = answer.commentIndex - 1;
-            if (commentIndex >= 0 && commentIndex < comments.length) {
-                return comments[commentIndex];
-            }
-            return null;
+            return (commentIndex >= 0 && commentIndex < comments.length) ? comments[commentIndex] : null;
         }).filter(Boolean);
-
     } catch (error) {
         console.error("Comment answer extraction error:", error);
         return [];
     }
 }
 
-
-// 4. Render the list of top questions
 function renderTopQuestions(questionPosts) {
     const container = document.getElementById('faq-container');
     if (!container) return;
-
     let questionItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No top-voted question posts found in the search results.</p>';
     if (questionPosts.length > 0) {
         questionItems = questionPosts.map(post => `
@@ -145,49 +111,42 @@ function renderTopQuestions(questionPosts) {
                 <div class="faq-question">${post.data.title}</div>
                 <div class="faq-answer">
                     <p><em>From r/${post.data.subreddit} with ${post.data.ups.toLocaleString()} upvotes and ${post.data.num_comments.toLocaleString()} comments.</em></p>
-                    <button class="see-reddit-answers-btn" data-post-id="${post.data.id}" data-post-title="${post.data.title}">See Answers From This Post</button>
+                    <button class="see-reddit-answers-btn" data-post-permalink="${post.data.permalink}" data-post-title="${post.data.title}">See Answers From This Post</button>
                 </div>
             </div>`).join('');
     }
     container.innerHTML = `<h3 class="dashboard-section-title">Top Community Questions</h3>${questionItems}`;
-
     container.querySelectorAll('.faq-question').forEach(button => {
-        button.addEventListener('click', () => {
-            const answer = button.nextElementSibling;
-            button.classList.toggle('active');
+        button.addEventListener('click', (e) => {
+            const answer = e.target.nextElementSibling;
+            e.target.classList.toggle('active');
             answer.style.maxHeight = answer.style.maxHeight ? null : answer.scrollHeight + "px";
         });
     });
-
     container.querySelectorAll('.see-reddit-answers-btn').forEach(button => {
         button.addEventListener('click', async (event) => {
-            const postId = event.target.dataset.postId;
+            const permalink = event.target.dataset.postPermalink;
             const postTitle = event.target.dataset.postTitle;
             const answersContainer = document.getElementById('faq-answers');
             if (!answersContainer) return;
-
             answersContainer.innerHTML = `<p class="loading-text" style="text-align: center; padding: 1rem;">Fetching comments for "${postTitle}"...</p>`;
             answersContainer.style.display = 'block';
             answersContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
-
-            const comments = await fetchCommentsForPost(postId);
-            if(comments.length === 0) {
-                answersContainer.innerHTML = `<p class="error">Could not fetch comments for this post.</p>`;
+            const comments = await fetchCommentsForPost(permalink);
+            if (comments.length === 0) {
+                answersContainer.innerHTML = `<h4 class="faq-answers-title">Answers for: "${postTitle}"</h4><p class="error">Could not fetch or find any valid comments for this post.</p>`;
                 return;
             }
             answersContainer.innerHTML = `<p class="loading-text" style="text-align: center; padding: 1rem;">Finding the best answers with AI...</p>`;
-            
             const bestAnswers = await extractAnswersFromComments(postTitle, comments);
-            renderCommentAnswers(bestAnswers, postTitle);
+            renderCommentAnswers(bestAnswers, postTitle, permalink);
         });
     });
 }
 
-// 5. Render the extracted answers from the comments
-function renderCommentAnswers(answers, question) {
+function renderCommentAnswers(answers, question, originalPostPermalink) {
     const container = document.getElementById('faq-answers');
     if (!container) return;
-
     let contentHTML;
     if (answers && answers.length > 0) {
         const answerItems = answers.map(answer => `
@@ -197,15 +156,11 @@ function renderCommentAnswers(answers, question) {
                     <span>by u/${answer.author} | 👍 ${answer.score}</span>
                     <a href="https://www.reddit.com${answer.permalink}" target="_blank" rel="noopener noreferrer" class="source-link" style="font-weight: bold; color: #007bff; text-decoration: none;">View Comment →</a>
                 </div>
-            </div>`
-        ).join('');
-        contentHTML = `
-            <h4 class="faq-answers-title" style="margin-bottom: 1rem; font-size: 1.2rem; color: #2c3e50;">Top Answers for: "${question}"</h4>
-            <div class="reddit-answer-list">${answerItems}</div>`;
+            </div>`).join('');
+        contentHTML = `<h4 class="faq-answers-title" style="margin-bottom: 1rem; font-size: 1.2rem; color: #2c3e50;">Top Answers for: "${question}"</h4><div class="reddit-answer-list">${answerItems}</div>`;
     } else {
-        contentHTML = `
-            <h4 class="faq-answers-title" style="margin-bottom: 1rem; font-size: 1.2rem; color: #2c3e50;">Top Answers for: "${question}"</h4>
-            <p class="no-answers-found" style="color: #555;">AI could not identify clear answers in the comments section of this post. You can still <a href="https://www.reddit.com/${question.id}" target="_blank">read the post</a> to investigate manually.</p>`;
+        const postLink = `<a href="https://www.reddit.com${originalPostPermalink}" target="_blank" rel="noopener noreferrer">read the post</a>`;
+        contentHTML = `<h4 class="faq-answers-title" style="margin-bottom: 1rem; font-size: 1.2rem; color: #2c3e50;">Top Answers for: "${question}"</h4><p class="no-answers-found" style="color: #555;">AI could not identify clear answers in the comments. You can still ${postLink} to investigate manually.</p>`;
     }
     container.innerHTML = contentHTML;
 }
@@ -215,13 +170,7 @@ function renderSentimentScore(positiveCount, negativeCount) { const container = 
 
 async function findPurchaseIntent(posts) {
     const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nContent: ${p.data.selftext.substring(0, 1000)}`).join('\n---\n');
-    const prompt = `You are an expert market researcher for the '${originalGroupName}' niche, tasked with identifying explicit purchase intent.
-Analyze the following Reddit posts. Extract up to 5 direct quotes where users express a clear willingness to pay for a solution, a product, or a service.
-Look for phrases like "I would pay for", "take my money", "where can I buy this", "shut up and take my money", "I'd happily pay", "need this now", or "instant buy".
-For each quote you find, also provide a very brief summary of the problem the user wants to solve.
-Respond ONLY with a valid JSON object with a single key "signals". This key should hold an array of objects, where each object has two keys: "problem" and "quote".
-Example: { "signals": [{ "problem": "A durable dog toy", "quote": "I would literally pay $50 for a chew toy my dog can't destroy in an hour." }] }
-If no such signals are found, return an empty array for "signals". Posts to analyze:\n${topPostsText}`;
+    const prompt = `You are an expert market researcher for the '${originalGroupName}' niche, tasked with identifying explicit purchase intent. Analyze the following Reddit posts. Extract up to 5 direct quotes where users express a clear willingness to pay for a solution, a product, or a service. Look for phrases like "I would pay for", "take my money", "where can I buy this", "shut up and take my money", "I'd happily pay", "need this now", or "instant buy". For each quote you find, also provide a very brief summary of the problem the user wants to solve. Respond ONLY with a valid JSON object with a single key "signals". This key should hold an array of objects, where each object has two keys: "problem" and "quote". Example: { "signals": [{ "problem": "A durable dog toy", "quote": "I would literally pay $50 for a chew toy my dog can't destroy in an hour." }] } If no such signals are found, return an empty array for "signals". Posts to analyze:\n${topPostsText}`;
     const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a market researcher that outputs only valid JSON for purchase intent signals." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 800, response_format: { "type": "json_object" } };
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
@@ -240,12 +189,7 @@ function renderPurchaseIntent(signals) {
     if (!container) return;
     let contentHTML = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No direct purchase intent signals were found in the top posts.</p>';
     if (signals && signals.length > 0) {
-        contentHTML = signals.map(signal => `
-            <div class="purchase-intent-item">
-                <div class="problem-summary">${signal.problem}</div>
-                <p class="quote">"${signal.quote}"</p>
-            </div>
-        `).join('');
+        contentHTML = signals.map(signal => `<div class="purchase-intent-item"><div class="problem-summary">${signal.problem}</div><p class="quote">"${signal.quote}"</p></div>`).join('');
     }
     container.innerHTML = `<h3 class="dashboard-section-title">Purchase Intent Signals</h3>${contentHTML}`;
 }
@@ -263,9 +207,7 @@ async function runProblemFinder() {
     const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
     let searchTerms = (searchDepth === 'deep') ? deepSearchTerms : quickSearchTerms; let limitPerTerm = (searchDepth === 'deep') ? 100 : 50;
     const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-    
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "faq-answers", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "purchase-intent-container"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; } });
-    
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
     const resultsMessageDiv = document.getElementById("results-message"); const countHeaderDiv = document.getElementById("count-header");
@@ -285,21 +227,14 @@ async function runProblemFinder() {
         renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
-        
-        generateEmotionMapData(filteredPosts).then(emotionMapData => {
-            renderEmotionMap(emotionMapData);
-        });
-
+        generateEmotionMapData(filteredPosts).then(emotionMapData => renderEmotionMap(emotionMapData));
         renderIncludedSubreddits(selectedSubreddits);
         extractAndValidateEntities(filteredPosts, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         
-        // --- MODIFIED Q&A FLOW ---
         const topQuestionPosts = findTopQuestionPosts(filteredPosts);
         renderTopQuestions(topQuestionPosts);
 
-        findPurchaseIntent(filteredPosts).then(signals => {
-            renderPurchaseIntent(signals);
-        });
+        findPurchaseIntent(filteredPosts).then(signals => renderPurchaseIntent(signals));
         
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) countHeaderDiv.textContent = `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;

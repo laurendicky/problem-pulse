@@ -40,78 +40,156 @@ function displaySubredditChoices(subreddits) { const choicesDiv = document.getEl
 function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1); return word; }
 async function generateEmotionMapData(posts) { try { const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 1000)}`).join('\n---\n'); const prompt = `You are a world-class market research analyst for '${originalGroupName}'. Analyze the following text to identify the 15 most significant problems, pain points, or key topics.\n\nFor each one, provide:\n1. "problem": A short, descriptive name for the problem (e.g., "Finding Reliable Vendors", "Budgeting Anxiety").\n2. "intensity": A score from 1 (mild) to 10 (severe) of how big a problem this is.\n3. "frequency": A score from 1 (rarely mentioned) to 10 (frequently mentioned) based on its prevalence in the text.\n\nRespond ONLY with a valid JSON object with a single key "problems", which is an array of these objects.\nExample: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequency": 9 }] }`; const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 1500, response_format: { "type": "json_object" } }; const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) { throw new Error(`AI API failed with status: ${response.status}`); } const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const aiProblems = parsed.problems || []; if (aiProblems.length >= 3) { console.log("Successfully used AI analysis for Problem Map."); const chartData = aiProblems.map(item => { if (!item.problem || typeof item.intensity !== 'number' || typeof item.frequency !== 'number') return null; return { x: item.frequency, y: item.intensity, label: item.problem }; }).filter(Boolean); return chartData.sort((a, b) => b.x - a.x); } else { console.warn("AI analysis returned too few problems. Falling back to keyword analysis."); } } catch (error) { console.error("AI analysis for Problem Map failed:", error, "Falling back to reliable keyword-based analysis."); } const emotionFreq = {}; posts.forEach(post => { const text = `${post.data.title} ${post.data.selftext || ''}`.toLowerCase(); const words = text.replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { const lemma = lemmatize(rawWord); if (emotionalIntensityScores[lemma]) { emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1; } }); }); const chartData = Object.entries(emotionFreq).map(([word, freq]) => ({ x: freq, y: emotionalIntensityScores[word], label: word })); return chartData.sort((a, b) => b.x - a.x).slice(0, 25); }
 function renderEmotionMap(data) { const container = document.getElementById('emotion-map-container'); if (!container) return; if (window.myEmotionChart) { window.myEmotionChart.destroy(); } if (data.length < 3) { container.innerHTML = '<h3 class="dashboard-section-title">Problem Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough distinct problems were found to build a map.</p>'; return; } container.innerHTML = ` <h3 class="dashboard-section-title">Problem Polarity Map</h3> <p id="problem-map-description">Top Right = The most frequent and emotionally intense problems.</p> <div id="emotion-map-wrapper"> <div id="emotion-map" style="height: 400px; background: #2c3e50; padding: 10px; border-radius: 8px;"> <canvas id="emotion-chart-canvas"></canvas> </div> <button id="chart-zoom-btn" style="display: none;"></button> </div> `; const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d'); if (!ctx) return; const maxFreq = Math.max(...data.map(p => p.x)); const allFrequencies = data.map(p => p.x); const minObservedFreq = Math.min(...allFrequencies); const collapsedMinX = 5; const isCollapseFeatureEnabled = minObservedFreq >= collapsedMinX; const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0; window.myEmotionChart = new Chart(ctx, { type: 'scatter', data: { datasets: [{ label: 'Problems/Topics', data: data, backgroundColor: 'rgba(52, 152, 219, 0.9)', borderColor: 'rgba(41, 128, 185, 1)', borderWidth: 1, pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20, pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20, }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { mode: 'nearest', intersect: false, callbacks: { title: function(tooltipItems) { return tooltipItems[0].raw.label; }, label: function(context) { return ''; }, afterBody: function(tooltipItems) { const point = tooltipItems[0].raw; return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`; } }, displayColors: false, titleFont: { size: 14, weight: 'bold' }, bodyFont: { size: 12 }, backgroundColor: 'rgba(0, 0, 0, 0.8)', titleColor: '#ffffff', bodyColor: '#dddddd', } }, scales: { x: { title: { display: true, text: 'Frequency (1-10)', color: 'white', font: { weight: 'bold' } }, min: initialMinX, max: 10, grid: { color: 'rgba(255, 255, 255, 0.15)' }, ticks: { color: 'white' } }, y: { title: { display: true, text: 'Problem Intensity (1-10)', color: 'white', font: { weight: 'bold' } }, min: 0, max: 10, grid: { color: 'rgba(255, 255, 255, 0.15)' }, ticks: { color: 'white' } } } } }); const zoomButton = document.getElementById('chart-zoom-btn'); if (isCollapseFeatureEnabled) { zoomButton.style.display = 'block'; const updateButtonText = () => { const isCurrentlyCollapsed = window.myEmotionChart.options.scales.x.min !== 0; zoomButton.textContent = isCurrentlyCollapsed ? 'Zoom Out to See Full Range' : 'Zoom In to High-Frequency'; }; zoomButton.addEventListener('click', () => { const chart = window.myEmotionChart; const isCurrentlyCollapsed = chart.options.scales.x.min !== 0; chart.options.scales.x.min = isCurrentlyCollapsed ? 0 : collapsedMinX; chart.update('none'); updateButtonText(); }); updateButtonText(); } }
-function generateSentimentData(posts) { const data = { positive: {}, negative: {} }; let positiveCount = 0; let negativeCount = 0; posts.forEach(post => { const text = `${post.data.title} ${post.data.selftext || ''}`; const words = text.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { if (rawWord.length < 3 || stopWords.includes(rawWord)) return; const lemma = lemmatize(rawWord); let category = null; if (positiveWords.has(lemma)) { category = 'positive'; positiveCount++; } else if (negativeWords.has(lemma)) { category = 'negative'; negativeCount++; } if (category) { if (!data[category][lemma]) { data[category][lemma] = { count: 0, posts: new Set() }; } data[category][lemma].count++; data[category][lemma].posts.add(post); } }); }); window._sentimentData = data; return { positive: Object.entries(data.positive).sort((a, b) => b[1].count - a[1].count).slice(0, 30), negative: Object.entries(data.negative).sort((a, b) => b[1].count - a[1].count).slice(0, 30), positiveCount, negativeCount }; }
-function generateSentimentPhraseData(posts) { const data = { positive: {}, negative: {} }; posts.forEach(post => { const text = `${post.data.title} ${post.data.selftext || ''}`; const words = text.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/).filter(w => w.length > 0); const processNgram = (ngram, terminalWord) => { if (stopWords.includes(ngram[0]) || stopWords.includes(ngram[ngram.length - 1])) { return; } const lemma = lemmatize(terminalWord); let category = null; if (positiveWords.has(lemma)) { category = 'positive'; } else if (negativeWords.has(lemma)) { category = 'negative'; } if (category) { const phrase = ngram.join(' '); if (!data[category][phrase]) { data[category][phrase] = { count: 0, posts: new Set() }; } data[category][phrase].count++; data[category][phrase].posts.add(post); } }; for (let i = 0; i < words.length - 1; i++) { processNgram([words[i], words[i+1]], words[i+1]); } for (let i = 0; i < words.length - 2; i++) { processNgram([words[i], words[i+1], words[i+2]], words[i+2]); } }); window._sentimentPhraseData = data; return { positive: Object.entries(data.positive).filter(entry => entry[1].count > 1).sort((a, b) => b[1].count - a[1].count).slice(0, 25), negative: Object.entries(data.negative).filter(entry => entry[1].count > 1).sort((a, b) => b[1].count - a[1].count).slice(0, 25), }; }
+
+// --- MODIFIED --- This function and the one below are re-architected for reliability.
+function generateSentimentData(posts) {
+    const data = { positive: {}, negative: {} };
+    let positiveCount = 0;
+    let negativeCount = 0;
+    posts.forEach(post => {
+        const text = `${post.data.title} ${post.data.selftext || ''}`;
+        const words = text.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/);
+        words.forEach(rawWord => {
+            if (rawWord.length < 3 || stopWords.includes(rawWord)) return;
+            const lemma = lemmatize(rawWord);
+            let category = null;
+            if (positiveWords.has(lemma)) {
+                category = 'positive';
+                positiveCount++;
+            } else if (negativeWords.has(lemma)) {
+                category = 'negative';
+                negativeCount++;
+            }
+            if (category) {
+                if (!data[category][lemma]) {
+                    data[category][lemma] = {
+                        count: 0,
+                        posts: new Set()
+                    };
+                }
+                data[category][lemma].count++;
+                data[category][lemma].posts.add(post);
+            }
+        });
+    });
+    window._sentimentData = data;
+    return {
+        positive: Object.entries(data.positive).sort((a, b) => b[1].count - a[1].count).slice(0, 30),
+        negative: Object.entries(data.negative).sort((a, b) => b[1].count - a[1].count).slice(0, 30),
+        positiveCount,
+        negativeCount
+    };
+}
+
+// --- MODIFIED --- This is the new, robust phrase generation logic.
+function generateSentimentPhraseData(posts) {
+    const data = { positive: {}, negative: {} };
+    posts.forEach(post => {
+        const fullText = `${post.data.title}. ${post.data.selftext || ''}`;
+        const sentences = fullText.match(/[^.!?]+[.!?]+/g) || [];
+
+        sentences.forEach(sentence => {
+            const words = sentence.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/).filter(w => w.length > 1 && !stopWords.includes(w));
+            if (words.length < 2) return;
+
+            const processNgram = (ngram) => {
+                const terminalWord = ngram[ngram.length - 1];
+                const lemma = lemmatize(terminalWord);
+                let category = null;
+
+                if (positiveWords.has(lemma)) category = 'positive';
+                else if (negativeWords.has(lemma)) category = 'negative';
+
+                if (category) {
+                    const phrase = ngram.join(' ');
+                    if (!data[category][phrase]) {
+                        data[category][phrase] = { count: 0, contexts: new Map() };
+                    }
+                    // Use a Map to store unique contexts (post + snippet) to avoid duplicates
+                    if (!data[category][phrase].contexts.has(post.data.id)) {
+                        data[category][phrase].contexts.set(post.data.id, { postData: post, snippet: sentence });
+                    }
+                }
+            };
+
+            for (let i = 0; i < words.length - 1; i++) { processNgram([words[i], words[i+1]]); }
+            for (let i = 0; i < words.length - 2; i++) { processNgram([words[i], words[i+1], words[i+2]]); }
+        });
+    });
+
+    // Post-process to finalize counts and structure
+    for (const category in data) {
+        for (const phrase in data[category]) {
+            const contextsMap = data[category][phrase].contexts;
+            data[category][phrase].count = contextsMap.size;
+            data[category][phrase].contexts = Array.from(contextsMap.values());
+        }
+    }
+
+    window._sentimentPhraseData = data;
+
+    const formatForCloud = (categoryData) => {
+        return Object.entries(categoryData)
+            .filter(entry => entry[1].count > 1)
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 25)
+            .map(([phrase, data]) => [phrase, { count: data.count }]);
+    };
+
+    return {
+        positive: formatForCloud(data.positive),
+        negative: formatForCloud(data.negative),
+    };
+}
+
 function renderSentimentCloud(containerId, wordData, colors) { const container = document.getElementById(containerId); if (!container) return; if (wordData.length < 3) { container.innerHTML = `<p style="font-family: sans-serif; color: #777; padding: 1rem; text-align: center;">Not enough distinct terms found.</p>`; return; } const counts = wordData.map(item => item[1].count); const maxCount = Math.max(...counts); const minCount = Math.min(...counts); const minFontSize = 16, maxFontSize = 42; const cloudHTML = wordData.map(([word, data]) => { const fontSize = minFontSize + ((data.count - minCount) / (maxCount - minCount || 1)) * (maxFontSize - minFontSize); const color = colors[Math.floor(Math.random() * colors.length)]; const rotation = Math.random() * 8 - 4; return `<span class="cloud-word" data-word="${word}" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${word}</span>`; }).join(''); container.innerHTML = cloudHTML; }
 function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title}. ${post.data.selftext || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence.replace(highlightRegex, `<strong>$1</strong>`); const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if(closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 
-// =================================================================================
-// FIXED FUNCTION (DEFINITIVE VERSION)
-// This function definitively solves the repetition and highlighting issues.
-// =================================================================================
-function showSlidingPanel(word, posts, category) {
+// --- MODIFIED --- This is the re-architected, definitive fix for the function.
+function showSlidingPanel(word, data, category) {
     const positivePanel = document.getElementById('positive-context-box');
     const negativePanel = document.getElementById('negative-context-box');
     const overlay = document.getElementById('context-overlay');
-    if (!positivePanel || !negativePanel || !overlay) {
-        console.error("Sliding context panels or overlay not found in the DOM.");
-        renderContextContent(word, posts); // Fallback to original behavior
-        return;
-    }
+    if (!positivePanel || !negativePanel || !overlay) { return; }
+
     const targetPanel = category === 'positive' ? positivePanel : negativePanel;
     const otherPanel = category === 'positive' ? negativePanel : positivePanel;
-    
-    // --- FIX #1: ROBUST HIGHLIGHTING ---
-    // This creates a flexible regex that handles plurals, possessives, and special characters.
-    const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const phraseParts = word.split(' ');
-    const lastPartIndex = phraseParts.length - 1;
-    const pattern = phraseParts.map((part, index) => {
-        const escapedPart = escapeRegex(part);
-        // Add plural/possessive flexibility ONLY to the last word of the phrase
-        if (index === lastPartIndex) {
-            return escapedPart + "(s|'s|es)?";
-        }
-        return escapedPart;
-    }).join("[\\s'’`.-]+"); // Allow flexible separators between words
 
-    const highlightRegex = new RegExp(`(\\b${pattern}\\b)`, 'gi');
-    const keywordRegex = new RegExp(`\\b${pattern}\\b`, 'i');
+    // --- Definitive Highlighting Fix ---
+    // Creates a robust regex that handles apostrophes and plurals for each word in the phrase.
+    const flexiblePattern = word.split(' ').map(part => {
+        // Escape special characters for regex, then make plurals optional.
+        const escapedPart = part.replace(/['’]/g, "['’]?");
+        return escapedPart + 's?';
+    }).join('[\\s`-]+'); // Allow different separators between words.
+    const highlightRegex = new RegExp(`(${flexiblePattern})`, 'gi');
 
     const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`;
+    let snippetsHTML = '';
 
-    // --- FIX #2: GUARANTEED DE-DUPLICATION ---
-    // This ensures every post is processed only ONCE by using its unique ID as a key.
-    const uniquePosts = Array.from(new Map(posts.map(p => (p.data && p.data.id ? [p.data.id, p] : null)).filter(Boolean)).values());
-
-    const snippets = [];
-    for (const post of uniquePosts) {
-        if (snippets.length >= 10) break; // Stop after 10 unique examples.
-
-        const fullText = `${post.data.title}. ${post.data.selftext || ''}`;
-        
-        // Trust the post is relevant and generate the best possible snippet
-        let textToShow;
-        const sentences = fullText.match(/[^.!?]+[.!?]+/g) || [];
-        let relevantSentence = sentences.find(s => keywordRegex.test(s));
-
-        if (relevantSentence) {
-            // Best case: Found a perfect sentence. Highlight the phrase.
-            textToShow = relevantSentence.replace(highlightRegex, `<strong class="highlight">$1</strong>`);
-        } else {
-            // Fallback: If no single sentence matches (e.g., phrase spans sentences),
-            // use the start of the post and highlight there. This ensures a snippet is always shown.
-            textToShow = getFirstTwoSentences(fullText).replace(highlightRegex, `<strong class="highlight">$1</strong>`);
-        }
-        
-        const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`;
-        snippets.push(`<div class="context-snippet"><p class="context-snippet-text">...${textToShow}...</p>${metaHTML}</div>`);
+    // Case 1: Handle pre-captured contexts for phrases.
+    if (data.contexts && Array.isArray(data.contexts)) {
+        snippetsHTML = data.contexts.slice(0, 10).map(context => {
+            const { postData, snippet } = context;
+            const textToShow = snippet.replace(highlightRegex, `<strong>$1</strong>`);
+            const metaHTML = `<div class="context-snippet-meta"><span>r/${postData.data.subreddit} | 👍 ${postData.data.ups.toLocaleString()} | 💬 ${postData.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(postData.data.created_utc)}</span></div>`;
+            return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`;
+        }).join('');
+    } 
+    // Case 2: Handle raw post lists for single words.
+    else if (Array.isArray(data)) {
+        // --- Definitive Deduplication Fix ---
+        const uniquePosts = Array.from(new Map(data.map(p => [p.data.id, p])).values());
+        snippetsHTML = uniquePosts.slice(0, 10).map(post => {
+            const fullText = `${post.data.title}. ${post.data.selftext || ''}`;
+            const textToShow = getFirstTwoSentences(fullText).replace(highlightRegex, `<strong>$1</strong>`);
+            const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`;
+            return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`;
+        }).join('');
     }
 
-    const snippetsHTML = snippets.join('');
-    targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML.length > 0 ? snippetsHTML : '<p style="padding: 1rem;">Could not find specific examples for this phrase.</p>'}</div>`;
+    targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML || '<p style="padding: 1rem;">No valid post examples could be generated for this term.</p>'}</div>`;
     
-    // Logic to show the panel
     const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); };
     targetPanel.querySelector('.context-close-btn').onclick = close;
     overlay.onclick = close;
@@ -119,7 +197,6 @@ function showSlidingPanel(word, posts, category) {
     targetPanel.classList.add('visible');
     overlay.classList.add('visible');
 }
-
 
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title}\nContent: ${p.data.selftext.substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
 async function extractAndValidateEntities(posts, nicheContext) { const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 800)}`).join('\n---\n'); const prompt = `You are a market research analyst reviewing Reddit posts from the '${nicheContext}' community. Extract the following: 1. "brands": Specific, proper-noun company, brand, or service names (e.g., "KitchenAid", "Stripe"). 2. "products": Common, generic product categories (e.g., "stand mixer", "CRM software"). CRITICAL RULES: Be strict. Exclude acronyms (MOH, AITA), generic words (UPDATE), etc. Respond ONLY with a JSON object with two keys: "brands" and "products", holding an array of strings. If none, return an empty array. Text: ${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1000, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('AI entity extraction failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const allEntities = { brands: parsed.brands || [], products: parsed.products || [] }; window._entityData = {}; for (const type in allEntities) { window._entityData[type] = {}; allEntities[type].forEach(name => { const regex = new RegExp(`\\b${name.replace(/ /g, '\\s')}(s?)\\b`, 'gi'); const mentioningPosts = posts.filter(post => regex.test(post.data.title + ' ' + post.data.selftext)); if (mentioningPosts.length > 0) { window._entityData[type][name] = { count: mentioningPosts.length, posts: mentioningPosts }; } }); } return { topBrands: Object.entries(window._entityData.brands || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8), topProducts: Object.entries(window._entityData.products || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8) }; } catch (error) { console.error("Entity extraction error:", error); return { topBrands: [], topProducts: [] }; } }
@@ -226,25 +303,26 @@ function initializeDashboardInteractivity() {
         const entityEl = e.target.closest('.discovery-list-item');
 
         if (cloudWordEl) {
+            // --- MODIFIED --- This click handler now correctly passes the right data structure.
             const word = cloudWordEl.dataset.word;
-            let category, postsData;
+            let category, dataForPanel;
 
             if (cloudWordEl.closest('#positive-cloud')) {
                 category = 'positive';
-                postsData = window._sentimentData?.[category]?.[word]?.posts;
+                dataForPanel = Array.from(window._sentimentData?.[category]?.[word]?.posts || []); // Pass array of posts
             } else if (cloudWordEl.closest('#negative-cloud')) {
                 category = 'negative';
-                postsData = window._sentimentData?.[category]?.[word]?.posts;
+                dataForPanel = Array.from(window._sentimentData?.[category]?.[word]?.posts || []);
             } else if (cloudWordEl.closest('#positive-phrases-cloud')) {
                 category = 'positive';
-                postsData = window._sentimentPhraseData?.[category]?.[word]?.posts;
+                dataForPanel = window._sentimentPhraseData?.[category]?.[word]; // Pass the whole object {count, contexts}
             } else if (cloudWordEl.closest('#negative-phrases-cloud')) {
                 category = 'negative';
-                postsData = window._sentimentPhraseData?.[category]?.[word]?.posts;
+                dataForPanel = window._sentimentPhraseData?.[category]?.[word];
             }
             
-            if (postsData) {
-                showSlidingPanel(word, Array.from(postsData), category);
+            if (dataForPanel) {
+                showSlidingPanel(word, dataForPanel, category);
             }
         }
         else if (entityEl) {

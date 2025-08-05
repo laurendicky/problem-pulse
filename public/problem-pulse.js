@@ -46,9 +46,8 @@ function renderSentimentCloud(containerId, wordData, colors) { const container =
 function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title}. ${post.data.selftext || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence.replace(highlightRegex, `<strong>$1</strong>`); const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if(closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 
 // =================================================================================
-// FIXED FUNCTION (NEW, MORE ROBUST APPROACH)
-// This version solves both issues by ensuring snippets are always generated
-// and that posts are unique for each phrase clicked.
+// FIXED FUNCTION (DEFINITIVE VERSION)
+// This function definitively solves the repetition and highlighting issues.
 // =================================================================================
 function showSlidingPanel(word, posts, category) {
     const positivePanel = document.getElementById('positive-context-box');
@@ -61,48 +60,55 @@ function showSlidingPanel(word, posts, category) {
     }
     const targetPanel = category === 'positive' ? positivePanel : negativePanel;
     const otherPanel = category === 'positive' ? negativePanel : positivePanel;
+    
+    // --- FIX #1: ROBUST HIGHLIGHTING ---
+    // This creates a flexible regex that handles plurals, possessives, and special characters.
+    const escapeRegex = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const phraseParts = word.split(' ');
+    const lastPartIndex = phraseParts.length - 1;
+    const pattern = phraseParts.map((part, index) => {
+        const escapedPart = escapeRegex(part);
+        // Add plural/possessive flexibility ONLY to the last word of the phrase
+        if (index === lastPartIndex) {
+            return escapedPart + "(s|'s|es)?";
+        }
+        return escapedPart;
+    }).join("[\\s'’`.-]+"); // Allow flexible separators between words
 
-    // A flexible regex to find the phrase, allowing for different spacing or optional 's' at the end.
-    const phraseWords = word.split(' ');
-    const regexPattern = '\\b' + phraseWords.join('[\\s\'’`-]*') + 's?\\b';
-    const highlightRegex = new RegExp(`(${regexPattern})`, 'gi');
-    const keywordRegex = new RegExp(regexPattern, 'i');
+    const highlightRegex = new RegExp(`(\\b${pattern}\\b)`, 'gi');
+    const keywordRegex = new RegExp(`\\b${pattern}\\b`, 'i');
 
     const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`;
 
-    // FIX #2: Eliminate duplicate posts FOR THIS SPECIFIC PHRASE.
-    // This creates a new array with only unique posts using their ID. This solves the duplicate post issue.
+    // --- FIX #2: GUARANTEED DE-DUPLICATION ---
+    // This ensures every post is processed only ONCE by using its unique ID as a key.
     const uniquePosts = Array.from(new Map(posts.map(p => (p.data && p.data.id ? [p.data.id, p] : null)).filter(Boolean)).values());
 
     const snippets = [];
     for (const post of uniquePosts) {
-        if (snippets.length >= 10) break; // Stop after 10 examples.
+        if (snippets.length >= 10) break; // Stop after 10 unique examples.
 
         const fullText = `${post.data.title}. ${post.data.selftext || ''}`;
         
-        // FIX #1: GUARANTEE SNIPPET GENERATION.
-        // We now trust that this post is relevant. Our goal is to create the best snippet possible.
+        // Trust the post is relevant and generate the best possible snippet
         let textToShow;
         const sentences = fullText.match(/[^.!?]+[.!?]+/g) || [];
-        // Try to find a sentence that contains the phrase for a perfect snippet.
         let relevantSentence = sentences.find(s => keywordRegex.test(s));
 
         if (relevantSentence) {
-            // Best case: Found a perfect sentence. Highlight the phrase within it.
-            textToShow = relevantSentence.replace(highlightRegex, `<strong>$1</strong>`);
+            // Best case: Found a perfect sentence. Highlight the phrase.
+            textToShow = relevantSentence.replace(highlightRegex, `<strong class="highlight">$1</strong>`);
         } else {
-            // Fallback: The phrase might be split across sentences or formatted weirdly.
-            // Since we TRUST this post is relevant, we create a snippet from the start of the post
-            // and attempt to highlight the phrase there. This prevents valid posts from being skipped.
-            textToShow = getFirstTwoSentences(fullText).replace(highlightRegex, `<strong>$1</strong>`);
+            // Fallback: If no single sentence matches (e.g., phrase spans sentences),
+            // use the start of the post and highlight there. This ensures a snippet is always shown.
+            textToShow = getFirstTwoSentences(fullText).replace(highlightRegex, `<strong class="highlight">$1</strong>`);
         }
         
         const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`;
-        snippets.push(`<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`);
+        snippets.push(`<div class="context-snippet"><p class="context-snippet-text">...${textToShow}...</p>${metaHTML}</div>`);
     }
 
     const snippetsHTML = snippets.join('');
-    // This message will now only show if the initial `posts` array was truly empty.
     targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML.length > 0 ? snippetsHTML : '<p style="padding: 1rem;">Could not find specific examples for this phrase.</p>'}</div>`;
     
     // Logic to show the panel
@@ -113,6 +119,7 @@ function showSlidingPanel(word, posts, category) {
     targetPanel.classList.add('visible');
     overlay.classList.add('visible');
 }
+
 
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title}\nContent: ${p.data.selftext.substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
 async function extractAndValidateEntities(posts, nicheContext) { const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 800)}`).join('\n---\n'); const prompt = `You are a market research analyst reviewing Reddit posts from the '${nicheContext}' community. Extract the following: 1. "brands": Specific, proper-noun company, brand, or service names (e.g., "KitchenAid", "Stripe"). 2. "products": Common, generic product categories (e.g., "stand mixer", "CRM software"). CRITICAL RULES: Be strict. Exclude acronyms (MOH, AITA), generic words (UPDATE), etc. Respond ONLY with a JSON object with two keys: "brands" and "products", holding an array of strings. If none, return an empty array. Text: ${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1000, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('AI entity extraction failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const allEntities = { brands: parsed.brands || [], products: parsed.products || [] }; window._entityData = {}; for (const type in allEntities) { window._entityData[type] = {}; allEntities[type].forEach(name => { const regex = new RegExp(`\\b${name.replace(/ /g, '\\s')}(s?)\\b`, 'gi'); const mentioningPosts = posts.filter(post => regex.test(post.data.title + ' ' + post.data.selftext)); if (mentioningPosts.length > 0) { window._entityData[type][name] = { count: mentioningPosts.length, posts: mentioningPosts }; } }); } return { topBrands: Object.entries(window._entityData.brands || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8), topProducts: Object.entries(window._entityData.products || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8) }; } catch (error) { console.error("Entity extraction error:", error); return { topBrands: [], topProducts: [] }; } }

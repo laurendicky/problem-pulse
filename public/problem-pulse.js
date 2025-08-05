@@ -45,7 +45,7 @@ function generateSentimentPhraseData(posts) { const data = { positive: {}, negat
 function renderSentimentCloud(containerId, wordData, colors) { const container = document.getElementById(containerId); if (!container) return; if (wordData.length < 3) { container.innerHTML = `<p style="font-family: sans-serif; color: #777; padding: 1rem; text-align: center;">Not enough distinct terms found.</p>`; return; } const counts = wordData.map(item => item[1].count); const maxCount = Math.max(...counts); const minCount = Math.min(...counts); const minFontSize = 16, maxFontSize = 42; const cloudHTML = wordData.map(([word, data]) => { const fontSize = minFontSize + ((data.count - minCount) / (maxCount - minCount || 1)) * (maxFontSize - minFontSize); const color = colors[Math.floor(Math.random() * colors.length)]; const rotation = Math.random() * 8 - 4; return `<span class="cloud-word" data-word="${word}" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${word}</span>`; }).join(''); container.innerHTML = cloudHTML; }
 function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title}. ${post.data.selftext || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence.replace(highlightRegex, `<strong>$1</strong>`); const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if(closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 
-// --- MODIFIED --- This is the re-engineered, robust version of the function.
+// --- MODIFIED --- This is the re-architected, definitive fix for the function.
 function showSlidingPanel(word, posts, category) {
     const positivePanel = document.getElementById('positive-context-box');
     const negativePanel = document.getElementById('negative-context-box');
@@ -65,38 +65,49 @@ function showSlidingPanel(word, posts, category) {
 
     const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`;
 
-    // --- DEFINITIVE FIX 1: Eliminate duplicates before processing ---
-    // Creates a new array with only unique posts, using a Map to ensure each post ID is represented once.
-    const uniquePosts = Array.from(new Map(posts.map(p => p.data && p.data.id ? [p.data.id, p] : null).filter(Boolean)).values());
-
+    // FIX 1: Absolutely guarantee no duplicate posts are processed.
+    const uniquePosts = Array.from(new Map(posts.map(p => [p.data.id, p])).values());
+    
     const snippets = [];
     for (const post of uniquePosts) {
-        if (snippets.length >= 10) break; // Stop when we have enough examples.
+        if (snippets.length >= 10) break; // We only need a max of 10 examples.
 
         const fullText = `${post.data.title}. ${post.data.selftext || ''}`;
 
-        // --- DEFINITIVE FIX 2: Ensure every relevant post produces a snippet ---
+        // FIX 2: Create a snippet for EVERY valid post, eliminating the "could not find" error.
         if (keywordRegex.test(fullText)) {
-            let textToShow;
+            let snippetText;
             const sentences = fullText.match(/[^.!?]+[.!?]+/g) || [];
             let relevantSentence = sentences.find(s => keywordRegex.test(s));
 
             if (relevantSentence) {
-                // Golden path: Found a perfect sentence.
-                textToShow = relevantSentence.replace(highlightRegex, `<strong>$1</strong>`);
+                // Best case: Found a perfect sentence containing the phrase.
+                snippetText = relevantSentence;
             } else {
-                // Fallback: The phrase spans multiple sentences or is in a weird format.
-                // We ALREADY confirmed the phrase exists in fullText, so this highlighting is guaranteed to work.
-                textToShow = getFirstTwoSentences(fullText).replace(highlightRegex, `<strong>$1</strong>`);
+                // Guaranteed Fallback: The phrase might span sentences. Find its first occurrence
+                // and create a context window around it. This ensures we always get a snippet.
+                const match = fullText.match(keywordRegex);
+                if (match) {
+                    const matchIndex = match.index;
+                    const contextRadius = 80;
+                    const startIndex = Math.max(0, matchIndex - contextRadius);
+                    const endIndex = Math.min(fullText.length, matchIndex + match[0].length + contextRadius);
+                    snippetText = fullText.substring(startIndex, endIndex);
+                } else {
+                    // This is a safety net, should rarely be hit due to the check above.
+                    // If for some reason the match fails here, just use the start of the post.
+                    snippetText = getFirstTwoSentences(fullText);
+                }
             }
             
+            const textToShow = snippetText.replace(highlightRegex, `<strong>$1</strong>`);
             const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 💬 ${post.data.num_comments.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`;
             snippets.push(`<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`);
         }
     }
 
     const snippetsHTML = snippets.join('');
-    targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML.length > 0 ? snippetsHTML : '<p style="padding: 1rem;">Could not find specific examples for this phrase.</p>'}</div>`;
+    targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML.length > 0 ? snippetsHTML : '<p style="padding: 1rem;">No valid post examples could be generated for this phrase.</p>'}</div>`;
     
     const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); };
     targetPanel.querySelector('.context-close-btn').onclick = close;

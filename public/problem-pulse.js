@@ -1,7 +1,8 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 14.2 - PAYLOAD SIZE FIX)
-// This version corrects the 500 server error by reducing the payload size sent
-// to the AI for constellation map generation, preventing the proxy from crashing.
+// FINAL SCRIPT (VERSION 14.3 - BULLETPROOF PROMPT STRUCTURE)
+// This version uses a clearly delineated two-section prompt to prevent the AI
+// from confusing instructions/examples with the data to be analyzed. This is
+// a robust, standard prompting technique to prevent hallucination.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -64,6 +65,13 @@ const EMOTION_COLORS = {
     Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7',
     Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316'
 };
+const SIGNAL_TYPE_MAP = {
+    direct_payment: "Direct Payment Signal",
+    pain_backed_desire: "Pain-Backed Desire",
+    failed_solution: "Failed Solution",
+    aspirational_wishlist: "Aspirational Wishlist",
+    time_money_tradeoff: "Time vs. Money Tradeoff"
+};
 
 const CONSTELLATION_CATEGORY_KEYWORDS = {
     Automation: ['automate', 'manually', 'manual', 'repetitive', 'every time', 'time consuming', 'workflow', 'tedious'],
@@ -86,45 +94,47 @@ const EMOTION_KEYWORD_MAP = {
 async function extractWillingnessToPaySignals(posts) {
     const postsForAI = posts.map((p, index) => ({
         index: index,
-        // *** PAYLOAD SIZE FIX 1: Reduce text per post ***
         text: `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 800)}`
     }));
 
-    const prompt = `You are an expert market research analyst. Your task is to identify quotes from Reddit posts that signal a "willingness to pay" for a solution. Analyze the posts and extract up to 40 high-quality signals.
+    const prompt = `Your task is to act as an expert market research analyst.
+Analyze the Reddit posts provided in Section 2 using the conceptual framework described in Section 1.
+Extract up to 30 high-quality signals that indicate a "willingness to pay".
 
-Use this framework to guide your analysis:
+### SECTION 1: FRAMEWORK & INSTRUCTIONS ###
 
-### 1. Direct Payment Signals
-Crystal-clear signs someone is ready to hand over money.
-- Examples: "I’d pay good money for…", "I wish someone would make [X], I’d buy it in a second", "I’d subscribe to something that…", "Shut up and take my money"
+You will identify quotes that fall into one of the following five categories:
 
-### 2. Pain-Backed Desire Signals
-Strong frustration that implies a willingness to pay to make the pain go away.
-- Examples: "I’m sick of doing this manually…", "I waste so much time on…", "This shouldn’t be this hard", "Why is there no tool/app/product for this?"
+1.  **Direct Payment Signals:** Clear statements about paying for something.
+    - Examples: "I’d pay good money for…", "I would buy it in a second", "Shut up and take my money"
+    - Use the key: "direct_payment"
 
-### 3. Failed Solution Signals
-Hints that they've tried other solutions and are open to better alternatives.
-- Examples: "I’ve tried everything and nothing works", "I’ve used [product] but it’s missing [crucial feature]"
+2.  **Pain-Backed Desire Signals:** Strong frustration implying a need for a paid solution.
+    - Examples: "I’m sick of doing this manually…", "This shouldn’t be this hard"
+    - Use the key: "pain_backed_desire"
 
-### 4. Aspirational / Wishlist Signals
-Softer signals that show a clear market gap or desire.
-- Examples: "If only there was an app for…", "I wish someone would build…"
+3.  **Failed Solution Signals:** The user has tried other tools and is looking for a better alternative.
+    - Examples: "I’ve tried everything and nothing works", "This tool is missing a crucial feature"
+    - Use the key: "failed_solution"
 
-### 5. Time vs Money Tradeoffs
-When the user explicitly states their time is more valuable than the cost of a solution.
-- Examples: "I waste hours every week doing this", "I’d pay just to not have to think about this anymore"
+4.  **Aspirational / Wishlist Signals:** Clear identification of a market gap or wish for a new tool.
+    - Examples: "If only there was an app for…", "I wish someone would build…"
+    - Use the key: "aspirational_wishlist"
 
-For each signal you find, you must provide:
-1.  \`quote\`: The user's exact quote (under 280 characters).
-2.  \`problem_theme\`: A short, 4-5 word summary of the core problem.
-3.  \`signal_type\`: The name of the signal category from the framework above (e.g., "Direct Payment Signals", "Pain-Backed Desire Signals").
-4.  \`postIndex\`: The original index of the post from which the quote was extracted.
+5.  **Time vs Money Tradeoffs:** The user states their time is more valuable than the cost of a solution.
+    - Examples: "I waste hours every week doing this", "I’d pay just to not have to think about this"
+    - Use the key: "time_money_tradeoff"
+
+For each signal you find, you MUST provide:
+- \`quote\`: The user's exact quote (under 280 characters).
+- \`problem_theme\`: A short, 4-5 word summary of the core problem.
+- \`signal_type\`: The specific key for the category from the list above (e.g., "direct_payment").
+- \`postIndex\`: The original index of the post from which the quote was extracted.
 
 Respond ONLY with a valid JSON object with a single key "signals", which is an array of these objects.
-Example: { "signals": [{ "quote": "I'd happily pay $5 a month to never deal with this terrible UI again.", "problem_theme": "Frustration with User Interface", "signal_type": "Direct Payment Signals", "postIndex": 12 }] }
+Do NOT include the example quotes in your final response. Only use quotes from the posts in Section 2.
 
----
-Posts to analyze:
+### SECTION 2: REDDIT POSTS FOR ANALYSIS ###
 ${postsForAI.map(p => `Post Index: ${p.index}\nText: ${p.text}`).join('\n\n---\n\n')}
 `;
 
@@ -163,13 +173,12 @@ function getEmotionForText(text) {
             }
         }
     }
-    return 'Longing'; // A safe, neutral-positive default
+    return 'Longing';
 }
 
 async function generateConstellationData(allPosts) {
     console.log("Generating constellation data using Semantic Framework approach...");
 
-    // *** PAYLOAD SIZE FIX 2: Reduce number of posts ***
     const extractedSignals = await extractWillingnessToPaySignals(allPosts.slice(0, 150));
     if (!extractedSignals || extractedSignals.length === 0) {
         console.log("AI extraction returned no signals. Aborting constellation map.");
@@ -257,8 +266,9 @@ function initializeConstellationInteractivity() {
     container.addEventListener('mouseover', (e) => {
         if (!e.target.classList.contains('constellation-star')) return;
         const star = e.target;
+        const friendlySignalType = SIGNAL_TYPE_MAP[star.dataset.signalType] || star.dataset.signalType;
         panelContent.innerHTML = `
-            <div class="signal-type-header">${star.dataset.signalType}</div>
+            <div class="signal-type-header">${friendlySignalType}</div>
             <p class="quote">“${star.dataset.quote}”</p>
             <h4 class="problem-theme">${star.dataset.problemTheme}</h4>
             <p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes on related signals</p>

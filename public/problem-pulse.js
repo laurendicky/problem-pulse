@@ -21,8 +21,55 @@ const stopWords = ["a", "about", "above", "after", "again", "against", "all", "a
 // --- 2. ALL HELPER AND LOGIC FUNCTIONS ---
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
 function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
-async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all') { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after }) }); if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return []; } return allPosts.slice(0, totalLimit); }
-async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all') { const allResults = []; for (let i = 0; i < searchTerms.length; i += 8) { const batchTerms = searchTerms.slice(i, i + 8); const batchPromises = batchTerms.map(term => fetchRedditForTermWithPagination(niche, term, limitPerTerm, timeFilter)); const batchResults = await Promise.all(batchPromises); batchResults.forEach(posts => { if (Array.isArray(posts)) { allResults.push(...posts); } }); if (i + 8 < searchTerms.length) { await new Promise(resolve => setTimeout(resolve, 500)); } } return deduplicatePosts(allResults); }
+// MODIFIED: Added `searchInComments` flag to enable searching within comments via the proxy.
+async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all', searchInComments = false) {
+    let allPosts = [];
+    let after = null;
+    try {
+        while (allPosts.length < totalLimit) {
+            // Create a payload object to dynamically add the comment search parameter.
+            const payload = {
+                searchTerm: term,
+                niche: niche,
+                limit: 25,
+                timeFilter: timeFilter,
+                after: after
+            };
+
+            // If requested, add the parameter to tell the Netlify proxy to search comments.
+            // This is crucial for finding "willingness to pay" signals, which often appear in comments.
+            if (searchInComments) {
+                payload.includeComments = true;
+            }
+
+            const response = await fetch(REDDIT_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload) // Send the dynamic payload
+            });
+            if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); }
+            const data = await response.json();
+            if (!data.data || !data.data.children || !data.data.children.length) break;
+            allPosts = allPosts.concat(data.data.children);
+            after = data.data.after;
+            if (!after) break;
+        }
+    } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return []; }
+    return allPosts.slice(0, totalLimit);
+}
+// MODIFIED: Added `searchInComments` flag to pass down to the pagination function.
+async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all', searchInComments = false) {
+    const allResults = [];
+    for (let i = 0; i < searchTerms.length; i += 8) {
+        const batchTerms = searchTerms.slice(i, i + 8);
+        // Pass the searchInComments flag down to the single-term fetcher function.
+        const batchPromises = batchTerms.map(term => fetchRedditForTermWithPagination(niche, term, limitPerTerm, timeFilter, searchInComments));
+        const batchResults = await Promise.all(batchPromises);
+        batchResults.forEach(posts => { if (Array.isArray(posts)) { allResults.push(...posts); } });
+        if (i + 8 < searchTerms.length) { await new Promise(resolve => setTimeout(resolve, 500)); }
+    }
+    return deduplicatePosts(allResults);
+}
 function parseAISummary(aiResponse) { try { aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim(); const jsonMatch = aiResponse.match(/{[\s\S]*}/); if (!jsonMatch) { throw new Error("No JSON object in AI response."); } const parsed = JSON.parse(jsonMatch[0]); if (!parsed.summaries || !Array.isArray(parsed.summaries) || parsed.summaries.length < 1) { throw new Error("AI response lacks a 'summaries' array."); } parsed.summaries.forEach((summary, idx) => { const missingFields = []; if (!summary.title) missingFields.push("title"); if (!summary.body) missingFields.push("body"); if (typeof summary.count !== 'number') missingFields.push("count"); if (!summary.quotes || !Array.isArray(summary.quotes) || summary.quotes.length < 1) missingFields.push("quotes"); if (!summary.keywords || !Array.isArray(summary.keywords) || summary.keywords.length === 0) missingFields.push("keywords"); if (missingFields.length > 0) throw new Error(`Summary ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`); }); return parsed.summaries; } catch (error) { console.error("Parsing Error:", error); console.log("Raw AI Response:", aiResponse); throw new Error("Failed to parse AI response."); } }
 function parseAIAssignments(aiResponse) { try { aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim(); const jsonMatch = aiResponse.match(/{[\s\S]*}/); if (!jsonMatch) { throw new Error("No JSON object in AI response."); } const parsed = JSON.parse(jsonMatch[0]); if (!parsed.assignments || !Array.isArray(parsed.assignments)) { throw new Error("AI response lacks an 'assignments' array."); } parsed.assignments.forEach((assignment, idx) => { const missingFields = []; if (typeof assignment.postNumber !== 'number') missingFields.push("postNumber"); if (typeof assignment.finding !== 'number') missingFields.push("finding"); if (missingFields.length > 0) throw new Error(`Assignment ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`); }); return parsed.assignments; } catch (error) { console.error("Parsing Error:", error); console.log("Raw AI Response:", aiResponse); throw new Error("Failed to parse AI response."); } }
 function filterPosts(posts, minUpvotes = 20) { return posts.filter(post => { const title = post.data.title.toLowerCase(); const selftext = post.data.selftext || ''; if (title.includes('[ad]') || title.includes('sponsored') || post.data.upvote_ratio < 0.2 || post.data.ups < minUpvotes || !selftext || selftext.length < 100) return false; const isRamblingOrNoisy = (text) => { if (!text) return false; return /&#x[0-9a-fA-F]+;/g.test(text) || /[^a-zA-Z0-9\s]{5,}/g.test(text) || /(.)\1{6,}/g.test(text); }; return !isRamblingOrNoisy(title) && !isRamblingOrNoisy(selftext); }); }
@@ -236,11 +283,12 @@ async function runProblemFinder() {
     
     const problemTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
     const deepProblemTerms = [ "struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent" ];
-    // --- MODIFIED --- Search terms are now broader for better top-of-funnel results. No quotes.
+    // MODIFICATION: This list is now used for a dedicated search that includes comments to find purchase intent.
     const demandSignalTerms = ["I would pay", "take my money", "happily pay", "instant buy", "I need this", "shut up and take my money", "where can I buy"];
 
     const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
-    let searchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms, ...demandSignalTerms] : [...problemTerms, ...demandSignalTerms];
+    // MODIFICATION: The general search terms no longer include demand signals, as they are handled separately.
+    let generalSearchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms] : problemTerms;
     let limitPerTerm = (searchDepth === 'deep') ? 75 : 40;
     
     const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
@@ -256,14 +304,40 @@ async function runProblemFinder() {
     const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
     const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" }; const selectedTime = timeMap[selectedTimeRaw] || "all";
     try {
-        let allPosts = await fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, limitPerTerm, selectedTime);
+        // === MODIFICATION START: Two-Pronged Search Strategy for Better Signal Detection ===
+        // To reliably find "Willingness to Pay" signals for the constellation map, we now run two parallel searches.
+        // 1. A broad search for general problems, looking only in post titles/bodies.
+        // 2. A targeted search for specific "purchase intent" phrases, which ALSO includes searching comments,
+        //    as per the user request and proxy capabilities.
+
+        console.log("Fetching general problem posts...");
+        // Fetch general problem posts (submissions only). The last argument `false` prevents comment searching.
+        const problemPostsPromise = fetchMultipleRedditDataBatched(subredditQueryString, generalSearchTerms, limitPerTerm, selectedTime, false);
+
+        console.log("Fetching high-intent demand signals (including from comments)...");
+        // Fetch high-intent demand signals from posts AND comments. The `true` flag enables comment searching via the proxy.
+        // We use a slightly smaller limit per term (50) as these keywords are highly specific.
+        const demandSignalsPromise = fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 50, selectedTime, true);
+
+        // Await both searches to complete concurrently for efficiency.
+        const [problemPosts, demandSignalPosts] = await Promise.all([problemPostsPromise, demandSignalsPromise]);
+        
+        console.log(`Found ${problemPosts.length} general problem posts and ${demandSignalPosts.length} potential demand signals from posts & comments.`);
+
+        // Combine results, prioritizing the high-intent signals by placing them at the start of the array.
+        // This is important because downstream analysis functions may only look at the first N posts.
+        const combinedPosts = [...demandSignalPosts, ...problemPosts];
+        let allPosts = deduplicatePosts(combinedPosts);
+        console.log(`Total unique posts after combining and deduplicating: ${allPosts.length}`);
+        // === MODIFICATION END ===
+
+        // The rest of the script continues as before, but now operates on a much richer dataset.
         if (allPosts.length === 0) { throw new Error("No results found."); }
         const filteredPosts = filterPosts(allPosts, selectedMinUpvotes);
         if (filteredPosts.length < 10) { throw new Error("Not enough high-quality posts found."); }
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
         
-        // --- MODIFIED --- Call the new orchestrator function for the constellation map
         generateConstellationData(filteredPosts, demandSignalTerms);
         
         const sentimentData = generateSentimentData(filteredPosts);

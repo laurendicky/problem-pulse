@@ -233,11 +233,50 @@ function initializeConstellationInteractivity() {
     container.addEventListener('mouseout', (e) => { if (e.target === container) setDefaultPanelState(); });
 }
 
+// =================================================================================
+// NEW: Asynchronous function to handle the slow constellation analysis in the background
+// =================================================================================
+async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
+    console.log("--- Starting Delayed Constellation Analysis (in background) ---");
+    try {
+        // Step 1: Fetch initial posts that might contain demand signals.
+        const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false);
+        console.log(`[Constellation] Found ${demandSignalPosts.length} initial posts for signals.`);
+
+        if (demandSignalPosts.length === 0) {
+            renderConstellationMap([]); // Render empty map if no posts found
+            return;
+        }
+
+        // CRITICAL FIX: Prioritize and limit the posts to prevent overload.
+        const MAX_POSTS_FOR_COMMENTS = 40; // Set a reasonable limit
+        const postsToProcess = demandSignalPosts
+            .sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0))
+            .slice(0, MAX_POSTS_FOR_COMMENTS);
+
+        // Step 2: Fetch comments for ONLY the top, prioritized posts.
+        const postIds = postsToProcess.map(p => p.data.id);
+        console.log(`[Constellation] Fetching comments for the top ${postIds.length} posts...`);
+        const highIntentComments = await fetchCommentsForPosts(postIds);
+
+        // Step 3: Combine and generate the map.
+        const demandSignalItems = [...postsToProcess, ...highIntentComments];
+        generateConstellationData(demandSignalItems, demandSignalTerms);
+        console.log("--- Constellation Analysis Complete. Map should be populated. ---");
+
+    } catch (error) {
+        console.error("Constellation analysis failed in the background:", error);
+        // Fail silently without showing an error to the user, as the main report is already done.
+        renderConstellationMap([]); 
+    }
+}
 
 
-
+// =================================================================================
+// BLOCK 3 of 4: MAIN ANALYSIS FUNCTION (FINAL - Two-Phase Architecture)
+// =================================================================================
 async function runProblemFinder() {
-    // --- Start of UI and variable setup ---
+    // --- UI and variable setup ---
     const searchButton = document.getElementById('search-selected-btn'); if (!searchButton) { console.error("Could not find button."); return; }
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked'); if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value); const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
@@ -263,9 +302,10 @@ async function runProblemFinder() {
     const countHeaderDiv = document.getElementById("count-header");
     if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
     findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
-    // --- End of UI and variable setup ---
 
     try {
+        // --- PHASE 1: FAST ANALYSIS ---
+        console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
         const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
         let generalSearchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms] : problemTerms;
         let limitPerTerm = (searchDepth === 'deep') ? 75 : 40;
@@ -273,63 +313,30 @@ async function runProblemFinder() {
         const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
         const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" }; const selectedTime = timeMap[selectedTimeRaw] || "all";
 
-        console.log("--- STARTING FINAL ANALYSIS RUN ---");
+        // Set a placeholder for the constellation map while it loads in the background
+        const constellationContainer = document.getElementById('constellation-map-container');
+        if (constellationContainer) {
+            const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+            const placeholderHTML = '<div class="panel-placeholder">Loading purchase signals...</div>';
+            const panelPlaceholderHTML = '<div class="panel-placeholder">Insights loading...</div>';
+            constellationContainer.innerHTML = placeholderHTML;
+            if(panelContent) panelContent.innerHTML = panelPlaceholderHTML;
+        }
 
-        // TASK A: Fetch general problem posts
-        const problemItemsPromise = fetchMultipleRedditDataBatched(subredditQueryString, generalSearchTerms, limitPerTerm, selectedTime, false);
-
-        // TASK B: Fetch demand signal items (posts and comments)
-        const getDemandSignalItems = async () => {
-            console.log("[TASK B] Starting: Fetch demand signal items.");
-            const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, selectedTime, false);
-            console.log(`[TASK B] Found ${demandSignalPosts.length} initial posts.`);
-
-            if (demandSignalPosts.length === 0) return [];
-            
-            // <<< CRITICAL FIX: LIMIT AND PRIORITIZE POSTS FOR COMMENT FETCHING >>>
-            const MAX_POSTS_FOR_COMMENTS = 40; // Set a reasonable limit
-            let postsToProcess = demandSignalPosts;
-
-            if (demandSignalPosts.length > MAX_POSTS_FOR_COMMENTS) {
-                console.log(`[TASK B] Prioritizing the top ${MAX_POSTS_FOR_COMMENTS} posts by upvotes.`);
-                // Sort by upvotes (descending) and take the top N
-                postsToProcess = demandSignalPosts
-                    .sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0))
-                    .slice(0, MAX_POSTS_FOR_COMMENTS);
-            }
-            // <<< END OF FIX >>>
-
-            const postIds = postsToProcess.map(p => p.data.id);
-            console.log(`[TASK B] Fetching comments for the top ${postIds.length} posts...`);
-            const highIntentComments = await fetchCommentsForPosts(postIds);
-
-            // Return the prioritized posts AND their comments
-            return [...postsToProcess, ...highIntentComments];
-        };
+        // Only fetch the general problem items, which is fast.
+        const problemItems = await fetchMultipleRedditDataBatched(subredditQueryString, generalSearchTerms, limitPerTerm, selectedTime, false);
         
-        // Run both tasks in parallel
-        const [problemItems, demandSignalItems] = await Promise.all([
-            problemItemsPromise,
-            getDemandSignalItems()
-        ]);
+        console.log(`Phase 1 complete: Found ${problemItems.length} general problem items.`);
         
-        console.log("--- PARALLEL FETCHING COMPLETE ---");
-        console.log(`Received ${problemItems.length} general problem items.`);
-        console.log(`Received ${demandSignalItems.length} demand signal items.`);
-        
-        generateConstellationData(demandSignalItems, demandSignalTerms);
-
-        const allItems = deduplicatePosts([...demandSignalItems, ...problemItems]);
-        if (allItems.length === 0) throw new Error("No results found. Try selecting different communities or broadening your search terms.");
+        const allItems = deduplicatePosts(problemItems);
+        if (allItems.length === 0) throw new Error("No initial problem posts found. Try different communities or a broader search.");
         
         const filteredItems = filterPosts(allItems, selectedMinUpvotes);
         if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
         window._filteredPosts = filteredItems; 
         
-        // --- The rest of the function remains exactly the same ---
-        console.log("Starting main content analysis and rendering...");
+        // Run all fast analysis and rendering
         renderPosts(filteredItems);
-        // ... (The rest of the rendering and analysis code is unchanged)
         const sentimentData = generateSentimentData(filteredItems);
         renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
@@ -369,8 +376,12 @@ async function runProblemFinder() {
         for (let i = 0; i < window._summaries.length; i++) { if (i >= 5) break; showSamplePosts(i, assignments, filteredItems, window._usedPostIds); }
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); setTimeout(() => { if (resultsWrapper) { resultsWrapper.style.opacity = '1'; resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, 50); } }
 
+        // --- PHASE 2: SLOW ANALYSIS (TRIGGERED IN BACKGROUND) ---
+        // We do NOT `await` this. We want it to run in the background after the main results are shown.
+        runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime);
+        
     } catch (err) {
-        console.error("The following error stopped the analysis:", err);
+        console.error("The following error stopped the primary analysis:", err);
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
         if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); resultsWrapper.style.opacity = '1'; }
     } finally {
@@ -378,144 +389,6 @@ async function runProblemFinder() {
         searchButton.disabled = false;
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 // =================================================================================

@@ -111,25 +111,25 @@ async function generateAndRenderConstellation(items) {
 // 1. --- AI-POWERED SIGNAL EXTRACTION ---
 // ... (prioritizedItems logic remains the same) ...
 
-const extractionPrompt = `You are a highly precise data extraction tool. Your task is to analyze the following user comments and extract direct quotes that represent a clear business opportunity.
+const extractionPrompt = `You are a sharp-witted market research analyst acting as a precision extraction tool. Your mission is to find high-value business opportunities within user comments.
 
-Your focus is ONLY on quotes that are:
-1.  **Purchase Intent:** A clear willingness to pay for a solution (e.g., "I would happily pay for...", "take my money if you build this").
-2.  **Unsolved Problem:** A specific frustration about the lack of a tool or feature (e.g., "I wish there was an app that could...", "It's so frustrating that no software does X").
+Your task is to identify and extract up to 15 quotes that meet the following strict criteria. A quote is only valid if it satisfies these conditions:
+1.  **Specificity:** The quote MUST describe a concrete, specific problem, task, or desired outcome.
+2.  **Strong Intent:** The quote MUST express a clear desire for a solution, either through willingness to pay ("I'd pay for this") or intense frustration with the lack of a tool ("I waste so much time on this manually").
+3.  **Verbatim Accuracy:** The "quote" you return in the JSON **MUST BE an EXACT, VERBATIM substring** from the source text. Do not paraphrase, summarize, or alter it in any way.
 
-**CRITICAL INSTRUCTIONS:**
-- The "quote" you return in the JSON **MUST BE an EXACT, VERBATIM substring** from the source comment text.
-- **DO NOT** summarize, paraphrase, invent, or alter the quote in any way.
-- If you find a relevant quote, copy it character-for-character.
-- Ignore general complaints, questions, or emotional support discussions.
+**CRITICAL: WHAT TO AVOID**
+- **DO NOT** extract generic, placeholder-like wishes (e.g., "I wish there was a software for X", "someone should make an app for this"). These are too vague.
+- **DO NOT** extract simple questions (e.g., "How do I fix this?").
+- **DO NOT** extract vague frustrations without a specific context (e.g., "This is so annoying", "I hate this").
 
 Here are the comments, each with an index:
 ${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
 
-Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects. Each object must contain the verbatim quote and its source index.
-Example format: {"signals": [{"quote": "The exact user quote I copied from the text.", "source_index": 4}]}`;
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a good, specific extraction: {"signals": [{"quote": "I've tried every single budgeting app on the market and none of them can properly handle my freelance project income.", "source_index": 12}]}`;
 
-
+// ... (the rest of the function remains exactly the same) ...
 
     let rawSignals = [];
     try {

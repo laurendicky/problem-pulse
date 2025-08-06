@@ -1,9 +1,7 @@
-// This is the complete and corrected code for: netlify/functions/reddit-proxy.js
+// This is the complete and corrected code for: netlify/functions/reddit-proxy.js (v2 - with Comment Fetching)
 
-// Add your Reddit API credentials as environment variables in the Netlify UI
 const { REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT } = process.env;
 
-// This function handles getting a valid Reddit API token
 async function getRedditToken() {
     const auth = Buffer.from(`${REDDIT_CLIENT_ID}:${REDDIT_CLIENT_SECRET}`).toString('base64');
     const response = await fetch('https://www.reddit.com/api/v1/access_token', {
@@ -23,44 +21,38 @@ async function getRedditToken() {
 }
 
 exports.handler = async (event) => {
-    // Define the CORS headers to be used in all responses
     const corsHeaders = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Content-Type',
         'Access-Control-Allow-Methods': 'POST, OPTIONS'
     };
     
-    // Handle the browser's preflight OPTIONS request
     if (event.httpMethod === 'OPTIONS') {
-        return {
-            statusCode: 204,
-            headers: corsHeaders,
-            body: ''
-        };
+        return { statusCode: 204, headers: corsHeaders, body: '' };
     }
 
     try {
-        const { searchTerm, niche, limit, timeFilter, after } = JSON.parse(event.body);
+        const body = JSON.parse(event.body);
         const token = await getRedditToken();
-        
-        // ===================================================================
-        // *** THE DEFINITIVE FIX IS ON THIS LINE ***
-        // We are now wrapping the `niche` (the subreddit list) in parentheses
-        // to enforce the correct search logic: (subreddits) AND (searchTerm)
-        // ===================================================================
-        const query = encodeURIComponent(`( ${niche} ) ${searchTerm}`);
-        
-        let url = `https://oauth.reddit.com/search?q=${query}&limit=${limit}&t=${timeFilter}&sort=relevance`;
+        let url;
 
-        if (after) {
-            url += `&after=${after}`;
+        // --- NEW --- Logic to handle two different types of requests
+        if (body.type === 'comments') {
+            // This is a request to fetch comments for a specific post
+            if (!body.postId) throw new Error("A 'postId' is required for fetching comments.");
+            url = `https://oauth.reddit.com/comments/${body.postId}?limit=500&depth=10`; // Get up to 500 comments from a thread
+        } else {
+            // This is a standard search request (the original functionality)
+            const { searchTerm, niche, limit, timeFilter, after } = body;
+            const query = encodeURIComponent(`( ${niche} ) ${searchTerm}`);
+            url = `https://oauth.reddit.com/search?q=${query}&limit=${limit}&t=${timeFilter}&sort=relevance`;
+            if (after) {
+                url += `&after=${after}`;
+            }
         }
         
         const redditResponse = await fetch(url, {
-            headers: {
-                'Authorization': `Bearer ${token}`,
-                'User-Agent': REDDIT_USER_AGENT
-            }
+            headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': REDDIT_USER_AGENT }
         });
 
         if (!redditResponse.ok) {

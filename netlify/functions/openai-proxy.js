@@ -9,25 +9,32 @@ const allowedOrigins = [
   'https://problempop.io',
   'https://www.problempop.io',
   // It's a good practice to add your local dev environment too
-  // e.g., 'http://localhost:8888' (Netlify Dev) or 'http://localhost:3000'
+  'http://localhost:8888', // For `netlify dev`
 ];
 
 exports.handler = async (event) => {
-  // Check the incoming request's origin
+  // Get the incoming request's origin
   const origin = event.headers.origin;
   
-  // Prepare the response headers object. We will build this dynamically.
+  // --- CHANGE 1: Added logging for easier debugging ---
+  // This will show the exact origin in your Netlify function logs.
+  console.log(`[PROXY LOG] Incoming request from origin: ${origin}`);
+
+  // Prepare the response headers object.
   const headers = {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   };
 
-  // If the origin is in our whitelist, add the ACAO header to the response
+  // If the origin is in our whitelist, add the crucial ACAO header to the response
   if (allowedOrigins.includes(origin)) {
     headers['Access-Control-Allow-Origin'] = origin;
+    console.log(`[PROXY LOG] Origin is in whitelist. Granting access.`);
+  } else {
+    console.warn(`[PROXY LOG] Origin NOT in whitelist: ${origin}`);
   }
 
-  // Handle the browser's preflight OPTIONS request using the dynamic headers
+  // Handle the browser's preflight OPTIONS request
   if (event.httpMethod === 'OPTIONS') {
     return {
       statusCode: 204, // No Content
@@ -35,14 +42,15 @@ exports.handler = async (event) => {
       body: '',
     };
   }
-
-  // If the origin is not allowed, the 'Access-Control-Allow-Origin' header
-  // will be missing, and the browser will block the request.
-  // We can also return a explicit forbidden error.
+  
+  // Explicitly block non-whitelisted origins
   if (!allowedOrigins.includes(origin)) {
+      // --- CHANGE 2: Added the 'headers' object to the error response ---
+      // This ensures the browser gets a proper CORS response even on failure.
       return {
         statusCode: 403,
-        body: 'Forbidden: Origin not allowed.'
+        headers, 
+        body: `Forbidden: Origin ${origin} is not allowed.`
       };
   }
   
@@ -68,11 +76,11 @@ exports.handler = async (event) => {
     const openai = new OpenAI({ apiKey });
     const chatCompletion = await openai.chat.completions.create(openaiPayload);
 
-    // Send the successful response back, using the dynamic headers
+    // Send the successful response back
     return {
       statusCode: 200,
       headers: {
-        ...headers, // Include our CORS headers
+        ...headers,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
@@ -80,12 +88,12 @@ exports.handler = async (event) => {
       }),
     };
   } catch (error) {
-    console.error('Error in function:', error);
-    // Send the error response back, also using the dynamic headers
+    console.error('Error in OpenAI proxy function:', error);
+    // Send the error response back
     return {
       statusCode: 500,
       headers: {
-        ...headers, // Include our CORS headers
+        ...headers,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ error: error.message }),

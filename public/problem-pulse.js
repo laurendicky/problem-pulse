@@ -236,14 +236,8 @@ function initializeConstellationInteractivity() {
 
 
 
-// =================================================================================
-// BLOCK 3 of 4: MAIN ANALYSIS FUNCTION (CORRECTED & OPTIMIZED)
-// =================================================================================
-// =================================================================================
-// BLOCK 3 of 4: MAIN ANALYSIS FUNCTION (DEBUG VERSION WITH LOGGING & TIMEOUTS)
-// =================================================================================
 async function runProblemFinder() {
-    // --- Start of UI and variable setup (no changes here) ---
+    // --- Start of UI and variable setup ---
     const searchButton = document.getElementById('search-selected-btn'); if (!searchButton) { console.error("Could not find button."); return; }
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked'); if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value); const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
@@ -279,50 +273,44 @@ async function runProblemFinder() {
         const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
         const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" }; const selectedTime = timeMap[selectedTimeRaw] || "all";
 
-        // <<< NEW: Promise with Timeout Helper >>>
-        const promiseWithTimeout = (promise, ms, errorMessage) => {
-            let timeoutId;
-            const timeoutPromise = new Promise((_, reject) => {
-                timeoutId = setTimeout(() => reject(new Error(errorMessage)), ms);
-            });
-            return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
-        };
-        const FETCH_TIMEOUT = 45000; // 45 seconds
-
-        console.log("--- STARTING NEW ANALYSIS RUN ---");
+        console.log("--- STARTING FINAL ANALYSIS RUN ---");
 
         // TASK A: Fetch general problem posts
-        console.log("[TASK A] Starting: Fetch general problem posts.");
         const problemItemsPromise = fetchMultipleRedditDataBatched(subredditQueryString, generalSearchTerms, limitPerTerm, selectedTime, false);
 
-        // TASK B: Fetch demand signal posts and their comments
+        // TASK B: Fetch demand signal items (posts and comments)
         const getDemandSignalItems = async () => {
             console.log("[TASK B] Starting: Fetch demand signal items.");
-            
-            console.log("[TASK B] Step 1: Fetching initial posts that might contain demand signals...");
             const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, selectedTime, false);
-            console.log(`[TASK B] Step 1 COMPLETE: Found ${demandSignalPosts.length} initial posts.`);
+            console.log(`[TASK B] Found ${demandSignalPosts.length} initial posts.`);
 
-            if (demandSignalPosts.length === 0) {
-                console.log("[TASK B] No initial posts found. Skipping comment search.");
-                return [];
+            if (demandSignalPosts.length === 0) return [];
+            
+            // <<< CRITICAL FIX: LIMIT AND PRIORITIZE POSTS FOR COMMENT FETCHING >>>
+            const MAX_POSTS_FOR_COMMENTS = 40; // Set a reasonable limit
+            let postsToProcess = demandSignalPosts;
+
+            if (demandSignalPosts.length > MAX_POSTS_FOR_COMMENTS) {
+                console.log(`[TASK B] Prioritizing the top ${MAX_POSTS_FOR_COMMENTS} posts by upvotes.`);
+                // Sort by upvotes (descending) and take the top N
+                postsToProcess = demandSignalPosts
+                    .sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0))
+                    .slice(0, MAX_POSTS_FOR_COMMENTS);
             }
+            // <<< END OF FIX >>>
 
-            const postIds = demandSignalPosts.map(p => p.data.id);
-            console.log(`[TASK B] Step 2: Fetching comments for ${postIds.length} posts...`);
+            const postIds = postsToProcess.map(p => p.data.id);
+            console.log(`[TASK B] Fetching comments for the top ${postIds.length} posts...`);
             const highIntentComments = await fetchCommentsForPosts(postIds);
-            console.log(`[TASK B] Step 2 COMPLETE: Found ${highIntentComments.length} comments.`);
 
-            const combined = [...demandSignalPosts, ...highIntentComments];
-            console.log(`[TASK B] Finished: Returning a total of ${combined.length} items.`);
-            return combined;
+            // Return the prioritized posts AND their comments
+            return [...postsToProcess, ...highIntentComments];
         };
         
-        // <<< NEW: Wrap promises with the timeout utility >>>
-        console.log("Kicking off both tasks in parallel with a 45-second timeout...");
+        // Run both tasks in parallel
         const [problemItems, demandSignalItems] = await Promise.all([
-            promiseWithTimeout(problemItemsPromise, FETCH_TIMEOUT, "Task A (Fetching general problems) timed out."),
-            promiseWithTimeout(getDemandSignalItems(), FETCH_TIMEOUT, "Task B (Fetching demand signals & comments) timed out.")
+            problemItemsPromise,
+            getDemandSignalItems()
         ]);
         
         console.log("--- PARALLEL FETCHING COMPLETE ---");
@@ -341,6 +329,7 @@ async function runProblemFinder() {
         // --- The rest of the function remains exactly the same ---
         console.log("Starting main content analysis and rendering...");
         renderPosts(filteredItems);
+        // ... (The rest of the rendering and analysis code is unchanged)
         const sentimentData = generateSentimentData(filteredItems);
         renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
@@ -379,17 +368,153 @@ async function runProblemFinder() {
         const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment); window._assignments = assignments;
         for (let i = 0; i < window._summaries.length; i++) { if (i >= 5) break; showSamplePosts(i, assignments, filteredItems, window._usedPostIds); }
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); setTimeout(() => { if (resultsWrapper) { resultsWrapper.style.opacity = '1'; resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, 50); } }
+
     } catch (err) {
-        console.error("--- CATCH BLOCK TRIGGERED ---");
         console.error("The following error stopped the analysis:", err);
-        if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center; font-family: monospace; padding: 1rem; background: #fff0f0; border: 1px solid red; border-radius: 4px;">❌ Analysis Failed: ${err.message}</p>`;
+        if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
         if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); resultsWrapper.style.opacity = '1'; }
     } finally {
-        console.log("--- FINALLY BLOCK REACHED ---");
         searchButton.classList.remove('is-loading');
         searchButton.disabled = false;
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

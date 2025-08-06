@@ -36,7 +36,41 @@ function renderPosts(posts) { const container = document.getElementById("posts-c
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if (!assignments) return; const finding = window._summaries[summaryIndex]; if (!finding) return; let relevantPosts = []; const addedPostIds = new Set(); const addPost = (post) => { if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) { relevantPosts.push(post); addedPostIds.add(post.data.id); } }; const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber); assignedPostNumbers.forEach(postNum => { if (postNum - 1 < window._postsForAssignment.length) { addPost(window._postsForAssignment[postNum - 1]); } }); if (relevantPosts.length < 8) { const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id)); const scoredCandidates = candidatePool.map(post => ({ post: post, score: calculateRelevanceScore(post, finding) })).filter(item => item.score >= 4).sort((a, b) => b.score - a.score); for (const candidate of scoredCandidates) { if (relevantPosts.length >= 8) break; addPost(candidate.post); } } let html; if (relevantPosts.length === 0) { html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`; } else { const finalPosts = relevantPosts.slice(0, 8); finalPosts.forEach(post => usedPostIds.add(post.data.id)); html = finalPosts.map(post => { const content = post.data.selftext || post.data.body || 'No content.'; const title = post.data.title || post.data.link_title || 'View Comment'; const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : ''; return ` <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${title}</a> <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${content.substring(0, 150) + '...'}</p> <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)}</small> </div> `}).join(''); } const container = document.getElementById(`reddit-div${summaryIndex + 1}`); if (container) { container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">Real Stories from Reddit: "${finding.title}"</div><div class="reddit-samples-posts">${html}</div>`; } }
 async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 15 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 250, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
+// NEW HELPER FUNCTION TO FETCH COMMENTS FOR MULTIPLE POSTS
+async function fetchCommentsForPosts(postIds, batchSize = 5) {
+    let allComments = [];
+    console.log(`Fetching comments for ${postIds.length} posts...`);
+    for (let i = 0; i < postIds.length; i += batchSize) {
+        const batchIds = postIds.slice(i, i + batchSize);
+        const batchPromises = batchIds.map(postId => {
+            const payload = { type: 'comments', postId: postId };
+            return fetch(REDDIT_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(res => res.json()).then(data => {
+                // The API returns an array: [0] is the post data, [1] is the comment data
+                if (Array.isArray(data) && data.length > 1 && data[1].data && data[1].data.children) {
+                    return data[1].data.children.filter(comment => comment.kind === 't1'); // Ensure we only get comments
+                }
+                return [];
+            }).catch(err => {
+                console.error(`Failed to fetch comments for post ${postId}:`, err);
+                return [];
+            });
+        });
 
+        const results = await Promise.all(batchPromises);
+        results.forEach(comments => allComments.push(...comments));
+        
+        // Add a small delay between batches to avoid rate-limiting
+        if (i + batchSize < postIds.length) {
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+    }
+    console.log(`Successfully fetched ${allComments.length} comments.`);
+    return allComments;
+}
 // --- BLOCK 2: ALL DASHBOARD FUNCTIONS (RESTORED) ---
 function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1); return word; }
 async function generateEmotionMapData(posts) { try { const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || p.data.link_title}\nBody: ${(p.data.selftext || p.data.body).substring(0, 1000)}`).join('\n---\n'); const prompt = `You are a world-class market research analyst for '${originalGroupName}'. Analyze the following text to identify the 15 most significant problems, pain points, or key topics.\n\nFor each one, provide:\n1. "problem": A short, descriptive name for the problem (e.g., "Finding Reliable Vendors", "Budgeting Anxiety").\n2. "intensity": A score from 1 (mild) to 10 (severe) of how big a problem this is.\n3. "frequency": A score from 1 (rarely mentioned) to 10 (frequently mentioned) based on its prevalence in the text.\n\nRespond ONLY with a valid JSON object with a single key "problems", which is an array of these objects.\nExample: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequency": 9 }] }`; const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 1500, response_format: { "type": "json_object" } }; const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) { throw new Error(`AI API failed with status: ${response.status}`); } const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const aiProblems = parsed.problems || []; if (aiProblems.length >= 3) { console.log("Successfully used AI analysis for Problem Map."); const chartData = aiProblems.map(item => { if (!item.problem || typeof item.intensity !== 'number' || typeof item.frequency !== 'number') return null; return { x: item.frequency, y: item.intensity, label: item.problem }; }).filter(Boolean); return chartData.sort((a, b) => b.x - a.x); } else { console.warn("AI analysis returned too few problems. Falling back to keyword analysis."); } } catch (error) { console.error("AI analysis for Problem Map failed:", error, "Falling back to reliable keyword-based analysis."); } const emotionFreq = {}; posts.forEach(post => { const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase(); const words = text.replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { const lemma = lemmatize(rawWord); if (emotionalIntensityScores[lemma]) { emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1; } }); }); const chartData = Object.entries(emotionFreq).map(([word, freq]) => ({ x: freq, y: emotionalIntensityScores[word], label: word })); return chartData.sort((a, b) => b.x - a.x).slice(0, 25); }
@@ -199,9 +233,8 @@ function initializeConstellationInteractivity() {
     container.addEventListener('mouseout', (e) => { if (e.target === container) setDefaultPanelState(); });
 }
 
-
 // =================================================================================
-// BLOCK 3 of 4: MAIN ANALYSIS FUNCTION
+// BLOCK 3 of 4: MAIN ANALYSIS FUNCTION (UPDATED)
 // =================================================================================
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn'); if (!searchButton) { console.error("Could not find button."); return; }
@@ -211,8 +244,6 @@ async function runProblemFinder() {
     
     const problemTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
     const deepProblemTerms = [ "struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent" ];
-
-    // *** IMPLEMENTING USER-PROVIDED KEYWORD LOGIC ***
     const demandSignalTerms = [
         "i'd pay good money for", "buy it in a second", "i'd subscribe to", "throw money at it",
         "where can i buy", "happily pay", "shut up and take my money",
@@ -224,6 +255,7 @@ async function runProblemFinder() {
         "waste hours every week", "such a timesuck", "pay just to not have to think", "rather pay than do this myself"
     ];
     
+    // ... (rest of UI clearing code is the same)
     const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "constellation-map-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
@@ -240,22 +272,44 @@ async function runProblemFinder() {
         const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
         const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" }; const selectedTime = timeMap[selectedTimeRaw] || "all";
 
+        // Fetch general problem posts
         console.log("Fetching general problem items...");
         const problemItemsPromise = fetchMultipleRedditDataBatched(subredditQueryString, generalSearchTerms, limitPerTerm, selectedTime, false);
-        console.log("Fetching high-intent demand signals (from posts AND comments)...");
-        const demandSignalItemsPromise = fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 75, selectedTime, true);
-
-        const [problemItems, demandSignalItems] = await Promise.all([problemItemsPromise, demandSignalItemsPromise]);
-        console.log(`Found ${problemItems.length} general problem items and ${demandSignalItems.length} potential demand signal items.`);
         
-        generateConstellationData(demandSignalItems, demandSignalTerms);
+        // <<< NEW LOGIC START: TWO-STEP FETCH FOR DEMAND SIGNALS >>>
+        console.log("Step 1: Fetching posts that might contain demand signals...");
+        // NOTE: We set searchInComments to `false` here because we are only looking for the POSTS first.
+        const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, selectedTime, false);
+        console.log(`Found ${demandSignalPosts.length} initial posts with potential demand signals.`);
 
-        const allItems = deduplicatePosts([...demandSignalItems, ...problemItems]);
-        if (allItems.length === 0) throw new Error("No results found.");
+        let highIntentComments = [];
+        if (demandSignalPosts.length > 0) {
+            // Extract the IDs of the posts we found
+            const postIdsToFetchComments = demandSignalPosts.map(post => post.data.id);
+            // Now, use our new helper to fetch all comments from those posts
+            highIntentComments = await fetchCommentsForPosts(postIdsToFetchComments);
+        }
+
+        // Combine the original posts and the new comments into one powerful array
+        const combinedDemandSignalItems = [...demandSignalPosts, ...highIntentComments];
+        console.log(`Step 2: Analysis will run on ${demandSignalPosts.length} posts + ${highIntentComments.length} comments = ${combinedDemandSignalItems.length} total high-intent items.`);
+        // <<< NEW LOGIC END >>>
+
+        // Now, we wait for the general problem posts to finish fetching
+        const problemItems = await problemItemsPromise;
+        
+        // Call the constellation map generator with our rich, combined data
+        generateConstellationData(combinedDemandSignalItems, demandSignalTerms);
+
+        const allItems = deduplicatePosts([...combinedDemandSignalItems, ...problemItems]);
+        if (allItems.length === 0) throw new Error("No results found. Try selecting different communities or broadening your search terms.");
         
         const filteredItems = filterPosts(allItems, selectedMinUpvotes);
-        if (filteredItems.length < 10) throw new Error("Not enough high-quality content found.");
+        if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
         window._filteredPosts = filteredItems; 
+        
+        // ... THE REST OF THE FUNCTION CONTINUES AS NORMAL ...
+        // (No changes needed below this line in this function)
         
         renderPosts(filteredItems);
         
@@ -307,6 +361,10 @@ async function runProblemFinder() {
         searchButton.classList.remove('is-loading'); searchButton.disabled = false;
     }
 }
+
+
+
+
 
 // =================================================================================
 // BLOCK 4 of 4: INITIALIZATION LOGIC

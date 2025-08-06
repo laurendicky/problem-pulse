@@ -1,6 +1,8 @@
 // =================================================================================
-// COMPLETE AND VERIFIED SCRIPT (VERSION 13.0 - FINAL)
-// This version contains the fully corrected, visually aware constellation map logic.
+// COMPLETE AND VERIFIED SCRIPT (VERSION 12.9)
+// This version is a complete, working file with the user-defined constellation logic,
+// the critical post/comment processor, aggressive data fetching, and all
+// previously missing helper functions restored.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -34,6 +36,7 @@ function renderPosts(posts) { const container = document.getElementById("posts-c
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if (!assignments) return; const finding = window._summaries[summaryIndex]; if (!finding) return; let relevantPosts = []; const addedPostIds = new Set(); const addPost = (post) => { if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) { relevantPosts.push(post); addedPostIds.add(post.data.id); } }; const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber); assignedPostNumbers.forEach(postNum => { if (postNum - 1 < window._postsForAssignment.length) { addPost(window._postsForAssignment[postNum - 1]); } }); if (relevantPosts.length < 8) { const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id)); const scoredCandidates = candidatePool.map(post => ({ post: post, score: calculateRelevanceScore(post, finding) })).filter(item => item.score >= 4).sort((a, b) => b.score - a.score); for (const candidate of scoredCandidates) { if (relevantPosts.length >= 8) break; addPost(candidate.post); } } let html; if (relevantPosts.length === 0) { html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`; } else { const finalPosts = relevantPosts.slice(0, 8); finalPosts.forEach(post => usedPostIds.add(post.data.id)); html = finalPosts.map(post => { const content = post.data.selftext || post.data.body || 'No content.'; const title = post.data.title || post.data.link_title || 'View Comment'; const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : ''; return ` <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${title}</a> <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${content.substring(0, 150) + '...'}</p> <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)}</small> </div> `}).join(''); } const container = document.getElementById(`reddit-div${summaryIndex + 1}`); if (container) { container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">Real Stories from Reddit: "${finding.title}"</div><div class="reddit-samples-posts">${html}</div>`; } }
 async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 15 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 250, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
+// NEW HELPER FUNCTION TO FETCH COMMENTS FOR MULTIPLE POSTS
 async function fetchCommentsForPosts(postIds, batchSize = 5) {
     let allComments = [];
     console.log(`Fetching comments for ${postIds.length} posts...`);
@@ -46,8 +49,9 @@ async function fetchCommentsForPosts(postIds, batchSize = 5) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
             }).then(res => res.json()).then(data => {
+                // The API returns an array: [0] is the post data, [1] is the comment data
                 if (Array.isArray(data) && data.length > 1 && data[1].data && data[1].data.children) {
-                    return data[1].data.children.filter(comment => comment.kind === 't1');
+                    return data[1].data.children.filter(comment => comment.kind === 't1'); // Ensure we only get comments
                 }
                 return [];
             }).catch(err => {
@@ -55,8 +59,11 @@ async function fetchCommentsForPosts(postIds, batchSize = 5) {
                 return [];
             });
         });
+
         const results = await Promise.all(batchPromises);
         results.forEach(comments => allComments.push(...comments));
+        
+        // Add a small delay between batches to avoid rate-limiting
         if (i + batchSize < postIds.length) {
             await new Promise(resolve => setTimeout(resolve, 300));
         }
@@ -64,6 +71,7 @@ async function fetchCommentsForPosts(postIds, batchSize = 5) {
     console.log(`Successfully fetched ${allComments.length} comments.`);
     return allComments;
 }
+// --- BLOCK 2: ALL DASHBOARD FUNCTIONS (RESTORED) ---
 function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1); return word; }
 async function generateEmotionMapData(posts) { try { const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || p.data.link_title}\nBody: ${(p.data.selftext || p.data.body).substring(0, 1000)}`).join('\n---\n'); const prompt = `You are a world-class market research analyst for '${originalGroupName}'. Analyze the following text to identify the 15 most significant problems, pain points, or key topics.\n\nFor each one, provide:\n1. "problem": A short, descriptive name for the problem (e.g., "Finding Reliable Vendors", "Budgeting Anxiety").\n2. "intensity": A score from 1 (mild) to 10 (severe) of how big a problem this is.\n3. "frequency": A score from 1 (rarely mentioned) to 10 (frequently mentioned) based on its prevalence in the text.\n\nRespond ONLY with a valid JSON object with a single key "problems", which is an array of these objects.\nExample: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequency": 9 }] }`; const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 1500, response_format: { "type": "json_object" } }; const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) { throw new Error(`AI API failed with status: ${response.status}`); } const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const aiProblems = parsed.problems || []; if (aiProblems.length >= 3) { console.log("Successfully used AI analysis for Problem Map."); const chartData = aiProblems.map(item => { if (!item.problem || typeof item.intensity !== 'number' || typeof item.frequency !== 'number') return null; return { x: item.frequency, y: item.intensity, label: item.problem }; }).filter(Boolean); return chartData.sort((a, b) => b.x - a.x); } else { console.warn("AI analysis returned too few problems. Falling back to keyword analysis."); } } catch (error) { console.error("AI analysis for Problem Map failed:", error, "Falling back to reliable keyword-based analysis."); } const emotionFreq = {}; posts.forEach(post => { const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase(); const words = text.replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { const lemma = lemmatize(rawWord); if (emotionalIntensityScores[lemma]) { emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1; } }); }); const chartData = Object.entries(emotionFreq).map(([word, freq]) => ({ x: freq, y: emotionalIntensityScores[word], label: word })); return chartData.sort((a, b) => b.x - a.x).slice(0, 25); }
 function renderEmotionMap(data) { const container = document.getElementById('emotion-map-container'); if (!container) return; if (window.myEmotionChart) { window.myEmotionChart.destroy(); } if (data.length < 3) { container.innerHTML = '<h3 class="dashboard-section-title">Problem Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough distinct problems were found to build a map.</p>'; return; } container.innerHTML = `<h3 class="dashboard-section-title">Problem Polarity Map</h3><p id="problem-map-description">The most frequent and emotionally intense problems appear in the top-right quadrant.</p><div id="emotion-map-wrapper"><div id="emotion-map" style="height: 400px; background: #2c3e50; padding: 10px; border-radius: 8px;"><canvas id="emotion-chart-canvas"></canvas></div><button id="chart-zoom-btn" style="display: none;"></button></div>`; const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d'); if (!ctx) return; const maxFreq = Math.max(...data.map(p => p.x)); const allFrequencies = data.map(p => p.x); const minObservedFreq = Math.min(...allFrequencies); const collapsedMinX = 5; const isCollapseFeatureEnabled = minObservedFreq >= collapsedMinX; const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0; window.myEmotionChart = new Chart(ctx, { type: 'scatter', data: { datasets: [{ label: 'Problems/Topics', data: data, backgroundColor: 'rgba(52, 152, 219, 0.9)', borderColor: 'rgba(41, 128, 185, 1)', borderWidth: 1, pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20, pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20, }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { mode: 'nearest', intersect: false, callbacks: { title: function(tooltipItems) { return tooltipItems[0].raw.label; }, label: function(context) { return ''; }, afterBody: function(tooltipItems) { const point = tooltipItems[0].raw; return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`; } }, displayColors: false, titleFont: { size: 14, weight: 'bold' }, bodyFont: { size: 12 }, backgroundColor: 'rgba(0, 0, 0, 0.8)', titleColor: '#ffffff', bodyColor: '#dddddd', } }, scales: { x: { title: { display: true, text: 'Frequency (1-10)', color: 'white', font: { weight: 'bold' } }, min: initialMinX, max: 10, grid: { color: 'rgba(255, 255, 255, 0.15)' }, ticks: { color: 'white' } }, y: { title: { display: true, text: 'Problem Intensity (1-10)', color: 'white', font: { weight: 'bold' } }, min: 0, max: 10, grid: { color: 'rgba(255, 255, 255, 0.15)' }, ticks: { color: 'white' } } } } }); const zoomButton = document.getElementById('chart-zoom-btn'); if (isCollapseFeatureEnabled) { zoomButton.style.display = 'block'; const updateButtonText = () => { const isCurrentlyCollapsed = window.myEmotionChart.options.scales.x.min !== 0; zoomButton.textContent = isCurrentlyCollapsed ? 'Zoom Out to See Full Range' : 'Zoom In to High-Frequency'; }; zoomButton.addEventListener('click', () => { const chart = window.myEmotionChart; const isCurrentlyCollapsed = chart.options.scales.x.min !== 0; chart.options.scales.x.min = isCurrentlyCollapsed ? 0 : collapsedMinX; chart.update('none'); updateButtonText(); }); updateButtonText(); } }
@@ -79,109 +87,126 @@ function renderIncludedSubreddits(subreddits) { const container = document.getEl
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
 
-// --- CONSTELLATION MAP FUNCTIONS (FINAL, ROBUST VERSION) ---
-// NEW: ZONES instead of points to prevent overlap. Each category has a bounding box.
-const CONSTELLATION_ZONES = {
-    Automation:   { x_min: 0.05, x_max: 0.25, y_min: 0.15, y_max: 0.35 },
-    Productivity: { x_min: 0.28, x_max: 0.48, y_min: 0.55, y_max: 0.75 },
-    Simplicity:   { x_min: 0.40, x_max: 0.60, y_min: 0.20, y_max: 0.40 },
-    Customization:{ x_min: 0.55, x_max: 0.75, y_min: 0.65, y_max: 0.85 },
-    Trust:        { x_min: 0.78, x_max: 0.98, y_min: 0.10, y_max: 0.30 },
-    Wellness:     { x_min: 0.10, x_max: 0.30, y_min: 0.70, y_max: 0.90 },
-    Other:        { x_min: 0.70, x_max: 0.90, y_min: 0.40, y_max: 0.60 }
-};
+// --- CONSTELLATION MAP FUNCTIONS (REBUILT WITH USER LOGIC) ---
+// =================================================================================
+// SECTION 1: CONSTELLATION MAP LOGIC (RE-ARCHITECTED AND SIMPLIFIED)
+// =================================================================================
+// =================================================================================
+// SECTION 1: CONSTELLATION MAP LOGIC (RE-ARCHITECTED AND SIMPLIFIED)
+// =================================================================================
 
+const CONSTELLATION_CATEGORIES = { Automation: { x: 0.15, y: 0.25 }, Productivity: { x: 0.35, y: 0.65 }, Simplicity: { x: 0.5, y: 0.3 }, Customization: { x: 0.65, y: 0.75 }, Trust: { x: 0.85, y: 0.2 }, Wellness: { x: 0.2, y: 0.8 }, Other: { x: 0.8, y: 0.6 } };
 const EMOTION_COLORS = { Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7', Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316' };
 
-// This is the main pipeline. It now contains much stricter AI prompts.
+// This function now does EVERYTHING. It finds signals, enriches them, and renders the map.
+// It is the single source of truth for the constellation map.
 async function generateAndRenderConstellation(items) {
-    console.log("[Constellation] Starting final, robust generation process...");
+    console.log("[Constellation] Starting full generation process...");
 
-    // 1. --- AI-POWERED SIGNAL EXTRACTION ---
+    // 1. --- AI-POWERED SIGNAL IDENTIFICATION (NOT EXTRACTION) ---
+    // We prioritize the most upvoted/relevant items for analysis.
     const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 200);
-    const extractionPrompt = `You are a market research analyst. From the list of user comments below, extract up to 30 quotes that signal a strong purchase intent or a clear, unsolved problem.
+    console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal identification.`);
 
-    CRITICAL RULES:
-    1.  ONLY extract real quotes. DO NOT invent or paraphrase.
-    2.  DO NOT use any examples from this prompt.
-    3.  If no strong signals are found, return an empty array.
+    // CHANGE 1: The prompt is completely rewritten.
+    // Instead of asking for a "quote", we ask the AI to IDENTIFY which items are relevant
+    // and provide a short summary of the problem. This prevents hallucinated quotes.
+    const identificationPrompt = `You are a market research analyst. From the following list of user posts/comments, identify up to 15 that express a strong purchase intent or an unsolved problem perfect for a new product.
 
-    Comments (with source index):
-    ${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+    Focus ONLY on posts/comments that directly mention:
+    - Willingness to pay ("I'd pay for", "take my money")
+    - Frustration with a lack of a tool ("wish there was an app for", "why is there no tool")
+    - A specific, unmet need ("I need something that does X but Y gets in the way")
 
-    Respond ONLY with a valid JSON object: {"signals": [{"quote": "The real, extracted quote.", "source_index": 4}]}`;
+    CRITICAL: For each relevant item you find, provide its original index and a short, 4-5 word summary of the core problem. IGNORE general complaints or emotional support requests.
+
+    Here are the posts/comments:
+    ${prioritizedItems.map((item, index) => `Item ${index}: ${((item.data.body || item.data.selftext || '')).substring(0, 500)}`).join('\n---\n')}
+
+    Respond ONLY with a valid JSON object: {"signals": [{"source_index": 4, "problem_summary": "Wishes for automated scheduling tool"}]}`;
     
-    let rawSignals = [];
+    let identifiedSignals = [];
     try {
-        const extractionResponse = await fetch(OPENAI_PROXY_URL, {
+        const identificationResponse = await fetch(OPENAI_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: { model: "gpt-4o", messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: extractionPrompt }], temperature: 0.1, max_tokens: 2500, response_format: { "type": "json_object" } } })
+            body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data identification engine that outputs only valid JSON." }, { role: "user", content: identificationPrompt }], temperature: 0.1, max_tokens: 2000, response_format: { "type": "json_object" } } })
         });
-        if (!extractionResponse.ok) throw new Error(`AI Extraction Failed: ${extractionResponse.statusText}`);
-        const extractionData = await extractionResponse.json();
-        const parsedExtraction = JSON.parse(extractionData.openaiResponse);
+        if (!identificationResponse.ok) throw new Error("AI Signal Identification Failed");
+        const identificationData = await identificationResponse.json();
+        const parsedIdentification = JSON.parse(identificationData.openaiResponse);
 
-        if (parsedExtraction.signals && Array.isArray(parsedExtraction.signals)) {
-            rawSignals = parsedExtraction.signals.map(signal => ({
-                quote: signal.quote,
-                sourceItem: prioritizedItems[signal.source_index]
-            })).filter(s => s.sourceItem);
+        // CHANGE 2: Process the identified signals. We now store the *entire original item* for later use.
+        if (parsedIdentification.signals && Array.isArray(parsedIdentification.signals)) {
+            identifiedSignals = parsedIdentification.signals.map(signal => {
+                const sourceItem = prioritizedItems[signal.source_index];
+                if (!sourceItem) return null; // Ignore if index is out of bounds
+                return {
+                    problem_theme: signal.problem_summary, // The summary from the AI
+                    sourceItem: sourceItem // The complete, original post/comment object
+                };
+            }).filter(Boolean); // Filter out any nulls
         }
     } catch (error) {
-        console.error("CRITICAL ERROR in AI Signal Extraction:", error);
-        renderConstellationMap([]); return;
+        console.error("CRITICAL ERROR in AI Signal Identification:", error);
+        renderConstellationMap([]); // Render empty map on failure
+        return;
     }
 
-    if (rawSignals.length === 0) {
-        renderConstellationMap([]); return;
+    console.log(`[Constellation] AI identified ${identifiedSignals.length} high-quality signals.`);
+    if (identifiedSignals.length === 0) {
+        renderConstellationMap([]);
+        return;
     }
 
-    // 2. --- AI-POWERED ENRICHMENT WITH STRICT GUIDELINES ---
-    const enrichmentPrompt = `You are a data enrichment analyst. For each of the ${rawSignals.length} quotes below, provide a specific summary and classify its category and emotion.
+    // 2. --- AI-POWERED ENRICHMENT (WITH FULL CONTEXT) ---
+    // CHANGE 3: The enrichment prompt now receives the FULL ORIGINAL TEXT of the identified items.
+    // This gives it maximum context for accurate classification.
+    const enrichmentPrompt = `You are a market research analyst. For each user post/comment below, classify its category and emotion.
+    
+    Posts/Comments:
+    ${identifiedSignals.map((signal, index) => {
+        const text = signal.sourceItem.data.body || signal.sourceItem.data.selftext || '';
+        return `${index}. "${text.substring(0, 1000)}"`
+    }).join('\n')}
 
-    CRITICAL RULES:
-    1.  The 'emotion' key MUST contain one of these exact, case-sensitive strings: [${Object.keys(EMOTION_COLORS).join(', ')}].
-    2.  Create a UNIQUE and SPECIFIC \`problem_theme\` for each quote. Do not be generic.
-    3.  Your response array MUST have exactly ${rawSignals.length} items.
+    For EACH item, provide a JSON object with:
+    1. "category": Classify the user's need into ONE of: [${Object.keys(CONSTELLATION_CATEGORIES).join(', ')}].
+    2. "emotion": Classify the primary emotion into ONE of: [${Object.keys(EMOTION_COLORS).join(', ')}].
 
-    Quotes:
-    ${rawSignals.map((signal, index) => `${index}. "${signal.quote}"`).join('\n')}
+    Respond ONLY with a valid JSON object: {"enriched_signals": [...]}. The array MUST be the same length as the list of items.`;
 
-    Respond ONLY with a valid JSON object: {"enriched_signals": [{"problem_theme": "A unique, specific summary.", "category": "Automation", "emotion": "Frustration"}]}.`;
-
-    let enrichedSignals = [];
+    let finalSignals = [];
     try {
         const enrichmentResponse = await fetch(OPENAI_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: { model: "gpt-4o", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_tokens: 3500, response_format: { "type": "json_object" } } })
+            body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_tokens: 2000, response_format: { "type": "json_object" } } })
         });
-        if (!enrichmentResponse.ok) throw new Error(`AI Enrichment Failed: ${enrichmentResponse.statusText}`);
+        if (!enrichmentResponse.ok) throw new Error("AI Signal Enrichment Failed");
         const enrichmentData = await enrichmentResponse.json();
         const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse);
 
-        if (parsedEnrichment.enriched_signals && parsedEnrichment.enriched_signals.length > 0) {
-             enrichedSignals = rawSignals.map((rawSignal, index) => {
-                const enrichment = parsedEnrichment.enriched_signals[index];
-                if (!enrichment) return null;
-                // Defensive check to prevent white circles
-                if (!enrichment.emotion || !EMOTION_COLORS[enrichment.emotion]) {
-                     enrichment.emotion = 'Desire'; // Default color if AI fails
-                }
-                return { ...rawSignal, ...enrichment, source: rawSignal.sourceItem.data };
-            }).filter(Boolean);
+        // CHANGE 4: Combine the results from both AI calls into a final, complete object for rendering.
+        if (parsedEnrichment.enriched_signals && parsedEnrichment.enriched_signals.length === identifiedSignals.length) {
+            finalSignals = identifiedSignals.map((signal, index) => ({
+                problem_theme: signal.problem_theme, // From identification step
+                source: signal.sourceItem.data, // The full, original data object
+                ...parsedEnrichment.enriched_signals[index] // Category & Emotion from enrichment step
+            }));
         }
     } catch (error) {
         console.error("CRITICAL ERROR in AI Signal Enrichment:", error);
-        renderConstellationMap([]); return;
+        renderConstellationMap([]); // Render empty map on failure
+        return;
     }
     
+    console.log(`[Constellation] AI enriched ${finalSignals.length} signals. Rendering map.`);
+    
     // 3. --- RENDER THE MAP ---
-    renderConstellationMap(enrichedSignals);
+    renderConstellationMap(finalSignals);
 }
 
-// <<< CORRECT: This function is now at the top-level scope >>>
 function renderConstellationMap(signals) {
     const container = document.getElementById('constellation-map-container');
     if (!container) return;
@@ -194,37 +219,56 @@ function renderConstellationMap(signals) {
         return;
     }
 
-    signals.forEach(star => {
-        if (!star.problem_theme || !star.source || !star.source.subreddit) return; 
+    // CHANGE 5: Aggregation logic is simplified. We now group by the AI-generated problem_theme.
+    // We store the first representative signal for each theme to use its source data.
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source) return;
+        const theme = signal.problem_theme.trim().toLowerCase();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { 
+                ...signal, 
+                representativeSource: signal.source, // Store the first source we see for this theme
+                frequency: 0, 
+                totalUpvotes: 0,
+                allSources: [] // Store all sources for potential future use
+            };
+        }
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+        aggregatedSignals[theme].allSources.push(signal.source);
+    });
 
+    const starData = Object.values(aggregatedSignals);
+    const maxFreq = Math.max(...starData.map(s => s.frequency), 1);
+
+    starData.forEach(star => {
         const starEl = document.createElement('div');
         starEl.className = 'constellation-star';
-        
-        const upvotes = star.source.ups || 0;
-        const size = 8 + Math.log(upvotes + 1) * 2.5;
-        
-        // Use the zone for positioning to prevent overlap
-        const zone = CONSTELLATION_ZONES[star.category] || CONSTELLATION_ZONES.Other;
-        const x_pos = zone.x_min + (Math.random() * (zone.x_max - zone.x_min));
-        const y_pos = zone.y_min + (Math.random() * (zone.y_max - zone.y_min));
-
+        const size = 8 + (star.frequency / maxFreq) * 20;
         starEl.style.width = `${size}px`;
         starEl.style.height = `${size}px`;
-        starEl.style.backgroundColor = EMOTION_COLORS[star.emotion]; // Already defaulted in previous step
-        starEl.style.left = `calc(${x_pos * 100}% - ${size/2}px)`;
-        starEl.style.top = `calc(${y_pos * 100}% - ${size/2}px)`;
+        starEl.style.backgroundColor = EMOTION_COLORS[star.emotion] || '#ffffff';
+        const categoryCoords = CONSTELLATION_CATEGORIES[star.category] || CONSTELLATION_CATEGORIES.Other;
+        const x_rand = (Math.random() - 0.5) * 0.1;
+        const y_rand = (Math.random() - 0.5) * 0.1;
+        starEl.style.left = `calc(${(categoryCoords.x + x_rand) * 100}% - ${size/2}px)`;
+        starEl.style.top = `calc(${(categoryCoords.y + y_rand) * 100}% - ${size/2}px)`;
         
-        starEl.dataset.quote = star.quote;
+        // CHANGE 6: Set dataset attributes using the TRUE original source data.
+        // The quote is now a direct, real excerpt from the original comment/post.
+        const originalText = star.representativeSource.body || star.representativeSource.selftext || "No text found.";
+        const realQuote = getFirstTwoSentences(originalText) || originalText.substring(0, 200);
+
+        starEl.dataset.quote = realQuote; // This is now a REAL quote.
         starEl.dataset.problemTheme = star.problem_theme;
-        starEl.dataset.sourceSubreddit = star.source.subreddit;
-        starEl.dataset.sourcePermalink = star.source.permalink;
-        starEl.dataset.sourceUpvotes = (star.source.ups || 0).toLocaleString();
-        
+        starEl.dataset.sourceSubreddit = star.representativeSource.subreddit;
+        starEl.dataset.sourcePermalink = star.representativeSource.permalink;
+        starEl.dataset.sourceUpvotes = star.totalUpvotes.toLocaleString();
         container.appendChild(starEl);
     });
 }
 
-// <<< CORRECT: This function is now at the top-level scope >>>
 function initializeConstellationInteractivity() {
     const container = document.getElementById('constellation-map-container');
     const panel = document.getElementById('constellation-side-panel');
@@ -241,7 +285,8 @@ function initializeConstellationInteractivity() {
         if (!e.target.classList.contains('constellation-star')) return;
         clearTimeout(hidePanelTimer);
         const star = e.target;
-        panelContent.innerHTML = `<p class="quote">“${star.dataset.quote}”</p><h4 class="problem-theme">${star.dataset.problemTheme}</h4><p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes on related signals</p><a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>`;
+        // CHANGE 7: The HTML displayed is now guaranteed to be from the original source.
+        panelContent.innerHTML = `<p class="quote">“${star.dataset.quote}...”</p><h4 class="problem-theme">${star.dataset.problemTheme}</h4><p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes on related signals</p><a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>`;
     });
 
     container.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); });
@@ -258,7 +303,7 @@ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms,
         const highIntentComments = await fetchCommentsForPosts(postIds);
         const allItems = [...demandSignalPosts, ...highIntentComments];
         
-        // This is the single, crucial call.
+        // This is the single, crucial call to our new, robust function.
         await generateAndRenderConstellation(allItems);
 
         console.log("--- Constellation Analysis Complete. ---");
@@ -267,8 +312,6 @@ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms,
         renderConstellationMap([]); 
     }
 }
-
-
 // =================================================================================
 // MAIN ANALYSIS FUNCTION - NO CHANGES NEEDED HERE
 // =================================================================================

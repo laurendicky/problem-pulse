@@ -88,166 +88,107 @@ function renderSentimentScore(positiveCount, negativeCount) { const container = 
 
 
 // --- CONSTELLATION MAP FUNCTIONS (REBUILT WITH USER LOGIC) ---
+// =================================================================================
+// SECTION 1: CONSTELLATION MAP LOGIC (RE-ARCHITECTED AND SIMPLIFIED)
+// =================================================================================
+
 const CONSTELLATION_CATEGORIES = { Automation: { x: 0.15, y: 0.25 }, Productivity: { x: 0.35, y: 0.65 }, Simplicity: { x: 0.5, y: 0.3 }, Customization: { x: 0.65, y: 0.75 }, Trust: { x: 0.85, y: 0.2 }, Wellness: { x: 0.2, y: 0.8 }, Other: { x: 0.8, y: 0.6 } };
 const EMOTION_COLORS = { Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7', Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316' };
 
-/**
- * STEP 1: Reliably extract signal-bearing sentences or comments.
- */
-/**
- * STEP 1: Use AI to reliably extract signal-bearing sentences or comments. (AI-First Approach)
- */
-async function extractSignalsFromItems(items) {
-    console.log(`[Signal Extraction] Starting AI-first signal extraction from ${items.length} items.`);
-    if (items.length === 0) return [];
+// This function now does EVERYTHING. It finds signals, enriches them, and renders the map.
+// It is the single source of truth for the constellation map.
+async function generateAndRenderConstellation(items) {
+    console.log("[Constellation] Starting full generation process...");
 
-    // We'll process in batches to avoid making the prompt too large for the AI
-    const BATCH_SIZE = 40;
-    let allSignals = [];
+    // 1. --- AI-POWERED SIGNAL EXTRACTION ---
+    // Instead of processing thousands of items, we prioritize the most upvoted ones first.
+    // This gives us the best shot at finding high-quality signals quickly.
+    const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 200);
+    console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
 
-    for (let i = 0; i < items.length; i += BATCH_SIZE) {
-        const batchItems = items.slice(i, i + BATCH_SIZE);
-        const commentsText = batchItems.map((item, index) => {
-            const content = item.kind === 't1' 
-                ? (item.data.body || '') 
-                : `${item.data.title || ''}. ${item.data.selftext || ''}`;
-            return `${index + 1}. ${content.substring(0, 1500)}`; // Limit length of each item
-        }).join('\n---\n');
+    const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 15 quotes that express a strong purchase intent or an unsolved problem perfect for a new product.
 
-        const prompt = `You are a market research analyst. From the following list of user comments, extract up to 10 quotes that express a strong purchase intent.
+    Focus ONLY on phrases that directly mention:
+    - Willingness to pay ("I'd pay for", "take my money")
+    - Frustration with a lack of a tool ("wish there was an app for", "why is there no tool")
+    - A specific, unmet need ("I need something that does X but Y gets in the way")
 
-Focus ONLY on phrases that directly mention:
-- Willingness to pay ("I'd pay for", "take my money")
-- Frustration with a lack of a tool ("wish there was an app for", "why is there no tool")
-- A specific, unmet need for a product or service ("I need something that does X but Y gets in the way")
+    CRITICAL: IGNORE general complaints, emotional support, or sentences that use words like "love" or "need" in a non-commercial context.
 
-CRITICAL: IGNORE general complaints, emotional support, or sentences that use words like "love" or "need" in a non-commercial context.
+    Here are the comments:
+    ${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
 
-Here are the comments:
-${commentsText}
-
-Respond ONLY with a valid JSON object with a single key "signals", which is an array of objects. Each object must have a "quote" and the "source_index" (the original number of the comment it came from).
-Example: {"signals": [{"quote": "I'd happily pay for a tool that did this automatically.", "source_index": 3}]}`;
-
-        const openAIParams = {
-            model: "gpt-4o-mini",
-            messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: prompt }],
-            temperature: 0.1,
-            max_tokens: 1000,
-            response_format: { "type": "json_object" }
-        };
-
-        try {
-            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-            if (!response.ok) continue; // Silently fail and move to next batch
-            const data = await response.json();
-            const parsed = JSON.parse(data.openaiResponse);
-            
-            if (parsed.signals && Array.isArray(parsed.signals)) {
-                const batchSignals = parsed.signals.map(signal => {
-                    const sourceIndex = signal.source_index - 1;
-                    if (sourceIndex >= 0 && sourceIndex < batchItems.length) {
-                        return {
-                            quote: signal.quote,
-                            sourceItem: batchItems[sourceIndex]
-                        };
-                    }
-                    return null;
-                }).filter(Boolean); // Filter out any nulls
-                allSignals.push(...batchSignals);
-            }
-        } catch (error) {
-            console.error("AI signal extraction for a batch failed:", error);
-        }
-    }
+    Respond ONLY with a valid JSON object: {"signals": [{"quote": "The extracted quote.", "source_index": 4}]}`;
     
-    console.log(`[Signal Extraction] AI-first process complete. Found ${allSignals.length} high-quality raw signals.`);
-    return allSignals;
-}
-
-/**
- * STEP 2: Takes a list of raw signals and uses AI to enrich them with context. (DEBUG VERSION)
- */
-async function enrichSignalsWithAI(rawSignals) {
-    if (rawSignals.length === 0) return [];
-    console.log(`[AI Enrichment] Preparing to enrich ${rawSignals.length} signals...`);
-    
-    const prompt = `You are a market research analyst. I have extracted quotes that signal a desire for a product or service. Your task is to analyze each quote and provide a short summary of the user's core problem.
-Here is the list of quotes:\n${rawSignals.map((signal, index) => `${index + 1}. "${signal.quote}"`).join('\n')}
-
-For each quote, provide a JSON object with:
-1. "problem_theme": A short, 4-5 word summary of the core problem or desire.
-2. "category": Classify the user's need into ONE of: [${Object.keys(CONSTELLATION_CATEGORIES).join(', ')}].
-3. "emotion": Classify the primary emotion into ONE of: [${Object.keys(EMOTION_COLORS).join(', ')}].
-
-Respond ONLY with a valid JSON object: {"enriched_signals": [...]}. The array must be the same length as the list of quotes.`;
-    
-    const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 4000, response_format: { "type": "json_object" } };
-    
-    let rawAIResponse = ''; // Variable to hold the raw response for debugging
+    let rawSignals = [];
     try {
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error("[AI Enrichment] The OpenAI proxy returned an error status:", response.status, errorText);
-            throw new Error(`AI enrichment proxy failed with status ${response.status}`);
-        }
+        const extractionResponse = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: extractionPrompt }], temperature: 0.1, max_tokens: 1500, response_format: { "type": "json_object" } } })
+        });
+        if (!extractionResponse.ok) throw new Error("AI Signal Extraction Failed");
+        const extractionData = await extractionResponse.json();
+        const parsedExtraction = JSON.parse(extractionData.openaiResponse);
 
-        const data = await response.json();
-        
-        // <<< NEW DEBUG LOGGING >>>
-        console.log("[AI Enrichment] Received raw data object from proxy:", data);
-        rawAIResponse = data.openaiResponse; // Store the raw string from the AI
-        if (!rawAIResponse) {
-             throw new Error("The 'openaiResponse' key was missing from the proxy response.");
+        if (parsedExtraction.signals && Array.isArray(parsedExtraction.signals)) {
+            rawSignals = parsedExtraction.signals.map(signal => ({
+                quote: signal.quote,
+                sourceItem: prioritizedItems[signal.source_index]
+            })).filter(s => s.sourceItem); // Ensure the source item exists
         }
-        console.log("[AI Enrichment] Raw AI response string to be parsed:", rawAIResponse);
-        // <<< END NEW DEBUG LOGGING >>>
-        
-        const parsed = JSON.parse(rawAIResponse);
-        const enrichedData = parsed.enriched_signals || [];
-        
-        if (enrichedData.length !== rawSignals.length) {
-            console.warn(`[AI Enrichment] WARNING: AI returned ${enrichedData.length} items, but we sent ${rawSignals.length}. This may indicate a partial analysis by the AI.`);
-            // We will proceed with the data we got, but this is a useful warning.
-        }
-        
-        console.log(`[AI Enrichment] Successfully parsed ${enrichedData.length} enriched signals from AI.`);
-        return rawSignals.map((rawSignal, index) => ({ ...rawSignal, ...enrichedData[index], source: rawSignal.sourceItem.data }));
-
-    } catch (error) { 
-        // <<< ENHANCED ERROR LOGGING >>>
-        console.error("--- ERROR CAUGHT IN enrichSignalsWithAI ---");
-        console.error("The specific error was:", error);
-        console.error("The raw, unparsed AI response that likely caused the error was:", rawAIResponse);
-        console.error("--- END OF AI ENRICHMENT ERROR ---");
-        return []; // Return empty array to prevent crash
+    } catch (error) {
+        console.error("CRITICAL ERROR in AI Signal Extraction:", error);
+        renderConstellationMap([]); // Render empty map on failure
+        return;
     }
-}
 
-/**
- * STEP 3: The main orchestrator for the new constellation logic. (FINAL VERSION)
- */
-async function generateConstellationData(highIntentItems, demandSignalTerms) {
-    const rawSignals = await extractSignalsFromItems(highIntentItems, demandSignalTerms);
-    
-    // If we have no raw signals, stop here.
+    console.log(`[Constellation] AI extracted ${rawSignals.length} high-quality signals.`);
     if (rawSignals.length === 0) {
-        console.log("No raw signals could be extracted. Rendering empty map.");
         renderConstellationMap([]);
         return;
     }
 
-    // <<< CRITICAL FIX: REDUCE THE NUMBER OF SIGNALS SENT TO AI >>>
-    // We only need the top ~30 signals for a great map, and this prevents the 10-second timeout.
-    const MAX_SIGNALS_FOR_AI = 30; 
-    const signalsForAI = rawSignals.slice(0, MAX_SIGNALS_FOR_AI);
-
-    // Now, enrich only this smaller, manageable batch.
-    const enrichedSignals = await enrichSignalsWithAI(signalsForAI);
+    // 2. --- AI-POWERED ENRICHMENT ---
+    const enrichmentPrompt = `You are a market research analyst. For each quote below, provide a short summary of the user's core problem and classify it.
     
-    console.log(`Final processed signals for constellation map: ${enrichedSignals.length}`);
+    Quotes:
+    ${rawSignals.map((signal, index) => `${index}. "${signal.quote}"`).join('\n')}
+
+    For EACH quote, provide a JSON object with:
+    1. "problem_theme": A short, 4-5 word summary of the core problem or desire.
+    2. "category": Classify into ONE of: [${Object.keys(CONSTELLATION_CATEGORIES).join(', ')}].
+    3. "emotion": Classify the primary emotion into ONE of: [${Object.keys(EMOTION_COLORS).join(', ')}].
+
+    Respond ONLY with a valid JSON object: {"enriched_signals": [...]}. The array MUST be the same length as the list of quotes.`;
+
+    let enrichedSignals = [];
+    try {
+        const enrichmentResponse = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: { model: "gpt-4o", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_tokens: 2000, response_format: { "type": "json_object" } } })
+        });
+        if (!enrichmentResponse.ok) throw new Error("AI Signal Enrichment Failed");
+        const enrichmentData = await enrichmentResponse.json();
+        const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse);
+
+        if (parsedEnrichment.enriched_signals && parsedEnrichment.enriched_signals.length === rawSignals.length) {
+            enrichedSignals = rawSignals.map((rawSignal, index) => ({
+                ...rawSignal,
+                ...parsedEnrichment.enriched_signals[index],
+                source: rawSignal.sourceItem.data
+            }));
+        }
+    } catch (error) {
+        console.error("CRITICAL ERROR in AI Signal Enrichment:", error);
+        renderConstellationMap([]); // Render empty map on failure
+        return;
+    }
+    
+    console.log(`[Constellation] AI enriched ${enrichedSignals.length} signals. Rendering map.`);
+    
+    // 3. --- RENDER THE MAP ---
     renderConstellationMap(enrichedSignals);
 }
 
@@ -255,23 +196,29 @@ function renderConstellationMap(signals) {
     const container = document.getElementById('constellation-map-container');
     if (!container) return;
     container.innerHTML = '';
+
     if (!signals || signals.length === 0) {
         container.innerHTML = '<div class="panel-placeholder">No strong purchase intent signals found.<br/>Try a broader search or different communities.</div>';
         const panelContent = document.querySelector('#constellation-side-panel .panel-content');
         if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No opportunities discovered.</div>`;
         return;
     }
+
     const aggregatedSignals = {};
     signals.forEach(signal => {
-        if (!signal.problem_theme) return;
+        if (!signal.problem_theme || !signal.source) return; // Add check for source
         const theme = signal.problem_theme.trim().toLowerCase();
-        if (!aggregatedSignals[theme]) aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
         aggregatedSignals[theme].quotes.push(signal.quote);
         aggregatedSignals[theme].frequency++;
         aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
     });
+
     const starData = Object.values(aggregatedSignals);
     const maxFreq = Math.max(...starData.map(s => s.frequency), 1);
+
     starData.forEach(star => {
         const starEl = document.createElement('div');
         starEl.className = 'constellation-star';
@@ -293,102 +240,54 @@ function renderConstellationMap(signals) {
     });
 }
 
-
 function initializeConstellationInteractivity() {
     const container = document.getElementById('constellation-map-container');
     const panel = document.getElementById('constellation-side-panel');
     if (!container || !panel) return;
 
     const panelContent = panel.querySelector('.panel-content');
-    let hidePanelTimer; // Timer to manage the "grace period"
+    let hidePanelTimer;
 
-    const setDefaultPanelState = () => {
-        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`;
-    };
-
-    const hidePanel = () => {
-        // We can add a fade-out effect here later if desired
-        setDefaultPanelState();
-    };
-
+    const setDefaultPanelState = () => { panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`; };
+    const hidePanel = () => { setDefaultPanelState(); };
     setDefaultPanelState();
 
-    // Event for hovering over a star
     container.addEventListener('mouseover', (e) => {
         if (!e.target.classList.contains('constellation-star')) return;
-        
-        // If there's a timer set to hide the panel, cancel it.
         clearTimeout(hidePanelTimer);
-
         const star = e.target;
-        panelContent.innerHTML = `
-            <p class="quote">“${star.dataset.quote}”</p>
-            <h4 class="problem-theme">${star.dataset.problemTheme}</h4>
-            <p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes on related signals</p>
-            <a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>
-        `;
+        panelContent.innerHTML = `<p class="quote">“${star.dataset.quote}”</p><h4 class="problem-theme">${star.dataset.problemTheme}</h4><p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes on related signals</p><a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>`;
     });
 
-    // Event for when the mouse leaves the entire map container
-    container.addEventListener('mouseleave', () => {
-        // Use a timer to give the user time to move to the panel
-        hidePanelTimer = setTimeout(hidePanel, 300);
-    });
-    
-    // If the mouse enters the side panel, cancel any timer that was set to hide it.
-    panel.addEventListener('mouseenter', () => {
-        clearTimeout(hidePanelTimer);
-    });
-
-    // If the mouse leaves the side panel, hide it.
-    panel.addEventListener('mouseleave', () => {
-        hidePanelTimer = setTimeout(hidePanel, 300);
-    });
+    container.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); });
+    panel.addEventListener('mouseenter', () => { clearTimeout(hidePanelTimer); });
+    panel.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); });
 }
 
-// =================================================================================
-// NEW: Asynchronous function to handle the slow constellation analysis in the background
-// =================================================================================
+// This function now ONLY fetches data and passes it to the main generator.
 async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
     console.log("--- Starting Delayed Constellation Analysis (in background) ---");
     try {
-        // Step 1: Fetch initial posts that might contain demand signals.
         const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false);
-        console.log(`[Constellation] Found ${demandSignalPosts.length} initial posts for signals.`);
-
-        if (demandSignalPosts.length === 0) {
-            renderConstellationMap([]); // Render empty map if no posts found
-            return;
-        }
-
-        // CRITICAL FIX: Prioritize and limit the posts to prevent overload.
-        const MAX_POSTS_FOR_COMMENTS = 40; // Set a reasonable limit
-        const postsToProcess = demandSignalPosts
-            .sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0))
-            .slice(0, MAX_POSTS_FOR_COMMENTS);
-
-        // Step 2: Fetch comments for ONLY the top, prioritized posts.
-        const postIds = postsToProcess.map(p => p.data.id);
-        console.log(`[Constellation] Fetching comments for the top ${postIds.length} posts...`);
+        const postIds = demandSignalPosts.sort((a,b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id);
         const highIntentComments = await fetchCommentsForPosts(postIds);
+        const allItems = [...demandSignalPosts, ...highIntentComments];
+        
+        // This is the single, crucial call.
+        await generateAndRenderConstellation(allItems);
 
-        // Step 3: Combine and generate the map.
-        const demandSignalItems = [...postsToProcess, ...highIntentComments];
-        generateConstellationData(demandSignalItems, demandSignalTerms);
-        console.log("--- Constellation Analysis Complete. Map should be populated. ---");
-
+        console.log("--- Constellation Analysis Complete. ---");
     } catch (error) {
         console.error("Constellation analysis failed in the background:", error);
-        // Fail silently without showing an error to the user, as the main report is already done.
         renderConstellationMap([]); 
     }
 }
 
-
 // =================================================================================
-// BLOCK 3 of 4: MAIN ANALYSIS FUNCTION (FINAL - Two-Phase Architecture)
+// MAIN ANALYSIS FUNCTION - NO CHANGES NEEDED HERE
 // =================================================================================
 async function runProblemFinder() {
+    // This function remains the same as your working version.
     // --- UI and variable setup ---
     const searchButton = document.getElementById('search-selected-btn'); if (!searchButton) { console.error("Could not find button."); return; }
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked'); if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
@@ -490,7 +389,6 @@ async function runProblemFinder() {
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); setTimeout(() => { if (resultsWrapper) { resultsWrapper.style.opacity = '1'; resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, 50); } }
 
         // --- PHASE 2: SLOW ANALYSIS (TRIGGERED IN BACKGROUND) ---
-        // We do NOT `await` this. We want it to run in the background after the main results are shown.
         runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime);
         
     } catch (err) {

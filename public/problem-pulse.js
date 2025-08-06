@@ -94,36 +94,75 @@ const EMOTION_COLORS = { Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b
 /**
  * STEP 1: Reliably extract signal-bearing sentences or comments.
  */
-function extractSignalsFromItems(items, keywords) {
-    const rawSignals = [];
-    const keywordRegex = new RegExp(`(${keywords.join('|').replace(/ /g, '\\s')})`, 'i');
+/**
+ * STEP 1: Use AI to reliably extract signal-bearing sentences or comments. (AI-First Approach)
+ */
+async function extractSignalsFromItems(items) {
+    console.log(`[Signal Extraction] Starting AI-first signal extraction from ${items.length} items.`);
+    if (items.length === 0) return [];
 
-    items.forEach(item => {
-        if (!item || !item.data) return;
-        let searchableText = '';
-        let quoteSource = '';
-        let isComment = item.kind === 't1';
+    // We'll process in batches to avoid making the prompt too large for the AI
+    const BATCH_SIZE = 40;
+    let allSignals = [];
 
-        if (isComment) {
-            searchableText = item.data.body || '';
-            quoteSource = searchableText;
-        } else {
-            searchableText = `${item.data.title || ''}. ${item.data.selftext || ''}`;
-            const sentences = searchableText.match(/[^.!?]+[.!?]+\s*/g) || [];
-            quoteSource = sentences.find(sentence => keywordRegex.test(sentence)) || '';
+    for (let i = 0; i < items.length; i += BATCH_SIZE) {
+        const batchItems = items.slice(i, i + BATCH_SIZE);
+        const commentsText = batchItems.map((item, index) => {
+            const content = item.kind === 't1' 
+                ? (item.data.body || '') 
+                : `${item.data.title || ''}. ${item.data.selftext || ''}`;
+            return `${index + 1}. ${content.substring(0, 1500)}`; // Limit length of each item
+        }).join('\n---\n');
+
+        const prompt = `You are a market research analyst. From the following list of user comments, extract up to 10 quotes that express a strong purchase intent.
+
+Focus ONLY on phrases that directly mention:
+- Willingness to pay ("I'd pay for", "take my money")
+- Frustration with a lack of a tool ("wish there was an app for", "why is there no tool")
+- A specific, unmet need for a product or service ("I need something that does X but Y gets in the way")
+
+CRITICAL: IGNORE general complaints, emotional support, or sentences that use words like "love" or "need" in a non-commercial context.
+
+Here are the comments:
+${commentsText}
+
+Respond ONLY with a valid JSON object with a single key "signals", which is an array of objects. Each object must have a "quote" and the "source_index" (the original number of the comment it came from).
+Example: {"signals": [{"quote": "I'd happily pay for a tool that did this automatically.", "source_index": 3}]}`;
+
+        const openAIParams = {
+            model: "gpt-4o-mini",
+            messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: prompt }],
+            temperature: 0.1,
+            max_tokens: 1000,
+            response_format: { "type": "json_object" }
+        };
+
+        try {
+            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+            if (!response.ok) continue; // Silently fail and move to next batch
+            const data = await response.json();
+            const parsed = JSON.parse(data.openaiResponse);
+            
+            if (parsed.signals && Array.isArray(parsed.signals)) {
+                const batchSignals = parsed.signals.map(signal => {
+                    const sourceIndex = signal.source_index - 1;
+                    if (sourceIndex >= 0 && sourceIndex < batchItems.length) {
+                        return {
+                            quote: signal.quote,
+                            sourceItem: batchItems[sourceIndex]
+                        };
+                    }
+                    return null;
+                }).filter(Boolean); // Filter out any nulls
+                allSignals.push(...batchSignals);
+            }
+        } catch (error) {
+            console.error("AI signal extraction for a batch failed:", error);
         }
-
-        if (quoteSource && keywordRegex.test(searchableText)) {
-            const matchedKeyword = (searchableText.toLowerCase().match(keywordRegex) || [])[0];
-            rawSignals.push({
-                quote: quoteSource.trim(),
-                sourceItem: item,
-                keyword: matchedKeyword || 'unknown'
-            });
-        }
-    });
-    console.log(`Step 1 (Keyword Extraction): Found ${rawSignals.length} raw signals from posts AND comments.`);
-    return rawSignals;
+    }
+    
+    console.log(`[Signal Extraction] AI-first process complete. Found ${allSignals.length} high-quality raw signals.`);
+    return allSignals;
 }
 
 /**
@@ -191,7 +230,7 @@ Respond ONLY with a valid JSON object: {"enriched_signals": [...]}. The array mu
  * STEP 3: The main orchestrator for the new constellation logic. (FINAL VERSION)
  */
 async function generateConstellationData(highIntentItems, demandSignalTerms) {
-    const rawSignals = extractSignalsFromItems(highIntentItems, demandSignalTerms);
+    const rawSignals = await extractSignalsFromItems(highIntentItems, demandSignalTerms);
     
     // If we have no raw signals, stop here.
     if (rawSignals.length === 0) {
@@ -254,15 +293,33 @@ function renderConstellationMap(signals) {
     });
 }
 
+
 function initializeConstellationInteractivity() {
     const container = document.getElementById('constellation-map-container');
     const panel = document.getElementById('constellation-side-panel');
     if (!container || !panel) return;
+
     const panelContent = panel.querySelector('.panel-content');
-    const setDefaultPanelState = () => { panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`; };
+    let hidePanelTimer; // Timer to manage the "grace period"
+
+    const setDefaultPanelState = () => {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`;
+    };
+
+    const hidePanel = () => {
+        // We can add a fade-out effect here later if desired
+        setDefaultPanelState();
+    };
+
     setDefaultPanelState();
+
+    // Event for hovering over a star
     container.addEventListener('mouseover', (e) => {
         if (!e.target.classList.contains('constellation-star')) return;
+        
+        // If there's a timer set to hide the panel, cancel it.
+        clearTimeout(hidePanelTimer);
+
         const star = e.target;
         panelContent.innerHTML = `
             <p class="quote">“${star.dataset.quote}”</p>
@@ -271,7 +328,22 @@ function initializeConstellationInteractivity() {
             <a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>
         `;
     });
-    container.addEventListener('mouseout', (e) => { if (e.target === container) setDefaultPanelState(); });
+
+    // Event for when the mouse leaves the entire map container
+    container.addEventListener('mouseleave', () => {
+        // Use a timer to give the user time to move to the panel
+        hidePanelTimer = setTimeout(hidePanel, 300);
+    });
+    
+    // If the mouse enters the side panel, cancel any timer that was set to hide it.
+    panel.addEventListener('mouseenter', () => {
+        clearTimeout(hidePanelTimer);
+    });
+
+    // If the mouse leaves the side panel, hide it.
+    panel.addEventListener('mouseleave', () => {
+        hidePanelTimer = setTimeout(hidePanel, 300);
+    });
 }
 
 // =================================================================================

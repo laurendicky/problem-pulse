@@ -1,8 +1,8 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 14.3 - BULLETPROOF PROMPT STRUCTURE)
-// This version uses a clearly delineated two-section prompt to prevent the AI
-// from confusing instructions/examples with the data to be analyzed. This is
-// a robust, standard prompting technique to prevent hallucination.
+// FINAL SCRIPT (VERSION 14.4 - ANTI-HALLUCINATION PROMPT)
+// This version uses a heavily revised prompt structure. It rephrases examples
+// as conceptual patterns and adds a strict negative constraint to prevent the AI
+// from copying examples and force it to use real data.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -54,7 +54,7 @@ function renderSentimentScore(positiveCount, negativeCount) { const container = 
 
 
 // ===================================================================
-// --- NEW CONSTELLATION MAP FUNCTIONS (SEMANTIC FRAMEWORK APPROACH) ---
+// --- NEW CONSTELLATION MAP FUNCTIONS (ANTI-HALLUCINATION PROMPT) ---
 // ===================================================================
 
 const CONSTELLATION_CATEGORIES = {
@@ -97,42 +97,39 @@ async function extractWillingnessToPaySignals(posts) {
         text: `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 800)}`
     }));
 
-    const prompt = `Your task is to act as an expert market research analyst.
+    const prompt = `You are an expert market research analyst. Your task is to identify quotes from Reddit posts that signal a "willingness to pay" for a solution.
 Analyze the Reddit posts provided in Section 2 using the conceptual framework described in Section 1.
 Extract up to 30 high-quality signals that indicate a "willingness to pay".
 
 ### SECTION 1: FRAMEWORK & INSTRUCTIONS ###
 
-You will identify quotes that fall into one of the following five categories:
+You will identify quotes that fall into one of the following five categories.
 
-1.  **Direct Payment Signals:** Clear statements about paying for something.
-    - Examples: "I’d pay good money for…", "I would buy it in a second", "Shut up and take my money"
-    - Use the key: "direct_payment"
+1.  **direct_payment:** Direct statements about paying, buying, or subscribing.
+    - Look for concepts like: "I'd pay for", "I would buy", "take my money".
 
-2.  **Pain-Backed Desire Signals:** Strong frustration implying a need for a paid solution.
-    - Examples: "I’m sick of doing this manually…", "This shouldn’t be this hard"
-    - Use the key: "pain_backed_desire"
+2.  **pain_backed_desire:** Expressions of strong frustration implying a need for a paid solution.
+    - Look for concepts like: "sick of doing this", "waste so much time", "shouldn't be this hard".
 
-3.  **Failed Solution Signals:** The user has tried other tools and is looking for a better alternative.
-    - Examples: "I’ve tried everything and nothing works", "This tool is missing a crucial feature"
-    - Use the key: "failed_solution"
+3.  **failed_solution:** The user has tried other tools and is looking for a better alternative.
+    - Look for concepts like: "tried everything", "[product] is missing...", "nothing works".
 
-4.  **Aspirational / Wishlist Signals:** Clear identification of a market gap or wish for a new tool.
-    - Examples: "If only there was an app for…", "I wish someone would build…"
-    - Use the key: "aspirational_wishlist"
+4.  **aspirational_wishlist:** Clear identification of a market gap or wish for a new tool.
+    - Look for concepts like: "if only there was", "someone should build", "wish there was an app for".
 
-5.  **Time vs Money Tradeoffs:** The user states their time is more valuable than the cost of a solution.
-    - Examples: "I waste hours every week doing this", "I’d pay just to not have to think about this"
-    - Use the key: "time_money_tradeoff"
+5.  **time_money_tradeoff:** The user states their time is more valuable than the cost of a solution.
+    - Look for concepts like: "waste hours", "pay to not think about this".
 
+**OUTPUT FORMAT:**
 For each signal you find, you MUST provide:
 - \`quote\`: The user's exact quote (under 280 characters).
 - \`problem_theme\`: A short, 4-5 word summary of the core problem.
 - \`signal_type\`: The specific key for the category from the list above (e.g., "direct_payment").
 - \`postIndex\`: The original index of the post from which the quote was extracted.
 
+**CRITICAL RULE: Your task is to EXTRACT real quotes. Do NOT generate, create, or use the conceptual examples from Section 1 in your response. The 'quote' field must contain text found ONLY in the posts from Section 2.**
+
 Respond ONLY with a valid JSON object with a single key "signals", which is an array of these objects.
-Do NOT include the example quotes in your final response. Only use quotes from the posts in Section 2.
 
 ### SECTION 2: REDDIT POSTS FOR ANALYSIS ###
 ${postsForAI.map(p => `Post Index: ${p.index}\nText: ${p.text}`).join('\n\n---\n\n')}

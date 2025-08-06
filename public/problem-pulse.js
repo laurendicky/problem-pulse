@@ -1,7 +1,8 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 12.3 - EXPANDED DEMAND SIGNAL DETECTION)
-// This version uses a much broader set of keywords and a refined AI prompt to
-// capture more subtle "willingness to pay" signals for the constellation map.
+// FINAL SCRIPT (VERSION 12.5 - DATA PURITY FOR CONSTELLATION)
+// This version corrects the fallback logic to ensure the constellation map is
+// ALWAYS sourced from high-intent, commercially-relevant posts, solving the
+// issue of general frustrations appearing in the "Willingness to Pay" chart.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -52,103 +53,57 @@ function renderIncludedSubreddits(subreddits) { const container = document.getEl
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
 
-// --- NEW / MODIFIED --- Functions for the Constellation Map
-const CONSTELLATION_CATEGORIES = {
-    Automation: { x: 0.15, y: 0.25 }, Productivity: { x: 0.35, y: 0.65 }, Simplicity: { x: 0.5, y: 0.3 },
-    Customization: { x: 0.65, y: 0.75 }, Trust: { x: 0.85, y: 0.2 }, Wellness: { x: 0.2, y: 0.8 }, Other: { x: 0.8, y: 0.6 }
-};
-const EMOTION_COLORS = {
-    Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7',
-    Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316'
-};
+// --- CONSTELLATION MAP FUNCTIONS (REWRITTEN FOR DATA PURITY) ---
+const CONSTELLATION_CATEGORIES = { Automation: { x: 0.15, y: 0.25 }, Productivity: { x: 0.35, y: 0.65 }, Simplicity: { x: 0.5, y: 0.3 }, Customization: { x: 0.65, y: 0.75 }, Trust: { x: 0.85, y: 0.2 }, Wellness: { x: 0.2, y: 0.8 }, Other: { x: 0.8, y: 0.6 } };
+const EMOTION_COLORS = { Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7', Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316' };
 
-async function processSignalsForConstellation(posts) {
-    const postsForAI = posts.map((p, index) => ({
-        index: index,
-        text: `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 1000)}`
-    }));
+// AI PROMPT 1: The "Sniper" - for high-intent, pre-filtered posts
+const PRIMARY_CONSTELLATION_PROMPT = `You are a market research analyst extracting high-value demand signals where a problem meets commercial intent. Analyze the following Reddit posts. Find up to 25 quotes demonstrating a strong willingness to acquire a solution. CRITICAL RULE: The quote MUST demonstrate strong commercial intent. This includes: 1. Direct statements about paying, buying, or purchasing. 2. Actively searching for a specific product, tool, or service. 3. Identifying a clear market gap or opportunity. DO NOT include quotes that only express general frustration without this commercial or solution-seeking context. For each valid signal, provide a JSON object with: "quote", "problem_theme", "category" (from [${Object.keys(CONSTELLATION_CATEGORIES).join(', ')}]), "emotion" (from [${Object.keys(EMOTION_COLORS).join(', ')}]), and "postIndex". Respond ONLY with a valid JSON object: {"signals": [...]}. If none, return an empty array.`;
 
-    // --- MODIFIED AI PROMPT ---
-    // The prompt is now updated to understand the broader definition of a "demand signal,"
-    // including active solution seeking and market gap identification, not just explicit "I will pay" statements.
-    const prompt = `You are a market research analyst extracting high-value demand signals where a problem meets commercial intent.
-Analyze the following Reddit posts. Find up to 25 quotes demonstrating a strong willingness to acquire a solution.
+// AI PROMPT 2: The "Interpreter" (Fallback) - a broader prompt for the SAME high-intent posts
+const FALLBACK_CONSTELLATION_PROMPT = `You are a market research analyst identifying unsolved problems and desired solutions from a pre-filtered list of commercially-relevant posts. From the following posts, extract up to 25 quotes that reveal a clear user problem, wish, or a desired solution that does not yet exist. Focus on what users WISH they had or could do. For each, provide a JSON object with: "quote", "problem_theme", "category" (from [${Object.keys(CONSTELLATION_CATEGORIES).join(', ')}]), "emotion" (from [${Object.keys(EMOTION_COLORS).join(', ')}]), and "postIndex". Respond ONLY with a valid JSON object: {"signals": [...]}.`;
 
-CRITICAL RULE: The quote MUST demonstrate strong commercial intent. This includes:
-1.  **Direct statements** about paying, buying, or purchasing (e.g., "take my money", "I'd pay for this").
-2.  **Actively searching** for a specific product, tool, or service to solve a problem (e.g., "is there an app for...", "recommend a tool that...").
-3.  **Identifying a clear market gap** or opportunity (e.g., "someone should make an app that...", "I wish there was a tool for...").
-
-DO NOT include quotes that only express general frustration or wishes without this commercial or solution-seeking context.
-
-For each valid signal you find, provide a JSON object with:
-1.  "quote": The exact user quote (under 280 characters).
-2.  "problem_theme": A short, 4-5 word summary of the core problem.
-3.  "category": Classify the user's need into ONE of the following: [${Object.keys(CONSTELLATION_CATEGORIES).join(', ')}].
-4.  "emotion": Classify the primary emotion of the quote into ONE of the following: [${Object.keys(EMOTION_COLORS).join(', ')}].
-5.  "postIndex": The original index of the post from which the quote was extracted.
-
-Respond ONLY with a valid JSON object with a single key "signals", which is an array of these objects.
-If you find no quotes that meet the CRITICAL RULE, return an empty array.
-
----
-Posts to analyze:
-${postsForAI.map(p => `Post Index: ${p.index}\nText: ${p.text.substring(0, 800)}`).join('\n\n---\n\n')}
-`;
-
-    const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON for purchase intent signals." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 4000, response_format: { "type": "json_object" } };
+async function processConstellationAI(posts, prompt) {
+    if (!posts || posts.length === 0) return [];
+    const postsForAI = posts.map((p, index) => ({ index: index, text: `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 1000)}` }));
+    const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: `${prompt}\n\nPosts to analyze:\n${JSON.stringify(postsForAI.map(p => ({index: p.index, text: p.text.substring(0, 500)})))}` }], temperature: 0.2, max_tokens: 4000, response_format: { "type": "json_object" } };
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('AI constellation processing failed.');
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
-
         if (!parsed.signals || !Array.isArray(parsed.signals)) return [];
-
         return parsed.signals.map(signal => {
             const originalPost = posts[signal.postIndex];
             return originalPost ? { ...signal, source: originalPost.data } : null;
         }).filter(Boolean);
-
-    } catch (error) {
-        console.error("Constellation signal processing error:", error);
-        return [];
-    }
+    } catch (error) { console.error("Constellation signal processing error:", error); return []; }
 }
 
 function renderConstellationMap(signals) {
     const container = document.getElementById('constellation-map-container');
     if (!container) return;
     container.innerHTML = '';
-
     if (!signals || signals.length === 0) {
-        container.innerHTML = '<div class="panel-placeholder">No strong purchase intent signals found.<br/>Try a broader search.</div>';
+        container.innerHTML = '<div class="panel-placeholder">No strong purchase intent signals found.<br/>Try a broader search or different communities.</div>';
         const panelContent = document.querySelector('#constellation-side-panel .panel-content');
-        if (panelContent) {
-            panelContent.innerHTML = `<div class="panel-placeholder">No opportunities discovered in this search.</div>`;
-        }
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No opportunities discovered.</div>`;
         return;
     }
-    
     const aggregatedSignals = {};
     signals.forEach(signal => {
         const theme = signal.problem_theme.trim().toLowerCase();
-        if (!aggregatedSignals[theme]) {
-            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
-        }
+        if (!aggregatedSignals[theme]) aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
         aggregatedSignals[theme].quotes.push(signal.quote);
         aggregatedSignals[theme].frequency++;
-        aggregatedSignals[theme].totalUpvotes += signal.source.ups;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
     });
-
     const starData = Object.values(aggregatedSignals);
     const maxFreq = Math.max(...starData.map(s => s.frequency), 1);
-
     starData.forEach(star => {
         const starEl = document.createElement('div');
         starEl.className = 'constellation-star';
-        const baseSize = 8;
-        const size = baseSize + (star.frequency / maxFreq) * 20;
+        const size = 8 + (star.frequency / maxFreq) * 20;
         starEl.style.width = `${size}px`;
         starEl.style.height = `${size}px`;
         starEl.style.backgroundColor = EMOTION_COLORS[star.emotion] || '#ffffff';
@@ -178,25 +133,32 @@ function initializeConstellationInteractivity() {
         const star = e.target;
         panelContent.innerHTML = `
             <p class="quote">“${star.dataset.quote}”</p>
-            <h4 class="problem-theme">${star.dataset.problemTheme}</h4>
+            <h4 class="problem-theme">${star.problemTheme}</h4>
             <p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes on related signals</p>
             <a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>
         `;
     });
-    container.addEventListener('mouseout', (e) => { if (e.target === container) { setDefaultPanelState(); } });
+    container.addEventListener('mouseout', (e) => { if (e.target === container) setDefaultPanelState(); });
 }
 
-async function generateConstellationData(allPosts) {
-    console.log("Generating constellation data...");
-    let signals = await processSignalsForConstellation(allPosts.slice(0, 200));
-    
+async function generateConstellationData(highIntentPosts) {
+    console.log("CONSTELLATION PASS 1: Running 'Sniper' analysis on high-intent posts...");
+    let signals = await processConstellationAI(highIntentPosts, PRIMARY_CONSTELLATION_PROMPT);
+
     if (signals.length < 5) {
-        console.log(`Initial pass yielded only ${signals.length} signals. Running Pass 2 safety net on a broader post set.`);
-        const broaderPosts = allPosts.slice(0, 300); 
-        const fallbackSignals = await processSignalsForConstellation(broaderPosts);
-        signals = [...signals, ...fallbackSignals];
+        console.log(`PASS 1 yielded only ${signals.length} signals. Triggering PASS 2: 'Interpreter' analysis on the SAME high-intent posts...`);
+        // CRITICAL CHANGE: The fallback now uses the SAME high-intent posts, not the general ones.
+        // This ensures the data source is always commercially relevant.
+        const fallbackSignals = await processConstellationAI(highIntentPosts, FALLBACK_CONSTELLATION_PROMPT);
+        
+        console.log(`PASS 2 found ${fallbackSignals.length} potential signals.`);
+        const combinedSignals = [...signals, ...fallbackSignals];
         const uniqueSignals = {};
-        signals.forEach(s => { if (!uniqueSignals[s.problem_theme.toLowerCase()]) { uniqueSignals[s.problem_theme.toLowerCase()] = s; } });
+        combinedSignals.forEach(s => {
+            if (s && s.problem_theme && !uniqueSignals[s.problem_theme.toLowerCase()]) {
+                uniqueSignals[s.problem_theme.toLowerCase()] = s;
+            }
+        });
         signals = Object.values(uniqueSignals);
     }
     
@@ -216,27 +178,14 @@ async function runProblemFinder() {
     
     const problemTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
     const deepProblemTerms = [ "struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent" ];
-
-    // --- MODIFICATION: EXPANDED DEMAND SIGNAL KEYWORDS ---
-    // This list is now much broader to capture more subtle buying signals.
-    const demandSignalTerms = [
-        // Category 1: Explicit Purchase Intent
-        "i would pay", "happily pay", "pay for", "take my money", "shut up and take my money",
-        "instant buy", "where can i buy", "where to buy", "i'd buy", "name your price", "willing to pay",
-        // Category 2: Active Solution Seeking
-        "is there an app for", "looking for a tool", "need a service", "recommend a product", "any software that",
-        "find a solution", "need an app", "what tool", "best software for", "looking for a service",
-        // Category 3: High-Value Problem / Opportunity Identification
-        "someone should make", "i wish there was", "if only there was a", "alternative to", "desperate for a",
-        "tired of manually", "needs to exist", "why doesn't this exist"
-    ];
+    const demandSignalTerms = [ "i would pay", "happily pay", "pay for", "take my money", "shut up and take my money", "instant buy", "where can i buy", "where to buy", "i'd buy", "name your price", "willing to pay", "is there an app for", "looking for a tool", "need a service", "recommend a product", "any software that", "find a solution", "need an app", "what tool", "best software for", "looking for a service", "someone should make", "i wish there was", "if only there was a", "alternative to", "desperate for a", "tired of manually", "needs to exist", "why doesn't this exist" ];
 
     const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
     let generalSearchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms] : problemTerms;
     let limitPerTerm = (searchDepth === 'deep') ? 75 : 40;
     
     const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "constellation-map-container"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; } });
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "constellation-map-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
     const resultsMessageDiv = document.getElementById("results-message"); const countHeaderDiv = document.getElementById("count-header");
@@ -246,26 +195,24 @@ async function runProblemFinder() {
     const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
     const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" }; const selectedTime = timeMap[selectedTimeRaw] || "all";
     try {
-        console.log("Fetching general problem posts...");
+        console.log("Fetching general problem posts (for main analysis)...");
         const problemPostsPromise = fetchMultipleRedditDataBatched(subredditQueryString, generalSearchTerms, limitPerTerm, selectedTime, false);
-
-        console.log("Fetching high-intent demand signals (including from comments)...");
+        console.log("Fetching high-intent demand signals (for constellation & main analysis)...");
         const demandSignalsPromise = fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 50, selectedTime, true);
 
         const [problemPosts, demandSignalPosts] = await Promise.all([problemPostsPromise, demandSignalsPromise]);
         console.log(`Found ${problemPosts.length} general problem posts and ${demandSignalPosts.length} potential demand signals.`);
         
-        const combinedPosts = [...demandSignalPosts, ...problemPosts];
-        let allPosts = deduplicatePosts(combinedPosts);
-        console.log(`Total unique posts after combining: ${allPosts.length}`);
+        // Call the constellation generator with ONLY the high-intent posts to maintain data purity.
+        generateConstellationData(demandSignalPosts);
 
-        if (allPosts.length === 0) { throw new Error("No results found."); }
+        const allPosts = deduplicatePosts([...demandSignalPosts, ...problemPosts]);
+        if (allPosts.length === 0) throw new Error("No results found.");
+        
         const filteredPosts = filterPosts(allPosts, selectedMinUpvotes);
-        if (filteredPosts.length < 10) { throw new Error("Not enough high-quality posts found."); }
+        if (filteredPosts.length < 10) throw new Error("Not enough high-quality posts found.");
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
-        
-        generateConstellationData(filteredPosts);
         
         const sentimentData = generateSentimentData(filteredPosts);
         renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
@@ -273,7 +220,6 @@ async function runProblemFinder() {
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
         
         generateEmotionMapData(filteredPosts).then(renderEmotionMap);
-
         renderIncludedSubreddits(selectedSubreddits);
         extractAndValidateEntities(filteredPosts, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredPosts).then(faqs => renderFAQs(faqs));

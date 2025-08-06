@@ -97,37 +97,43 @@ const EMOTION_COLORS = { Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b
 
 // This function now does EVERYTHING. It finds signals, enriches them, and renders the map.
 // It is the single source of truth for the constellation map.
+// =================================================================================
+// SECTION 1: CONSTELLATION MAP LOGIC (FINAL QUALITY & ARCHITECTURE FIX)
+// =================================================================================
+
+// This is the main pipeline. It now contains much stricter AI prompts.
 async function generateAndRenderConstellation(items) {
-    console.log("[Constellation] Starting full generation process...");
+    console.log("[Constellation] Starting final generation process...");
 
     // 1. --- AI-POWERED SIGNAL EXTRACTION ---
-    // Instead of processing thousands of items, we prioritize the most upvoted ones first.
-    // This gives us the best shot at finding high-quality signals quickly.
     const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 200);
     console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
 
-    const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 15 quotes that express a strong purchase intent or an unsolved problem perfect for a new product.
+    const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 25 quotes that express a strong purchase intent or a clear, unsolved problem.
 
-    Focus ONLY on phrases that directly mention:
-    - Willingness to pay ("I'd pay for", "take my money")
-    - Frustration with a lack of a tool ("wish there was an app for", "why is there no tool")
-    - A specific, unmet need ("I need something that does X but Y gets in the way")
+    Your focus is ONLY on quotes that describe:
+    - A direct willingness to pay for a solution.
+    - Frustration that a specific tool or app does not exist.
+    - A detailed description of an unmet need or a problem they wish was solved.
 
-    CRITICAL: IGNORE general complaints, emotional support, or sentences that use words like "love" or "need" in a non-commercial context.
+    CRITICAL RULES:
+    1.  ONLY extract real quotes from the provided text.
+    2.  DO NOT invent quotes or use any examples from this prompt in your answer.
+    3.  If you find no strong signals, return an empty array.
 
-    Here are the comments:
+    Here are the comments, each with a source index:
     ${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
 
-    Respond ONLY with a valid JSON object: {"signals": [{"quote": "The extracted quote.", "source_index": 4}]}`;
+    Respond ONLY with a valid JSON object: {"signals": [{"quote": "The real, extracted quote.", "source_index": 4}]}`;
     
     let rawSignals = [];
     try {
         const extractionResponse = await fetch(OPENAI_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: extractionPrompt }], temperature: 0.1, max_tokens: 1500, response_format: { "type": "json_object" } } })
+            body: JSON.stringify({ openaiPayload: { model: "gpt-4o", messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: extractionPrompt }], temperature: 0.1, max_tokens: 2000, response_format: { "type": "json_object" } } })
         });
-        if (!extractionResponse.ok) throw new Error("AI Signal Extraction Failed");
+        if (!extractionResponse.ok) throw new Error(`AI Signal Extraction Failed with status: ${extractionResponse.status}`);
         const extractionData = await extractionResponse.json();
         const parsedExtraction = JSON.parse(extractionData.openaiResponse);
 
@@ -135,11 +141,11 @@ async function generateAndRenderConstellation(items) {
             rawSignals = parsedExtraction.signals.map(signal => ({
                 quote: signal.quote,
                 sourceItem: prioritizedItems[signal.source_index]
-            })).filter(s => s.sourceItem); // Ensure the source item exists
+            })).filter(s => s.sourceItem);
         }
     } catch (error) {
         console.error("CRITICAL ERROR in AI Signal Extraction:", error);
-        renderConstellationMap([]); // Render empty map on failure
+        renderConstellationMap([]);
         return;
     }
 
@@ -150,39 +156,43 @@ async function generateAndRenderConstellation(items) {
     }
 
     // 2. --- AI-POWERED ENRICHMENT ---
-    const enrichmentPrompt = `You are a market research analyst. For each quote below, provide a short summary of the user's core problem and classify it.
+    const enrichmentPrompt = `You are a market research analyst. For each of the ${rawSignals.length} quotes below, provide a short, specific summary of the user's core problem and classify it.
     
+    CRITICAL RULES:
+    1.  Create a UNIQUE and SPECIFIC \`problem_theme\` for each individual quote.
+    2.  DO NOT group different ideas under a general theme. The theme must be a direct summary of its corresponding quote.
+    3.  Your response array MUST have exactly ${rawSignals.length} items.
+
     Quotes:
     ${rawSignals.map((signal, index) => `${index}. "${signal.quote}"`).join('\n')}
 
-    For EACH quote, provide a JSON object with:
-    1. "problem_theme": A short, 4-5 word summary of the core problem or desire.
-    2. "category": Classify into ONE of: [${Object.keys(CONSTELLATION_CATEGORIES).join(', ')}].
-    3. "emotion": Classify the primary emotion into ONE of: [${Object.keys(EMOTION_COLORS).join(', ')}].
-
-    Respond ONLY with a valid JSON object: {"enriched_signals": [...]}. The array MUST be the same length as the list of quotes.`;
+    Respond ONLY with a valid JSON object: {"enriched_signals": [{"problem_theme": "A unique, specific summary.", "category": "Automation", "emotion": "Frustration"}]}.`;
 
     let enrichedSignals = [];
     try {
         const enrichmentResponse = await fetch(OPENAI_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: { model: "gpt-4o", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_tokens: 2000, response_format: { "type": "json_object" } } })
+            body: JSON.stringify({ openaiPayload: { model: "gpt-4o", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_tokens: 3000, response_format: { "type": "json_object" } } })
         });
-        if (!enrichmentResponse.ok) throw new Error("AI Signal Enrichment Failed");
+        if (!enrichmentResponse.ok) throw new Error(`AI Signal Enrichment Failed with status: ${enrichmentResponse.status}`);
         const enrichmentData = await enrichmentResponse.json();
         const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse);
 
-        if (parsedEnrichment.enriched_signals && parsedEnrichment.enriched_signals.length === rawSignals.length) {
-            enrichedSignals = rawSignals.map((rawSignal, index) => ({
-                ...rawSignal,
-                ...parsedEnrichment.enriched_signals[index],
-                source: rawSignal.sourceItem.data
-            }));
+        if (parsedEnrichment.enriched_signals && parsedEnrichment.enriched_signals.length > 0) {
+             enrichedSignals = rawSignals.map((rawSignal, index) => {
+                const enrichment = parsedEnrichment.enriched_signals[index];
+                if (!enrichment) return null; // Skip if enrichment is missing for an index
+                return {
+                    ...rawSignal,
+                    ...enrichment,
+                    source: rawSignal.sourceItem.data
+                };
+            }).filter(Boolean); // Filter out any null items
         }
     } catch (error) {
         console.error("CRITICAL ERROR in AI Signal Enrichment:", error);
-        renderConstellationMap([]); // Render empty map on failure
+        renderConstellationMap([]);
         return;
     }
     
@@ -204,38 +214,40 @@ function renderConstellationMap(signals) {
         return;
     }
 
-    const aggregatedSignals = {};
-    signals.forEach(signal => {
-        if (!signal.problem_theme || !signal.source) return; // Add check for source
-        const theme = signal.problem_theme.trim().toLowerCase();
-        if (!aggregatedSignals[theme]) {
-            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+    // <<< ELIMINATED AGGREGATION LOGIC >>>
+    // We now create one star for every valid signal.
+
+    signals.forEach(star => {
+        // Ensure the signal has the required data before trying to render it.
+        if (!star.problem_theme || !star.source || !star.source.subreddit) {
+            return; 
         }
-        aggregatedSignals[theme].quotes.push(signal.quote);
-        aggregatedSignals[theme].frequency++;
-        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
-    });
 
-    const starData = Object.values(aggregatedSignals);
-    const maxFreq = Math.max(...starData.map(s => s.frequency), 1);
-
-    starData.forEach(star => {
         const starEl = document.createElement('div');
         starEl.className = 'constellation-star';
-        const size = 8 + (star.frequency / maxFreq) * 20;
+        
+        // Size the star based on the upvotes of the source comment/post.
+        // Using Math.log helps normalize the size for a wide range of upvote counts.
+        const upvotes = star.source.ups || 0;
+        const size = 8 + Math.log(upvotes + 1) * 2.5; // +1 prevents log(0), 2.5 is a scaling factor.
+        
         starEl.style.width = `${size}px`;
         starEl.style.height = `${size}px`;
         starEl.style.backgroundColor = EMOTION_COLORS[star.emotion] || '#ffffff';
+
         const categoryCoords = CONSTELLATION_CATEGORIES[star.category] || CONSTELLATION_CATEGORIES.Other;
         const x_rand = (Math.random() - 0.5) * 0.1;
         const y_rand = (Math.random() - 0.5) * 0.1;
         starEl.style.left = `calc(${(categoryCoords.x + x_rand) * 100}% - ${size/2}px)`;
         starEl.style.top = `calc(${(categoryCoords.y + y_rand) * 100}% - ${size/2}px)`;
-        starEl.dataset.quote = star.quotes[0];
+        
+        // Attach data directly from the signal
+        starEl.dataset.quote = star.quote;
         starEl.dataset.problemTheme = star.problem_theme;
         starEl.dataset.sourceSubreddit = star.source.subreddit;
         starEl.dataset.sourcePermalink = star.source.permalink;
-        starEl.dataset.sourceUpvotes = star.totalUpvotes.toLocaleString();
+        starEl.dataset.sourceUpvotes = (star.source.ups || 0).toLocaleString(); // Use the individual upvote count
+        
         container.appendChild(starEl);
     });
 }

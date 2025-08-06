@@ -127,11 +127,12 @@ function extractSignalsFromItems(items, keywords) {
 }
 
 /**
- * STEP 2: Takes a list of raw signals and uses AI to enrich them with context.
+ * STEP 2: Takes a list of raw signals and uses AI to enrich them with context. (DEBUG VERSION)
  */
 async function enrichSignalsWithAI(rawSignals) {
     if (rawSignals.length === 0) return [];
-    console.log(`Step 2 (AI Enrichment): Enriching ${rawSignals.length} signals...`);
+    console.log(`[AI Enrichment] Preparing to enrich ${rawSignals.length} signals...`);
+    
     const prompt = `You are a market research analyst. I have extracted quotes that signal a desire for a product or service. Your task is to analyze each quote and provide a short summary of the user's core problem.
 Here is the list of quotes:\n${rawSignals.map((signal, index) => `${index + 1}. "${signal.quote}"`).join('\n')}
 
@@ -141,19 +142,49 @@ For each quote, provide a JSON object with:
 3. "emotion": Classify the primary emotion into ONE of: [${Object.keys(EMOTION_COLORS).join(', ')}].
 
 Respond ONLY with a valid JSON object: {"enriched_signals": [...]}. The array must be the same length as the list of quotes.`;
+    
     const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 4000, response_format: { "type": "json_object" } };
+    
+    let rawAIResponse = ''; // Variable to hold the raw response for debugging
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        if (!response.ok) throw new Error('AI enrichment failed.');
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
-        const enrichedData = parsed.enriched_signals || [];
-        if (enrichedData.length !== rawSignals.length) {
-            console.warn("AI enrichment returned a different number of items than expected.");
-            return [];
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error("[AI Enrichment] The OpenAI proxy returned an error status:", response.status, errorText);
+            throw new Error(`AI enrichment proxy failed with status ${response.status}`);
         }
+
+        const data = await response.json();
+        
+        // <<< NEW DEBUG LOGGING >>>
+        console.log("[AI Enrichment] Received raw data object from proxy:", data);
+        rawAIResponse = data.openaiResponse; // Store the raw string from the AI
+        if (!rawAIResponse) {
+             throw new Error("The 'openaiResponse' key was missing from the proxy response.");
+        }
+        console.log("[AI Enrichment] Raw AI response string to be parsed:", rawAIResponse);
+        // <<< END NEW DEBUG LOGGING >>>
+        
+        const parsed = JSON.parse(rawAIResponse);
+        const enrichedData = parsed.enriched_signals || [];
+        
+        if (enrichedData.length !== rawSignals.length) {
+            console.warn(`[AI Enrichment] WARNING: AI returned ${enrichedData.length} items, but we sent ${rawSignals.length}. This may indicate a partial analysis by the AI.`);
+            // We will proceed with the data we got, but this is a useful warning.
+        }
+        
+        console.log(`[AI Enrichment] Successfully parsed ${enrichedData.length} enriched signals from AI.`);
         return rawSignals.map((rawSignal, index) => ({ ...rawSignal, ...enrichedData[index], source: rawSignal.sourceItem.data }));
-    } catch (error) { console.error("Constellation AI enrichment error:", error); return []; }
+
+    } catch (error) { 
+        // <<< ENHANCED ERROR LOGGING >>>
+        console.error("--- ERROR CAUGHT IN enrichSignalsWithAI ---");
+        console.error("The specific error was:", error);
+        console.error("The raw, unparsed AI response that likely caused the error was:", rawAIResponse);
+        console.error("--- END OF AI ENRICHMENT ERROR ---");
+        return []; // Return empty array to prevent crash
+    }
 }
 
 /**

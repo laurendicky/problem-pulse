@@ -111,24 +111,836 @@ async function generateAndRenderConstellation(items) {
 // 1. --- AI-POWERED SIGNAL EXTRACTION ---
 // ... (prioritizedItems logic remains the same) ...
 
-const extractionPrompt = `You are a sharp-witted market research analyst acting as a precision extraction tool. Your mission is to find high-value business opportunities within user comments.
+// Located inside the generateAndRenderConstellation function
 
-Your task is to identify and extract up to 15 quotes that meet the following strict criteria. A quote is only valid if it satisfies these conditions:
-1.  **Specificity:** The quote MUST describe a concrete, specific problem, task, or desired outcome.
-2.  **Strong Intent:** The quote MUST express a clear desire for a solution, either through willingness to pay ("I'd pay for this") or intense frustration with the lack of a tool ("I waste so much time on this manually").
-3.  **Verbatim Accuracy:** The "quote" you return in the JSON **MUST BE an EXACT, VERBATIM substring** from the source text. Do not paraphrase, summarize, or alter it in any way.
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
 
-**CRITICAL: WHAT TO AVOID**
-- **DO NOT** extract generic, placeholder-like wishes (e.g., "I wish there was a software for X", "someone should make an app for this"). These are too vague.
-- **DO NOT** extract simple questions (e.g., "How do I fix this?").
-- **DO NOT** extract vague frustrations without a specific context (e.g., "This is so annoying", "I hate this").
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
 
 Here are the comments, each with an index:
 ${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
 
 Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
-Example of a good, specific extraction: {"signals": [{"quote": "I've tried every single budgeting app on the market and none of them can properly handle my freelance project income.", "source_index": 12}]}`;
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
 
+// ... (the rest of the function remains exactly the same) ...// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ... // Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ... // Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
+// Located inside the generateAndRenderConstellation function
+
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
+
+const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+
+Before extracting any quote, you MUST apply this single test:
+**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
+If the answer is no, you MUST ignore the quote.
+
+A valid signal is a quote that meets ALL of the following criteria:
+1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
+2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
+3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+
+**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
+-   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
+-   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
+-   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
+-   **DO NOT** extract relationship advice or family drama.
+-   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+
+Here are the comments, each with an index:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
+Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+
+// ... (the rest of the function remains exactly the same) ...
 // ... (the rest of the function remains exactly the same) ...
 
     let rawSignals = [];

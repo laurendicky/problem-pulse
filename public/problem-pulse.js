@@ -1,7 +1,7 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 12.1 - REFINED CONSTELLATION MAP)
-// This version refines the constellation map to focus on explicit purchase intent
-// and updates the interaction model to a persistent side panel.
+// FINAL SCRIPT (VERSION 12.2 - RESILIENT CONSTELLATION MAP)
+// This version implements a two-pass AI strategy to ensure the constellation
+// map is populated reliably, first with targeted results, then with a broad search.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -52,33 +52,23 @@ function renderIncludedSubreddits(subreddits) { const container = document.getEl
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
 
-// --- NEW / MODIFIED --- Functions for the Constellation Map (v12.1)
+// --- NEW / MODIFIED --- Functions for the Constellation Map (v12.2)
 const CONSTELLATION_CATEGORIES = {
-    Automation: { x: 0.15, y: 0.25 },
-    Productivity: { x: 0.35, y: 0.65 },
-    Simplicity: { x: 0.5, y: 0.3 },
-    Customization: { x: 0.65, y: 0.75 },
-    Trust: { x: 0.85, y: 0.2 },
-    Wellness: { x: 0.2, y: 0.8 },
-    Other: { x: 0.8, y: 0.6 }
+    Automation: { x: 0.15, y: 0.25 }, Productivity: { x: 0.35, y: 0.65 }, Simplicity: { x: 0.5, y: 0.3 },
+    Customization: { x: 0.65, y: 0.75 }, Trust: { x: 0.85, y: 0.2 }, Wellness: { x: 0.2, y: 0.8 }, Other: { x: 0.8, y: 0.6 }
 };
 const EMOTION_COLORS = {
-    Frustration: '#ef4444', // Red
-    Anger: '#dc2626',       // Darker Red
-    Longing: '#8b5cf6',     // Violet
-    Desire: '#a855f7',      // Purple
-    Excitement: '#22c55e',  // Green
-    Hope: '#10b981',        // Teal
-    Urgency: '#f97316'      // Orange
+    Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7',
+    Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316'
 };
+const demandSignalKeywords = ["pay for", "buy", "take my money", "instant buy", "name your price", "i need this", "where can i get"];
 
 async function processSignalsForConstellation(posts) {
-    const postsForAI = posts.slice(0, 100).map((p, index) => ({
+    const postsForAI = posts.map((p, index) => ({
         index: index,
         text: `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 1000)}`
     }));
 
-    // --- MODIFIED --- This prompt is now much stricter to focus on purchase intent.
     const prompt = `You are a market research analyst extracting high-value demand signals where pain meets a willingness to PAY.
 Analyze the following Reddit posts. Find up to 25 quotes that demonstrate a clear willingness to PAY for a solution.
 
@@ -93,19 +83,6 @@ For each valid signal you find, provide a JSON object with:
 
 Respond ONLY with a valid JSON object with a single key "signals", which is an array of these objects.
 If you find no quotes that meet the CRITICAL RULE, return an empty array.
-
-Example:
-{
-  "signals": [
-    {
-      "quote": "I'd happily pay for an app that just automatically sorts my work expenses.",
-      "problem_theme": "Automated expense report sorting",
-      "category": "Automation",
-      "emotion": "Longing",
-      "postIndex": 12
-    }
-  ]
-}
 
 Posts to analyze:
 ${JSON.stringify(postsForAI.map(p => ({index: p.index, text: p.text.substring(0, 500)})))}
@@ -122,8 +99,7 @@ ${JSON.stringify(postsForAI.map(p => ({index: p.index, text: p.text.substring(0,
 
         return parsed.signals.map(signal => {
             const originalPost = posts[signal.postIndex];
-            if (!originalPost) return null;
-            return { ...signal, source: originalPost.data };
+            return originalPost ? { ...signal, source: originalPost.data } : null;
         }).filter(Boolean);
 
     } catch (error) {
@@ -135,12 +111,14 @@ ${JSON.stringify(postsForAI.map(p => ({index: p.index, text: p.text.substring(0,
 function renderConstellationMap(signals) {
     const container = document.getElementById('constellation-map-container');
     if (!container) return;
-    
-    // --- MODIFIED --- Remove the title from here as requested.
-    container.innerHTML = '';
+    container.innerHTML = ''; // Clear container
 
     if (!signals || signals.length === 0) {
         container.innerHTML = '<div class="panel-placeholder">No strong purchase intent signals found.<br/>Try a broader search.</div>';
+        const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+        if (panelContent) {
+            panelContent.innerHTML = `<div class="panel-placeholder">No opportunities discovered in this search.</div>`;
+        }
         return;
     }
     
@@ -148,14 +126,11 @@ function renderConstellationMap(signals) {
     signals.forEach(signal => {
         const theme = signal.problem_theme.trim().toLowerCase();
         if (!aggregatedSignals[theme]) {
-            aggregatedSignals[theme] = {
-                ...signal,
-                quotes: [],
-                frequency: 0
-            };
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
         }
         aggregatedSignals[theme].quotes.push(signal.quote);
         aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += signal.source.ups;
     });
 
     const starData = Object.values(aggregatedSignals);
@@ -169,7 +144,6 @@ function renderConstellationMap(signals) {
         const size = baseSize + (star.frequency / maxFreq) * 20;
         starEl.style.width = `${size}px`;
         starEl.style.height = `${size}px`;
-        
         starEl.style.backgroundColor = EMOTION_COLORS[star.emotion] || '#ffffff';
         
         const categoryCoords = CONSTELLATION_CATEGORIES[star.category] || CONSTELLATION_CATEGORIES.Other;
@@ -178,19 +152,16 @@ function renderConstellationMap(signals) {
         starEl.style.left = `calc(${(categoryCoords.x + x_rand) * 100}% - ${size/2}px)`;
         starEl.style.top = `calc(${(categoryCoords.y + y_rand) * 100}% - ${size/2}px)`;
         
-        // Store data for interactions
-        starEl.dataset.quote = star.quotes[0]; // Show the first quote as representative
-        starEl.dataset.allQuotes = JSON.stringify(star.quotes);
+        starEl.dataset.quote = star.quotes[0];
         starEl.dataset.problemTheme = star.problem_theme;
         starEl.dataset.sourceSubreddit = star.source.subreddit;
         starEl.dataset.sourcePermalink = star.source.permalink;
-        starEl.dataset.sourceUpvotes = star.source.ups;
-
+        starEl.dataset.sourceUpvotes = star.totalUpvotes.toLocaleString();
+        
         container.appendChild(starEl);
     });
 }
 
-// --- MODIFIED --- This function now handles the new hover-to-display interaction model.
 function initializeConstellationInteractivity() {
     const container = document.getElementById('constellation-map-container');
     const panel = document.getElementById('constellation-side-panel');
@@ -202,27 +173,55 @@ function initializeConstellationInteractivity() {
         panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`;
     };
     
-    setDefaultPanelState(); // Set initial state
+    setDefaultPanelState();
 
     container.addEventListener('mouseover', (e) => {
         if (!e.target.classList.contains('constellation-star')) return;
-        
         const star = e.target;
-        
         panelContent.innerHTML = `
             <p class="quote">“${star.dataset.quote}”</p>
             <h4 class="problem-theme">${star.dataset.problemTheme}</h4>
-            <p class="meta-info">From r/${star.dataset.sourceSubreddit} with ${star.dataset.sourceUpvotes} upvotes</p>
+            <p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes on related signals</p>
             <a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>
         `;
     });
 
     container.addEventListener('mouseout', (e) => {
-        // When the mouse leaves the map area, reset the panel
         if (e.target === container) {
             setDefaultPanelState();
         }
     });
+}
+
+// --- NEW --- Orchestrator function for the two-pass constellation generation
+async function generateConstellationData(allPosts, demandSignalTerms) {
+    console.log("Generating constellation data...");
+    
+    // Pass 1: Targeted search using only posts that contain demand keywords
+    const demandKeywordsRegex = new RegExp(demandSignalTerms.join('|'), 'i');
+    const targetedPosts = allPosts.filter(p => demandKeywordsRegex.test(p.data.selftext) || demandKeywordsRegex.test(p.data.title));
+
+    console.log(`Pass 1: Found ${targetedPosts.length} potentially relevant posts for AI analysis.`);
+    let signals = await processSignalsForConstellation(targetedPosts.length > 0 ? targetedPosts : allPosts.slice(0, 100));
+    
+    // Pass 2 (Safety Net): If Pass 1 is insufficient, run on a broader set of posts
+    if (signals.length < 5) {
+        console.log(`Pass 1 yielded only ${signals.length} signals. Running Pass 2 safety net on broader post set.`);
+        const broaderPosts = allPosts.slice(0, 150); // Use a larger slice of all posts
+        const fallbackSignals = await processSignalsForConstellation(broaderPosts);
+        signals = [...signals, ...fallbackSignals]; // Combine results
+        // Deduplicate based on theme
+        const uniqueSignals = {};
+        signals.forEach(s => {
+            if (!uniqueSignals[s.problem_theme.toLowerCase()]) {
+                uniqueSignals[s.problem_theme.toLowerCase()] = s;
+            }
+        });
+        signals = Object.values(uniqueSignals);
+    }
+    
+    console.log(`Final processed signals for constellation map: ${signals.length}`);
+    renderConstellationMap(signals);
 }
 
 
@@ -237,8 +236,8 @@ async function runProblemFinder() {
     
     const problemTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
     const deepProblemTerms = [ "struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent" ];
-    // --- MODIFIED --- Stricter search terms for purchase intent
-    const demandSignalTerms = [ "\"I would pay\"", "\"take my money\"", "\"I'd happily pay\"", "\"instant buy\"", "\"I need this\"", "\"shut up and take my money\"" ];
+    // --- MODIFIED --- Search terms are now broader for better top-of-funnel results. No quotes.
+    const demandSignalTerms = ["I would pay", "take my money", "happily pay", "instant buy", "I need this", "shut up and take my money", "where can I buy"];
 
     const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
     let searchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms, ...demandSignalTerms] : [...problemTerms, ...demandSignalTerms];
@@ -264,7 +263,8 @@ async function runProblemFinder() {
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
         
-        processSignalsForConstellation(filteredPosts).then(renderConstellationMap);
+        // --- MODIFIED --- Call the new orchestrator function for the constellation map
+        generateConstellationData(filteredPosts, demandSignalTerms);
         
         const sentimentData = generateSentimentData(filteredPosts);
         renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);

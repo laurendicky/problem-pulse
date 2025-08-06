@@ -1,7 +1,4 @@
 
-// This is the complete and corrected code for: netlify/functions/reddit-proxy.js
-
-// Add your Reddit API credentials as environment variables in the Netlify UI
 const { REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT } = process.env;
 
 // This function handles getting a valid Reddit API token

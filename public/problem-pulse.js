@@ -1,7 +1,7 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 12.0 - INTERACTIVE CONSTELLATION MAP)
-// This version visualizes demand signals as an interactive star map,
-// categorizing them by theme and emotion using AI.
+// FINAL SCRIPT (VERSION 12.1 - REFINED CONSTELLATION MAP)
+// This version refines the constellation map to focus on explicit purchase intent
+// and updates the interaction model to a persistent side panel.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -52,7 +52,7 @@ function renderIncludedSubreddits(subreddits) { const container = document.getEl
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
 
-// --- NEW --- Functions for the Constellation Map
+// --- NEW / MODIFIED --- Functions for the Constellation Map (v12.1)
 const CONSTELLATION_CATEGORIES = {
     Automation: { x: 0.15, y: 0.25 },
     Productivity: { x: 0.35, y: 0.65 },
@@ -78,16 +78,21 @@ async function processSignalsForConstellation(posts) {
         text: `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 1000)}`
     }));
 
-    const prompt = `You are a market research analyst extracting demand signals for a visual map.
-Analyze the following Reddit posts. Find up to 25 quotes that signal a problem or a desire for a solution.
-For each valid signal you find, provide a JSON object with the following keys:
-1.  "quote": The exact user quote (under 280 characters).
-2.  "problem_theme": A short, 4-5 word summary of the core problem (e.g., "Finding a durable dog toy"). This is for grouping similar quotes.
-3.  "category": Classify the user's need into ONE of the following constellation categories: [${Object.keys(CONSTELLATION_CATEGORIES).join(', ')}].
-4.  "emotion": Classify the primary emotion of the quote into ONE of the following: [${Object.keys(EMOTION_COLORS).join(', ')}].
-5.  "postIndex": The original index of the post from which the quote was extracted.
+    // --- MODIFIED --- This prompt is now much stricter to focus on purchase intent.
+    const prompt = `You are a market research analyst extracting high-value demand signals where pain meets a willingness to PAY.
+Analyze the following Reddit posts. Find up to 25 quotes that demonstrate a clear willingness to PAY for a solution.
+
+CRITICAL RULE: The quote MUST contain a phrase explicitly about purchasing, paying, or acquiring a product/service. Look for keywords like "pay for", "buy", "take my money", "shut up and take my money", "instant buy", "name your price", "I need this", "where can I get this". DO NOT include quotes that only express general frustration, problems, or wishes without a clear purchase signal.
+
+For each valid signal you find, provide a JSON object with:
+1. "quote": The exact user quote (under 280 characters).
+2. "problem_theme": A short, 4-5 word summary of the core problem.
+3. "category": Classify the user's need into ONE of the following: [${Object.keys(CONSTELLATION_CATEGORIES).join(', ')}].
+4. "emotion": Classify the primary emotion of the quote into ONE of the following: [${Object.keys(EMOTION_COLORS).join(', ')}].
+5. "postIndex": The original index of the post from which the quote was extracted.
 
 Respond ONLY with a valid JSON object with a single key "signals", which is an array of these objects.
+If you find no quotes that meet the CRITICAL RULE, return an empty array.
 
 Example:
 {
@@ -106,7 +111,7 @@ Posts to analyze:
 ${JSON.stringify(postsForAI.map(p => ({index: p.index, text: p.text.substring(0, 500)})))}
 `;
 
-    const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON for constellation map data." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 4000, response_format: { "type": "json_object" } };
+    const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON for purchase intent signals." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 4000, response_format: { "type": "json_object" } };
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('AI constellation processing failed.');
@@ -130,24 +135,27 @@ ${JSON.stringify(postsForAI.map(p => ({index: p.index, text: p.text.substring(0,
 function renderConstellationMap(signals) {
     const container = document.getElementById('constellation-map-container');
     if (!container) return;
-    container.innerHTML = '<h2 class="constellation-title">Demand Constellation</h2>'; // Reset container
+    
+    // --- MODIFIED --- Remove the title from here as requested.
+    container.innerHTML = '';
 
     if (!signals || signals.length === 0) {
-        container.innerHTML += '<p style="color: #94a3b8; text-align: center; padding-top: 40px;">Not enough demand signals found to build a constellation map.</p>';
+        container.innerHTML = '<div class="panel-placeholder">No strong purchase intent signals found.<br/>Try a broader search.</div>';
         return;
     }
     
     const aggregatedSignals = {};
     signals.forEach(signal => {
-        if (!aggregatedSignals[signal.problem_theme]) {
-            aggregatedSignals[signal.problem_theme] = {
+        const theme = signal.problem_theme.trim().toLowerCase();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = {
                 ...signal,
                 quotes: [],
                 frequency: 0
             };
         }
-        aggregatedSignals[signal.problem_theme].quotes.push(signal.quote);
-        aggregatedSignals[signal.problem_theme].frequency++;
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
     });
 
     const starData = Object.values(aggregatedSignals);
@@ -171,7 +179,8 @@ function renderConstellationMap(signals) {
         starEl.style.top = `calc(${(categoryCoords.y + y_rand) * 100}% - ${size/2}px)`;
         
         // Store data for interactions
-        starEl.dataset.quote = star.quote;
+        starEl.dataset.quote = star.quotes[0]; // Show the first quote as representative
+        starEl.dataset.allQuotes = JSON.stringify(star.quotes);
         starEl.dataset.problemTheme = star.problem_theme;
         starEl.dataset.sourceSubreddit = star.source.subreddit;
         starEl.dataset.sourcePermalink = star.source.permalink;
@@ -181,61 +190,38 @@ function renderConstellationMap(signals) {
     });
 }
 
-// --- MODIFIED --- This is now part of the main dashboard initialization
+// --- MODIFIED --- This function now handles the new hover-to-display interaction model.
 function initializeConstellationInteractivity() {
     const container = document.getElementById('constellation-map-container');
     const panel = document.getElementById('constellation-side-panel');
-    const closeBtn = panel.querySelector('.panel-close-btn');
-    const panelContent = panel.querySelector('.panel-content');
     if (!container || !panel) return;
     
-    let tooltip;
+    const panelContent = panel.querySelector('.panel-content');
+
+    const setDefaultPanelState = () => {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`;
+    };
+    
+    setDefaultPanelState(); // Set initial state
 
     container.addEventListener('mouseover', (e) => {
         if (!e.target.classList.contains('constellation-star')) return;
         
-        if (!tooltip) {
-            tooltip = document.createElement('div');
-            tooltip.className = 'constellation-tooltip';
-            document.body.appendChild(tooltip);
-        }
-        
-        const star = e.target;
-        tooltip.style.display = 'block';
-        tooltip.innerHTML = `
-            <div class="quote">“${star.dataset.quote}”</div>
-            <div class="source">r/${star.dataset.sourceSubreddit}</div>
-        `;
-    });
-
-    container.addEventListener('mousemove', (e) => {
-        if (tooltip && tooltip.style.display === 'block') {
-            tooltip.style.left = `${e.clientX + 15}px`;
-            tooltip.style.top = `${e.clientY + 15}px`;
-        }
-    });
-
-    container.addEventListener('mouseout', (e) => {
-        if (tooltip) {
-            tooltip.style.display = 'none';
-        }
-    });
-
-    container.addEventListener('click', (e) => {
-        if (!e.target.classList.contains('constellation-star')) return;
         const star = e.target;
         
         panelContent.innerHTML = `
             <p class="quote">“${star.dataset.quote}”</p>
-            <h4 class="problem-theme">Problem Theme: ${star.dataset.problemTheme}</h4>
+            <h4 class="problem-theme">${star.dataset.problemTheme}</h4>
             <p class="meta-info">From r/${star.dataset.sourceSubreddit} with ${star.dataset.sourceUpvotes} upvotes</p>
-            <a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Full Thread →</a>
+            <a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>
         `;
-        panel.classList.add('visible');
     });
-    
-    closeBtn.addEventListener('click', () => {
-        panel.classList.remove('visible');
+
+    container.addEventListener('mouseout', (e) => {
+        // When the mouse leaves the map area, reset the panel
+        if (e.target === container) {
+            setDefaultPanelState();
+        }
     });
 }
 
@@ -251,7 +237,8 @@ async function runProblemFinder() {
     
     const problemTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
     const deepProblemTerms = [ "struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent" ];
-    const demandSignalTerms = [ "I would pay for", "take my money", "I'd happily pay", "is there a tool that", "someone should make", "I need this" ];
+    // --- MODIFIED --- Stricter search terms for purchase intent
+    const demandSignalTerms = [ "\"I would pay\"", "\"take my money\"", "\"I'd happily pay\"", "\"instant buy\"", "\"I need this\"", "\"shut up and take my money\"" ];
 
     const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
     let searchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms, ...demandSignalTerms] : [...problemTerms, ...demandSignalTerms];
@@ -259,7 +246,6 @@ async function runProblemFinder() {
     
     const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
     
-    // --- MODIFIED --- Added the new constellation map container to the clear list
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "constellation-map-container"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; } });
     
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
@@ -278,7 +264,6 @@ async function runProblemFinder() {
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
         
-        // --- NEW --- Call the constellation map processing function. This runs in parallel.
         processSignalsForConstellation(filteredPosts).then(renderConstellationMap);
         
         const sentimentData = generateSentimentData(filteredPosts);
@@ -338,7 +323,6 @@ function initializeDashboardInteractivity() {
     const dashboard = document.getElementById('results-wrapper-b');
     if (!dashboard) return;
     
-    // --- NEW --- Initialize constellation interactivity
     initializeConstellationInteractivity();
 
     dashboard.addEventListener('click', (e) => {

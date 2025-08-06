@@ -1,7 +1,7 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 11.0 - DEMAND SIGNALS FEATURE)
-// This version adds a "Demand Signals" feature to find and display
-// explicit purchase intent from Reddit posts.
+// FINAL SCRIPT (VERSION 12.0 - INTERACTIVE CONSTELLATION MAP)
+// This version visualizes demand signals as an interactive star map,
+// categorizing them by theme and emotion using AI.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -52,82 +52,191 @@ function renderIncludedSubreddits(subreddits) { const container = document.getEl
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
 
-// --- NEW --- Functions for finding and rendering "Demand Signals"
-async function findDemandSignals(posts) {
-    const postsForAI = posts.slice(0, 75).map((p, index) => ({
+// --- NEW --- Functions for the Constellation Map
+const CONSTELLATION_CATEGORIES = {
+    Automation: { x: 0.15, y: 0.25 },
+    Productivity: { x: 0.35, y: 0.65 },
+    Simplicity: { x: 0.5, y: 0.3 },
+    Customization: { x: 0.65, y: 0.75 },
+    Trust: { x: 0.85, y: 0.2 },
+    Wellness: { x: 0.2, y: 0.8 },
+    Other: { x: 0.8, y: 0.6 }
+};
+const EMOTION_COLORS = {
+    Frustration: '#ef4444', // Red
+    Anger: '#dc2626',       // Darker Red
+    Longing: '#8b5cf6',     // Violet
+    Desire: '#a855f7',      // Purple
+    Excitement: '#22c55e',  // Green
+    Hope: '#10b981',        // Teal
+    Urgency: '#f97316'      // Orange
+};
+
+async function processSignalsForConstellation(posts) {
+    const postsForAI = posts.slice(0, 100).map((p, index) => ({
         index: index,
-        text: `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 1500)}`
+        text: `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 1000)}`
     }));
 
-    const prompt = `You are an expert market researcher for the '${originalGroupName}' niche, tasked with identifying explicit purchase intent from a list of Reddit posts.
+    const prompt = `You are a market research analyst extracting demand signals for a visual map.
+Analyze the following Reddit posts. Find up to 25 quotes that signal a problem or a desire for a solution.
+For each valid signal you find, provide a JSON object with the following keys:
+1.  "quote": The exact user quote (under 280 characters).
+2.  "problem_theme": A short, 4-5 word summary of the core problem (e.g., "Finding a durable dog toy"). This is for grouping similar quotes.
+3.  "category": Classify the user's need into ONE of the following constellation categories: [${Object.keys(CONSTELLATION_CATEGORIES).join(', ')}].
+4.  "emotion": Classify the primary emotion of the quote into ONE of the following: [${Object.keys(EMOTION_COLORS).join(', ')}].
+5.  "postIndex": The original index of the post from which the quote was extracted.
 
-Analyze the following posts. Extract up to 8 direct quotes where users express a clear willingness to pay for a solution, a product, or a service. Look for phrases like "I would pay for", "take my money", "where can I buy this", "shut up and take my money", "I'd happily pay", "need this now", or "instant buy".
+Respond ONLY with a valid JSON object with a single key "signals", which is an array of these objects.
 
-For each quote you find, you MUST provide:
-1. "quote": The exact verbatim quote expressing the purchase intent.
-2. "problem": A concise, one-sentence summary of the specific problem the user wants to solve.
-3. "postIndex": The original index of the post from which the quote was extracted.
+Example:
+{
+  "signals": [
+    {
+      "quote": "I'd happily pay for an app that just automatically sorts my work expenses.",
+      "problem_theme": "Automated expense report sorting",
+      "category": "Automation",
+      "emotion": "Longing",
+      "postIndex": 12
+    }
+  ]
+}
 
-Respond ONLY with a valid JSON object with a single key "signals". This key should hold an array of these objects.
-Example: { "signals": [{ "quote": "I would literally pay $50 for a chew toy my dog can't destroy in an hour.", "problem": "User needs a durable, long-lasting toy to keep their dog occupied.", "postIndex": 5 }] }
+Posts to analyze:
+${JSON.stringify(postsForAI.map(p => ({index: p.index, text: p.text.substring(0, 500)})))}
+`;
 
-If no such signals are found, return an empty array for "signals".
-
-Here are the posts to analyze:
-${JSON.stringify(postsForAI, null, 2)}`;
-
-    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a market researcher that outputs only valid JSON for purchase intent signals." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 2000, response_format: { "type": "json_object" } };
+    const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON for constellation map data." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 4000, response_format: { "type": "json_object" } };
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        if (!response.ok) throw new Error('OpenAI demand signal generation failed.');
+        if (!response.ok) throw new Error('AI constellation processing failed.');
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
-        
-        if (!parsed.signals || !Array.isArray(parsed.signals)) {
-            return [];
-        }
 
-        // --- NEW --- Map the AI results back to the original post data to include metrics
+        if (!parsed.signals || !Array.isArray(parsed.signals)) return [];
+
         return parsed.signals.map(signal => {
             const originalPost = posts[signal.postIndex];
-            if (!originalPost) return null; // Handle case where AI returns an invalid index
-
-            return {
-                quote: signal.quote,
-                problem: signal.problem,
-                upvotes: originalPost.data.ups,
-                permalink: originalPost.data.permalink,
-                created_utc: originalPost.data.created_utc
-            };
-        }).filter(Boolean); // Filter out any nulls
+            if (!originalPost) return null;
+            return { ...signal, source: originalPost.data };
+        }).filter(Boolean);
 
     } catch (error) {
-        console.error("Demand signal generation error:", error);
+        console.error("Constellation signal processing error:", error);
         return [];
     }
 }
 
-function renderDemandSignals(signals) {
-    const container = document.getElementById('demand-signals-container');
+function renderConstellationMap(signals) {
+    const container = document.getElementById('constellation-map-container');
     if (!container) return;
+    container.innerHTML = '<h2 class="constellation-title">Demand Constellation</h2>'; // Reset container
 
-    let contentHTML = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No strong demand signals were found in the top posts.</p>';
-
-    if (signals && signals.length > 0) {
-        contentHTML = signals.map(signal => `
-            <div class="demand-signal-card">
-                <blockquote class="demand-signal-quote">“${signal.quote}”</blockquote>
-                <p class="demand-signal-problem">${signal.problem}</p>
-                <div class="demand-signal-meta">
-                    <span class="meta-item">👍 ${signal.upvotes.toLocaleString()}</span>
-                    <span class="meta-item">🗓️ ${formatDate(signal.created_utc)}</span>
-                    <a href="https://www.reddit.com${signal.permalink}" target="_blank" rel="noopener noreferrer" class="meta-item meta-link">View on Reddit →</a>
-                </div>
-            </div>
-        `).join('');
+    if (!signals || signals.length === 0) {
+        container.innerHTML += '<p style="color: #94a3b8; text-align: center; padding-top: 40px;">Not enough demand signals found to build a constellation map.</p>';
+        return;
     }
+    
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!aggregatedSignals[signal.problem_theme]) {
+            aggregatedSignals[signal.problem_theme] = {
+                ...signal,
+                quotes: [],
+                frequency: 0
+            };
+        }
+        aggregatedSignals[signal.problem_theme].quotes.push(signal.quote);
+        aggregatedSignals[signal.problem_theme].frequency++;
+    });
 
-    container.innerHTML = `<h3 class="dashboard-section-title">💰 Demand Signals</h3>${contentHTML}`;
+    const starData = Object.values(aggregatedSignals);
+    const maxFreq = Math.max(...starData.map(s => s.frequency), 1);
+
+    starData.forEach(star => {
+        const starEl = document.createElement('div');
+        starEl.className = 'constellation-star';
+        
+        const baseSize = 8;
+        const size = baseSize + (star.frequency / maxFreq) * 20;
+        starEl.style.width = `${size}px`;
+        starEl.style.height = `${size}px`;
+        
+        starEl.style.backgroundColor = EMOTION_COLORS[star.emotion] || '#ffffff';
+        
+        const categoryCoords = CONSTELLATION_CATEGORIES[star.category] || CONSTELLATION_CATEGORIES.Other;
+        const x_rand = (Math.random() - 0.5) * 0.1;
+        const y_rand = (Math.random() - 0.5) * 0.1;
+        starEl.style.left = `calc(${(categoryCoords.x + x_rand) * 100}% - ${size/2}px)`;
+        starEl.style.top = `calc(${(categoryCoords.y + y_rand) * 100}% - ${size/2}px)`;
+        
+        // Store data for interactions
+        starEl.dataset.quote = star.quote;
+        starEl.dataset.problemTheme = star.problem_theme;
+        starEl.dataset.sourceSubreddit = star.source.subreddit;
+        starEl.dataset.sourcePermalink = star.source.permalink;
+        starEl.dataset.sourceUpvotes = star.source.ups;
+
+        container.appendChild(starEl);
+    });
+}
+
+// --- MODIFIED --- This is now part of the main dashboard initialization
+function initializeConstellationInteractivity() {
+    const container = document.getElementById('constellation-map-container');
+    const panel = document.getElementById('constellation-side-panel');
+    const closeBtn = panel.querySelector('.panel-close-btn');
+    const panelContent = panel.querySelector('.panel-content');
+    if (!container || !panel) return;
+    
+    let tooltip;
+
+    container.addEventListener('mouseover', (e) => {
+        if (!e.target.classList.contains('constellation-star')) return;
+        
+        if (!tooltip) {
+            tooltip = document.createElement('div');
+            tooltip.className = 'constellation-tooltip';
+            document.body.appendChild(tooltip);
+        }
+        
+        const star = e.target;
+        tooltip.style.display = 'block';
+        tooltip.innerHTML = `
+            <div class="quote">“${star.dataset.quote}”</div>
+            <div class="source">r/${star.dataset.sourceSubreddit}</div>
+        `;
+    });
+
+    container.addEventListener('mousemove', (e) => {
+        if (tooltip && tooltip.style.display === 'block') {
+            tooltip.style.left = `${e.clientX + 15}px`;
+            tooltip.style.top = `${e.clientY + 15}px`;
+        }
+    });
+
+    container.addEventListener('mouseout', (e) => {
+        if (tooltip) {
+            tooltip.style.display = 'none';
+        }
+    });
+
+    container.addEventListener('click', (e) => {
+        if (!e.target.classList.contains('constellation-star')) return;
+        const star = e.target;
+        
+        panelContent.innerHTML = `
+            <p class="quote">“${star.dataset.quote}”</p>
+            <h4 class="problem-theme">Problem Theme: ${star.dataset.problemTheme}</h4>
+            <p class="meta-info">From r/${star.dataset.sourceSubreddit} with ${star.dataset.sourceUpvotes} upvotes</p>
+            <a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Full Thread →</a>
+        `;
+        panel.classList.add('visible');
+    });
+    
+    closeBtn.addEventListener('click', () => {
+        panel.classList.remove('visible');
+    });
 }
 
 
@@ -140,19 +249,18 @@ async function runProblemFinder() {
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value); const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
     searchButton.classList.add('is-loading'); searchButton.disabled = true;
     
-    // --- MODIFIED --- Added demand signal terms to the search queries
     const problemTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
     const deepProblemTerms = [ "struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent" ];
-    const demandSignalTerms = [ "I would pay for", "take my money", "shut up and take my money", "is there a tool that", "someone should make" ];
+    const demandSignalTerms = [ "I would pay for", "take my money", "I'd happily pay", "is there a tool that", "someone should make", "I need this" ];
 
     const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
     let searchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms, ...demandSignalTerms] : [...problemTerms, ...demandSignalTerms];
-    let limitPerTerm = (searchDepth === 'deep') ? 75 : 40; // Adjusted limits slightly for more terms
+    let limitPerTerm = (searchDepth === 'deep') ? 75 : 40;
     
     const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
     
-    // --- MODIFIED --- Added the new demand signals container to the list of elements to clear.
-    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "demand-signals-container"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; } });
+    // --- MODIFIED --- Added the new constellation map container to the clear list
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "constellation-map-container"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; } });
     
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
@@ -170,19 +278,15 @@ async function runProblemFinder() {
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
         
-        // --- NEW --- Call the new function to find and render demand signals. This runs in parallel.
-        findDemandSignals(filteredPosts).then(signals => {
-            renderDemandSignals(signals);
-        });
+        // --- NEW --- Call the constellation map processing function. This runs in parallel.
+        processSignalsForConstellation(filteredPosts).then(renderConstellationMap);
         
         const sentimentData = generateSentimentData(filteredPosts);
         renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
         
-        generateEmotionMapData(filteredPosts).then(emotionMapData => {
-            renderEmotionMap(emotionMapData);
-        });
+        generateEmotionMapData(filteredPosts).then(renderEmotionMap);
 
         renderIncludedSubreddits(selectedSubreddits);
         extractAndValidateEntities(filteredPosts, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
@@ -233,6 +337,10 @@ async function runProblemFinder() {
 function initializeDashboardInteractivity() {
     const dashboard = document.getElementById('results-wrapper-b');
     if (!dashboard) return;
+    
+    // --- NEW --- Initialize constellation interactivity
+    initializeConstellationInteractivity();
+
     dashboard.addEventListener('click', (e) => {
         const cloudWordEl = e.target.closest('.cloud-word');
         const entityEl = e.target.closest('.discovery-list-item');

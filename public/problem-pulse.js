@@ -92,224 +92,162 @@ function renderSentimentScore(positiveCount, negativeCount) { const container = 
 // SECTION 1: CONSTELLATION MAP LOGIC (RE-ARCHITECTED AND SIMPLIFIED)
 // =================================================================================
 // =================================================================================
-// SECTION 1: CONSTELLATION MAP LOGIC (RE-ARCHITECTED AND SIMPLIFIED)
+// COMPLETE FUNCTION 1 of 2: runConstellationAnalysis
+// This version uses a robust fetching strategy to avoid API errors.
 // =================================================================================
 
-const CONSTELLATION_CATEGORIES = { Automation: { x: 0.15, y: 0.25 }, Productivity: { x: 0.35, y: 0.65 }, Simplicity: { x: 0.5, y: 0.3 }, Customization: { x: 0.65, y: 0.75 }, Trust: { x: 0.85, y: 0.2 }, Wellness: { x: 0.2, y: 0.8 }, Other: { x: 0.8, y: 0.6 } };
-const EMOTION_COLORS = { Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7', Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316' };
-
-// This function now does EVERYTHING. It finds signals, enriches them, and renders the map.
-// It is the single source of truth for the constellation map.
-async function generateAndRenderConstellation(items) {
-    console.log("[Constellation] Starting full generation process...");
-
-    // 1. --- AI-POWERED SIGNAL IDENTIFICATION (NOT EXTRACTION) ---
-    // We prioritize the most upvoted/relevant items for analysis.
-    const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 200);
-    console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal identification.`);
-
-    // CHANGE 1: The prompt is completely rewritten.
-    // Instead of asking for a "quote", we ask the AI to IDENTIFY which items are relevant
-    // and provide a short summary of the problem. This prevents hallucinated quotes.
-    const identificationPrompt = `You are a market research analyst. From the following list of user posts/comments, identify up to 15 that express a strong purchase intent or an unsolved problem perfect for a new product.
-
-    Focus ONLY on posts/comments that directly mention:
-    - Willingness to pay ("I'd pay for", "take my money")
-    - Frustration with a lack of a tool ("wish there was an app for", "why is there no tool")
-    - A specific, unmet need ("I need something that does X but Y gets in the way")
-
-    CRITICAL: For each relevant item you find, provide its original index and a short, 4-5 word summary of the core problem. IGNORE general complaints or emotional support requests.
-
-    Here are the posts/comments:
-    ${prioritizedItems.map((item, index) => `Item ${index}: ${((item.data.body || item.data.selftext || '')).substring(0, 500)}`).join('\n---\n')}
-
-    Respond ONLY with a valid JSON object: {"signals": [{"source_index": 4, "problem_summary": "Wishes for automated scheduling tool"}]}`;
-    
-    let identifiedSignals = [];
-    try {
-        const identificationResponse = await fetch(OPENAI_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data identification engine that outputs only valid JSON." }, { role: "user", content: identificationPrompt }], temperature: 0.1, max_tokens: 2000, response_format: { "type": "json_object" } } })
-        });
-        if (!identificationResponse.ok) throw new Error("AI Signal Identification Failed");
-        const identificationData = await identificationResponse.json();
-        const parsedIdentification = JSON.parse(identificationData.openaiResponse);
-
-        // CHANGE 2: Process the identified signals. We now store the *entire original item* for later use.
-        if (parsedIdentification.signals && Array.isArray(parsedIdentification.signals)) {
-            identifiedSignals = parsedIdentification.signals.map(signal => {
-                const sourceItem = prioritizedItems[signal.source_index];
-                if (!sourceItem) return null; // Ignore if index is out of bounds
-                return {
-                    problem_theme: signal.problem_summary, // The summary from the AI
-                    sourceItem: sourceItem // The complete, original post/comment object
-                };
-            }).filter(Boolean); // Filter out any nulls
-        }
-    } catch (error) {
-        console.error("CRITICAL ERROR in AI Signal Identification:", error);
-        renderConstellationMap([]); // Render empty map on failure
-        return;
-    }
-
-    console.log(`[Constellation] AI identified ${identifiedSignals.length} high-quality signals.`);
-    if (identifiedSignals.length === 0) {
-        renderConstellationMap([]);
-        return;
-    }
-
-    // 2. --- AI-POWERED ENRICHMENT (WITH FULL CONTEXT) ---
-    // CHANGE 3: The enrichment prompt now receives the FULL ORIGINAL TEXT of the identified items.
-    // This gives it maximum context for accurate classification.
-    const enrichmentPrompt = `You are a market research analyst. For each user post/comment below, classify its category and emotion.
-    
-    Posts/Comments:
-    ${identifiedSignals.map((signal, index) => {
-        const text = signal.sourceItem.data.body || signal.sourceItem.data.selftext || '';
-        return `${index}. "${text.substring(0, 1000)}"`
-    }).join('\n')}
-
-    For EACH item, provide a JSON object with:
-    1. "category": Classify the user's need into ONE of: [${Object.keys(CONSTELLATION_CATEGORIES).join(', ')}].
-    2. "emotion": Classify the primary emotion into ONE of: [${Object.keys(EMOTION_COLORS).join(', ')}].
-
-    Respond ONLY with a valid JSON object: {"enriched_signals": [...]}. The array MUST be the same length as the list of items.`;
-
-    let finalSignals = [];
-    try {
-        const enrichmentResponse = await fetch(OPENAI_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_tokens: 2000, response_format: { "type": "json_object" } } })
-        });
-        if (!enrichmentResponse.ok) throw new Error("AI Signal Enrichment Failed");
-        const enrichmentData = await enrichmentResponse.json();
-        const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse);
-
-        // CHANGE 4: Combine the results from both AI calls into a final, complete object for rendering.
-        if (parsedEnrichment.enriched_signals && parsedEnrichment.enriched_signals.length === identifiedSignals.length) {
-            finalSignals = identifiedSignals.map((signal, index) => ({
-                problem_theme: signal.problem_theme, // From identification step
-                source: signal.sourceItem.data, // The full, original data object
-                ...parsedEnrichment.enriched_signals[index] // Category & Emotion from enrichment step
-            }));
-        }
-    } catch (error) {
-        console.error("CRITICAL ERROR in AI Signal Enrichment:", error);
-        renderConstellationMap([]); // Render empty map on failure
-        return;
-    }
-    
-    console.log(`[Constellation] AI enriched ${finalSignals.length} signals. Rendering map.`);
-    
-    // 3. --- RENDER THE MAP ---
-    renderConstellationMap(finalSignals);
-}
-
-function renderConstellationMap(signals) {
-    const container = document.getElementById('constellation-map-container');
-    if (!container) return;
-    container.innerHTML = '';
-
-    if (!signals || signals.length === 0) {
-        container.innerHTML = '<div class="panel-placeholder">No strong purchase intent signals found.<br/>Try a broader search or different communities.</div>';
-        const panelContent = document.querySelector('#constellation-side-panel .panel-content');
-        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No opportunities discovered.</div>`;
-        return;
-    }
-
-    // CHANGE 5: Aggregation logic is simplified. We now group by the AI-generated problem_theme.
-    // We store the first representative signal for each theme to use its source data.
-    const aggregatedSignals = {};
-    signals.forEach(signal => {
-        if (!signal.problem_theme || !signal.source) return;
-        const theme = signal.problem_theme.trim().toLowerCase();
-        if (!aggregatedSignals[theme]) {
-            aggregatedSignals[theme] = { 
-                ...signal, 
-                representativeSource: signal.source, // Store the first source we see for this theme
-                frequency: 0, 
-                totalUpvotes: 0,
-                allSources: [] // Store all sources for potential future use
-            };
-        }
-        aggregatedSignals[theme].frequency++;
-        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
-        aggregatedSignals[theme].allSources.push(signal.source);
-    });
-
-    const starData = Object.values(aggregatedSignals);
-    const maxFreq = Math.max(...starData.map(s => s.frequency), 1);
-
-    starData.forEach(star => {
-        const starEl = document.createElement('div');
-        starEl.className = 'constellation-star';
-        const size = 8 + (star.frequency / maxFreq) * 20;
-        starEl.style.width = `${size}px`;
-        starEl.style.height = `${size}px`;
-        starEl.style.backgroundColor = EMOTION_COLORS[star.emotion] || '#ffffff';
-        const categoryCoords = CONSTELLATION_CATEGORIES[star.category] || CONSTELLATION_CATEGORIES.Other;
-        const x_rand = (Math.random() - 0.5) * 0.1;
-        const y_rand = (Math.random() - 0.5) * 0.1;
-        starEl.style.left = `calc(${(categoryCoords.x + x_rand) * 100}% - ${size/2}px)`;
-        starEl.style.top = `calc(${(categoryCoords.y + y_rand) * 100}% - ${size/2}px)`;
-        
-        // CHANGE 6: Set dataset attributes using the TRUE original source data.
-        // The quote is now a direct, real excerpt from the original comment/post.
-        const originalText = star.representativeSource.body || star.representativeSource.selftext || "No text found.";
-        const realQuote = getFirstTwoSentences(originalText) || originalText.substring(0, 200);
-
-        starEl.dataset.quote = realQuote; // This is now a REAL quote.
-        starEl.dataset.problemTheme = star.problem_theme;
-        starEl.dataset.sourceSubreddit = star.representativeSource.subreddit;
-        starEl.dataset.sourcePermalink = star.representativeSource.permalink;
-        starEl.dataset.sourceUpvotes = star.totalUpvotes.toLocaleString();
-        container.appendChild(starEl);
-    });
-}
-
-function initializeConstellationInteractivity() {
-    const container = document.getElementById('constellation-map-container');
-    const panel = document.getElementById('constellation-side-panel');
-    if (!container || !panel) return;
-
-    const panelContent = panel.querySelector('.panel-content');
-    let hidePanelTimer;
-
-    const setDefaultPanelState = () => { panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`; };
-    const hidePanel = () => { setDefaultPanelState(); };
-    setDefaultPanelState();
-
-    container.addEventListener('mouseover', (e) => {
-        if (!e.target.classList.contains('constellation-star')) return;
-        clearTimeout(hidePanelTimer);
-        const star = e.target;
-        // CHANGE 7: The HTML displayed is now guaranteed to be from the original source.
-        panelContent.innerHTML = `<p class="quote">“${star.dataset.quote}...”</p><h4 class="problem-theme">${star.dataset.problemTheme}</h4><p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes on related signals</p><a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>`;
-    });
-
-    container.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); });
-    panel.addEventListener('mouseenter', () => { clearTimeout(hidePanelTimer); });
-    panel.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); });
-}
-
-// This function now ONLY fetches data and passes it to the main generator.
-async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
+async function runConstellationAnalysis(subredditQueryString, timeFilter) {
     console.log("--- Starting Delayed Constellation Analysis (in background) ---");
     try {
-        const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false);
-        const postIds = demandSignalPosts.sort((a,b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id);
-        const highIntentComments = await fetchCommentsForPosts(postIds);
-        const allItems = [...demandSignalPosts, ...highIntentComments];
+        // These simple keywords are robust and won't crash the Reddit API proxy.
+        // We fetch a broad set of posts/comments and let the AI find the specific signals.
+        const constellationKeywords = [
+            "wish there was", "need an app", "looking for a tool", "solution for",
+            "alternative to", "hate that", "frustrating that", "i'd pay for",
+            "is there an app", "a better way to", "tool for"
+        ];
         
-        // This is the single, crucial call to our new, robust function.
+        console.log("[Constellation] Fetching broad data using robust keywords...");
+
+        // Fetch posts that contain our simple keywords.
+        const posts = await fetchMultipleRedditDataBatched(subredditQueryString, constellationKeywords, 40, timeFilter, false);
+        
+        // From the posts found, get the IDs of the top 50 to fetch their comments.
+        // Comments are often where the best purchase-intent signals are.
+        const topPostIds = posts
+            .sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0))
+            .slice(0, 50) 
+            .map(p => p.data.id);
+
+        console.log(`[Constellation] Fetching comments for ${topPostIds.length} top posts.`);
+        const comments = await fetchCommentsForPosts(topPostIds);
+
+        // Combine the fetched posts and their comments into one large pool for analysis.
+        const allItems = [...posts, ...comments];
+        
+        if (allItems.length === 0) {
+            console.log("[Constellation] No relevant items found with broad keywords. Aborting.");
+            renderConstellationMap([]); // Render an empty map
+            return;
+        }
+
+        console.log(`[Constellation] Found ${allItems.length} total items. Passing to AI for signal identification.`);
+        
+        // This is the crucial call to the intelligent analysis function.
+        // It takes the large, reliably-fetched dataset and finds the true signals within it.
         await generateAndRenderConstellation(allItems);
 
         console.log("--- Constellation Analysis Complete. ---");
     } catch (error) {
         console.error("Constellation analysis failed in the background:", error);
-        renderConstellationMap([]); 
+        renderConstellationMap([]); // Ensure the map is cleared on failure
+    }
+}
+
+
+// =================================================================================
+// COMPLETE FUNCTION 2 of 2: runProblemFinder
+// This version is updated to call the new runConstellationAnalysis function correctly.
+// =================================================================================
+
+async function runProblemFinder() {
+    // --- UI and variable setup ---
+    const searchButton = document.getElementById('search-selected-btn'); if (!searchButton) { console.error("Could not find button."); return; }
+    const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked'); if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
+    const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value); const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
+    searchButton.classList.add('is-loading'); searchButton.disabled = true;
+    
+    const problemTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
+    const deepProblemTerms = [ "struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent" ];
+    
+    const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "constellation-map-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+    const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
+    const resultsMessageDiv = document.getElementById("results-message");
+    const countHeaderDiv = document.getElementById("count-header");
+    if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
+    findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
+
+    try {
+        // --- PHASE 1: FAST ANALYSIS ---
+        console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
+        const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
+        let generalSearchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms] : problemTerms;
+        let limitPerTerm = (searchDepth === 'deep') ? 75 : 40;
+        const selectedTimeRaw = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
+        const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
+        const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" }; const selectedTime = timeMap[selectedTimeRaw] || "all";
+
+        const constellationContainer = document.getElementById('constellation-map-container');
+        if (constellationContainer) {
+            const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+            const placeholderHTML = '<div class="panel-placeholder">Loading purchase signals...</div>';
+            const panelPlaceholderHTML = '<div class="panel-placeholder">Insights loading...</div>';
+            constellationContainer.innerHTML = placeholderHTML;
+            if(panelContent) panelContent.innerHTML = panelPlaceholderHTML;
+        }
+
+        const problemItems = await fetchMultipleRedditDataBatched(subredditQueryString, generalSearchTerms, limitPerTerm, selectedTime, false);
+        
+        console.log(`Phase 1 complete: Found ${problemItems.length} general problem items.`);
+        
+        const allItems = deduplicatePosts(problemItems);
+        if (allItems.length === 0) throw new Error("No initial problem posts found. Try different communities or a broader search.");
+        
+        const filteredItems = filterPosts(allItems, selectedMinUpvotes);
+        if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
+        window._filteredPosts = filteredItems; 
+        
+        renderPosts(filteredItems);
+        const sentimentData = generateSentimentData(filteredItems);
+        renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
+        renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
+        renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
+        generateEmotionMapData(filteredItems).then(renderEmotionMap);
+        renderIncludedSubreddits(selectedSubreddits);
+        extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
+        generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
+        const userNicheCount = allItems.filter(p => ((p.data.title || p.data.link_title || '') + (p.data.selftext || p.data.body || '')).toLowerCase().includes(originalGroupName.toLowerCase())).length;
+        if (countHeaderDiv) countHeaderDiv.textContent = `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
+        const topKeywords = getTopKeywords(filteredItems, 10);
+        const topPosts = filteredItems.slice(0, 30);
+        const combinedTexts = topPosts.map(post => `${post.data.title || post.data.link_title || ''}. ${getFirstTwoSentences(post.data.selftext || post.data.body || '')}`).join("\n\n");
+        const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["Quote A", "Quote B", "Quote C"], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_tokens: 1500, response_format: { "type": "json_object" } };
+        const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!openAIResponse.ok) throw new Error('OpenAI summary generation failed.');
+        const openAIData = await openAIResponse.json(); const summaries = parseAISummary(openAIData.openaiResponse);
+        const validatedSummaries = summaries.filter(finding => filteredItems.filter(post => calculateRelevanceScore(post, finding) > 0).length >= 3);
+        if (validatedSummaries.length === 0) { throw new Error("While posts were found, none formed a clear, common problem."); }
+        const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
+        const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
+        window._summaries = sortedFindings.map(item => item.summary);
+        sortedFindings.forEach((findingData, index) => {
+            const displayIndex = index + 1; if (displayIndex > 5) return;
+            const block = document.getElementById(`findings-block${displayIndex}`); const content = document.getElementById(`findings-${displayIndex}`); const btn = document.getElementById(`button-sample${displayIndex}`);
+            if (block) block.style.display = "flex";
+            if (content) {
+                const { summary, prevalence, supportCount } = findingData; const summaryId = `summary-body-${displayIndex}-${Date.now()}`; const summaryShort = summary.body.length > 95 ? summary.body.substring(0, 95) + "…" : summary.body;
+                let metricsHtml = (sortedFindings.length === 1) ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
+                content.innerHTML = `<div class="section-title">${summary.title}</div><div class="summary-expand-container"><span class="summary-teaser" id="${summaryId}">${summaryShort}</span>${summary.body.length > 95 ? `<button class="see-more-btn" data-summary="${summaryId}">See more</button>` : ""}<span class="summary-full" id="${summaryId}-full" style="display:none">${summary.body}</span></div><div class="quotes-container">${summary.quotes.map(quote => `<div class="quote">"${quote}"</div>`).join('')}</div>${metricsHtml}`;
+                if (summary.body.length > 95) { const seeMoreBtn = content.querySelector(`.see-more-btn`); if(seeMoreBtn) seeMoreBtn.addEventListener('click', function() { const teaser = content.querySelector(`#${summaryId}`), full = content.querySelector(`#${summaryId}-full`); const isHidden = teaser.style.display !== 'none'; teaser.style.display = isHidden ? 'none' : 'inline'; full.style.display = isHidden ? 'inline' : 'none'; seeMoreBtn.textContent = isHidden ? 'See less' : 'See more'; }); }
+            }
+            if (btn) btn.onclick = function() { showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); };
+        });
+        window._postsForAssignment = filteredItems.slice(0, 75); window._usedPostIds = new Set();
+        const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment); window._assignments = assignments;
+        for (let i = 0; i < window._summaries.length; i++) { if (i >= 5) break; showSamplePosts(i, assignments, filteredItems, window._usedPostIds); }
+        if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); setTimeout(() => { if (resultsWrapper) { resultsWrapper.style.opacity = '1'; resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, 50); } }
+
+        // --- PHASE 2: SLOW ANALYSIS (TRIGGERED IN BACKGROUND) ---
+        runConstellationAnalysis(subredditQueryString, selectedTime);
+        
+    } catch (err) {
+        console.error("The following error stopped the primary analysis:", err);
+        if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
+        if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); resultsWrapper.style.opacity = '1'; }
+    } finally {
+        searchButton.classList.remove('is-loading');
+        searchButton.disabled = false;
     }
 }
 // =================================================================================

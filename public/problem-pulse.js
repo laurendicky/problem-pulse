@@ -111,33 +111,35 @@ async function generateAndRenderConstellation(items) {
 // 1. --- AI-POWERED SIGNAL EXTRACTION ---
 // ... (prioritizedItems logic remains the same) ...
 
+// Located inside the generateAndRenderConstellation function
 
-const extractionPrompt = `You are a Product Manager at a tech company. Your sole job is to identify unmet user needs that could be solved with a new app, software tool, or specific digital service.
+// 1. --- AI-POWERED SIGNAL EXTRACTION ---
+// ... (prioritizedItems logic remains the same) ...
 
-Before extracting any quote, you MUST apply this single test:
-**"Is the user describing a tangible problem that a new software tool or specific service could directly solve?"**
-If the answer is no, you MUST ignore the quote.
+const extractionPrompt = `You are a Product Manager hunting for actionable user needs that can be directly solved with a new physical product, service, business, app or software tool.
 
-A valid signal is a quote that meets ALL of the following criteria:
-1.  **Product-Solvable:** The problem is about a task, a workflow, or a lack of a tool. It is NOT about general emotions, life decisions, or self-improvement.
-2.  **Commercial Intent:** The user either explicitly mentions paying for a solution OR expresses intense frustration with a process that implies a high willingness to pay to fix it.
-3.  **Verbatim Accuracy:** The quote MUST be an EXACT, character-for-character copy from the source text. Do not alter or summarize it.
+Your absolute priority is to distinguish between a user **describing a past situation** and a user **expressing an unmet need for a new capability**. Only the latter is a valid signal.
 
-**THE CRUCIAL FILTER: IGNORE THESE TOPICS COMPLETELY**
--   **DO NOT** extract quotes about general emotional distress or venting. (e.g., "I’m having an emotional hard time right now...").
--   **DO NOT** extract quotes about personal life desires or decisions. (e.g., "I just want to be married ASAP? Yes!").
--   **DO NOT** extract quotes about psychological states or self-improvement goals. (e.g., "I feel like I should get over my body dysmorphia...").
--   **DO NOT** extract relationship advice or family drama.
--   **DO NOT** extract generic wishes. (e.g., "I wish someone would make an app for this").
+A valid quote MUST be forward-looking or express a problem with a **specific, repeatable task**.
 
-Here are the comments, each with an index:
+To be selected, a quote must satisfy ONE of these conditions:
+1.  **Explicit Purchase Intent:** The user directly states they would pay for a solution (e.g., "I would pay for...", "take my money").
+2.  **Wishing for a Tool:** The user wishes for a specific tool or feature that doesn't exist (e.g., "I wish there was an app that did X", "if only I could find software for Y").
+3.  **Intense Frustration with a Task:** The user describes a tedious, manual, or time-consuming task they are forced to do, implying a strong need for automation (e.g., "I waste hours every week doing...", "manually creating these reports is a nightmare").
+
+**CRITICAL RULE: AVOID NARRATIVES AND EXPLANATIONS.**
+Do not extract stories or explanations of past events, even if they mention money or costs. These are not unmet needs.
+
+For example, this is a **BAD** quote (it's a narrative):
+"I had a dry wedding... The reception venue required we pay an extra fee and hire security..."
+
+Here are the comments to analyze:
 ${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
 
-Respond ONLY with a valid JSON object with a single key "signals". "signals" is an array of objects.
-Example of a PERFECT extraction: {"signals": [{"quote": "I spend hours every month manually creating invoices from my Stripe data, I'd pay good money for a tool that automates this.", "source_index": 25}]}`;
+Respond ONLY with a valid JSON object: {"signals": [{"quote": "The verbatim quote expressing an unmet need.", "source_index": 4}]}. The quote MUST be an exact copy.`;
 
 // ... (the rest of the function remains exactly the same) ...
- 
+
     let rawSignals = [];
     try {
         const extractionResponse = await fetch(OPENAI_PROXY_URL, {

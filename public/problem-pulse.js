@@ -233,13 +233,17 @@ function initializeConstellationInteractivity() {
     container.addEventListener('mouseout', (e) => { if (e.target === container) setDefaultPanelState(); });
 }
 
-// =================================================================================
-// BLOCK 3 of 4: MAIN ANALYSIS FUNCTION (UPDATED)
-// =================================================================================
+
+
+
 // =================================================================================
 // BLOCK 3 of 4: MAIN ANALYSIS FUNCTION (CORRECTED & OPTIMIZED)
 // =================================================================================
+// =================================================================================
+// BLOCK 3 of 4: MAIN ANALYSIS FUNCTION (DEBUG VERSION WITH LOGGING & TIMEOUTS)
+// =================================================================================
 async function runProblemFinder() {
+    // --- Start of UI and variable setup (no changes here) ---
     const searchButton = document.getElementById('search-selected-btn'); if (!searchButton) { console.error("Could not find button."); return; }
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked'); if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value); const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
@@ -258,7 +262,6 @@ async function runProblemFinder() {
         "waste hours every week", "such a timesuck", "pay just to not have to think", "rather pay than do this myself"
     ];
     
-    // UI Clearing Logic (no changes here)
     const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "constellation-map-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
@@ -266,7 +269,8 @@ async function runProblemFinder() {
     const countHeaderDiv = document.getElementById("count-header");
     if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
     findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
-    
+    // --- End of UI and variable setup ---
+
     try {
         const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
         let generalSearchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms] : problemTerms;
@@ -275,44 +279,56 @@ async function runProblemFinder() {
         const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
         const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" }; const selectedTime = timeMap[selectedTimeRaw] || "all";
 
-        // <<< NEW LOGIC START: PARALLEL FETCHING >>>
-        console.log("Fetching general problem items and demand signals in parallel...");
+        // <<< NEW: Promise with Timeout Helper >>>
+        const promiseWithTimeout = (promise, ms, errorMessage) => {
+            let timeoutId;
+            const timeoutPromise = new Promise((_, reject) => {
+                timeoutId = setTimeout(() => reject(new Error(errorMessage)), ms);
+            });
+            return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+        };
+        const FETCH_TIMEOUT = 45000; // 45 seconds
 
-        // TASK A: Fetch general problem posts. This is a promise that starts running immediately.
+        console.log("--- STARTING NEW ANALYSIS RUN ---");
+
+        // TASK A: Fetch general problem posts
+        console.log("[TASK A] Starting: Fetch general problem posts.");
         const problemItemsPromise = fetchMultipleRedditDataBatched(subredditQueryString, generalSearchTerms, limitPerTerm, selectedTime, false);
 
-        // TASK B: This is an async function that handles the entire two-step demand signal process.
+        // TASK B: Fetch demand signal posts and their comments
         const getDemandSignalItems = async () => {
-            console.log("Starting demand signal search...");
-            // Step 1: Fetch posts that MIGHT contain demand signals.
+            console.log("[TASK B] Starting: Fetch demand signal items.");
+            
+            console.log("[TASK B] Step 1: Fetching initial posts that might contain demand signals...");
             const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, selectedTime, false);
-            console.log(`Found ${demandSignalPosts.length} initial posts with potential demand signals.`);
+            console.log(`[TASK B] Step 1 COMPLETE: Found ${demandSignalPosts.length} initial posts.`);
 
             if (demandSignalPosts.length === 0) {
-                return []; // No posts found, so no comments to fetch. Return empty.
+                console.log("[TASK B] No initial posts found. Skipping comment search.");
+                return [];
             }
 
-            // Step 2: If we found posts, get their IDs and fetch all their comments.
             const postIds = demandSignalPosts.map(p => p.data.id);
+            console.log(`[TASK B] Step 2: Fetching comments for ${postIds.length} posts...`);
             const highIntentComments = await fetchCommentsForPosts(postIds);
+            console.log(`[TASK B] Step 2 COMPLETE: Found ${highIntentComments.length} comments.`);
 
-            // Return the combined array of original posts and all their comments.
-            return [...demandSignalPosts, ...highIntentComments];
+            const combined = [...demandSignalPosts, ...highIntentComments];
+            console.log(`[TASK B] Finished: Returning a total of ${combined.length} items.`);
+            return combined;
         };
-
-        // We kick off Task B immediately. This also returns a promise.
-        const demandSignalItemsPromise = getDemandSignalItems();
         
-        // Now, we wait for BOTH long operations (Task A and Task B) to complete concurrently.
+        // <<< NEW: Wrap promises with the timeout utility >>>
+        console.log("Kicking off both tasks in parallel with a 45-second timeout...");
         const [problemItems, demandSignalItems] = await Promise.all([
-            problemItemsPromise,
-            demandSignalItemsPromise
+            promiseWithTimeout(problemItemsPromise, FETCH_TIMEOUT, "Task A (Fetching general problems) timed out."),
+            promiseWithTimeout(getDemandSignalItems(), FETCH_TIMEOUT, "Task B (Fetching demand signals & comments) timed out.")
         ]);
         
-        console.log(`Finished parallel fetch. Found ${problemItems.length} general problem items and ${demandSignalItems.length} potential demand signal items.`);
-        // <<< NEW LOGIC END >>>
+        console.log("--- PARALLEL FETCHING COMPLETE ---");
+        console.log(`Received ${problemItems.length} general problem items.`);
+        console.log(`Received ${demandSignalItems.length} demand signal items.`);
         
-        // This function now receives the rich, combined data as intended.
         generateConstellationData(demandSignalItems, demandSignalTerms);
 
         const allItems = deduplicatePosts([...demandSignalItems, ...problemItems]);
@@ -322,21 +338,17 @@ async function runProblemFinder() {
         if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
         window._filteredPosts = filteredItems; 
         
-        // ... THE REST OF THE FUNCTION CONTINUES AS NORMAL ...
-        // (No changes needed below this line in this function)
-        
+        // --- The rest of the function remains exactly the same ---
+        console.log("Starting main content analysis and rendering...");
         renderPosts(filteredItems);
-        
         const sentimentData = generateSentimentData(filteredItems);
         renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
-        
         generateEmotionMapData(filteredItems).then(renderEmotionMap);
         renderIncludedSubreddits(selectedSubreddits);
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
-        
         const userNicheCount = allItems.filter(p => ((p.data.title || p.data.link_title || '') + (p.data.selftext || p.data.body || '')).toLowerCase().includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) countHeaderDiv.textContent = `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
         const topKeywords = getTopKeywords(filteredItems, 10);
@@ -368,13 +380,18 @@ async function runProblemFinder() {
         for (let i = 0; i < window._summaries.length; i++) { if (i >= 5) break; showSamplePosts(i, assignments, filteredItems, window._usedPostIds); }
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); setTimeout(() => { if (resultsWrapper) { resultsWrapper.style.opacity = '1'; resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, 50); } }
     } catch (err) {
-        console.error("Error in main analysis:", err);
-        if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
+        console.error("--- CATCH BLOCK TRIGGERED ---");
+        console.error("The following error stopped the analysis:", err);
+        if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center; font-family: monospace; padding: 1rem; background: #fff0f0; border: 1px solid red; border-radius: 4px;">❌ Analysis Failed: ${err.message}</p>`;
         if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); resultsWrapper.style.opacity = '1'; }
     } finally {
-        searchButton.classList.remove('is-loading'); searchButton.disabled = false;
+        console.log("--- FINALLY BLOCK REACHED ---");
+        searchButton.classList.remove('is-loading');
+        searchButton.disabled = false;
     }
-}   
+}
+
+
 
 // =================================================================================
 // BLOCK 4 of 4: INITIALIZATION LOGIC

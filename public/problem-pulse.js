@@ -1,14 +1,13 @@
 // =================================================================================
-// FINAL SCRIPT (VERSION 10.3 - DEFINITIVE PROBLEM MAP FIX)
-// This version uses a robust "AI-First with Keyword Fallback" model to guarantee
-// a rich, populated map of actual problems, while being resilient to errors.
+// FINAL SCRIPT (VERSION 11.0 - DEMAND SIGNALS FEATURE)
+// This version adds a "Demand Signals" feature to find and display
+// explicit purchase intent from Reddit posts.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 let originalGroupName = '';
-let _selectedSubreddits = []; // Global store for selected subreddits
 const suggestions = ["Dog Lovers", "Start-up Founders", "Fitness Beginners", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Developers", "Brides To Be"];
 const positiveColors = ['#2E7D32', '#388E3C', '#43A047', '#1B5E20'];
 const negativeColors = ['#C62828', '#D32F2F', '#E53935', '#B71C1C'];
@@ -22,36 +21,7 @@ const stopWords = ["a", "about", "above", "after", "again", "against", "all", "a
 // --- 2. ALL HELPER AND LOGIC FUNCTIONS ---
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
 function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
-// MODIFIED: This function now uses the 'type' parameter to tell the proxy what to do
-async function fetchFromReddit(payload) {
-    try {
-        const response = await fetch(REDDIT_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        if (!response.ok) {
-            throw new Error(`Reddit Proxy Error: Server returned status ${response.status}`);
-        }
-        return await response.json();
-    } catch (err) {
-        console.error(`Failed to fetch from Reddit via proxy:`, err.message);
-        return null;
-    }
-}
-async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all') {
-    let allPosts = [];
-    let after = null;
-    while (allPosts.length < totalLimit) {
-        const payload = { type: 'search', searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after };
-        const data = await fetchFromReddit(payload);
-        if (!data || !data.data || !data.data.children || !data.data.children.length) break;
-        allPosts = allPosts.concat(data.data.children);
-        after = data.data.after;
-        if (!after) break;
-    }
-    return allPosts.slice(0, totalLimit);
-}
+async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all') { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after }) }); if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return []; } return allPosts.slice(0, totalLimit); }
 async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all') { const allResults = []; for (let i = 0; i < searchTerms.length; i += 8) { const batchTerms = searchTerms.slice(i, i + 8); const batchPromises = batchTerms.map(term => fetchRedditForTermWithPagination(niche, term, limitPerTerm, timeFilter)); const batchResults = await Promise.all(batchPromises); batchResults.forEach(posts => { if (Array.isArray(posts)) { allResults.push(...posts); } }); if (i + 8 < searchTerms.length) { await new Promise(resolve => setTimeout(resolve, 500)); } } return deduplicatePosts(allResults); }
 function parseAISummary(aiResponse) { try { aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim(); const jsonMatch = aiResponse.match(/{[\s\S]*}/); if (!jsonMatch) { throw new Error("No JSON object in AI response."); } const parsed = JSON.parse(jsonMatch[0]); if (!parsed.summaries || !Array.isArray(parsed.summaries) || parsed.summaries.length < 1) { throw new Error("AI response lacks a 'summaries' array."); } parsed.summaries.forEach((summary, idx) => { const missingFields = []; if (!summary.title) missingFields.push("title"); if (!summary.body) missingFields.push("body"); if (typeof summary.count !== 'number') missingFields.push("count"); if (!summary.quotes || !Array.isArray(summary.quotes) || summary.quotes.length < 1) missingFields.push("quotes"); if (!summary.keywords || !Array.isArray(summary.keywords) || summary.keywords.length === 0) missingFields.push("keywords"); if (missingFields.length > 0) throw new Error(`Summary ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`); }); return parsed.summaries; } catch (error) { console.error("Parsing Error:", error); console.log("Raw AI Response:", aiResponse); throw new Error("Failed to parse AI response."); } }
 function parseAIAssignments(aiResponse) { try { aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim(); const jsonMatch = aiResponse.match(/{[\s\S]*}/); if (!jsonMatch) { throw new Error("No JSON object in AI response."); } const parsed = JSON.parse(jsonMatch[0]); if (!parsed.assignments || !Array.isArray(parsed.assignments)) { throw new Error("AI response lacks an 'assignments' array."); } parsed.assignments.forEach((assignment, idx) => { const missingFields = []; if (typeof assignment.postNumber !== 'number') missingFields.push("postNumber"); if (typeof assignment.finding !== 'number') missingFields.push("finding"); if (missingFields.length > 0) throw new Error(`Assignment ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`); }); return parsed.assignments; } catch (error) { console.error("Parsing Error:", error); console.log("Raw AI Response:", aiResponse); throw new Error("Failed to parse AI response."); } }
@@ -77,156 +47,87 @@ function showSlidingPanel(word, posts, category) { const positivePanel = documen
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title}\nContent: ${p.data.selftext.substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
 async function extractAndValidateEntities(posts, nicheContext) { const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 800)}`).join('\n---\n'); const prompt = `You are a market research analyst reviewing Reddit posts from the '${nicheContext}' community. Extract the following: 1. "brands": Specific, proper-noun company, brand, or service names (e.g., "KitchenAid", "Stripe"). 2. "products": Common, generic product categories (e.g., "stand mixer", "CRM software"). CRITICAL RULES: Be strict. Exclude acronyms (MOH, AITA), generic words (UPDATE), etc. Respond ONLY with a JSON object with two keys: "brands" and "products", holding an array of strings. If none, return an empty array. Text: ${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1000, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('AI entity extraction failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const allEntities = { brands: parsed.brands || [], products: parsed.products || [] }; window._entityData = {}; for (const type in allEntities) { window._entityData[type] = {}; allEntities[type].forEach(name => { const regex = new RegExp(`\\b${name.replace(/ /g, '\\s')}(s?)\\b`, 'gi'); const mentioningPosts = posts.filter(post => regex.test(post.data.title + ' ' + post.data.selftext)); if (mentioningPosts.length > 0) { window._entityData[type][name] = { count: mentioningPosts.length, posts: mentioningPosts }; } }); } return { topBrands: Object.entries(window._entityData.brands || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8), topProducts: Object.entries(window._entityData.products || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8) }; } catch (error) { console.error("Entity extraction error:", error); return { topBrands: [], topProducts: [] }; } }
 function renderDiscoveryList(containerId, data, title, type) { const container = document.getElementById(containerId); if(!container) return; let listItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No significant mentions found.</p>'; if (data.length > 0) { listItems = data.map(([name, details], index) => `<li class="discovery-list-item" data-word="${name}" data-type="${type}"><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${details.count} mentions</span></li>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`; }
-
-// --- COMPLETELY REBUILT FUNCTION ---
-// Finds and displays real user comments for a given FAQ.
-async function findRedditAnswersForFAQ(faqText) {
-    const answersContainer = document.getElementById('faq-answers');
-    if (!answersContainer) { console.error("The 'faq-answers' container was not found."); return; }
-
-    answersContainer.innerHTML = `<h3 class="dashboard-section-title">Finding Real Answers for: "${faqText}"</h3><p class="loading-text" style="text-align:center; padding: 2rem;">Finding best discussion & fetching comments...</p>`;
-    answersContainer.style.display = 'block';
-    answersContainer.scrollIntoView({ behavior: 'smooth', block: 'center' });
-
-    try {
-        // Step 1: Use AI to get the best search keywords from the question.
-        const keywordPrompt = `From the following question, extract the 4-5 most important and unique keywords for a search engine. Exclude common words like "how", "what", "is". Question: "${faqText}". Respond ONLY with a valid JSON object with a single key "keywords", which is an array of strings. Example: {"keywords": ["budget", "anxiety", "wedding", "planning"]}`;
-        const keywordParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a keyword extraction tool that outputs only JSON." }, { role: "user", content: keywordPrompt }], temperature: 0, max_tokens: 100, response_format: { "type": "json_object" } };
-        const keywordResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: keywordParams }) });
-        if (!keywordResponse.ok) throw new Error('AI keyword extraction failed.');
-        const keywordData = await keywordResponse.json();
-        const keywords = JSON.parse(keywordData.openaiResponse).keywords;
-        if (!keywords || keywords.length === 0) throw new Error("Could not extract keywords from question.");
-
-        // Step 2: Use keywords to find the single best post.
-        const redditSearchQuery = keywords.join(' OR ');
-        const subredditQueryString = _selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
-        const posts = await fetchRedditForTermWithPagination(subredditQueryString, redditSearchQuery, 100, 'all');
-        if (!posts || posts.length === 0) throw new Error("No relevant discussions found on Reddit.");
-
-        const bestPost = posts.sort((a, b) => (b.data.score + b.data.num_comments * 2) - (a.data.score + a.data.num_comments * 2))[0];
-        const postId = bestPost.data.id;
-
-        // Step 3: Fetch the comments for that single best post.
-        const commentsData = await fetchFromReddit({ type: 'comments', postId });
-        if (!commentsData || !commentsData[1] || !commentsData[1].data) throw new Error("Could not fetch comments for the selected post.");
-        
-        const comments = commentsData[1].data.children
-            .filter(c => c.kind === 't1' && c.data.body && c.data.body !== '[deleted]' && c.data.body !== '[removed]' && c.data.author !== 'AutoModerator')
-            .sort((a, b) => b.data.score - a.data.score); // Sort by upvotes
-
-        if (comments.length === 0) throw new Error("Found a discussion, but it had no valid comments.");
-
-        // Step 4: Render the top comments.
-        const formatBody = (text) => text.replace(/\n/g, '<br>');
-        const commentsHTML = comments.slice(0, 10).map(comment => `
-            <div class="reddit-answer-item" style="border-top: 1px solid #eee; padding: 12px 0;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; color: #555; font-size: 0.9rem;">
-                    <span style="font-weight: bold; color: #007bff;">${comment.data.author}</span>
-                    <span style="font-weight: bold;">👍 ${comment.data.score.toLocaleString()}</span>
-                </div>
-                <div style="line-height: 1.6;">${formatBody(comment.data.body)}</div>
-            </div>
-        `).join('');
-        
-        const sourceLink = `https://www.reddit.com${bestPost.data.permalink}`;
-        const finalHTML = `
-            <h3 class="dashboard-section-title">Top Answers for: "${faqText}"</h3>
-            <div style="padding: 8px 12px; background-color: #e9f2ff; border-radius: 6px; margin-bottom: 1rem; text-align: center;">
-                Showing answers from the post: <a href="${sourceLink}" target="_blank" rel="noopener noreferrer" style="font-weight: bold;">${bestPost.data.title}</a>
-            </div>
-            ${commentsHTML}
-        `;
-        answersContainer.innerHTML = finalHTML;
-
-    } catch (error) {
-        console.error("Error in findRedditAnswersForFAQ:", error);
-        answersContainer.innerHTML = `<h3 class="dashboard-section-title">Could Not Find Answers</h3><p style="color: red; text-align: center;">${error.message}</p>`;
-    }
-}
-
-function renderFAQs(faqs) {
-    const container = document.getElementById('faq-container');
-    if (!container) return;
-    let faqItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">Could not generate common questions from the text.</p>';
-    if (faqs.length > 0) {
-        faqItems = faqs.map((faq) =>
-            `<div class="faq-item">
-                <button class="faq-question">
-                    <span class="faq-text">${faq}</span>
-                    <span class="see-reddit-answers-btn" data-faq-text="${encodeURIComponent(faq)}">See Real Answers</span>
-                </button>
-                <div class="faq-answer">
-                    <p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p>
-                </div>
-            </div>`
-        ).join('');
-    }
-    container.innerHTML = `<h3 class="dashboard-section-title">Frequently Asked Questions</h3>${faqItems}`;
-
-    container.querySelectorAll('.faq-question').forEach(button => {
-        button.addEventListener('click', (event) => {
-            if (event.target.closest('.see-reddit-answers-btn')) {
-                event.stopPropagation();
-                const btn = event.target.closest('.see-reddit-answers-btn');
-                const faqText = decodeURIComponent(btn.dataset.faqText);
-                findRedditAnswersForFAQ(faqText);
-                return;
-            }
-
-            const answer = button.nextElementSibling;
-            button.classList.toggle('active');
-            if (answer.style.maxHeight) {
-                answer.style.maxHeight = null;
-                answer.style.padding = '0 1.5rem';
-            } else {
-                answer.style.padding = '1rem 1.5rem';
-                answer.style.maxHeight = answer.scrollHeight + "px";
-            }
-        });
-    });
-}
-
+function renderFAQs(faqs) { const container = document.getElementById('faq-container'); if(!container) return; let faqItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">Could not generate common questions from the text.</p>'; if (faqs.length > 0) { faqItems = faqs.map((faq) => `<div class="faq-item"><button class="faq-question">${faq}</button><div class="faq-answer"><p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p></div></div>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">Frequently Asked Questions</h3>${faqItems}`; container.querySelectorAll('.faq-question').forEach(button => { button.addEventListener('click', () => { const answer = button.nextElementSibling; button.classList.toggle('active'); if (answer.style.maxHeight) { answer.style.maxHeight = null; answer.style.padding = '0 1.5rem'; } else { answer.style.padding = '1rem 1.5rem'; answer.style.maxHeight = answer.scrollHeight + "px"; } }); }); }
 function renderIncludedSubreddits(subreddits) { const container = document.getElementById('included-subreddits-container'); if(!container) return; const tags = subreddits.map(sub => `<div class="subreddit-tag">r/${sub}</div>`).join(''); container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list">${tags}</div>`; }
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
-async function findPurchaseIntent(posts) {
-    const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title}\nContent: ${p.data.selftext.substring(0, 1000)}`).join('\n---\n');
-    const prompt = `You are an expert market researcher for the '${originalGroupName}' niche, tasked with identifying explicit purchase intent.
-Analyze the following Reddit posts. Extract up to 5 direct quotes where users express a clear willingness to pay for a solution, a product, or a service.
-Look for phrases like "I would pay for", "take my money", "where can I buy this", "shut up and take my money", "I'd happily pay", "need this now", or "instant buy".
-For each quote you find, also provide a very brief summary of the problem the user wants to solve.
-Respond ONLY with a valid JSON object with a single key "signals". This key should hold an array of objects, where each object has two keys: "problem" and "quote".
-Example: { "signals": [{ "problem": "A durable dog toy", "quote": "I would literally pay $50 for a chew toy my dog can't destroy in an hour." }] }
+
+// --- NEW --- Functions for finding and rendering "Demand Signals"
+async function findDemandSignals(posts) {
+    const postsForAI = posts.slice(0, 75).map((p, index) => ({
+        index: index,
+        text: `Title: ${p.data.title}\nBody: ${p.data.selftext.substring(0, 1500)}`
+    }));
+
+    const prompt = `You are an expert market researcher for the '${originalGroupName}' niche, tasked with identifying explicit purchase intent from a list of Reddit posts.
+
+Analyze the following posts. Extract up to 8 direct quotes where users express a clear willingness to pay for a solution, a product, or a service. Look for phrases like "I would pay for", "take my money", "where can I buy this", "shut up and take my money", "I'd happily pay", "need this now", or "instant buy".
+
+For each quote you find, you MUST provide:
+1. "quote": The exact verbatim quote expressing the purchase intent.
+2. "problem": A concise, one-sentence summary of the specific problem the user wants to solve.
+3. "postIndex": The original index of the post from which the quote was extracted.
+
+Respond ONLY with a valid JSON object with a single key "signals". This key should hold an array of these objects.
+Example: { "signals": [{ "quote": "I would literally pay $50 for a chew toy my dog can't destroy in an hour.", "problem": "User needs a durable, long-lasting toy to keep their dog occupied.", "postIndex": 5 }] }
+
 If no such signals are found, return an empty array for "signals".
-Posts to analyze:
-${topPostsText}`;
-    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a market researcher that outputs only valid JSON for purchase intent signals." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 800, response_format: { "type": "json_object" } };
+
+Here are the posts to analyze:
+${JSON.stringify(postsForAI, null, 2)}`;
+
+    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a market researcher that outputs only valid JSON for purchase intent signals." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 2000, response_format: { "type": "json_object" } };
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        if (!response.ok) throw new Error('OpenAI purchase intent generation failed.');
+        if (!response.ok) throw new Error('OpenAI demand signal generation failed.');
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
-        return parsed.signals || [];
+        
+        if (!parsed.signals || !Array.isArray(parsed.signals)) {
+            return [];
+        }
+
+        // --- NEW --- Map the AI results back to the original post data to include metrics
+        return parsed.signals.map(signal => {
+            const originalPost = posts[signal.postIndex];
+            if (!originalPost) return null; // Handle case where AI returns an invalid index
+
+            return {
+                quote: signal.quote,
+                problem: signal.problem,
+                upvotes: originalPost.data.ups,
+                permalink: originalPost.data.permalink,
+                created_utc: originalPost.data.created_utc
+            };
+        }).filter(Boolean); // Filter out any nulls
+
     } catch (error) {
-        console.error("Purchase intent generation error:", error);
+        console.error("Demand signal generation error:", error);
         return [];
     }
 }
 
-function renderPurchaseIntent(signals) {
-    const container = document.getElementById('purchase-intent-container');
+function renderDemandSignals(signals) {
+    const container = document.getElementById('demand-signals-container');
     if (!container) return;
-    let contentHTML = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No direct purchase intent signals were found in the top posts.</p>';
+
+    let contentHTML = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No strong demand signals were found in the top posts.</p>';
+
     if (signals && signals.length > 0) {
         contentHTML = signals.map(signal => `
-            <div class="purchase-intent-item">
-                <div class="problem-summary">${signal.problem}</div>
-                <p class="quote">"${signal.quote}"</p>
+            <div class="demand-signal-card">
+                <blockquote class="demand-signal-quote">“${signal.quote}”</blockquote>
+                <p class="demand-signal-problem">${signal.problem}</p>
+                <div class="demand-signal-meta">
+                    <span class="meta-item">👍 ${signal.upvotes.toLocaleString()}</span>
+                    <span class="meta-item">🗓️ ${formatDate(signal.created_utc)}</span>
+                    <a href="https://www.reddit.com${signal.permalink}" target="_blank" rel="noopener noreferrer" class="meta-item meta-link">View on Reddit →</a>
+                </div>
             </div>
         `).join('');
     }
-    container.innerHTML = `<h3 class="dashboard-section-title">Purchase Intent Signals</h3>${contentHTML}`;
+
+    container.innerHTML = `<h3 class="dashboard-section-title">💰 Demand Signals</h3>${contentHTML}`;
 }
 
 
@@ -236,18 +137,22 @@ function renderPurchaseIntent(signals) {
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn'); if (!searchButton) { console.error("Could not find button."); return; }
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked'); if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
-    
-    _selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
-    const subredditQueryString = _selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
-    
+    const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value); const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
     searchButton.classList.add('is-loading'); searchButton.disabled = true;
-    const quickSearchTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
-    const deepSearchTerms = [ "struggle", "challenge", "problem", "issue", "difficulty", "pain point", "pet peeve", "annoyance", "frustration", "disappointed", "help", "advice", "solution", "workaround", "how to", "fix", "rant", "vent" ];
+    
+    // --- MODIFIED --- Added demand signal terms to the search queries
+    const problemTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
+    const deepProblemTerms = [ "struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent" ];
+    const demandSignalTerms = [ "I would pay for", "take my money", "shut up and take my money", "is there a tool that", "someone should make" ];
+
     const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
-    let searchTerms = (searchDepth === 'deep') ? deepSearchTerms : quickSearchTerms; let limitPerTerm = (searchDepth === 'deep') ? 100 : 50;
+    let searchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms, ...demandSignalTerms] : [...problemTerms, ...demandSignalTerms];
+    let limitPerTerm = (searchDepth === 'deep') ? 75 : 40; // Adjusted limits slightly for more terms
+    
     const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
     
-    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "faq-answers", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "purchase-intent-container"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; } });
+    // --- MODIFIED --- Added the new demand signals container to the list of elements to clear.
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "demand-signals-container"].forEach(id => { const el = document.getElementById(id); if (el) { el.innerHTML = ""; } });
     
     for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); if (block) block.style.display = "none"; }
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
@@ -264,6 +169,12 @@ async function runProblemFinder() {
         if (filteredPosts.length < 10) { throw new Error("Not enough high-quality posts found."); }
         window._filteredPosts = filteredPosts;
         renderPosts(filteredPosts);
+        
+        // --- NEW --- Call the new function to find and render demand signals. This runs in parallel.
+        findDemandSignals(filteredPosts).then(signals => {
+            renderDemandSignals(signals);
+        });
+        
         const sentimentData = generateSentimentData(filteredPosts);
         renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
@@ -273,13 +184,9 @@ async function runProblemFinder() {
             renderEmotionMap(emotionMapData);
         });
 
-        renderIncludedSubreddits(_selectedSubreddits);
+        renderIncludedSubreddits(selectedSubreddits);
         extractAndValidateEntities(filteredPosts, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredPosts).then(faqs => renderFAQs(faqs));
-        
-        findPurchaseIntent(filteredPosts).then(signals => {
-            renderPurchaseIntent(signals);
-        });
         
         const userNicheCount = allPosts.filter(p => ((p.data.title + p.data.selftext).toLowerCase()).includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) countHeaderDiv.textContent = `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;

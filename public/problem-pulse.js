@@ -188,16 +188,26 @@ Respond ONLY with a valid JSON object: {"enriched_signals": [...]}. The array mu
 }
 
 /**
- * STEP 3: The main orchestrator for the new constellation logic.
+ * STEP 3: The main orchestrator for the new constellation logic. (FINAL VERSION)
  */
 async function generateConstellationData(highIntentItems, demandSignalTerms) {
     const rawSignals = extractSignalsFromItems(highIntentItems, demandSignalTerms);
+    
+    // If we have no raw signals, stop here.
     if (rawSignals.length === 0) {
         console.log("No raw signals could be extracted. Rendering empty map.");
         renderConstellationMap([]);
         return;
     }
-    const enrichedSignals = await enrichSignalsWithAI(rawSignals.slice(0, 75));
+
+    // <<< CRITICAL FIX: REDUCE THE NUMBER OF SIGNALS SENT TO AI >>>
+    // We only need the top ~30 signals for a great map, and this prevents the 10-second timeout.
+    const MAX_SIGNALS_FOR_AI = 30; 
+    const signalsForAI = rawSignals.slice(0, MAX_SIGNALS_FOR_AI);
+
+    // Now, enrich only this smaller, manageable batch.
+    const enrichedSignals = await enrichSignalsWithAI(signalsForAI);
+    
     console.log(`Final processed signals for constellation map: ${enrichedSignals.length}`);
     renderConstellationMap(enrichedSignals);
 }

@@ -220,19 +220,32 @@ async function generateAndRenderConstellation(items) {
     // 3. --- RENDER THE MAP ---
     renderConstellationMap(enrichedSignals);
 }
-
 function renderConstellationMap(signals) {
     const container = document.getElementById('constellation-map-container');
     if (!container) return;
-    container.innerHTML = '';
+
+    // ========================================================================
+    // === THE FIX: SURGICAL REMOVAL INSTEAD OF BULLDOZING ===
+    // This finds ONLY the elements with the 'constellation-star' class
+    // and removes them, leaving your other HTML elements (circles, labels) untouched.
+    const oldStars = container.querySelectorAll('.constellation-star');
+    oldStars.forEach(star => star.remove());
+    // ========================================================================
 
     if (!signals || signals.length === 0) {
-        container.innerHTML = '<div class="panel-placeholder">No strong purchase intent signals found.<br/>Try a broader search or different communities.</div>';
+        // This part now safely adds a placeholder if there are no stars,
+        // without deleting your circles. We can create a temporary element for it.
+        const placeholder = document.createElement('div');
+        placeholder.className = 'panel-placeholder constellation-star'; // Use same class to get removed next run
+        placeholder.innerHTML = 'No strong purchase intent signals found.<br/>Try a broader search or different communities.';
+        container.appendChild(placeholder);
+        
         const panelContent = document.querySelector('#constellation-side-panel .panel-content');
         if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No opportunities discovered.</div>`;
         return;
     }
 
+    // Aggregate signals into unique "stars"
     const aggregatedSignals = {};
     signals.forEach(signal => {
         if (!signal.problem_theme || !signal.source) return;
@@ -248,6 +261,7 @@ function renderConstellationMap(signals) {
     const starData = Object.values(aggregatedSignals);
     const maxFreq = Math.max(...starData.map(s => s.frequency), 1);
 
+    // Group stars by category for orbital calculations
     const starsByCategory = {};
     starData.forEach(star => {
         const categoryKey = star.category && CONSTELLATION_CATEGORIES[star.category] ? star.category : 'Other';
@@ -257,9 +271,10 @@ function renderConstellationMap(signals) {
         starsByCategory[categoryKey].push(star);
     });
 
+    // Create and position each star
     starData.forEach(star => {
         const starEl = document.createElement('div');
-        starEl.className = 'constellation-star';
+        starEl.className = 'constellation-star'; // This class is how we find it to remove it later
         const size = 8 + (star.frequency / maxFreq) * 20;
         starEl.style.width = `${size}px`;
         starEl.style.height = `${size}px`;
@@ -302,10 +317,11 @@ function renderConstellationMap(signals) {
         starEl.dataset.sourceSubreddit = star.source.subreddit;
         starEl.dataset.sourcePermalink = star.source.permalink;
         starEl.dataset.sourceUpvotes = star.totalUpvotes.toLocaleString();
+        
+        // Add the new star to the container
         container.appendChild(starEl);
     });
 }
-
 function initializeConstellationInteractivity() {
     const container = document.getElementById('constellation-map-container');
     const panel = document.getElementById('constellation-side-panel');

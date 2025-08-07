@@ -1,5 +1,5 @@
 // =================================================================================
-// COMPLETE AND VERIFIED SCRIPT (VERSION 12.9)
+// COMPLETE AND VERIFIED SCRIPT (VERSION 12.9 - CORRECTED)
 // This version is a complete, working file with the user-defined constellation logic,
 // the critical post/comment processor, aggressive data fetching, and all
 // previously missing helper functions restored.
@@ -92,30 +92,35 @@ function renderSentimentScore(positiveCount, negativeCount) { const container = 
 // SECTION 1: CONSTELLATION MAP LOGIC (RE-ARCHITECTED AND SIMPLIFIED)
 // =================================================================================
 
-// NEW CATEGORY DEFINITIONS
 const CONSTELLATION_CATEGORIES = {
-    // The main category in the center of the map
-    DemandSignals: { x: 0.5, y: 0.5 }, 
-    
-    // The five outer "orbiting" categories
-    WillingnessToPay:      { x: 0.85, y: 0.30 }, // Top-Right
-    Frustration:           { x: 0.80, y: 0.75 }, // Bottom-Right
-    SubstituteComparisons: { x: 0.20, y: 0.75 }, // Bottom-Left
-    Urgency:               { x: 0.15, y: 0.30 }, // Top-Left
-    CostConcerns:          { x: 0.5,  y: 0.90 }, // Bottom-Center
-    
-    // Fallback category
-    Other: { x: 0.5, y: 0.1 } // Placed at the top if uncategorized
+    DemandSignals:         { x: 0.5, y: 0.5 }, 
+    WillingnessToPay:      { x: 0.85, y: 0.30 },
+    Frustration:           { x: 0.80, y: 0.75 },
+    SubstituteComparisons: { x: 0.20, y: 0.75 },
+    Urgency:               { x: 0.15, y: 0.30 },
+    CostConcerns:          { x: 0.5,  y: 0.90 },
+    Other:                 { x: 0.5, y: 0.1 } 
 };
 
-// This function now does EVERYTHING. It finds signals, enriches them, and renders the map.
-// It is the single source of truth for the constellation map
+// =================================================================================
+// === THE FIX: DEFINE THE MISSING EMOTION_COLORS CONSTANT HERE ===
+// =================================================================================
+const EMOTION_COLORS = { 
+    Frustration: '#ef4444', // red
+    Anger: '#dc2626',       // darker red
+    Longing: '#8b5cf6',     // purple
+    Desire: '#a855f7',      // lighter purple
+    Excitement: '#22c55e',  // green
+    Hope: '#10b981',        // teal
+    Urgency: '#f97316'      // orange
+};
+
 // This function now does EVERYTHING. It finds signals, enriches them, and renders the map.
 // It is the single source of truth for the constellation map.
 async function generateAndRenderConstellation(items) {
     console.log("[Constellation] Starting full generation process...");
 
-    // 1. --- AI-POWERED SIGNAL EXTRACTION (No changes here) ---
+    // 1. --- AI-POWERED SIGNAL EXTRACTION ---
     const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 200);
     console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
 
@@ -165,7 +170,7 @@ async function generateAndRenderConstellation(items) {
         return;
     }
 
-    // 2. --- AI-POWERED ENRICHMENT (UPDATED PROMPT) ---
+    // 2. --- AI-POWERED ENRICHMENT ---
     const enrichmentPrompt = `You are a market research analyst. For each quote below, provide a short summary of the user's core problem and classify it into the MOST relevant category.
 
     Here are the categories and their definitions:
@@ -263,13 +268,8 @@ function renderConstellationMap(signals) {
         const categoryKey = star.category && CONSTELLATION_CATEGORIES[star.category] ? star.category : 'Other';
         const categoryCoords = CONSTELLATION_CATEGORIES[categoryKey];
         
-        // ========================================================================
-        // NEW: DUAL POSITIONING LOGIC
-        // ========================================================================
-        
-        // IF the star is in the center category, cluster it randomly.
         if (categoryKey === 'DemandSignals') {
-            const CLUSTER_SPREAD = 12; // How wide the central cluster is (in percent)
+            const CLUSTER_SPREAD = 12; 
             const offsetX = (Math.random() - 0.5) * CLUSTER_SPREAD;
             const offsetY = (Math.random() - 0.5) * CLUSTER_SPREAD;
             const finalX = (categoryCoords.x * 100) + offsetX;
@@ -277,7 +277,6 @@ function renderConstellationMap(signals) {
             starEl.style.left = `calc(${finalX}% - ${size / 2}px)`;
             starEl.style.top = `calc(${finalY}% - ${size / 2}px)`;
         
-        // ELSE (for all other categories), place it in a natural orbit.
         } else {
             const categoryStars = starsByCategory[categoryKey];
             const starIndex = categoryStars.findIndex(s => s.problem_theme === star.problem_theme);
@@ -298,8 +297,6 @@ function renderConstellationMap(signals) {
             starEl.style.top = `calc(${finalY}% - ${size / 2}px)`;
         }
         
-        // ========================================================================
-
         starEl.dataset.quote = star.quotes[0];
         starEl.dataset.problemTheme = star.problem_theme;
         starEl.dataset.sourceSubreddit = star.source.subreddit;
@@ -333,7 +330,6 @@ function initializeConstellationInteractivity() {
     panel.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); });
 }
 
-// This function now ONLY fetches data and passes it to the main generator.
 async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
     console.log("--- Starting Delayed Constellation Analysis (in background) ---");
     try {
@@ -342,7 +338,6 @@ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms,
         const highIntentComments = await fetchCommentsForPosts(postIds);
         const allItems = [...demandSignalPosts, ...highIntentComments];
         
-        // This is the single, crucial call.
         await generateAndRenderConstellation(allItems);
 
         console.log("--- Constellation Analysis Complete. ---");

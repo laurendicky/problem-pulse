@@ -87,26 +87,28 @@ function renderIncludedSubreddits(subreddits) { const container = document.getEl
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 // =================================================================================
 // SECTION 1: CONSTELLATION MAP LOGIC (RE-ARCHITECTED FOR RADIAL LAYOUT)
+// =================================================================================;
+// =================================================================================
+// SECTION 1: CONSTELLATION MAP LOGIC (RE-ARCHITECTED FOR GALAXY/NEBULA LAYOUT)
 // =================================================================================
 
-// Define the new radial layout and categories
-const RADIAL_CATEGORIES = {
-    // These keys must match the 'category' output from the AI enrichment prompt
-    mentionsOfPrice: { name: "Mentions of Price", angle: -90, color: '#3498db' }, // Top
-    desireDespiteCost: { name: "Desire Despite Cost", angle: -20, color: '#2ecc71' }, // Top-Right
-    frustrationWithCurrent: { name: "Frustration with Current Offerings", angle: 50, color: '#e74c3c' }, // Bottom-Right
-    urgencyToSolve: { name: "Urgency to Solve", angle: 180, color: '#f1c40f' }, // Left
-    substituteComparisons: { name: "Substitute Comparisons", angle: 120, color: '#9b59b6' } // Bottom-Left
+// Define the new Category "Zones" with their center coordinates and size
+const CATEGORY_ZONES = {
+    // Keys must match the 'category' from the AI prompt.
+    // x, y are percentages for the center. radius is the zone's size.
+    mentionsOfPrice:        { name: "Mentions of Price", color: '#3498db', x: 0.25, y: 0.25, radius: 0.2 },
+    desireDespiteCost:      { name: "Desire Despite Cost", color: '#2ecc71', x: 0.75, y: 0.2,  radius: 0.22 },
+    frustrationWithCurrent: { name: "Frustration", color: '#e74c3c', x: 0.7,  y: 0.75, radius: 0.25 },
+    urgencyToSolve:         { name: "Urgency to Solve", color: '#f1c40f', x: 0.2,  y: 0.7,  radius: 0.18 },
+    substituteComparisons:  { name: "Comparisons", color: '#9b59b6', x: 0.5,  y: 0.5,  radius: 0.2 }
 };
 
-// This function now does EVERYTHING. It finds signals, enriches them for the new layout, and renders the map.
+// Main generation function - finds signals, enriches them, and renders the map.
 async function generateAndRenderConstellation(items) {
-    console.log("[Constellation] Starting full generation process for new radial map...");
+    console.log("[Constellation] Starting full generation process for GALAXY MAP...");
 
-    // 1. --- AI-POWERED SIGNAL EXTRACTION (This prompt is good, we keep it) ---
+    // 1. --- AI-POWERED SIGNAL EXTRACTION ---
     const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 200);
-    console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
-
     const extractionPrompt = `You are a Product Manager hunting for actionable user needs that can be directly solved with a new app or software tool. Your absolute priority is to distinguish between a user **describing a past situation** and a user **expressing an unmet need for a new capability**. Only the latter is a valid signal. A valid quote MUST be forward-looking or express a problem with a **specific, repeatable task**. To be selected, a quote must satisfy ONE of these conditions: 1. **Explicit Purchase Intent:** The user directly states they would pay for a solution (e.g., "I would pay for...", "take my money"). 2. **Wishing for a Tool:** The user wishes for a specific tool or feature that doesn't exist (e.g., "I wish there was an app that did X", "if only I could find software for Y"). 3. **Intense Frustration with a Task:** The user describes a tedious, manual, or time-consuming task they are forced to do, implying a strong need for automation (e.g., "I waste hours every week doing...", "manually creating these reports is a nightmare"). **CRITICAL RULE: AVOID NARRATIVES AND EXPLANATIONS.** Do not extract stories or explanations of past events, even if they mention money or costs. For example, this is a **BAD** quote (it's a narrative): "I had a dry wedding... The reception venue required we pay an extra fee and hire security..." Here are the comments to analyze: ${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')} Respond ONLY with a valid JSON object: {"signals": [{"quote": "The verbatim quote expressing an unmet need.", "source_index": 4}]}. The quote MUST be an exact copy.`;
 
     let rawSignals = [];
@@ -119,44 +121,22 @@ async function generateAndRenderConstellation(items) {
         if (!extractionResponse.ok) throw new Error("AI Signal Extraction Failed");
         const extractionData = await extractionResponse.json();
         const parsedExtraction = JSON.parse(extractionData.openaiResponse);
-
         if (parsedExtraction.signals && Array.isArray(parsedExtraction.signals)) {
-            rawSignals = parsedExtraction.signals.map(signal => ({
-                quote: signal.quote,
-                sourceItem: prioritizedItems[signal.source_index]
-            })).filter(s => s.sourceItem);
+            rawSignals = parsedExtraction.signals.map(signal => ({ quote: signal.quote, sourceItem: prioritizedItems[signal.source_index] })).filter(s => s.sourceItem);
         }
     } catch (error) {
         console.error("CRITICAL ERROR in AI Signal Extraction:", error);
-        renderConstellationMap(null); // Render empty map on failure
+        renderConstellationMap([]);
         return;
     }
 
-    console.log(`[Constellation] AI extracted ${rawSignals.length} high-quality signals.`);
     if (rawSignals.length === 0) {
-        renderConstellationMap(null);
+        renderConstellationMap([]);
         return;
     }
 
-    // 2. --- AI-POWERED ENRICHMENT (***CRITICAL CHANGE HERE***) ---
-    // This new prompt classifies signals into YOUR new categories.
-    const enrichmentPrompt = `You are a market researcher specializing in consumer psychology. For each user quote, classify it into the single most appropriate category of purchase intent. Also, rate its intensity.
-
-    Here are the categories and their definitions:
-    - **mentionsOfPrice:** The user is asking about or discussing the specific price or cost of a potential solution. (e.g., "How much would something like this cost?")
-    - **desireDespiteCost:** The user expresses a strong desire for a solution, implying that the price is a secondary concern. (e.g., "I don't even care what it costs, I need this.", "Expensive but would be totally worth it.")
-    - **substituteComparisons:** The user is comparing existing tools or solutions, highlighting the flaws of their current option. (e.g., "I've tried App-X, but it can't do Y.", "This is so much better than the way I do it now.")
-    - **frustrationWithCurrent:** The user shows strong frustration with a task or the lack of a good tool, signaling a deep pain point. (e.g., "This whole process is a nightmare.", "I'm so sick of doing this manually.")
-    - **urgencyToSolve:** The user expresses an immediate need or desire for a solution. (e.g., "I need this in my life right now.", "Where can I get this ASAP?")
-
-    Here are the quotes:
-    ${rawSignals.map((signal, index) => `${index}. "${signal.quote}"`).join('\n')}
-
-    Respond ONLY with a valid JSON object: {"enriched_signals": [...]}.
-    Each object in the array must have:
-    1. "category": ONE of [mentionsOfPrice, desireDespiteCost, substituteComparisons, frustrationWithCurrent, urgencyToSolve].
-    2. "intensity": A score from 1 (mild) to 10 (severe) of the user's emotion or need.
-    The array MUST be the same length as the list of quotes.`;
+    // 2. --- AI-POWERED ENRICHMENT ---
+    const enrichmentPrompt = `You are a market researcher specializing in consumer psychology. For each user quote, classify it into the single most appropriate category of purchase intent. Also, rate its intensity. Here are the categories and their definitions: - **mentionsOfPrice:** The user is asking about or discussing the specific price or cost of a potential solution. (e.g., "How much would something like this cost?") - **desireDespiteCost:** The user expresses a strong desire for a solution, implying that the price is a secondary concern. (e.g., "I don't even care what it costs, I need this.", "Expensive but would be totally worth it.") - **substituteComparisons:** The user is comparing existing tools or solutions, highlighting the flaws of their current option. (e.g., "I've tried App-X, but it can't do Y.", "This is so much better than the way I do it now.") - **frustrationWithCurrent:** The user shows strong frustration with a task or the lack of a good tool, signaling a deep pain point. (e.g., "This whole process is a nightmare.", "I'm so sick of doing this manually.") - **urgencyToSolve:** The user expresses an immediate need or desire for a solution. (e.g., "I need this in my life right now.", "Where can I get this ASAP?") Here are the quotes: ${rawSignals.map((signal, index) => `${index}. "${signal.quote}"`).join('\n')} Respond ONLY with a valid JSON object: {"enriched_signals": [...]}. Each object in the array must have: 1. "category": ONE of [mentionsOfPrice, desireDespiteCost, substituteComparisons, frustrationWithCurrent, urgencyToSolve]. 2. "intensity": A score from 1 (mild) to 10 (severe) of the user's emotion or need. The array MUST be the same length as the list of quotes.`;
 
     let enrichedSignals = [];
     try {
@@ -168,109 +148,80 @@ async function generateAndRenderConstellation(items) {
         if (!enrichmentResponse.ok) throw new Error("AI Signal Enrichment Failed");
         const enrichmentData = await enrichmentResponse.json();
         const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse);
-
         if (parsedEnrichment.enriched_signals && parsedEnrichment.enriched_signals.length === rawSignals.length) {
-            enrichedSignals = rawSignals.map((rawSignal, index) => ({
-                ...rawSignal,
-                ...parsedEnrichment.enriched_signals[index],
-                source: rawSignal.sourceItem.data
-            }));
+            enrichedSignals = rawSignals.map((rawSignal, index) => ({ ...rawSignal, ...parsedEnrichment.enriched_signals[index], source: rawSignal.sourceItem.data }));
         }
     } catch (error) {
         console.error("CRITICAL ERROR in AI Signal Enrichment:", error);
-        renderConstellationMap(null);
+        renderConstellationMap([]);
         return;
     }
-
-    console.log(`[Constellation] AI enriched ${enrichedSignals.length} signals. Aggregating and rendering map.`);
-
-    // 3. --- AGGREGATE DATA FOR THE NEW MAP ---
-    const aggregatedData = {};
-    for (const key in RADIAL_CATEGORIES) {
-        aggregatedData[key] = {
-            quotes: [],
-            sources: [],
-            totalIntensity: 0,
-            count: 0
-        };
-    }
-
-    enrichedSignals.forEach(signal => {
-        const category = signal.category;
-        if (aggregatedData[category]) {
-            aggregatedData[category].quotes.push(signal.quote);
-            aggregatedData[category].sources.push(signal.source);
-            aggregatedData[category].totalIntensity += (signal.intensity || 5);
-            aggregatedData[category].count++;
-        }
-    });
-
-    renderConstellationMap(aggregatedData);
+    
+    console.log(`[Constellation] AI enriched ${enrichedSignals.length} signals. Rendering galaxy map.`);
+    
+    // We pass the individual signals directly to the renderer now.
+    renderConstellationMap(enrichedSignals);
 }
 
-function renderConstellationMap(data) {
+function renderConstellationMap(signals) {
     const container = document.getElementById('constellation-map-container');
     if (!container) return;
-    container.innerHTML = ''; // Clear previous map
+    container.innerHTML = '';
 
-    if (!data || Object.values(data).every(cat => cat.count === 0)) {
+    if (!signals || signals.length === 0) {
         container.innerHTML = '<div class="panel-placeholder">No strong purchase intent signals found.<br/>Try a broader search or different communities.</div>';
         const panelContent = document.querySelector('#constellation-side-panel .panel-content');
         if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No opportunities discovered.</div>`;
         return;
     }
 
-    // Add central bubble
-    container.innerHTML = `<div class="constellation-bubble center-bubble">Willingness to Pay</div>`;
-
-    const totalMentions = Object.values(data).reduce((sum, cat) => sum + cat.count, 0);
-
-    for (const categoryKey in RADIAL_CATEGORIES) {
-        const categoryData = data[categoryKey];
-        const categoryInfo = RADIAL_CATEGORIES[categoryKey];
-        const hasData = categoryData.count > 0;
-
-        // --- Calculate Bubble Size ---
-        // Base size + size proportional to its share of mentions
-        const size = 60 + (totalMentions > 0 ? (categoryData.count / totalMentions) * 120 : 0);
-
-        // --- Calculate Bubble Position (using trigonometry for a perfect circle) ---
-        const angleRad = categoryInfo.angle * (Math.PI / 180);
-        const radius = 38; // Percentage from center
-        const xPos = 50 + radius * Math.cos(angleRad);
-        const yPos = 50 + radius * Math.sin(angleRad);
-
-        // --- Create Bubble Element ---
-        const bubbleEl = document.createElement('div');
-        bubbleEl.className = `constellation-bubble outer-bubble ${hasData ? 'has-data' : 'no-data'}`;
-        bubbleEl.style.width = `${size}px`;
-        bubbleEl.style.height = `${size}px`;
-        bubbleEl.style.left = `${xPos}%`;
-        bubbleEl.style.top = `${yPos}%`;
-        bubbleEl.style.backgroundColor = hasData ? categoryInfo.color : '#7f8c8d';
-        bubbleEl.textContent = categoryInfo.name;
-        
-        // Add data attributes for interactivity
-        if (hasData) {
-            bubbleEl.dataset.categoryName = categoryInfo.name;
-            bubbleEl.dataset.quotes = JSON.stringify(categoryData.quotes);
-            bubbleEl.dataset.sources = JSON.stringify(categoryData.sources.map(s => ({
-                subreddit: s.subreddit,
-                permalink: s.permalink,
-                ups: s.ups
-            })));
-        }
-        
-        container.appendChild(bubbleEl);
-
-        // --- Create Connecting Line Element ---
-        if (hasData) {
-            const line = document.createElement('div');
-            line.className = 'constellation-line';
-            line.style.transform = `rotate(${categoryInfo.angle}deg)`;
-            container.appendChild(line);
-        }
+    // --- RENDER LAYER 1: The Category Zones (Nebulae) ---
+    for (const key in CATEGORY_ZONES) {
+        const zone = CATEGORY_ZONES[key];
+        const zoneEl = document.createElement('div');
+        zoneEl.className = 'constellation-zone';
+        zoneEl.style.width = `${zone.radius * 2 * 100}%`;
+        zoneEl.style.height = `${zone.radius * 2 * 100}%`;
+        zoneEl.style.left = `${zone.x * 100}%`;
+        zoneEl.style.top = `${zone.y * 100}%`;
+        zoneEl.style.backgroundColor = zone.color;
+        zoneEl.innerHTML = `<span class="zone-name">${zone.name}</span>`;
+        container.appendChild(zoneEl);
     }
+    
+    // --- RENDER LAYER 2: The Individual Stars (Quotes) ---
+    signals.forEach(signal => {
+        const zone = CATEGORY_ZONES[signal.category];
+        if (!zone) return; // Skip if AI returns an unknown category
+
+        // Calculate a random position INSIDE the zone's circle
+        const angle = Math.random() * 2 * Math.PI;
+        // Ensure star is not exactly on the edge
+        const distFromCenter = Math.random() * zone.radius * 0.9; 
+
+        // Convert polar coordinates (angle, distance) to cartesian (x, y)
+        const x = zone.x + distFromCenter * Math.cos(angle);
+        const y = zone.y + distFromCenter * Math.sin(angle);
+        
+        // Determine star size based on intensity
+        const size = 8 + (signal.intensity || 5) * 1.5;
+
+        const starEl = document.createElement('div');
+        starEl.className = 'constellation-star';
+        starEl.style.width = `${size}px`;
+        starEl.style.height = `${size}px`;
+        starEl.style.left = `${x * 100}%`;
+        starEl.style.top = `${y * 100}%`;
+        
+        // Add data for interactivity
+        starEl.dataset.quote = signal.quote;
+        starEl.dataset.categoryName = zone.name;
+        starEl.dataset.sourceSubreddit = signal.source.subreddit;
+        starEl.dataset.sourcePermalink = signal.source.permalink;
+        starEl.dataset.sourceUpvotes = signal.source.ups.toLocaleString();
+
+        container.appendChild(starEl);
+    });
 }
 
 function initializeConstellationInteractivity() {
@@ -281,33 +232,23 @@ function initializeConstellationInteractivity() {
     const panelContent = panel.querySelector('.panel-content');
     let hidePanelTimer;
 
-    const setDefaultPanelState = () => { panelContent.innerHTML = `<div class="panel-placeholder">Hover over a colored bubble to see real user quotes.</div>`; };
+    const setDefaultPanelState = () => { panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`; };
     const hidePanel = () => { setDefaultPanelState(); };
     setDefaultPanelState();
 
     container.addEventListener('mouseover', (e) => {
-        if (!e.target.classList.contains('outer-bubble') || !e.target.classList.contains('has-data')) return;
+        if (!e.target.classList.contains('constellation-star')) return;
 
         clearTimeout(hidePanelTimer);
-        const bubble = e.target;
-        const categoryName = bubble.dataset.categoryName;
-        const quotes = JSON.parse(bubble.dataset.quotes);
-        const sources = JSON.parse(bubble.dataset.sources);
-
-        const quotesHTML = quotes.slice(0, 5).map((quote, index) => {
-             const source = sources[index];
-             return `<div class="quote-block">
-                        <p class="quote">“${quote}”</p>
-                        <a href="https://www.reddit.com${source.permalink}" target="_blank" rel="noopener noreferrer" class="meta-info">
-                            From r/${source.subreddit} (👍 ${source.ups.toLocaleString()}) →
-                        </a>
-                    </div>`;
-        }).join('');
-
+        const star = e.target;
         panelContent.innerHTML = `
-            <h4 class="problem-theme">${categoryName}</h4>
-            ${quotesHTML}
-        `;
+            <h4 class="problem-theme">${star.dataset.categoryName}</h4>
+            <div class="quote-block">
+                <p class="quote">“${star.dataset.quote}”</p>
+                <a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="meta-info">
+                    From r/${star.dataset.sourceSubreddit} (👍 ${star.dataset.sourceUpvotes}) →
+                </a>
+            </div>`;
     });
 
     container.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); });
@@ -315,7 +256,6 @@ function initializeConstellationInteractivity() {
     panel.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); });
 }
 
-// This function now ONLY fetches data and passes it to the main generator.
 async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
     console.log("--- Starting Delayed Constellation Analysis (in background) ---");
     try {
@@ -329,10 +269,9 @@ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms,
         console.log("--- Constellation Analysis Complete. ---");
     } catch (error) {
         console.error("Constellation analysis failed in the background:", error);
-        renderConstellationMap(null); 
+        renderConstellationMap([]); 
     }
 }
-
 // =================================================================================
 // MAIN ANALYSIS FUNCTION - NO CHANGES NEEDED HERE
 // =================================================================================

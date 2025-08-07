@@ -85,61 +85,73 @@ function renderDiscoveryList(containerId, data, title, type) { const container =
 function renderFAQs(faqs) { const container = document.getElementById('faq-container'); if(!container) return; let faqItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">Could not generate common questions from the text.</p>'; if (faqs.length > 0) { faqItems = faqs.map((faq) => `<div class="faq-item"><button class="faq-question">${faq}</button><div class="faq-answer"><p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p></div></div>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">Frequently Asked Questions</h3>${faqItems}`; container.querySelectorAll('.faq-question').forEach(button => { button.addEventListener('click', () => { const answer = button.nextElementSibling; button.classList.toggle('active'); if (answer.style.maxHeight) { answer.style.maxHeight = null; answer.style.padding = '0 1.5rem'; } else { answer.style.padding = '1rem 1.5rem'; answer.style.maxHeight = answer.scrollHeight + "px"; } }); }); }
 function renderIncludedSubreddits(subreddits) { const container = document.getElementById('included-subreddits-container'); if(!container) return; const tags = subreddits.map(sub => `<div class="subreddit-tag">r/${sub}</div>`).join(''); container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list">${tags}</div>`; }
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
+
+
+// --- CONSTELLATION MAP FUNCTIONS (REBUILT WITH USER LOGIC) ---
 // =================================================================================
-// SECTION 1: CONSTELLATION MAP LOGIC (RE-ARCHITECTED FOR RADIAL LAYOUT)
-// =================================================================================;
-// =================================================================================
-// SECTION 1: CONSTELLATION MAP LOGIC (RE-ARCHITECTED FOR GALAXY/NEBULA LAYOUT)
+// SECTION 1: CONSTELLATION MAP LOGIC (RE-ARCHITECTED AND SIMPLIFIED)
 // =================================================================================
 
-// Define the new Category "Zones" with their center coordinates and size
-const CATEGORY_ZONES = {
-    // Keys must match the 'category' from the AI prompt.
-    // x, y are percentages for the center. radius is the zone's size.
-    mentionsOfPrice:        { name: "Mentions of Price", color: '#3498db', x: 0.25, y: 0.25, radius: 0.2 },
-    desireDespiteCost:      { name: "Desire Despite Cost", color: '#2ecc71', x: 0.75, y: 0.2,  radius: 0.22 },
-    frustrationWithCurrent: { name: "Frustration", color: '#e74c3c', x: 0.7,  y: 0.75, radius: 0.25 },
-    urgencyToSolve:         { name: "Urgency to Solve", color: '#f1c40f', x: 0.2,  y: 0.7,  radius: 0.18 },
-    substituteComparisons:  { name: "Comparisons", color: '#9b59b6', x: 0.5,  y: 0.5,  radius: 0.2 }
+// NEW CATEGORY DEFINITIONS
+const CONSTELLATION_CATEGORIES = {
+    // The main category in the center of the map
+    DemandSignals: { x: 0.5, y: 0.5 }, 
+    
+    // The five outer "orbiting" categories
+    WillingnessToPay:      { x: 0.85, y: 0.30 }, // Top-Right
+    Frustration:           { x: 0.80, y: 0.75 }, // Bottom-Right
+    SubstituteComparisons: { x: 0.20, y: 0.75 }, // Bottom-Left
+    Urgency:               { x: 0.15, y: 0.30 }, // Top-Left
+    CostConcerns:          { x: 0.5,  y: 0.90 }, // Bottom-Center
+    
+    // Fallback category
+    Other: { x: 0.5, y: 0.1 } // Placed at the top if uncategorized
 };
 
-// Main generation function - finds signals, enriches them, and renders the map.
+// This function now does EVERYTHING. It finds signals, enriches them, and renders the map.
+// It is the single source of truth for the constellation map
+// This function now does EVERYTHING. It finds signals, enriches them, and renders the map.
+// It is the single source of truth for the constellation map.
 async function generateAndRenderConstellation(items) {
-    console.log("[Constellation] Starting full generation process for GALAXY MAP...");
+    console.log("[Constellation] Starting full generation process...");
 
-    // 1. --- AI-POWERED SIGNAL EXTRACTION ---
-    // This is inside the generateAndRenderConstellation function
+    // 1. --- AI-POWERED SIGNAL EXTRACTION (No changes here) ---
+    const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 200);
+    console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
 
-const extractionPrompt = `You are a diligent market research analyst. Your primary goal is to extract **between 15 and 25** high-quality quotes from the following user comments that indicate a business opportunity.
+    const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 20 quotes that express a strong purchase intent, an unsolved problem, or a significant pain point.
 
-A high-quality quote demonstrates one of the following:
-- **Explicit Purchase Intent:** A clear statement about paying for a solution (e.g., "I would pay for...", "take my money").
-- **Frustration with a Task:** The user is clearly annoyed by a manual, tedious, or broken process (e.g., "manually entering this data is a nightmare", "I'm so sick of doing this").
-- **Wishing for a Specific Tool:** The user describes a feature or app they wish existed (e.g., "I wish there was a tool that could sync X and Y automatically").
+    Focus ONLY on phrases that directly mention:
+    - Willingness to pay ("I'd pay for", "take my money")
+    - Frustration with a lack of a tool ("wish there was an app for", "why is there no tool")
+    - A specific, unmet need ("I need something that does X but Y gets in the way")
+    - Mentions of high cost or price sensitivity ("it's too expensive", "can't afford")
+    - Comparisons to other products ("I tried X, but it couldn't do Y")
+    - A sense of urgency or high pressure ("I need a solution now")
 
-CRITICAL INSTRUCTIONS:
-1.  **Prioritize Quantity:** Your main task is to find a good number of signals. It is better to have 15 relevant quotes than 2 perfect ones. Aim for the 15-25 range.
-2.  **Avoid Narratives:** Do not extract long stories about past events. Focus on quotes expressing a current or future need.
-3.  **Verbatim Copy:** The quote MUST be an exact, character-for-character copy from the source text.
+    CRITICAL: IGNORE general complaints, emotional support, or sentences that use words like "love" or "need" in a non-commercial context.
 
-Here are the comments to analyze:
-${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+    Here are the comments:
+    ${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
 
-Respond ONLY with a valid JSON object: {"signals": [...]}. The "signals" array should contain 15-25 objects if you can find them.`;
+    Respond ONLY with a valid JSON object: {"signals": [{"quote": "The extracted quote.", "source_index": 4}]}`;
     
-
     let rawSignals = [];
     try {
         const extractionResponse = await fetch(OPENAI_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: extractionPrompt }], temperature: 0.1, max_tokens: 1500, response_format: { "type": "json_object" } } })
+            body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: extractionPrompt }], temperature: 0.1, max_tokens: 2000, response_format: { "type": "json_object" } } })
         });
         if (!extractionResponse.ok) throw new Error("AI Signal Extraction Failed");
         const extractionData = await extractionResponse.json();
         const parsedExtraction = JSON.parse(extractionData.openaiResponse);
+
         if (parsedExtraction.signals && Array.isArray(parsedExtraction.signals)) {
-            rawSignals = parsedExtraction.signals.map(signal => ({ quote: signal.quote, sourceItem: prioritizedItems[signal.source_index] })).filter(s => s.sourceItem);
+            rawSignals = parsedExtraction.signals.map(signal => ({
+                quote: signal.quote,
+                sourceItem: prioritizedItems[signal.source_index]
+            })).filter(s => s.sourceItem);
         }
     } catch (error) {
         console.error("CRITICAL ERROR in AI Signal Extraction:", error);
@@ -147,26 +159,50 @@ Respond ONLY with a valid JSON object: {"signals": [...]}. The "signals" array s
         return;
     }
 
+    console.log(`[Constellation] AI extracted ${rawSignals.length} high-quality signals.`);
     if (rawSignals.length === 0) {
         renderConstellationMap([]);
         return;
     }
 
-    // 2. --- AI-POWERED ENRICHMENT ---
-    const enrichmentPrompt = `You are a market researcher specializing in consumer psychology. For each user quote, classify it into the single most appropriate category of purchase intent. Also, rate its intensity. Here are the categories and their definitions: - **mentionsOfPrice:** The user is asking about or discussing the specific price or cost of a potential solution. (e.g., "How much would something like this cost?") - **desireDespiteCost:** The user expresses a strong desire for a solution, implying that the price is a secondary concern. (e.g., "I don't even care what it costs, I need this.", "Expensive but would be totally worth it.") - **substituteComparisons:** The user is comparing existing tools or solutions, highlighting the flaws of their current option. (e.g., "I've tried App-X, but it can't do Y.", "This is so much better than the way I do it now.") - **frustrationWithCurrent:** The user shows strong frustration with a task or the lack of a good tool, signaling a deep pain point. (e.g., "This whole process is a nightmare.", "I'm so sick of doing this manually.") - **urgencyToSolve:** The user expresses an immediate need or desire for a solution. (e.g., "I need this in my life right now.", "Where can I get this ASAP?") Here are the quotes: ${rawSignals.map((signal, index) => `${index}. "${signal.quote}"`).join('\n')} Respond ONLY with a valid JSON object: {"enriched_signals": [...]}. Each object in the array must have: 1. "category": ONE of [mentionsOfPrice, desireDespiteCost, substituteComparisons, frustrationWithCurrent, urgencyToSolve]. 2. "intensity": A score from 1 (mild) to 10 (severe) of the user's emotion or need. The array MUST be the same length as the list of quotes.`;
+    // 2. --- AI-POWERED ENRICHMENT (UPDATED PROMPT) ---
+    const enrichmentPrompt = `You are a market research analyst. For each quote below, provide a short summary of the user's core problem and classify it into the MOST relevant category.
+
+    Here are the categories and their definitions:
+    - DemandSignals: General expressions of a need or problem. Use as a default if no other category fits perfectly.
+    - WillingnessToPay: Direct mentions of being willing to pay, subscribe, or buy a solution.
+    - Frustration: Expressions of frustration, annoyance, or disappointment with current tools or manual processes.
+    - SubstituteComparisons: Mentions or comparisons to other specific products, brands, or competing solutions.
+    - Urgency: Language that implies a high-pressure need or a problem that needs to be solved immediately.
+    - CostConcerns: Direct mentions of price, budget, or something being too expensive or unaffordable.
+    
+    Here are the quotes:
+    ${rawSignals.map((signal, index) => `${index}. "${signal.quote}"`).join('\n')}
+
+    For EACH quote, provide a JSON object with:
+    1. "problem_theme": A short, 4-5 word summary of the core problem or desire.
+    2. "category": Classify into ONE of: [${Object.keys(CONSTELLATION_CATEGORIES).join(', ')}].
+    3. "emotion": Classify the primary emotion into ONE of: [${Object.keys(EMOTION_COLORS).join(', ')}].
+
+    Respond ONLY with a valid JSON object: {"enriched_signals": [...]}. The array MUST be the same length as the list of quotes.`;
 
     let enrichedSignals = [];
     try {
         const enrichmentResponse = await fetch(OPENAI_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: { model: "gpt-4o", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_tokens: 2000, response_format: { "type": "json_object" } } })
+            body: JSON.stringify({ openaiPayload: { model: "gpt-4o", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_tokens: 2500, response_format: { "type": "json_object" } } })
         });
         if (!enrichmentResponse.ok) throw new Error("AI Signal Enrichment Failed");
         const enrichmentData = await enrichmentResponse.json();
         const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse);
+
         if (parsedEnrichment.enriched_signals && parsedEnrichment.enriched_signals.length === rawSignals.length) {
-            enrichedSignals = rawSignals.map((rawSignal, index) => ({ ...rawSignal, ...parsedEnrichment.enriched_signals[index], source: rawSignal.sourceItem.data }));
+            enrichedSignals = rawSignals.map((rawSignal, index) => ({
+                ...rawSignal,
+                ...parsedEnrichment.enriched_signals[index],
+                source: rawSignal.sourceItem.data
+            }));
         }
     } catch (error) {
         console.error("CRITICAL ERROR in AI Signal Enrichment:", error);
@@ -174,9 +210,9 @@ Respond ONLY with a valid JSON object: {"signals": [...]}. The "signals" array s
         return;
     }
     
-    console.log(`[Constellation] AI enriched ${enrichedSignals.length} signals. Rendering galaxy map.`);
+    console.log(`[Constellation] AI enriched ${enrichedSignals.length} signals. Rendering map.`);
     
-    // We pass the individual signals directly to the renderer now.
+    // 3. --- RENDER THE MAP ---
     renderConstellationMap(enrichedSignals);
 }
 
@@ -192,51 +228,83 @@ function renderConstellationMap(signals) {
         return;
     }
 
-    // --- RENDER LAYER 1: The Category Zones (Nebulae) ---
-    for (const key in CATEGORY_ZONES) {
-        const zone = CATEGORY_ZONES[key];
-        const zoneEl = document.createElement('div');
-        zoneEl.className = 'constellation-zone';
-        zoneEl.style.width = `${zone.radius * 2 * 100}%`;
-        zoneEl.style.height = `${zone.radius * 2 * 100}%`;
-        zoneEl.style.left = `${zone.x * 100}%`;
-        zoneEl.style.top = `${zone.y * 100}%`;
-        zoneEl.style.backgroundColor = zone.color;
-        zoneEl.innerHTML = `<span class="zone-name">${zone.name}</span>`;
-        container.appendChild(zoneEl);
-    }
-    
-    // --- RENDER LAYER 2: The Individual Stars (Quotes) ---
+    const aggregatedSignals = {};
     signals.forEach(signal => {
-        const zone = CATEGORY_ZONES[signal.category];
-        if (!zone) return; // Skip if AI returns an unknown category
+        if (!signal.problem_theme || !signal.source) return;
+        const theme = signal.problem_theme.trim().toLowerCase();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
 
-        // Calculate a random position INSIDE the zone's circle
-        const angle = Math.random() * 2 * Math.PI;
-        // Ensure star is not exactly on the edge
-        const distFromCenter = Math.random() * zone.radius * 0.9; 
+    const starData = Object.values(aggregatedSignals);
+    const maxFreq = Math.max(...starData.map(s => s.frequency), 1);
 
-        // Convert polar coordinates (angle, distance) to cartesian (x, y)
-        const x = zone.x + distFromCenter * Math.cos(angle);
-        const y = zone.y + distFromCenter * Math.sin(angle);
-        
-        // Determine star size based on intensity
-        const size = 8 + (signal.intensity || 5) * 1.5;
+    const starsByCategory = {};
+    starData.forEach(star => {
+        const categoryKey = star.category && CONSTELLATION_CATEGORIES[star.category] ? star.category : 'Other';
+        if (!starsByCategory[categoryKey]) {
+            starsByCategory[categoryKey] = [];
+        }
+        starsByCategory[categoryKey].push(star);
+    });
 
+    starData.forEach(star => {
         const starEl = document.createElement('div');
         starEl.className = 'constellation-star';
+        const size = 8 + (star.frequency / maxFreq) * 20;
         starEl.style.width = `${size}px`;
         starEl.style.height = `${size}px`;
-        starEl.style.left = `${x * 100}%`;
-        starEl.style.top = `${y * 100}%`;
-        
-        // Add data for interactivity
-        starEl.dataset.quote = signal.quote;
-        starEl.dataset.categoryName = zone.name;
-        starEl.dataset.sourceSubreddit = signal.source.subreddit;
-        starEl.dataset.sourcePermalink = signal.source.permalink;
-        starEl.dataset.sourceUpvotes = signal.source.ups.toLocaleString();
+        starEl.style.backgroundColor = EMOTION_COLORS[star.emotion] || '#ffffff';
 
+        const categoryKey = star.category && CONSTELLATION_CATEGORIES[star.category] ? star.category : 'Other';
+        const categoryCoords = CONSTELLATION_CATEGORIES[categoryKey];
+        
+        // ========================================================================
+        // NEW: DUAL POSITIONING LOGIC
+        // ========================================================================
+        
+        // IF the star is in the center category, cluster it randomly.
+        if (categoryKey === 'DemandSignals') {
+            const CLUSTER_SPREAD = 12; // How wide the central cluster is (in percent)
+            const offsetX = (Math.random() - 0.5) * CLUSTER_SPREAD;
+            const offsetY = (Math.random() - 0.5) * CLUSTER_SPREAD;
+            const finalX = (categoryCoords.x * 100) + offsetX;
+            const finalY = (categoryCoords.y * 100) + offsetY;
+            starEl.style.left = `calc(${finalX}% - ${size / 2}px)`;
+            starEl.style.top = `calc(${finalY}% - ${size / 2}px)`;
+        
+        // ELSE (for all other categories), place it in a natural orbit.
+        } else {
+            const categoryStars = starsByCategory[categoryKey];
+            const starIndex = categoryStars.findIndex(s => s.problem_theme === star.problem_theme);
+            const totalInCategory = categoryStars.length;
+            
+            const ORBIT_RADIUS_BASE = 6; 
+            const ORBIT_RADIUS_RANDOM_FACTOR = 4;
+            const angle = (starIndex / totalInCategory) * 2 * Math.PI; 
+            const radius = ORBIT_RADIUS_BASE + (Math.random() * ORBIT_RADIUS_RANDOM_FACTOR);
+            
+            const offsetX = radius * Math.cos(angle);
+            const offsetY = radius * Math.sin(angle);
+            
+            const finalX = (categoryCoords.x * 100) + offsetX;
+            const finalY = (categoryCoords.y * 100) + offsetY;
+
+            starEl.style.left = `calc(${finalX}% - ${size / 2}px)`;
+            starEl.style.top = `calc(${finalY}% - ${size / 2}px)`;
+        }
+        
+        // ========================================================================
+
+        starEl.dataset.quote = star.quotes[0];
+        starEl.dataset.problemTheme = star.problem_theme;
+        starEl.dataset.sourceSubreddit = star.source.subreddit;
+        starEl.dataset.sourcePermalink = star.source.permalink;
+        starEl.dataset.sourceUpvotes = star.totalUpvotes.toLocaleString();
         container.appendChild(starEl);
     });
 }
@@ -255,17 +323,9 @@ function initializeConstellationInteractivity() {
 
     container.addEventListener('mouseover', (e) => {
         if (!e.target.classList.contains('constellation-star')) return;
-
         clearTimeout(hidePanelTimer);
         const star = e.target;
-        panelContent.innerHTML = `
-            <h4 class="problem-theme">${star.dataset.categoryName}</h4>
-            <div class="quote-block">
-                <p class="quote">“${star.dataset.quote}”</p>
-                <a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="meta-info">
-                    From r/${star.dataset.sourceSubreddit} (👍 ${star.dataset.sourceUpvotes}) →
-                </a>
-            </div>`;
+        panelContent.innerHTML = `<p class="quote">“${star.dataset.quote}”</p><h4 class="problem-theme">${star.dataset.problemTheme}</h4><p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes on related signals</p><a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>`;
     });
 
     container.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); });
@@ -273,6 +333,7 @@ function initializeConstellationInteractivity() {
     panel.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); });
 }
 
+// This function now ONLY fetches data and passes it to the main generator.
 async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
     console.log("--- Starting Delayed Constellation Analysis (in background) ---");
     try {
@@ -281,6 +342,7 @@ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms,
         const highIntentComments = await fetchCommentsForPosts(postIds);
         const allItems = [...demandSignalPosts, ...highIntentComments];
         
+        // This is the single, crucial call.
         await generateAndRenderConstellation(allItems);
 
         console.log("--- Constellation Analysis Complete. ---");
@@ -289,6 +351,7 @@ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms,
         renderConstellationMap([]); 
     }
 }
+
 // =================================================================================
 // MAIN ANALYSIS FUNCTION - NO CHANGES NEEDED HERE
 // =================================================================================

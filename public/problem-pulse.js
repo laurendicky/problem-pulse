@@ -1,7 +1,7 @@
 // =================================================================================
-// COMPLETE AND VERIFIED SCRIPT (VERSION 13.0 - FINAL)
-// This version contains the definitive fix for preserving static HTML elements
-// by correctly managing the loader and star elements without using innerHTML.
+// COMPLETE AND VERIFIED SCRIPT (VERSION 14.0 - PROGRESSIVE DISCOVERY)
+// This version implements progressive loading for the brand/product discovery.
+// It performs a fast analysis on posts, then a delayed, deeper analysis on comments.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -73,7 +73,52 @@ function renderSentimentCloud(containerId, wordData, colors) { const container =
 function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : "Snippet not available."; const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if(closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title || p.data.link_title || ''}\nContent: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
-async function extractAndValidateEntities(posts, nicheContext) { const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || p.data.link_title || ''}\nBody: ${(p.data.selftext || post.data.body || '').substring(0, 800)}`).join('\n---\n'); const prompt = `You are a market research analyst reviewing Reddit posts from the '${nicheContext}' community. Extract the following: 1. "brands": Specific, proper-noun company, brand, or service names (e.g., "KitchenAid", "Stripe"). 2. "products": Common, generic product categories (e.g., "stand mixer", "CRM software"). CRITICAL RULES: Be strict. Exclude acronyms (MOH, AITA), generic words (UPDATE), etc. Respond ONLY with a JSON object with two keys: "brands" and "products", holding an array of strings. If none, return an empty array. Text: ${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1000, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('AI entity extraction failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const allEntities = { brands: parsed.brands || [], products: parsed.products || [] }; window._entityData = {}; for (const type in allEntities) { window._entityData[type] = {}; allEntities[type].forEach(name => { const regex = new RegExp(`\\b${name.replace(/ /g, '\\s')}(s?)\\b`, 'gi'); const mentioningPosts = posts.filter(post => regex.test(`${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`)); if (mentioningPosts.length > 0) { window._entityData[type][name] = { count: mentioningPosts.length, posts: mentioningPosts }; } }); } return { topBrands: Object.entries(window._entityData.brands || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8), topProducts: Object.entries(window._entityData.products || {}).sort((a,b) => b[1].count - a[1].count).slice(0, 8) }; } catch (error) { console.error("Entity extraction error:", error); return { topBrands: [], topProducts: [] }; } }
+
+// =================================================================================
+// === MODIFIED FUNCTION #1: `extractAndValidateEntities` ===
+// =================================================================================
+async function extractAndValidateEntities(posts, nicheContext) {
+    // MODIFICATION: This now handles both posts (with titles) and comments (without).
+    // It also increases the sample size for better AI analysis.
+    const topPostsText = posts.slice(0, 75).map(p => {
+        const title = p.data.title || p.data.link_title;
+        const body = p.data.selftext || p.data.body || '';
+        if (title) {
+            return `Title: ${title}\nBody: ${body.substring(0, 800)}`;
+        }
+        return `Body: ${body.substring(0, 800)}`; // For comments
+    }).join('\n---\n');
+
+    const prompt = `You are a market research analyst reviewing Reddit posts from the '${nicheContext}' community. Extract the following: 1. "brands": Specific, proper-noun company, brand, or service names (e.g., "KitchenAid", "Stripe"). 2. "products": Common, generic product categories (e.g., "stand mixer", "CRM software"). CRITICAL RULES: Be strict. Exclude acronyms (MOH, AITA), generic words (UPDATE), etc. Respond ONLY with a JSON object with two keys: "brands" and "products", holding an array of strings. If none, return an empty array. Text: ${topPostsText}`;
+    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1000, response_format: { "type": "json_object" } };
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('AI entity extraction failed.');
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        const allEntities = { brands: parsed.brands || [], products: parsed.products || [] };
+        window._entityData = {};
+        for (const type in allEntities) {
+            window._entityData[type] = {};
+            allEntities[type].forEach(name => {
+                const regex = new RegExp(`\\b${name.replace(/ /g, '\\s')}(s?)\\b`, 'gi');
+                // This check works for both posts and comments
+                const mentioningPosts = posts.filter(post => regex.test(`${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`));
+                if (mentioningPosts.length > 0) {
+                    window._entityData[type][name] = { count: mentioningPosts.length, posts: mentioningPosts };
+                }
+            });
+        }
+        return {
+            topBrands: Object.entries(window._entityData.brands || {}).sort((a, b) => b[1].count - a[1].count).slice(0, 8),
+            topProducts: Object.entries(window._entityData.products || {}).sort((a, b) => b[1].count - a[1].count).slice(0, 8)
+        };
+    } catch (error) {
+        console.error("Entity extraction error:", error);
+        return { topBrands: [], topProducts: [] };
+    }
+}
+
 function renderDiscoveryList(containerId, data, title, type) { const container = document.getElementById(containerId); if(!container) return; let listItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No significant mentions found.</p>'; if (data.length > 0) { listItems = data.map(([name, details], index) => `<li class="discovery-list-item" data-word="${name}" data-type="${type}"><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${details.count} mentions</span></li>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`; }
 function renderFAQs(faqs) { const container = document.getElementById('faq-container'); if(!container) return; let faqItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">Could not generate common questions from the text.</p>'; if (faqs.length > 0) { faqItems = faqs.map((faq) => `<div class="faq-item"><button class="faq-question">${faq}</button><div class="faq-answer"><p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p></div></div>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">Frequently Asked Questions</h3>${faqItems}`; container.querySelectorAll('.faq-question').forEach(button => { button.addEventListener('click', () => { const answer = button.nextElementSibling; button.classList.toggle('active'); if (answer.style.maxHeight) { answer.style.maxHeight = null; answer.style.padding = '0 1.5rem'; } else { answer.style.padding = '1rem 1.5rem'; answer.style.maxHeight = answer.scrollHeight + "px"; } }); }); }
 function renderIncludedSubreddits(subreddits) { const container = document.getElementById('included-subreddits-container'); if(!container) return; const tags = subreddits.map(sub => `<div class="subreddit-tag">r/${sub}</div>`).join(''); container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list">${tags}</div>`; }
@@ -103,17 +148,17 @@ async function generateAndRenderConstellation(items) {
     console.log("[Constellation] Starting full generation process...");
     const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 200);
     console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
-    const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 20 quotes that express a strong purchase intent, an unsolved problem, or a significant pain point.
+    const extractionPrompt = `You are a market research analyst. From the following list of user comments, as many quotes as possible that express a strong purchase intent, an unsolved & urgent problem, or a significant pain point.
 
     Focus ONLY on phrases that directly mention:
-    - Willingness to pay ("I'd pay for", "take my money")
-    - Frustration with a lack of a tool ("wish there was an app for", "why is there no tool")
-    - A specific, unmet need ("I need something that does X but Y gets in the way")
-    - Mentions of high cost or price sensitivity ("it's too expensive", "can't afford")
-    - Comparisons to other products ("I tried X, but it couldn't do Y")
-    - A sense of urgency or high pressure ("I need a solution now")
+    - Willingness to pay, for example: "I'd pay for", "take my money"
+    - Frustration with a lack of a tool, for example: "wish there was an app for", "why is there no tool"
+    - A specific, unmet need, for example: "I need something that does X but Y gets in the way"
+    - Mentions of high cost or price sensitivity, for example: "it's too expensive", "can't afford"
+    - Comparisons to other products, for example: "I tried X, but it couldn't do Y"
+    - A sense of urgency or high pressure for example: ("I need a solution for X now")
 
-    CRITICAL: IGNORE general complaints, emotional support, or sentences that use words like "love" or "need" in a non-commercial context.
+    CRITICAL: IGNORE general complaints, emotional support, or sentences that use words like "love" or "need" in a non-commercial context. DO NOT specifically use the examples given above. these examples are guidelines only for the quotes that you should be finding in the comments. 
 
     Here are the comments:
     ${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
@@ -227,32 +272,22 @@ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms,
     }
 }
 
-// =================================================================================
-// === UPDATED FUNCTION #1: `renderConstellationMap` ===
-// =================================================================================
 function renderConstellationMap(signals) {
     const container = document.getElementById('constellation-map-container');
     if (!container) return;
-
-    // FIX: Remove the specific loader and any old stars, leaving static HTML intact.
     const loader = container.querySelector('.constellation-loader');
     if (loader) loader.remove();
-    
     const oldStars = container.querySelectorAll('.constellation-star');
     oldStars.forEach(star => star.remove());
-
     if (!signals || signals.length === 0) {
         const placeholder = document.createElement('div');
-        // Give placeholder the 'constellation-star' class so it gets cleaned up on the next run
         placeholder.className = 'panel-placeholder constellation-star'; 
         placeholder.innerHTML = 'No strong purchase intent signals found.<br/>Try a broader search or different communities.';
         container.appendChild(placeholder);
-        
         const panelContent = document.querySelector('#constellation-side-panel .panel-content');
         if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No opportunities discovered.</div>`;
         return;
     }
-
     const aggregatedSignals = {};
     signals.forEach(signal => {
         if (!signal.problem_theme || !signal.source) return;
@@ -264,10 +299,8 @@ function renderConstellationMap(signals) {
         aggregatedSignals[theme].frequency++;
         aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
     });
-
     const starData = Object.values(aggregatedSignals);
     const maxFreq = Math.max(...starData.map(s => s.frequency), 1);
-
     const starsByCategory = {};
     starData.forEach(star => {
         const categoryKey = star.category && CONSTELLATION_CATEGORIES[star.category] ? star.category : 'Other';
@@ -276,7 +309,6 @@ function renderConstellationMap(signals) {
         }
         starsByCategory[categoryKey].push(star);
     });
-
     starData.forEach(star => {
         const starEl = document.createElement('div');
         starEl.className = 'constellation-star';
@@ -286,7 +318,6 @@ function renderConstellationMap(signals) {
         starEl.style.backgroundColor = EMOTION_COLORS[star.emotion] || '#ffffff';
         const categoryKey = star.category && CONSTELLATION_CATEGORIES[star.category] ? star.category : 'Other';
         const categoryCoords = CONSTELLATION_CATEGORIES[categoryKey];
-        
         if (categoryKey === 'DemandSignals') {
             const CLUSTER_SPREAD = 12; 
             const offsetX = (Math.random() - 0.5) * CLUSTER_SPREAD;
@@ -310,7 +341,6 @@ function renderConstellationMap(signals) {
             starEl.style.left = `calc(${finalX}% - ${size / 2}px)`;
             starEl.style.top = `calc(${finalY}% - ${size / 2}px)`;
         }
-        
         starEl.dataset.quote = star.quotes[0];
         starEl.dataset.problemTheme = star.problem_theme;
         starEl.dataset.sourceSubreddit = star.source.subreddit;
@@ -320,8 +350,37 @@ function renderConstellationMap(signals) {
     });
 }
 
+async function enhanceDiscoveryWithComments(posts, nicheContext) {
+    console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
+    const brandContainer = document.getElementById('top-brands-container');
+    const productContainer = document.getElementById('top-products-container');
+    const loadingMessage = `<p class="brewing-text" style="font-family: Inter, sans-serif; color: #555; padding: 0 1rem; font-style: italic;">Posts are in. Comments are brewing. Sit tight — the juicy bits are almost here. <span class="loader-dots"></span></p>`;
+    if (brandContainer && brandContainer.querySelector('.dashboard-section-title')) {
+        const title = brandContainer.querySelector('.dashboard-section-title').outerHTML;
+        brandContainer.innerHTML = title + loadingMessage;
+    }
+    if (productContainer && productContainer.querySelector('.dashboard-section-title')) {
+        const title = productContainer.querySelector('.dashboard-section-title').outerHTML;
+        productContainer.innerHTML = title + loadingMessage;
+    }
+    try {
+        const postIdsToFetch = posts.slice(0, 75).map(p => p.data.id);
+        const comments = await fetchCommentsForPosts(postIdsToFetch);
+        console.log(`Fetched ${comments.length} comments for enhancement.`);
+        const allItemsForAnalysis = [...posts, ...comments];
+        const enhancedEntities = await extractAndValidateEntities(allItemsForAnalysis, nicheContext);
+        console.log("Enhancement complete. Rendering final brand/product lists.");
+        renderDiscoveryList('top-brands-container', enhancedEntities.topBrands, 'Top Brands & Specific Products', 'brands');
+        renderDiscoveryList('top-products-container', enhancedEntities.topProducts, 'Top Generic Products', 'products');
+    } catch (error) {
+        console.error("Failed to enhance discovery lists with comments:", error);
+        if (brandContainer) brandContainer.innerHTML += "<p style='color:red;font-size:0.8rem;'>Could not load comment data.</p>";
+        if (productContainer) productContainer.innerHTML += "<p style='color:red;font-size:0.8rem;'>Could not load comment data.</p>";
+    }
+}
+
 // =================================================================================
-// === UPDATED FUNCTION #2: `runProblemFinder` ===
+// === MODIFIED FUNCTION #2: `runProblemFinder` ===
 // =================================================================================
 async function runProblemFinder() {
     const searchButton = document.getElementById('search-selected-btn'); if (!searchButton) { console.error("Could not find button."); return; }
@@ -331,16 +390,7 @@ async function runProblemFinder() {
     
     const problemTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
     const deepProblemTerms = [ "struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent" ];
-    const demandSignalTerms = [
-        "i'd pay good money for", "buy it in a second", "i'd subscribe to", "throw money at it",
-        "where can i buy", "happily pay", "shut up and take my money",
-        "sick of doing this manually", "can't find anything that", "waste so much time on",
-        "has to be a better way", "shouldn't be this hard", "why is there no tool for", "why is there no app for",
-        "tried everything and nothing works", "tool almost did what i wanted", "it's missing",
-        "tried", "gave up on it",
-        "if only there was an app", "i wish someone would build", "why hasn't anyone made",
-        "waste hours every week", "such a timesuck", "pay just to not have to think", "rather pay than do this myself"
-    ];
+    const demandSignalTerms = [ "i'd pay good money for", "buy it in a second", "i'd subscribe to", "throw money at it", "where can i buy", "happily pay", "shut up and take my money", "sick of doing this manually", "can't find anything that", "waste so much time on", "has to be a better way", "shouldn't be this hard", "why is there no tool for", "why is there no app for", "tried everything and nothing works", "tool almost did what i wanted", "it's missing", "tried", "gave up on it", "if only there was an app", "i wish someone would build", "why hasn't anyone made", "waste hours every week", "such a timesuck", "pay just to not have to think", "rather pay than do this myself" ];
     
     const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
     ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
@@ -353,7 +403,6 @@ async function runProblemFinder() {
     try {
         console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
         
-        // FIX: Gently add a loader without deleting static content.
         const constellationContainer = document.getElementById('constellation-map-container');
         if (constellationContainer) {
             const oldLoader = constellationContainer.querySelector('.constellation-loader');
@@ -427,7 +476,13 @@ async function runProblemFinder() {
         for (let i = 0; i < window._summaries.length; i++) { if (i >= 5) break; showSamplePosts(i, assignments, filteredItems, window._usedPostIds); }
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); setTimeout(() => { if (resultsWrapper) { resultsWrapper.style.opacity = '1'; resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, 50); } }
 
+        // --- BACKGROUND & ENHANCEMENT TASKS START HERE ---
         runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime);
+        
+        // MODIFICATION: After a delay, enhance the discovery lists with comment data.
+        setTimeout(() => {
+            enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName);
+        }, 5000); // 5-second delay
         
     } catch (err) {
         console.error("The following error stopped the primary analysis:", err);

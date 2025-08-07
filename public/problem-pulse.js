@@ -108,8 +108,25 @@ async function generateAndRenderConstellation(items) {
     console.log("[Constellation] Starting full generation process for GALAXY MAP...");
 
     // 1. --- AI-POWERED SIGNAL EXTRACTION ---
-    const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 200);
-    const extractionPrompt = `You are a Product Manager hunting for actionable user needs that can be directly solved with a new app or software tool. Your absolute priority is to distinguish between a user **describing a past situation** and a user **expressing an unmet need for a new capability**. Only the latter is a valid signal. A valid quote MUST be forward-looking or express a problem with a **specific, repeatable task**. To be selected, a quote must satisfy ONE of these conditions: 1. **Explicit Purchase Intent:** The user directly states they would pay for a solution (e.g., "I would pay for...", "take my money"). 2. **Wishing for a Tool:** The user wishes for a specific tool or feature that doesn't exist (e.g., "I wish there was an app that did X", "if only I could find software for Y"). 3. **Intense Frustration with a Task:** The user describes a tedious, manual, or time-consuming task they are forced to do, implying a strong need for automation (e.g., "I waste hours every week doing...", "manually creating these reports is a nightmare"). **CRITICAL RULE: AVOID NARRATIVES AND EXPLANATIONS.** Do not extract stories or explanations of past events, even if they mention money or costs. For example, this is a **BAD** quote (it's a narrative): "I had a dry wedding... The reception venue required we pay an extra fee and hire security..." Here are the comments to analyze: ${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')} Respond ONLY with a valid JSON object: {"signals": [{"quote": "The verbatim quote expressing an unmet need.", "source_index": 4}]}. The quote MUST be an exact copy.`;
+    // This is inside the generateAndRenderConstellation function
+
+const extractionPrompt = `You are a diligent market research analyst. Your primary goal is to extract **between 15 and 25** high-quality quotes from the following user comments that indicate a business opportunity.
+
+A high-quality quote demonstrates one of the following:
+- **Explicit Purchase Intent:** A clear statement about paying for a solution (e.g., "I would pay for...", "take my money").
+- **Frustration with a Task:** The user is clearly annoyed by a manual, tedious, or broken process (e.g., "manually entering this data is a nightmare", "I'm so sick of doing this").
+- **Wishing for a Specific Tool:** The user describes a feature or app they wish existed (e.g., "I wish there was a tool that could sync X and Y automatically").
+
+CRITICAL INSTRUCTIONS:
+1.  **Prioritize Quantity:** Your main task is to find a good number of signals. It is better to have 15 relevant quotes than 2 perfect ones. Aim for the 15-25 range.
+2.  **Avoid Narratives:** Do not extract long stories about past events. Focus on quotes expressing a current or future need.
+3.  **Verbatim Copy:** The quote MUST be an exact, character-for-character copy from the source text.
+
+Here are the comments to analyze:
+${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with a valid JSON object: {"signals": [...]}. The "signals" array should contain 15-25 objects if you can find them.`;
+    
 
     let rawSignals = [];
     try {

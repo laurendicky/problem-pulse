@@ -1,8 +1,7 @@
 // =================================================================================
-// COMPLETE AND VERIFIED SCRIPT (VERSION 14.1 - RESILIENT)
-// This version adds resiliency to the main analysis function. It isolates the
-// failure of the 'assignPostsToFindings' call, allowing the rest of the
-// dashboard to render even if the proxy function crashes.
+// COMPLETE AND VERIFIED SCRIPT (VERSION 14.3 - UI FLOW FIXED & RESILIENT)
+// This version corrects the product/brand discovery UI flow to be non-destructive.
+// It now displays a status message above the initial results instead of replacing them.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -116,20 +115,20 @@ function renderFAQs(faqs) { const container = document.getElementById('faq-conta
 function renderIncludedSubreddits(subreddits) { const container = document.getElementById('included-subreddits-container'); if(!container) return; const tags = subreddits.map(sub => `<div class="subreddit-tag">r/${sub}</div>`).join(''); container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list">${tags}</div>`; }
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
-// --- CONSTELLATION MAP FUNCTIONS (REBUILT WITH USER LOGIC) ---
+// --- CONSTELLATION MAP FUNCTIONS ---
 const CONSTELLATION_CATEGORIES = { DemandSignals: { x: 0.5, y: 0.5 }, CostConcerns: { x: 0.5, y: 0.2 }, WillingnessToPay: { x: 0.8, y: 0.4 }, Frustration: { x: 0.7, y: 0.75 }, SubstituteComparisons: { x: 0.3, y: 0.75 }, Urgency: { x: 0.2, y: 0.4 }, Other: { x: 0.5, y: 0.05 }, };
 const EMOTION_COLORS = { Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7', Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316' };
-async function generateAndRenderConstellation(items) { console.log("[Constellation] Starting full generation process..."); const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 200); console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal extraction.`); const extractionPrompt = `You are a market research analyst. From the following list of user comments, as many quotes as possible that express a strong purchase intent, an unsolved & urgent problem, or a significant pain point.
+async function generateAndRenderConstellation(items) { console.log("[Constellation] Starting full generation process..."); const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 200); console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal extraction.`); const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 20 quotes that express a strong purchase intent, an unsolved problem, or a significant pain point.
 
     Focus ONLY on phrases that directly mention:
-    - Willingness to pay, for example: "I'd pay for", "take my money"
-    - Frustration with a lack of a tool, for example: "wish there was an app for", "why is there no tool"
-    - A specific, unmet need, for example: "I need something that does X but Y gets in the way"
-    - Mentions of high cost or price sensitivity, for example: "it's too expensive", "can't afford"
-    - Comparisons to other products, for example: "I tried X, but it couldn't do Y"
-    - A sense of urgency or high pressure for example: ("I need a solution for X now")
+    - Willingness to pay ("I'd pay for", "take my money")
+    - Frustration with a lack of a tool ("wish there was an app for", "why is there no tool")
+    - A specific, unmet need ("I need something that does X but Y gets in the way")
+    - Mentions of high cost or price sensitivity ("it's too expensive", "can't afford")
+    - Comparisons to other products ("I tried X, but it couldn't do Y")
+    - A sense of urgency or high pressure ("I need a solution now")
 
-    CRITICAL: IGNORE general complaints, emotional support, or sentences that use words like "love" or "need" in a non-commercial context. DO NOT specifically use the examples given above. these examples are guidelines only for the quotes that you should be finding in the comments. 
+    CRITICAL: IGNORE general complaints, emotional support, or sentences that use words like "love" or "need" in a non-commercial context.
 
     Here are the comments:
     ${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
@@ -162,7 +161,53 @@ async function generateAndRenderConstellation(items) { console.log("[Constellati
 function initializeConstellationInteractivity() { const container = document.getElementById('constellation-map-container'); const panel = document.getElementById('constellation-side-panel'); if (!container || !panel) return; const panelContent = panel.querySelector('.panel-content'); let hidePanelTimer; const setDefaultPanelState = () => { panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`; }; const hidePanel = () => { setDefaultPanelState(); }; setDefaultPanelState(); container.addEventListener('mouseover', (e) => { if (!e.target.classList.contains('constellation-star')) return; clearTimeout(hidePanelTimer); const star = e.target; panelContent.innerHTML = `<p class="quote">“${star.dataset.quote}”</p><h4 class="problem-theme">${star.dataset.problemTheme}</h4><p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes on related signals</p><a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>`; }); container.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); }); panel.addEventListener('mouseenter', () => { clearTimeout(hidePanelTimer); }); panel.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); }); }
 async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) { console.log("--- Starting Delayed Constellation Analysis (in background) ---"); try { const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false); const postIds = demandSignalPosts.sort((a,b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id); const highIntentComments = await fetchCommentsForPosts(postIds); const allItems = [...demandSignalPosts, ...highIntentComments]; await generateAndRenderConstellation(allItems); console.log("--- Constellation Analysis Complete. ---"); } catch (error) { console.error("Constellation analysis failed in the background:", error); renderConstellationMap([]); } }
 function renderConstellationMap(signals) { const container = document.getElementById('constellation-map-container'); if (!container) return; const loader = container.querySelector('.constellation-loader'); if (loader) loader.remove(); const oldStars = container.querySelectorAll('.constellation-star'); oldStars.forEach(star => star.remove()); if (!signals || signals.length === 0) { const placeholder = document.createElement('div'); placeholder.className = 'panel-placeholder constellation-star'; placeholder.innerHTML = 'No strong purchase intent signals found.<br/>Try a broader search or different communities.'; container.appendChild(placeholder); const panelContent = document.querySelector('#constellation-side-panel .panel-content'); if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No opportunities discovered.</div>`; return; } const aggregatedSignals = {}; signals.forEach(signal => { if (!signal.problem_theme || !signal.source) return; const theme = signal.problem_theme.trim().toLowerCase(); if (!aggregatedSignals[theme]) { aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 }; } aggregatedSignals[theme].quotes.push(signal.quote); aggregatedSignals[theme].frequency++; aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0); }); const starData = Object.values(aggregatedSignals); const maxFreq = Math.max(...starData.map(s => s.frequency), 1); const starsByCategory = {}; starData.forEach(star => { const categoryKey = star.category && CONSTELLATION_CATEGORIES[star.category] ? star.category : 'Other'; if (!starsByCategory[categoryKey]) { starsByCategory[categoryKey] = []; } starsByCategory[categoryKey].push(star); }); starData.forEach(star => { const starEl = document.createElement('div'); starEl.className = 'constellation-star'; const size = 8 + (star.frequency / maxFreq) * 20; starEl.style.width = `${size}px`; starEl.style.height = `${size}px`; starEl.style.backgroundColor = EMOTION_COLORS[star.emotion] || '#ffffff'; const categoryKey = star.category && CONSTELLATION_CATEGORIES[star.category] ? star.category : 'Other'; const categoryCoords = CONSTELLATION_CATEGORIES[categoryKey]; if (categoryKey === 'DemandSignals') { const CLUSTER_SPREAD = 12; const offsetX = (Math.random() - 0.5) * CLUSTER_SPREAD; const offsetY = (Math.random() - 0.5) * CLUSTER_SPREAD; const finalX = (categoryCoords.x * 100) + offsetX; const finalY = (categoryCoords.y * 100) + offsetY; starEl.style.left = `calc(${finalX}% - ${size / 2}px)`; starEl.style.top = `calc(${finalY}% - ${size / 2}px)`; } else { const categoryStars = starsByCategory[categoryKey]; const starIndex = categoryStars.findIndex(s => s.problem_theme === star.problem_theme); const totalInCategory = categoryStars.length; const ORBIT_RADIUS_BASE = 6; const ORBIT_RADIUS_RANDOM_FACTOR = 4; const angle = (starIndex / totalInCategory) * 2 * Math.PI; const radius = ORBIT_RADIUS_BASE + (Math.random() * ORBIT_RADIUS_RANDOM_FACTOR); const offsetX = radius * Math.cos(angle); const offsetY = radius * Math.sin(angle); const finalX = (categoryCoords.x * 100) + offsetX; const finalY = (categoryCoords.y * 100) + offsetY; starEl.style.left = `calc(${finalX}% - ${size / 2}px)`; starEl.style.top = `calc(${finalY}% - ${size / 2}px)`; } starEl.dataset.quote = star.quotes[0]; starEl.dataset.problemTheme = star.problem_theme; starEl.dataset.sourceSubreddit = star.source.subreddit; starEl.dataset.sourcePermalink = star.source.permalink; starEl.dataset.sourceUpvotes = star.totalUpvotes.toLocaleString(); container.appendChild(starEl); }); }
-async function enhanceDiscoveryWithComments(posts, nicheContext) { console.log("--- Starting PHASE 2: Enhancing discovery with comments ---"); const brandContainer = document.getElementById('top-brands-container'); const productContainer = document.getElementById('top-products-container'); const loadingMessage = `<p class="brewing-text" style="font-family: Inter, sans-serif; color: #555; padding: 0 1rem; font-style: italic;">Posts are in. Comments are brewing. Sit tight — the juicy bits are almost here. <span class="loader-dots"></span></p>`; if (brandContainer && brandContainer.querySelector('.dashboard-section-title')) { const title = brandContainer.querySelector('.dashboard-section-title').outerHTML; brandContainer.innerHTML = title + loadingMessage; } if (productContainer && productContainer.querySelector('.dashboard-section-title')) { const title = productContainer.querySelector('.dashboard-section-title').outerHTML; productContainer.innerHTML = title + loadingMessage; } try { const postIdsToFetch = posts.slice(0, 75).map(p => p.data.id); const comments = await fetchCommentsForPosts(postIdsToFetch); console.log(`Fetched ${comments.length} comments for enhancement.`); const allItemsForAnalysis = [...posts, ...comments]; const enhancedEntities = await extractAndValidateEntities(allItemsForAnalysis, nicheContext); console.log("Enhancement complete. Rendering final brand/product lists."); renderDiscoveryList('top-brands-container', enhancedEntities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', enhancedEntities.topProducts, 'Top Generic Products', 'products'); } catch (error) { console.error("Failed to enhance discovery lists with comments:", error); if (brandContainer) brandContainer.innerHTML += "<p style='color:red;font-size:0.8rem;'>Could not load comment data.</p>"; if (productContainer) productContainer.innerHTML += "<p style='color:red;font-size:0.8rem;'>Could not load comment data.</p>"; } }
+
+// =================================================================================
+// === MODIFIED FUNCTION: `enhanceDiscoveryWithComments` (implements desired UI flow) ===
+// =================================================================================
+async function enhanceDiscoveryWithComments(posts, nicheContext) {
+    console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
+    const brandContainer = document.getElementById('top-brands-container');
+    if (!brandContainer) return; // Guard clause if the container isn't on the page
+
+    // 1. Create and inject the status message WITHOUT replacing existing content.
+    const statusMessageEl = document.createElement('div');
+    statusMessageEl.id = 'discovery-status-message'; // Give it an ID for easy removal
+    statusMessageEl.style.cssText = "font-family: Inter, sans-serif; color: #555; padding: 0.5rem 1rem 1rem 1rem; font-style: italic; text-align: center;";
+    statusMessageEl.innerHTML = 'Posts are in. Comments are brewing. Sit tight — the juicy bits are almost here. <span class="loader-dots"></span>';
+    
+    // Insert the message *before* the brand container, which should be above both lists.
+    brandContainer.before(statusMessageEl);
+
+    try {
+        // 2. Fetch comments and re-run the analysis
+        const postIdsToFetch = posts.slice(0, 75).map(p => p.data.id);
+        const comments = await fetchCommentsForPosts(postIdsToFetch);
+        console.log(`Fetched ${comments.length} comments for enhancement.`);
+        const allItemsForAnalysis = [...posts, ...comments];
+        const enhancedEntities = await extractAndValidateEntities(allItemsForAnalysis, nicheContext);
+
+        // 3. Render the final, enhanced lists. This will now replace the initial post-only lists.
+        console.log("Enhancement complete. Rendering final brand/product lists.");
+        renderDiscoveryList('top-brands-container', enhancedEntities.topBrands, 'Top Brands & Specific Products', 'brands');
+        renderDiscoveryList('top-products-container', enhancedEntities.topProducts, 'Top Generic Products', 'products');
+
+    } catch (error) {
+        console.error("Failed to enhance discovery lists with comments:", error);
+        // If an error occurs, update the status message to inform the user.
+        const statusMsg = document.getElementById('discovery-status-message');
+        if (statusMsg) {
+            statusMsg.style.color = 'red';
+            statusMsg.textContent = 'Could not load additional data from comments due to a network error.';
+        }
+    } finally {
+        // 4. IMPORTANT: Clean up and remove the status message after the process is finished (or has failed).
+        const statusMsg = document.getElementById('discovery-status-message');
+        if (statusMsg) {
+            statusMsg.remove();
+        }
+    }
+}
 
 // =================================================================================
 // === UPDATED AND HARDENED `runProblemFinder` FUNCTION ===
@@ -255,21 +300,17 @@ async function runProblemFinder() {
             if (btn) btn.onclick = function() { showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); };
         });
         
-        // --- START OF RESILIENCY FIX ---
-        // This part is now wrapped in its own try/catch to prevent it from crashing the whole app.
         try {
             window._postsForAssignment = filteredItems.slice(0, 75);
             window._usedPostIds = new Set();
             const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment);
             window._assignments = assignments;
-            // Initially render all sample post containers, even if the call failed
             for (let i = 0; i < window._summaries.length; i++) {
                 if (i >= 5) break;
                 showSamplePosts(i, assignments, filteredItems, window._usedPostIds);
             }
         } catch (err) {
             console.error("CRITICAL (but isolated): Failed to assign posts to findings. Sample posts will not be available.", err);
-            // Optionally, update the UI to inform the user
             for (let i = 1; i <= 5; i++) {
                 const redditDiv = document.getElementById(`reddit-div${i}`);
                 if (redditDiv) {
@@ -277,7 +318,6 @@ async function runProblemFinder() {
                 }
             }
         }
-        // --- END OF RESILIENCY FIX ---
 
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); setTimeout(() => { if (resultsWrapper) { resultsWrapper.style.opacity = '1'; resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, 50); } }
 

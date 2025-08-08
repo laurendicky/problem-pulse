@@ -1,11 +1,13 @@
 // =================================================================================
-// COMPLETE AND VERIFIED PROXY SCRIPT (VERSION 3.1 - 'about.json' SUFFIX REMOVED)
-// This version corrects the URL for fetching subreddit details via the OAuth API.
+// COMPLETE AND VERIFIED PROXY SCRIPT (VERSION 3.2 - GRACEFUL 404 HANDLING)
+// This version intelligently handles 404 "Not Found" errors for 'about' requests,
+// preventing crashes when the AI suggests a non-existent subreddit.
 // =================================================================================
 
 const { REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT } = process.env;
 
 async function getRedditToken() {
+    // ... (This function remains unchanged)
     const auth = Buffer.from(`${REDDIT_CLIENT_ID}:${REDDIT_CLIENT_SECRET}`).toString('base64');
     const response = await fetch('https://www.reddit.com/api/v1/access_token', {
         method: 'POST',
@@ -41,24 +43,13 @@ exports.handler = async (event) => {
         const token = await getRedditToken();
         let url;
 
-        // --- UPDATED: Main routing logic to handle different request types ---
-        
-        // Handle requests for subreddit details
+        // --- Main routing logic ---
         if (body.type === 'about') {
-            if (!body.subreddit) {
-                throw new Error("A 'subreddit' name is required for fetching 'about' details.");
-            }
-            // CORRECTED LINE: Removed the '.json' suffix for the OAuth endpoint.
+            if (!body.subreddit) throw new Error("A 'subreddit' name is required for 'about' details.");
             url = `https://oauth.reddit.com/r/${body.subreddit}/about`;
-        
-        // Handle requests for post comments (existing)
         } else if (body.type === 'comments') {
-            if (!body.postId) {
-                throw new Error("A 'postId' is required for fetching comments.");
-            }
+            if (!body.postId) throw new Error("A 'postId' is required for fetching comments.");
             url = `https://oauth.reddit.com/comments/${body.postId}?limit=500&depth=10`;
-        
-        // Handle standard search requests (existing)
         } else if (body.searchTerm) {
             const { searchTerm, niche, limit, timeFilter, after } = body;
             const query = encodeURIComponent(`( ${niche} ) ${searchTerm}`);
@@ -67,8 +58,7 @@ exports.handler = async (event) => {
                 url += `&after=${after}`;
             }
         } else {
-            // If none of the above match, it's an invalid request
-            throw new Error("Invalid request payload. Must include 'type' or 'searchTerm'.");
+            throw new Error("Invalid request payload.");
         }
         
         const redditResponse = await fetch(url, {
@@ -78,11 +68,27 @@ exports.handler = async (event) => {
             }
         });
 
+        // ======================================================================
+        // *** THE FIX IS HERE: Gracefully handle 'Not Found' for 'about' requests ***
+        // ======================================================================
         if (!redditResponse.ok) {
+            // If the subreddit doesn't exist, Reddit returns a 404.
+            // This is NOT a server error, it's valid information.
+            // We return a successful response with a null body so the front-end can filter it out.
+            if (body.type === 'about' && redditResponse.status === 404) {
+                return {
+                    statusCode: 200,
+                    headers: corsHeaders,
+                    body: JSON.stringify(null) // Send back null, which the front-end handles.
+                };
+            }
+            
+            // For all other errors, we still throw a real error.
             const errorText = await redditResponse.text();
             console.error("Reddit API Error:", errorText);
             throw new Error(`Reddit API failed with status: ${redditResponse.status} for URL: ${url}`);
         }
+        // ======================================================================
 
         const data = await redditResponse.json();
 

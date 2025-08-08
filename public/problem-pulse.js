@@ -37,7 +37,7 @@ function calculateRelevanceScore(post, finding) { let score = 0; const postTitle
 function calculateFindingMetrics(validatedSummaries, filteredPosts) { const metrics = {}; const allProblemPostIds = new Set(); validatedSummaries.forEach((finding, index) => { metrics[index] = { supportCount: 0 }; }); filteredPosts.forEach(post => { let bestFindingIndex = -1; let maxScore = 0; validatedSummaries.forEach((finding, index) => { const score = calculateRelevanceScore(post, finding); if (score > maxScore) { maxScore = score; bestFindingIndex = index; } }); if (bestFindingIndex !== -1 && maxScore > 0) { metrics[bestFindingIndex].supportCount++; allProblemPostIds.add(post.data.id); } }); metrics.totalProblemPosts = allProblemPostIds.size; return metrics; }
 function renderPosts(posts) { const container = document.getElementById("posts-container"); if (!container) { return; } container.innerHTML = posts.map(post => { const content = post.data.selftext || post.data.body || 'No additional content.'; const title = post.data.title || post.data.link_title || 'View Comment Thread'; const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : ''; return ` <div class="insight" style="border:1px solid #ccc; padding:12px; margin-bottom:12px; background:#fafafa; border-radius:8px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1.1rem; color:#007bff; text-decoration:none;"> ${title} </a> <p style="font-size:0.9rem; margin:0.75rem 0; color:#333; line-height:1.5;"> ${content.substring(0, 200) + '...'} </p> <small style="color:#555; font-size:0.8rem;"> r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)} </small> </div> `}).join(''); }
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if (!assignments) return; const finding = window._summaries[summaryIndex]; if (!finding) return; let relevantPosts = []; const addedPostIds = new Set(); const addPost = (post) => { if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) { relevantPosts.push(post); addedPostIds.add(post.data.id); } }; const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber); assignedPostNumbers.forEach(postNum => { if (postNum - 1 < window._postsForAssignment.length) { addPost(window._postsForAssignment[postNum - 1]); } }); if (relevantPosts.length < 8) { const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id)); const scoredCandidates = candidatePool.map(post => ({ post: post, score: calculateRelevanceScore(post, finding) })).filter(item => item.score >= 4).sort((a, b) => b.score - a.score); for (const candidate of scoredCandidates) { if (relevantPosts.length >= 8) break; addPost(candidate.post); } } let html; if (relevantPosts.length === 0) { html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`; } else { const finalPosts = relevantPosts.slice(0, 8); finalPosts.forEach(post => usedPostIds.add(post.data.id)); html = finalPosts.map(post => { const content = post.data.selftext || post.data.body || 'No content.'; const title = post.data.title || post.data.link_title || 'View Comment'; const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : ''; return ` <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${title}</a> <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${content.substring(0, 150) + '...'}</p> <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)}</small> </div> `}).join(''); } const container = document.getElementById(`reddit-div${summaryIndex + 1}`); if (container) { container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">Real Stories from Reddit: "${finding.title}"</div><div class="reddit-samples-posts">${html}</div>`; } }
-async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 15 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 250, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
+async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 20 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 300, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 async function fetchCommentsForPosts(postIds, batchSize = 5) {
     let allComments = [];
     console.log(`Fetching comments for ${postIds.length} posts...`);
@@ -183,30 +183,38 @@ function getActivityLabel(activeUsers, totalMembers) {
 }
 
 /**
- * NEW LOGIC: Takes a list of subreddit names, fetches details, filters out duds, ranks the rest.
+ * NEW LOGIC: Fetches details sequentially, filters, ranks, and returns a rich object for display.
  * @param {string[]} subredditNames - An array of subreddit names from the AI.
  * @returns {Promise<Object[]>} A promise that resolves to a ranked array of rich subreddit objects.
  */
 async function fetchAndRankSubreddits(subredditNames) {
     console.log(`AI suggested ${subredditNames.length} subreddits. Validating and ranking...`);
-    const promises = subredditNames.map(name => fetchSubredditDetails(name));
-    const results = await Promise.all(promises);
+    const detailedSubs = [];
+    
+    // CORRECTED: Process requests sequentially to avoid overwhelming the server.
+    for (const name of subredditNames) {
+        const details = await fetchSubredditDetails(name);
+        if (details) {
+            detailedSubs.push(details);
+        }
+        // Add a small delay to be polite to the proxy/API.
+        await new Promise(resolve => setTimeout(resolve, 50)); 
+    }
 
-    const rankedSubreddits = results
+    const rankedSubreddits = detailedSubs
         .filter(details => {
-            if (!details) return false;
             const isBigEnough = details.subscribers >= HARD_MIN_SUBSCRIBERS;
             const isActiveEnough = (details.active_user_count || 0) >= HARD_MIN_ACTIVE_USERS;
             return isBigEnough && isActiveEnough;
         })
-        .map(details => ({ // Create rich objects for easier use later
+        .map(details => ({
             name: details.display_name,
             members: details.subscribers,
             activityLabel: getActivityLabel(details.active_user_count, details.subscribers)
         }))
-        .sort((a, b) => b.members - a.members); // Rank by subscriber count
+        .sort((a, b) => b.members - a.members);
 
-    console.log(`Found ${rankedSubreddits.length} valid communities. Presenting the top choices.`);
+    console.log(`Found ${rankedSubreddits.length} valid communities. Ready to display.`);
     return rankedSubreddits;
 }
 
@@ -235,7 +243,6 @@ function renderSubredditChoicesHTML(subreddits) {
     `).join('');
 }
 
-
 /**
  * Displays the initial list of subreddits and a "Load More" button if applicable.
  * @param {Object[]} rankedSubreddits - The full, sorted list of rich subreddit objects.
@@ -244,7 +251,7 @@ function displaySubredditChoices(rankedSubreddits) {
     const choicesDiv = document.getElementById('subreddit-choices');
     if (!choicesDiv) return;
 
-    _allRankedSubreddits = rankedSubreddits; // Store the full list globally
+    _allRankedSubreddits = rankedSubreddits;
 
     if (_allRankedSubreddits.length === 0) {
         choicesDiv.innerHTML = '<p class="loading-text">No suitable communities found. Try a different group.</p>';
@@ -254,7 +261,6 @@ function displaySubredditChoices(rankedSubreddits) {
     const initialToShow = _allRankedSubreddits.slice(0, 8);
     choicesDiv.innerHTML = renderSubredditChoicesHTML(initialToShow);
 
-    // If there are more subreddits left to show, add the "Load More" button
     if (_allRankedSubreddits.length > 8) {
         const loadMoreBtn = document.createElement('button');
         loadMoreBtn.id = 'load-more-subs-btn';
@@ -278,11 +284,9 @@ function loadMoreSubreddits() {
 
     if (nextBatch.length > 0) {
         const newChoicesHTML = renderSubredditChoicesHTML(nextBatch);
-        // Insert the new choices before the button
         loadMoreBtn.insertAdjacentHTML('beforebegin', newChoicesHTML);
     }
 
-    // If we've now shown all available subreddits, remove the button
     const newTotalShown = choicesDiv.querySelectorAll('.subreddit-choice').length;
     if (newTotalShown >= _allRankedSubreddits.length) {
         loadMoreBtn.remove();
@@ -311,12 +315,14 @@ async function renderIncludedSubreddits(subreddits) {
 
             const description = details.public_description || 'No public description available.';
             const members = formatMemberCount(details.subscribers);
-            const activityLabel = getActivityLabel(details.active_user_count, details.subscribers);
+            const activityData = getActivityLabel(details.active_user_count, details.subscribers).split(' '); // e.g., ['🔥', 'Hot']
+            const activityEmoji = activityData[0];
+            const activityText = activityData[1];
 
             return `<div class="subreddit-tag-detailed" style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column;">
                         <div class="tag-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                             <span class="tag-name" style="font-weight: bold; font-size: 1rem; color: #0056b3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">r/${subName}</span>
-                            <span class="tag-activity" style="font-size: 0.8rem; background: #e9ecef; color: #495057; padding: 3px 8px; border-radius: 12px; flex-shrink: 0; margin-left: 8px;">${activityLabel.split(' ')[0]} ${activityLabel.split(' ')[1]}</span>
+                            <span class="tag-activity" style="font-size: 0.8rem; background: #e9ecef; color: #495057; padding: 3px 8px; border-radius: 12px; flex-shrink: 0; margin-left: 8px;">${activityEmoji} ${activityText}</span>
                         </div>
                         <p class="tag-description" style="font-size: 0.85rem; color: #495057; margin: 0 0 10px 0; line-height: 1.4; flex-grow: 1;">${description.substring(0, 150)}${description.length > 150 ? '...' : ''}</p>
                         <div class="tag-footer" style="font-size: 0.8rem; color: #6c757d; text-align: right; border-top: 1px solid #f1f3f5; padding-top: 8px; margin-top: auto;">

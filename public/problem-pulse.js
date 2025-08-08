@@ -1,7 +1,7 @@
 // =================================================================================
-// COMPLETE AND VERIFIED SCRIPT (VERSION 14.3 - UI FLOW FIXED & RESILIENT)
-// This version corrects the product/brand discovery UI flow to be non-destructive.
-// It now displays a status message above the initial results instead of replacing them.
+// COMPLETE AND VERIFIED SCRIPT (VERSION 14.4 - POWER PHRASES ADDED)
+// This version adds a "Power Phrases" module to extract common user phrases.
+// It is integrated into the concurrent analysis pipeline for optimal performance.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -32,20 +32,7 @@ function parseAIAssignments(aiResponse) { try { aiResponse = aiResponse.replace(
 function filterPosts(posts, minUpvotes = 20) { return posts.filter(post => { const title = (post.data.title || post.data.link_title || '').toLowerCase(); const selftext = post.data.selftext || post.data.body || ''; if (title.includes('[ad]') || title.includes('sponsored') || post.data.upvote_ratio < 0.2 || post.data.ups < minUpvotes || !selftext || selftext.length < 20) return false; const isRamblingOrNoisy = (text) => { if (!text) return false; return /&#x[0-9a-fA-F]+;/g.test(text) || /[^a-zA-Z0-9\s]{5,}/g.test(text) || /(.)\1{6,}/g.test(text); }; return !isRamblingOrNoisy(title) && !isRamblingOrNoisy(selftext); }); }
 function getTopKeywords(posts, topN = 10) { const freqMap = {}; posts.forEach(post => { const cleanedText = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.replace(/<[^>]+>/g, '').replace(/[^a-zA-Z0-9\s.,!?]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); const words = cleanedText.split(/\s+/); words.forEach(word => { if (!stopWords.includes(word) && word.length > 2) { freqMap[word] = (freqMap[word] || 0) + 1; } }); }); return Object.keys(freqMap).sort((a, b) => freqMap[b] - freqMap[a]).slice(0, topN); }
 function getFirstTwoSentences(text) { if (!text) return ''; const sentences = text.match(/[^\.!\?]+[\.!\?]+(?:\s|$)/g); return sentences ? sentences.slice(0, 2).join(' ').trim() : text; }
-async function assignPostsToFindings(summaries, posts) {
-    const postsForAI = posts.slice(0, 50);
-    const prompt = `You are an expert data analyst. Your task is to categorize Reddit posts into the most relevant "Finding" from a provided list.\n\nHere are the ${summaries.length} findings:\n${summaries.map((s, i) => `Finding ${i + 1}: ${s.title}`).join('\n')}\n\nHere are the ${postsForAI.length} Reddit posts:\n${postsForAI.map((p, i) => `Post ${i + 1}: ${(p.data.title || p.data.link_title || '').substring(0, 150)}`).join('\n')}\n\nINSTRUCTIONS: For each post, assign it to the most relevant Finding (from 1 to ${summaries.length}). Respond ONLY with a JSON object with a single key "assignments", which is an array of objects like {"postNumber": 1, "finding": 2}.`;
-    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data categorization engine that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1500, response_format: { "type": "json_object" } };
-    try {
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        if (!response.ok) throw new Error(`OpenAI API Error for assignments: ${response.statusText}`);
-        const data = await response.json();
-        return parseAIAssignments(data.openaiResponse);
-    } catch (error) {
-        console.error("Assignment function error:", error);
-        return [];
-    }
-}
+async function assignPostsToFindings(summaries, posts) { const postsForAI = posts.slice(0, 75); const prompt = `You are an expert data analyst. Your task is to categorize Reddit posts into the most relevant "Finding" from a provided list.\n\nHere are the ${summaries.length} findings:\n${summaries.map((s, i) => `Finding ${i + 1}: ${s.title}`).join('\n')}\n\nHere are the ${postsForAI.length} Reddit posts:\n${postsForAI.map((p, i) => `Post ${i + 1}: ${p.data.title || p.data.link_title}`).join('\n')}\n\nINSTRUCTIONS: For each post, assign it to the most relevant Finding (from 1 to ${summaries.length}). Respond ONLY with a JSON object with a single key "assignments", which is an array of objects like {"postNumber": 1, "finding": 2}.`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data categorization engine that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error(`OpenAI API Error for assignments: ${response.statusText}`); const data = await response.json(); return parseAIAssignments(data.openaiResponse); } catch (error) { console.error("Assignment function error:", error); return []; } }
 function calculateRelevanceScore(post, finding) { let score = 0; const postTitle = (post.data.title || post.data.link_title || "").toLowerCase(); const postBody = (post.data.selftext || post.data.body || "").toLowerCase(); const findingTitleWords = finding.title.toLowerCase().split(' ').filter(word => word.length > 3 && !stopWords.includes(word)); const findingKeywords = (finding.keywords || []).map(k => k.toLowerCase()); let titleWordMatched = false, keywordMatched = false; for (const word of findingTitleWords) { const regex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'); if (regex.test(postTitle)) { score += 5; titleWordMatched = true; } if (regex.test(postBody)) { score += 2; titleWordMatched = true; } } for (const keyword of findingKeywords) { const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'); if (regex.test(postTitle)) { score += 3; keywordMatched = true; } if (regex.test(postBody)) { score += 1; keywordMatched = true; } } if (titleWordMatched && keywordMatched) { score += 10; } return score; }
 function calculateFindingMetrics(validatedSummaries, filteredPosts) { const metrics = {}; const allProblemPostIds = new Set(); validatedSummaries.forEach((finding, index) => { metrics[index] = { supportCount: 0 }; }); filteredPosts.forEach(post => { let bestFindingIndex = -1; let maxScore = 0; validatedSummaries.forEach((finding, index) => { const score = calculateRelevanceScore(post, finding); if (score > maxScore) { maxScore = score; bestFindingIndex = index; } }); if (bestFindingIndex !== -1 && maxScore > 0) { metrics[bestFindingIndex].supportCount++; allProblemPostIds.add(post.data.id); } }); metrics.totalProblemPosts = allProblemPostIds.size; return metrics; }
 function renderPosts(posts) { const container = document.getElementById("posts-container"); if (!container) { return; } container.innerHTML = posts.map(post => { const content = post.data.selftext || post.data.body || 'No additional content.'; const title = post.data.title || post.data.link_title || 'View Comment Thread'; const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : ''; return ` <div class="insight" style="border:1px solid #ccc; padding:12px; margin-bottom:12px; background:#fafafa; border-radius:8px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1.1rem; color:#007bff; text-decoration:none;"> ${title} </a> <p style="font-size:0.9rem; margin:0.75rem 0; color:#333; line-height:1.5;"> ${content.substring(0, 200) + '...'} </p> <small style="color:#555; font-size:0.8rem;"> r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)} </small> </div> `}).join(''); }
@@ -90,7 +77,7 @@ function renderContextContent(word, posts) { const contextBox = document.getElem
 function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title || p.data.link_title || ''}\nContent: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
 async function extractAndValidateEntities(posts, nicheContext) {
-    const topPostsText = posts.slice(0, 50).map(p => {
+    const topPostsText = posts.slice(0, 75).map(p => {
         const title = p.data.title || p.data.link_title;
         const body = p.data.selftext || p.data.body || '';
         if (title) {
@@ -130,6 +117,89 @@ function renderDiscoveryList(containerId, data, title, type) { const container =
 function renderFAQs(faqs) { const container = document.getElementById('faq-container'); if(!container) return; let faqItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">Could not generate common questions from the text.</p>'; if (faqs.length > 0) { faqItems = faqs.map((faq) => `<div class="faq-item"><button class="faq-question">${faq}</button><div class="faq-answer"><p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p></div></div>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">Frequently Asked Questions</h3>${faqItems}`; container.querySelectorAll('.faq-question').forEach(button => { button.addEventListener('click', () => { const answer = button.nextElementSibling; button.classList.toggle('active'); if (answer.style.maxHeight) { answer.style.maxHeight = null; answer.style.padding = '0 1.5rem'; } else { answer.style.padding = '1rem 1.5rem'; answer.style.maxHeight = answer.scrollHeight + "px"; } }); }); }
 
 // =================================================================================
+// === NEW "POWER PHRASES" FUNCTIONS ===
+// =================================================================================
+
+/**
+ * Uses AI to extract common, meaningful 3-5 word phrases from user text.
+ * @param {Array} posts - An array of post objects to analyze.
+ * @param {string} nicheContext - The name of the user group for context.
+ * @returns {Promise<string[]>} A promise that resolves to an array of phrases.
+ */
+async function generatePowerPhrases(posts, nicheContext) {
+    console.log("Generating Power Phrases...");
+    try {
+        const textCorpus = posts.slice(0, 50).map(p => 
+            `${p.data.title || p.data.link_title || ''}. ${p.data.selftext || p.data.body || ''}`
+        ).join('\n').substring(0, 15000); // Limit corpus size for API efficiency
+
+        const prompt = `You are a market research analyst specializing in linguistics. Analyze the following text from the "${nicheContext}" community. Identify up to 8 of the most frequently used and meaningful 3-5 word phrases that reveal user goals, frustrations, or common ways of speaking.
+
+CRITICAL: Exclude generic, uninteresting phrases like "I think that the", "a lot of people", "for a while now", etc. Focus on phrases that a marketer could use in copy.
+
+Respond ONLY with a valid JSON object with a single key "power_phrases", which is an array of the extracted string phrases. Example: { "power_phrases": ["the biggest problem is", "wish there was a", "does anyone know how"] }
+
+Text to analyze:
+"""
+${textCorpus}
+"""`;
+
+        const openAIParams = {
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You are a linguistic analyst that outputs only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.1,
+            max_tokens: 500,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        });
+
+        if (!response.ok) {
+            throw new Error('OpenAI Power Phrase generation failed.');
+        }
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        console.log("Successfully generated Power Phrases:", parsed.power_phrases);
+        return parsed.power_phrases || [];
+    } catch (error) {
+        console.error("Power Phrase generation error:", error);
+        return [];
+    }
+}
+
+/**
+ * Renders the list of power phrases into the designated container.
+ * @param {string[]} phrases - An array of power phrases.
+ */
+function renderPowerPhrases(phrases) {
+    const container = document.getElementById('power-phrases');
+    if (!container) {
+        console.error("Power Phrases container not found.");
+        return;
+    }
+
+    let contentHTML = '';
+    if (!phrases || phrases.length === 0) {
+        contentHTML = `<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">Could not identify common phrases from the text.</p>`;
+    } else {
+        const listItems = phrases.map(phrase => 
+            `<li class="power-phrase-item" style="background-color: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; padding: 10px 14px; margin-bottom: 8px; font-family: 'Georgia', serif; font-style: italic; color: #343a40;">“${phrase}”</li>`
+        ).join('');
+        contentHTML = `<ul class="power-phrase-list" style="list-style-type: none; padding: 0; margin: 0;">${listItems}</ul>`;
+    }
+
+    container.innerHTML = `<h3 class="dashboard-section-title">Common Phrases</h3>${contentHTML}`;
+}
+
+// =================================================================================
 // === NEW & CORRECTED FUNCTIONS FOR SUBREDDIT VALIDATION & DISPLAY ===
 // =================================================================================
 
@@ -149,10 +219,12 @@ async function fetchSubredditDetails(subredditName) {
                 body: JSON.stringify(payload)
             });
 
+            // If we get a server error (5xx), we want to retry.
             if (response.status >= 500) {
                 throw new Error(`Server error: ${response.status}`);
             }
 
+            // If the response is OK or a client error (like 404), we accept the result and stop.
             if (!response.ok) {
                 console.warn(`Subreddit r/${subredditName} not found or failed to load. Status: ${response.status}`);
                 return null;
@@ -164,12 +236,13 @@ async function fetchSubredditDetails(subredditName) {
         } catch (error) {
             console.error(`Attempt ${attempt} failed for r/${subredditName}:`, error.message);
             if (attempt === MAX_RETRIES) {
-                return null;
+                return null; // Give up after the last retry.
             }
+            // Wait a bit before the next retry (exponential backoff).
             await new Promise(r => setTimeout(r, 200 * attempt));
         }
     }
-    return null;
+    return null; // Should not be reached, but as a fallback.
 }
 
 /**
@@ -210,7 +283,7 @@ function getActivityLabel(activeUsers, totalMembers) {
 }
 
 /**
- * Fetches details in batches, filters duds, ranks the rest, and returns a rich object for display.
+ * NEW LOGIC: Fetches details in batches, filters duds, ranks the rest, and returns a rich object for display.
  * @param {string[]} subredditNames - An array of subreddit names from the AI.
  * @returns {Promise<Object[]>} A promise that resolves to a ranked array of rich subreddit objects.
  */
@@ -246,7 +319,7 @@ async function fetchAndRankSubreddits(subredditNames) {
 
 
 /**
- * Helper function to generate the HTML for a list of subreddit choices with a single unified pill.
+ * Helper function to generate the HTML for a list of subreddit choices with pills.
  * @param {Object[]} subreddits - An array of rich subreddit objects.
  * @returns {string} The generated HTML string.
  */
@@ -257,20 +330,19 @@ function renderSubredditChoicesHTML(subreddits) {
     return subreddits.map(sub => `
         <div class="subreddit-choice">
             <input type="checkbox" id="sub-${sub.name}" value="${sub.name}" checked>
-            <label for="sub-${sub.name}">
-                <span class="sub-name">r/${sub.name}</span>
-                <span class="sub-pills">
-                    <span class="pill members-pill">
-                        ${formatMemberCount(sub.members)}
-                    </span>
-                    <span class="pill activity-pill" style="background-color: ${activityColors[sub.activityLabel]}; color: ${activityTextColors[sub.activityLabel]};">
-                        ${sub.activityLabel}
-                    </span>
+            <label for="sub-${sub.name}">r/${sub.name}</label>
+            <div class="subreddit-pills" style="margin-top: 6px; display: flex; gap: 6px;">
+                <span class="pill members-pill" style="display: inline-block; font-size: 0.75rem; padding: 2px 8px; border-radius: 12px; background-color: #eef2ff; color: #4338ca;">
+                    ${formatMemberCount(sub.members)} members
                 </span>
-            </label>
+                <span class="pill activity-pill" style="display: inline-block; font-size: 0.75rem; padding: 2px 8px; border-radius: 12px; background-color: ${activityColors[sub.activityLabel]}; color: ${activityTextColors[sub.activityLabel]};">
+                    ${sub.activityLabel}
+                </span>
+            </div>
         </div>
     `).join('');
 }
+
 
 /**
  * Displays the initial list of subreddits and a "Load More" button if applicable.
@@ -278,10 +350,8 @@ function renderSubredditChoicesHTML(subreddits) {
  */
 function displaySubredditChoices(rankedSubreddits) {
     const choicesDiv = document.getElementById('subreddit-choices');
-    const loadMoreContainer = document.getElementById('load-more-container');
-    if (!choicesDiv || !loadMoreContainer) return;
+    if (!choicesDiv) return;
 
-    loadMoreContainer.innerHTML = '';
     _allRankedSubreddits = rankedSubreddits;
 
     if (_allRankedSubreddits.length === 0) {
@@ -296,9 +366,9 @@ function displaySubredditChoices(rankedSubreddits) {
         const loadMoreBtn = document.createElement('button');
         loadMoreBtn.id = 'load-more-subs-btn';
         loadMoreBtn.textContent = 'Load More Communities';
-        loadMoreBtn.style.cssText = "padding: 8px 20px; border-radius: 50px; border: 1px solid var(--minky-glass-border); background-color: var(--minky-glass-bg-hover); color: var(--minky-text-primary); cursor: pointer; font-weight: 500; font-family: var(--pf-font-family); font-size: 1rem;";
+        loadMoreBtn.style.cssText = "width: 100%; padding: 10px; margin-top: 15px; border-radius: 6px; border: 1px solid #ccc; background-color: #f0f0f0; cursor: pointer; font-weight: bold;";
         loadMoreBtn.onclick = loadMoreSubreddits;
-        loadMoreContainer.appendChild(loadMoreBtn);
+        choicesDiv.appendChild(loadMoreBtn);
     }
 }
 
@@ -315,7 +385,7 @@ function loadMoreSubreddits() {
 
     if (nextBatch.length > 0) {
         const newChoicesHTML = renderSubredditChoicesHTML(nextBatch);
-        choicesDiv.insertAdjacentHTML('beforeend', newChoicesHTML);
+        loadMoreBtn.insertAdjacentHTML('beforebegin', newChoicesHTML);
     }
 
     const newTotalShown = choicesDiv.querySelectorAll('.subreddit-choice').length;
@@ -346,7 +416,7 @@ async function renderIncludedSubreddits(subreddits) {
 
             const description = details.public_description || 'No public description available.';
             const members = formatMemberCount(details.subscribers);
-            const activityData = getActivityLabel(details.active_user_count, details.subscribers).split(' ');
+            const activityData = getActivityLabel(details.active_user_count, details.subscribers).split(' '); // e.g., ['🔥', 'Hot']
             const activityEmoji = activityData[0];
             const activityText = activityData[1];
 
@@ -377,11 +447,7 @@ function renderSentimentScore(positiveCount, negativeCount) { const container = 
 // --- CONSTELLATION MAP FUNCTIONS ---
 const CONSTELLATION_CATEGORIES = { DemandSignals: { x: 0.5, y: 0.5 }, CostConcerns: { x: 0.5, y: 0.2 }, WillingnessToPay: { x: 0.8, y: 0.4 }, Frustration: { x: 0.7, y: 0.75 }, SubstituteComparisons: { x: 0.3, y: 0.75 }, Urgency: { x: 0.2, y: 0.4 }, Other: { x: 0.5, y: 0.05 }, };
 const EMOTION_COLORS = { Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7', Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316' };
-async function generateAndRenderConstellation(items) {
-    console.log("[Constellation] Starting full generation process...");
-    const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 150);
-    console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
-    const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 20 quotes that express a strong purchase intent, an unsolved problem, or a significant pain point.
+async function generateAndRenderConstellation(items) { console.log("[Constellation] Starting full generation process..."); const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 200); console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal extraction.`); const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 20 quotes that express a strong purchase intent, an unsolved problem, or a significant pain point.
 
     Focus ONLY on phrases that directly mention:
     - Willingness to pay ("I'd pay for", "take my money")
@@ -397,69 +463,29 @@ async function generateAndRenderConstellation(items) {
     ${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
 
     Respond ONLY with a valid JSON object: {"signals": [{"quote": "The extracted quote.", "source_index": 4}]}`;
-    let rawSignals = [];
-    try {
-        const extractionResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: extractionPrompt }], temperature: 0.1, max_tokens: 2000, response_format: { "type": "json_object" } } }) });
-        if (!extractionResponse.ok) throw new Error("AI Signal Extraction Failed");
-        const extractionData = await extractionResponse.json();
-        const parsedExtraction = JSON.parse(extractionData.openaiResponse);
-        if (parsedExtraction.signals && Array.isArray(parsedExtraction.signals)) {
-            rawSignals = parsedExtraction.signals.map(signal => ({ quote: signal.quote, sourceItem: prioritizedItems[signal.source_index] })).filter(s => s.sourceItem);
-        }
-    } catch (error) {
-        console.error("CRITICAL ERROR in AI Signal Extraction:", error);
-        renderConstellationMap([]);
-        return;
-    }
+    let rawSignals = []; try { const extractionResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: extractionPrompt }], temperature: 0.1, max_tokens: 2000, response_format: { "type": "json_object" } } }) }); if (!extractionResponse.ok) throw new Error("AI Signal Extraction Failed"); const extractionData = await extractionResponse.json(); const parsedExtraction = JSON.parse(extractionData.openaiResponse); if (parsedExtraction.signals && Array.isArray(parsedExtraction.signals)) { rawSignals = parsedExtraction.signals.map(signal => ({ quote: signal.quote, sourceItem: prioritizedItems[signal.source_index] })).filter(s => s.sourceItem); } } catch (error) { console.error("CRITICAL ERROR in AI Signal Extraction:", error); renderConstellationMap([]); return; }
+    console.log(`[Constellation] AI extracted ${rawSignals.length} high-quality signals.`); if (rawSignals.length === 0) { renderConstellationMap([]); return; }
+    const enrichmentPrompt = `You are a market research analyst. For each quote below, provide a short summary of the user's core problem and classify it into the MOST relevant category.
 
-    console.log(`[Constellation] AI extracted ${rawSignals.length} high-quality signals.`);
-    if (rawSignals.length === 0) {
-        renderConstellationMap([]);
-        return;
-    }
-
-    const enrichedSignals = [];
-    for (const rawSignal of rawSignals) {
-        try {
-            const enrichmentPrompt = `You are a market research analyst. For the quote below, provide a short summary of the user's core problem and classify it into the MOST relevant category.
-
-            Here are the categories and their definitions:
-            - DemandSignals: General expressions of a need or problem. Use as a default if no other category fits perfectly.
-            - WillingnessToPay: Direct mentions of being willing to pay, subscribe, or buy a solution.
-            - Frustration: Expressions of frustration, annoyance, or disappointment with current tools or manual processes.
-            - SubstituteComparisons: Mentions or comparisons to other specific products, brands, or competing solutions.
-            - Urgency: Language that implies a high-pressure need or a problem that needs to be solved immediately.
-            - CostConcerns: Direct mentions of price, budget, or something being too expensive or unaffordable.
-            
-            Quote: "${rawSignal.quote}"
-
-            Provide a JSON object with:
-            1. "problem_theme": A short, 4-5 word summary of the core problem or desire.
-            2. "category": Classify into ONE of: [${Object.keys(CONSTELLATION_CATEGORIES).join(', ')}].
-            3. "emotion": Classify the primary emotion into ONE of: [${Object.keys(EMOTION_COLORS).join(', ')}].
-
-            Respond ONLY with a valid JSON object.`;
-
-            const enrichmentResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_tokens: 250, response_format: { "type": "json_object" } } }) });
-            
-            if (enrichmentResponse.ok) {
-                const enrichmentData = await enrichmentResponse.json();
-                const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse);
-                if(parsedEnrichment.problem_theme && parsedEnrichment.category && parsedEnrichment.emotion) {
-                    enrichedSignals.push({ ...rawSignal, ...parsedEnrichment, source: rawSignal.sourceItem.data });
-                } else {
-                     console.warn("Skipping a signal due to missing fields in AI enrichment response:", parsedEnrichment);
-                }
-            } else {
-                 console.warn(`Failed to enrich a signal. Status: ${enrichmentResponse.status}`);
-            }
-        } catch (error) {
-            console.error("CRITICAL ERROR during individual signal enrichment:", error);
-        }
-    }
+    Here are the categories and their definitions:
+    - DemandSignals: General expressions of a need or problem. Use as a default if no other category fits perfectly.
+    - WillingnessToPay: Direct mentions of being willing to pay, subscribe, or buy a solution.
+    - Frustration: Expressions of frustration, annoyance, or disappointment with current tools or manual processes.
+    - SubstituteComparisons: Mentions or comparisons to other specific products, brands, or competing solutions.
+    - Urgency: Language that implies a high-pressure need or a problem that needs to be solved immediately.
+    - CostConcerns: Direct mentions of price, budget, or something being too expensive or unaffordable.
     
-    console.log(`[Constellation] AI successfully enriched ${enrichedSignals.length} signals. Rendering map.`);
-    renderConstellationMap(enrichedSignals);
+    Here are the quotes:
+    ${rawSignals.map((signal, index) => `${index}. "${signal.quote}"`).join('\n')}
+
+    For EACH quote, provide a JSON object with:
+    1. "problem_theme": A short, 4-5 word summary of the core problem or desire.
+    2. "category": Classify into ONE of: [${Object.keys(CONSTELLATION_CATEGORIES).join(', ')}].
+    3. "emotion": Classify the primary emotion into ONE of: [${Object.keys(EMOTION_COLORS).join(', ')}].
+
+    Respond ONLY with a valid JSON object: {"enriched_signals": [...]}. The array MUST be the same length as the list of quotes.`;
+    let enrichedSignals = []; try { const enrichmentResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-4o", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_tokens: 2500, response_format: { "type": "json_object" } } }) }); if (!enrichmentResponse.ok) throw new Error("AI Signal Enrichment Failed"); const enrichmentData = await enrichmentResponse.json(); const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse); if (parsedEnrichment.enriched_signals && parsedEnrichment.enriched_signals.length === rawSignals.length) { enrichedSignals = rawSignals.map((rawSignal, index) => ({ ...rawSignal, ...parsedEnrichment.enriched_signals[index], source: rawSignal.sourceItem.data })); } } catch (error) { console.error("CRITICAL ERROR in AI Signal Enrichment:", error); renderConstellationMap([]); return; }
+    console.log(`[Constellation] AI enriched ${enrichedSignals.length} signals. Rendering map.`); renderConstellationMap(enrichedSignals);
 }
 function initializeConstellationInteractivity() { const container = document.getElementById('constellation-map-container'); const panel = document.getElementById('constellation-side-panel'); if (!container || !panel) return; const panelContent = panel.querySelector('.panel-content'); let hidePanelTimer; const setDefaultPanelState = () => { panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`; }; const hidePanel = () => { setDefaultPanelState(); }; setDefaultPanelState(); container.addEventListener('mouseover', (e) => { if (!e.target.classList.contains('constellation-star')) return; clearTimeout(hidePanelTimer); const star = e.target; panelContent.innerHTML = `<p class="quote">“${star.dataset.quote}”</p><h4 class="problem-theme">${star.dataset.problemTheme}</h4><p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes on related signals</p><a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>`; }); container.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); }); panel.addEventListener('mouseenter', () => { clearTimeout(hidePanelTimer); }); panel.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); }); }
 async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) { console.log("--- Starting Delayed Constellation Analysis (in background) ---"); try { const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false); const postIds = demandSignalPosts.sort((a,b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id); const highIntentComments = await fetchCommentsForPosts(postIds); const allItems = [...demandSignalPosts, ...highIntentComments]; await generateAndRenderConstellation(allItems); console.log("--- Constellation Analysis Complete. ---"); } catch (error) { console.error("Constellation analysis failed in the background:", error); renderConstellationMap([]); } }
@@ -471,119 +497,45 @@ function renderConstellationMap(signals) { const container = document.getElement
 async function enhanceDiscoveryWithComments(posts, nicheContext) {
     console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
     const brandContainer = document.getElementById('top-brands-container');
-    if (!brandContainer) return;
+    if (!brandContainer) return; // Guard clause if the container isn't on the page
 
+    // 1. Create and inject the status message WITHOUT replacing existing content.
     const statusMessageEl = document.createElement('div');
-    statusMessageEl.id = 'discovery-status-message';
+    statusMessageEl.id = 'discovery-status-message'; // Give it an ID for easy removal
     statusMessageEl.style.cssText = "font-family: Inter, sans-serif; color: #555; padding: 0.5rem 1rem 1rem 1rem; font-style: italic; text-align: center;";
     statusMessageEl.innerHTML = 'Posts are in. Comments are brewing. Sit tight — the juicy bits are almost here. <span class="loader-dots"></span>';
     
+    // Insert the message *before* the brand container, which should be above both lists.
     brandContainer.before(statusMessageEl);
 
     try {
+        // 2. Fetch comments and re-run the analysis
         const postIdsToFetch = posts.slice(0, 75).map(p => p.data.id);
         const comments = await fetchCommentsForPosts(postIdsToFetch);
         console.log(`Fetched ${comments.length} comments for enhancement.`);
         const allItemsForAnalysis = [...posts, ...comments];
         const enhancedEntities = await extractAndValidateEntities(allItemsForAnalysis, nicheContext);
 
+        // 3. Render the final, enhanced lists. This will now replace the initial post-only lists.
         console.log("Enhancement complete. Rendering final brand/product lists.");
         renderDiscoveryList('top-brands-container', enhancedEntities.topBrands, 'Top Brands & Specific Products', 'brands');
         renderDiscoveryList('top-products-container', enhancedEntities.topProducts, 'Top Generic Products', 'products');
 
     } catch (error) {
         console.error("Failed to enhance discovery lists with comments:", error);
+        // If an error occurs, update the status message to inform the user.
         const statusMsg = document.getElementById('discovery-status-message');
         if (statusMsg) {
             statusMsg.style.color = 'red';
             statusMsg.textContent = 'Could not load additional data from comments due to a network error.';
         }
     } finally {
+        // 4. IMPORTANT: Clean up and remove the status message after the process is finished (or has failed).
         const statusMsg = document.getElementById('discovery-status-message');
         if (statusMsg) {
             statusMsg.remove();
         }
     }
-}
-
-// =================================================================================
-// === NEW FEATURE: Power Phrases (Functions to be added) ========================
-// =================================================================================
-
-/**
- * Generates n-grams (phrases of n words) from a list of words.
- * @param {string[]} words - The array of words to process.
- * @param {number} n - The size of the phrases to generate (e.g., 2 for bigrams).
- * @returns {string[]} An array of valid n-gram phrases.
- */
-function generateNgrams(words, n) {
-    const ngrams = [];
-    if (n > words.length) return ngrams;
-    for (let i = 0; i <= words.length - n; i++) {
-        const ngram = words.slice(i, i + n);
-        // Filter out phrases that start or end with a common stop word.
-        if (!stopWords.includes(ngram[0]) && !stopWords.includes(ngram[n - 1])) {
-            ngrams.push(ngram.join(' '));
-        }
-    }
-    return ngrams;
-}
-
-/**
- * Analyzes post text to find the most common phrases and renders them.
- * This is wrapped in a setTimeout to prevent it from blocking the main thread.
- * @param {Object[]} posts - The array of filtered Reddit posts.
- */
-function generateAndRenderPowerPhrases(posts) {
-    setTimeout(() => {
-        console.log("--- Starting Power Phrase Analysis (in background) ---");
-        const container = document.getElementById('power-phrases');
-        if (!container) {
-            console.warn("Power Phrases container not found.");
-            return;
-        }
-
-        const allText = posts
-            .map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`)
-            .join(' ')
-            .toLowerCase()
-            .replace(/[^a-z\s']/g, '') // Keep only letters, spaces, and apostrophes
-            .replace(/\s+/g, ' '); // Normalize whitespace
-
-        const words = allText.split(' ');
-        
-        const bigrams = generateNgrams(words, 2);
-        const trigrams = generateNgrams(words, 3);
-        
-        const allNgrams = [...bigrams, ...trigrams];
-        const freqMap = {};
-        allNgrams.forEach(ngram => {
-            freqMap[ngram] = (freqMap[ngram] || 0) + 1;
-        });
-
-        const sortedPhrases = Object.entries(freqMap)
-            .filter(([phrase, count]) => count > 2) // Only show phrases mentioned at least 3 times
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 10); // Take the top 10
-
-        if (sortedPhrases.length < 3) {
-            container.innerHTML = '<h3 class="dashboard-section-title">Power Phrases</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough common phrases found to generate a map.</p>';
-            return;
-        }
-        
-        const mindMapHTML = sortedPhrases.map(([phrase, count], index) => {
-            const size = 1 + (count / sortedPhrases[0][1]) * 1.5;
-            const rotation = (index * 36) % 360;
-            const distance = 80 + (Math.random() * 40);
-            const x = 50 + distance * Math.cos(rotation * Math.PI / 180);
-            const y = 50 + distance * Math.sin(rotation * Math.PI / 180);
-            return `<div class="power-phrase-node" style="font-size: ${size.toFixed(2)}em; top: ${y}%; left: ${x}%; transform: translate(-50%, -50%) rotate(${Math.random() * 20 - 10}deg);">${phrase}</div>`;
-        }).join('');
-
-        container.innerHTML = `<h3 class="dashboard-section-title">Power Phrases</h3><div class="power-phrase-map">${mindMapHTML}</div>`;
-        
-        console.log("--- Power Phrase Analysis Complete. ---");
-    }, 10); // setTimeout with a small delay makes it asynchronous
 }
 
 // =================================================================================
@@ -641,18 +593,46 @@ async function runProblemFinder() {
         if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
         window._filteredPosts = filteredItems; 
         
-        renderPosts(filteredItems);
-        const sentimentData = generateSentimentData(filteredItems);
-        renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
-        renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
-        renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
-        generateEmotionMapData(filteredItems).then(renderEmotionMap);
-        renderIncludedSubreddits(selectedSubreddits);
-        generateAndRenderPowerPhrases(filteredItems);
-        extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
-        generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
+        // --- START CONCURRENT ANALYSIS (using Promise.all for performance) ---
+        console.log("Starting concurrent analysis of initial posts...");
+        const analysisPromises = [
+            // Promise 1: Sentiment Analysis & Clouds
+            Promise.resolve().then(() => {
+                const sentimentData = generateSentimentData(filteredItems);
+                renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
+                renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
+                renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
+            }),
+
+            // Promise 2: Problem Polarity Map
+            generateEmotionMapData(filteredItems).then(renderEmotionMap),
+
+            // Promise 3: Initial Brand/Product Discovery
+            extractAndValidateEntities(filteredItems, originalGroupName).then(entities => {
+                renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands');
+                renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products');
+            }),
+
+            // Promise 4: FAQ Generation
+            generateFAQs(filteredItems).then(renderFAQs),
+
+            // Promise 5: Power Phrase Analysis (NEW)
+            generatePowerPhrases(filteredItems, originalGroupName).then(renderPowerPhrases),
+
+            // Promise 6: Render Included Subreddits & Raw Posts List
+            renderIncludedSubreddits(selectedSubreddits),
+            Promise.resolve().then(() => renderPosts(filteredItems))
+        ];
+        
+        // Await all non-blocking visual updates
+        await Promise.all(analysisPromises);
+        console.log("Concurrent visual analysis complete. Moving to main AI summary.");
+        // --- END CONCURRENT ANALYSIS ---
+
         const userNicheCount = allItems.filter(p => ((p.data.title || p.data.link_title || '') + (p.data.selftext || p.data.body || '')).toLowerCase().includes(originalGroupName.toLowerCase())).length;
         if (countHeaderDiv) countHeaderDiv.textContent = `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
+        
+        // This part remains sequential as it's the core finding generation
         const topKeywords = getTopKeywords(filteredItems, 10);
         const topPosts = filteredItems.slice(0, 30);
         const combinedTexts = topPosts.map(post => `${post.data.title || post.data.link_title || ''}. ${getFirstTwoSentences(post.data.selftext || post.data.body || '')}`).join("\n\n");
@@ -665,6 +645,7 @@ async function runProblemFinder() {
         const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
         const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
         window._summaries = sortedFindings.map(item => item.summary);
+        
         sortedFindings.forEach((findingData, index) => {
             const displayIndex = index + 1; if (displayIndex > 5) return;
             const block = document.getElementById(`findings-block${displayIndex}`); const content = document.getElementById(`findings-${displayIndex}`); const btn = document.getElementById(`button-sample${displayIndex}`);

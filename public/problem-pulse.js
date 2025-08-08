@@ -133,8 +133,8 @@ async function fetchSubredditDetails(subredditName) {
             throw new Error(`Proxy Error: Server returned status ${response.status} for r/${subredditName}`);
         }
         const data = await response.json();
-        // CORRECTED: Return the top-level object directly, not data.data
-        return data; 
+        // CORRECTED: Return the inner 'data' object, but only if it exists.
+        return data && data.data ? data.data : null;
     } catch (error) {
         console.error(`Error fetching subreddit details for ${subredditName}:`, error);
         return null;
@@ -164,7 +164,7 @@ function formatMemberCount(num) {
  * @returns {string} An activity label with an emoji.
  */
 function getActivityLabel(activeUsers, totalMembers) {
-    if (totalMembers === 0 || activeUsers === null || activeUsers === undefined) {
+    if (!totalMembers || totalMembers === 0 || activeUsers === null || activeUsers === undefined) {
         return '💤 Quiet Corner';
     }
     const ratio = activeUsers / totalMembers;
@@ -193,24 +193,21 @@ async function renderIncludedSubreddits(subreddits) {
         const detailPromises = subreddits.map(sub => fetchSubredditDetails(sub));
         const detailsArray = await Promise.all(detailPromises);
 
-        if (detailsArray.every(d => d === null)) {
-            throw new Error("Could not load details for any subreddit.");
-        }
-
         const tagsHTML = detailsArray.map((details, index) => {
             const subName = subreddits[index];
             
-            // Use optional chaining (?.) to prevent crashes if 'details' is null or missing properties.
-            const description = details?.public_description || 'No public description available.';
-            const members = formatMemberCount(details?.subscribers);
-            const activityLabel = getActivityLabel(details?.active_user_count, details?.subscribers);
-
+            // If fetching details for a specific subreddit failed, 'details' will be null.
             if (!details) {
                 return `<div class="subreddit-tag-detailed" style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center;">
                             <div class="tag-header" style="font-weight: bold; color: #007bff;">r/${subName}</div>
                             <div class="tag-body" style="font-style: italic; color: #6c757d; font-size: 0.9rem; margin-top: 8px;">Details could not be loaded.</div>
                         </div>`;
             }
+
+            // If we have details, we can safely access its properties.
+            const description = details.public_description || 'No public description available.';
+            const members = formatMemberCount(details.subscribers);
+            const activityLabel = getActivityLabel(details.active_user_count, details.subscribers);
 
             return `<div class="subreddit-tag-detailed" style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column;">
                         <div class="tag-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">

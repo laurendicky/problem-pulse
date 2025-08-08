@@ -116,7 +116,7 @@ function renderIncludedSubreddits(subredditDetails) {
             display_name = 'Unknown',
             public_description = 'Description not available.',
             subscribers, // Intentionally not defaulting to 0 here to let formatMemberCount handle it
-            active_user_count,
+            active_user_count = 0,
             error = false
         } = detail || {};
         
@@ -132,6 +132,7 @@ function renderIncludedSubreddits(subredditDetails) {
         const memberCount = formatMemberCount(subscribers); // API field is 'subscribers'
 
         let activityLabel = '💤 Quiet Corner';
+        // Use a ratio but also absolute numbers to better classify activity
         const activityRatio = subscribers > 0 ? (active_user_count / subscribers) : 0;
         if (active_user_count > 5000 || (activityRatio > 0.05 && subscribers > 10000)) {
             activityLabel = '🔥 Buzzing';

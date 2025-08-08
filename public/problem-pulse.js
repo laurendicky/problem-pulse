@@ -270,17 +270,17 @@ function renderSubredditChoicesHTML(subreddits) {
         </div>
     `).join('');
 }
-
 /**
  * Displays the initial list of subreddits and a "Load More" button if applicable.
  * @param {Object[]} rankedSubreddits - The full, sorted list of rich subreddit objects.
  */
 function displaySubredditChoices(rankedSubreddits) {
     const choicesDiv = document.getElementById('subreddit-choices');
-    if (!choicesDiv) return;
+    const loadMoreContainer = document.getElementById('load-more-container'); // Find our new container
+    if (!choicesDiv || !loadMoreContainer) return;
 
-    // Clear any existing "load more" button before re-rendering
-    document.getElementById('load-more-subs-btn')?.remove();
+    // Clear any existing content in the button container
+    loadMoreContainer.innerHTML = '';
 
     _allRankedSubreddits = rankedSubreddits; // Store the full list globally
 
@@ -292,19 +292,19 @@ function displaySubredditChoices(rankedSubreddits) {
     const initialToShow = _allRankedSubreddits.slice(0, 8);
     choicesDiv.innerHTML = renderSubredditChoicesHTML(initialToShow);
 
-    // If there are more subreddits left to show, add the "Load More" button
+    // If there are more subreddits left to show, create and add the "Load More" button
     if (_allRankedSubreddits.length > 8) {
         const loadMoreBtn = document.createElement('button');
         loadMoreBtn.id = 'load-more-subs-btn';
         loadMoreBtn.textContent = 'Load More Communities';
-        loadMoreBtn.style.cssText = "width: 100%; max-width: 450px; padding: 12px; margin-top: 15px; border-radius: 8px; border: 1px solid var(--minky-glass-border); background-color: var(--minky-glass-bg-hover); color: var(--minky-text-primary); cursor: pointer; font-weight: bold; font-family: var(--pf-font-family); font-size: 1rem;";
+        // Updated styles to fit better inside the options area
+        loadMoreBtn.style.cssText = "padding: 8px 20px; border-radius: 50px; border: 1px solid var(--minky-glass-border); background-color: var(--minky-glass-bg-hover); color: var(--minky-text-primary); cursor: pointer; font-weight: 500; font-family: var(--pf-font-family); font-size: 1rem;";
         loadMoreBtn.onclick = loadMoreSubreddits;
         
-        // THIS IS THE KEY CHANGE: Use .after() to place it outside the div
-        choicesDiv.after(loadMoreBtn);
+        // THIS IS THE KEY CHANGE: Append the button to our new container
+        loadMoreContainer.appendChild(loadMoreBtn);
     }
 }
-
 
 /**
  * Loads the next batch of subreddits and appends them to the list.

@@ -121,28 +121,45 @@ function renderFAQs(faqs) { const container = document.getElementById('faq-conta
 // =================================================================================
 
 /**
- * Fetches detailed information about a specific subreddit.
- * @param {string} subredditName The name of the subreddit (e.g., 'javascript').
+ * Fetches detailed information about a specific subreddit with a retry mechanism for server errors.
+ * @param {string} subredditName The name of the subreddit.
  * @returns {Promise<Object|null>} A promise that resolves to the subreddit's data object or null on error.
  */
 async function fetchSubredditDetails(subredditName) {
-    try {
-        const payload = { type: 'about', subreddit: subredditName };
-        const response = await fetch(REDDIT_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        if (!response.ok) {
-            console.warn(`Subreddit r/${subredditName} not found or failed to load. Status: ${response.status}`);
-            return null;
+    const MAX_RETRIES = 2;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            const payload = { type: 'about', subreddit: subredditName };
+            const response = await fetch(REDDIT_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            // If we get a server error (5xx), we want to retry.
+            if (response.status >= 500) {
+                throw new Error(`Server error: ${response.status}`);
+            }
+
+            // If the response is OK or a client error (like 404), we accept the result and stop.
+            if (!response.ok) {
+                console.warn(`Subreddit r/${subredditName} not found or failed to load. Status: ${response.status}`);
+                return null;
+            }
+
+            const data = await response.json();
+            return data && data.data ? data.data : null;
+
+        } catch (error) {
+            console.error(`Attempt ${attempt} failed for r/${subredditName}:`, error.message);
+            if (attempt === MAX_RETRIES) {
+                return null; // Give up after the last retry.
+            }
+            // Wait a bit before the next retry (exponential backoff).
+            await new Promise(r => setTimeout(r, 200 * attempt));
         }
-        const data = await response.json();
-        return data && data.data ? data.data : null;
-    } catch (error) {
-        console.error(`Error fetching subreddit details for ${subredditName}:`, error);
-        return null;
     }
+    return null; // Should not be reached, but as a fallback.
 }
 
 /**
@@ -183,26 +200,25 @@ function getActivityLabel(activeUsers, totalMembers) {
 }
 
 /**
- * NEW LOGIC: Fetches details sequentially, filters, ranks, and returns a rich object for display.
+ * NEW LOGIC: Fetches details in batches, filters duds, ranks the rest, and returns a rich object for display.
  * @param {string[]} subredditNames - An array of subreddit names from the AI.
  * @returns {Promise<Object[]>} A promise that resolves to a ranked array of rich subreddit objects.
  */
 async function fetchAndRankSubreddits(subredditNames) {
-    console.log(`AI suggested ${subredditNames.length} subreddits. Validating and ranking...`);
-    const detailedSubs = [];
-    
-    // CORRECTED: Process requests sequentially to avoid overwhelming the server.
-    for (const name of subredditNames) {
-        const details = await fetchSubredditDetails(name);
-        if (details) {
-            detailedSubs.push(details);
-        }
-        // Add a small delay to be polite to the proxy/API.
-        await new Promise(resolve => setTimeout(resolve, 50)); 
+    console.log(`AI suggested ${subredditNames.length} subreddits. Validating and ranking in batches...`);
+    const BATCH_SIZE = 5;
+    let allDetails = [];
+
+    for (let i = 0; i < subredditNames.length; i += BATCH_SIZE) {
+        const batchNames = subredditNames.slice(i, i + BATCH_SIZE);
+        const batchPromises = batchNames.map(name => fetchSubredditDetails(name));
+        const batchResults = await Promise.all(batchPromises);
+        allDetails.push(...batchResults);
     }
 
-    const rankedSubreddits = detailedSubs
+    const rankedSubreddits = allDetails
         .filter(details => {
+            if (!details) return false;
             const isBigEnough = details.subscribers >= HARD_MIN_SUBSCRIBERS;
             const isActiveEnough = (details.active_user_count || 0) >= HARD_MIN_ACTIVE_USERS;
             return isBigEnough && isActiveEnough;
@@ -217,6 +233,7 @@ async function fetchAndRankSubreddits(subredditNames) {
     console.log(`Found ${rankedSubreddits.length} valid communities. Ready to display.`);
     return rankedSubreddits;
 }
+
 
 /**
  * Helper function to generate the HTML for a list of subreddit choices with pills.
@@ -242,6 +259,7 @@ function renderSubredditChoicesHTML(subreddits) {
         </div>
     `).join('');
 }
+
 
 /**
  * Displays the initial list of subreddits and a "Load More" button if applicable.

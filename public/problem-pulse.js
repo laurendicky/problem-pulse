@@ -112,31 +112,127 @@ async function extractAndValidateEntities(posts, nicheContext) {
 }
 function renderDiscoveryList(containerId, data, title, type) { const container = document.getElementById(containerId); if(!container) return; let listItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No significant mentions found.</p>'; if (data.length > 0) { listItems = data.map(([name, details], index) => `<li class="discovery-list-item" data-word="${name}" data-type="${type}"><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${details.count} mentions</span></li>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`; }
 function renderFAQs(faqs) { const container = document.getElementById('faq-container'); if(!container) return; let faqItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">Could not generate common questions from the text.</p>'; if (faqs.length > 0) { faqItems = faqs.map((faq) => `<div class="faq-item"><button class="faq-question">${faq}</button><div class="faq-answer"><p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p></div></div>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">Frequently Asked Questions</h3>${faqItems}`; container.querySelectorAll('.faq-question').forEach(button => { button.addEventListener('click', () => { const answer = button.nextElementSibling; button.classList.toggle('active'); if (answer.style.maxHeight) { answer.style.maxHeight = null; answer.style.padding = '0 1.5rem'; } else { answer.style.padding = '1rem 1.5rem'; answer.style.maxHeight = answer.scrollHeight + "px"; } }); }); }
-function renderIncludedSubreddits(subreddits) {
+
+// =================================================================================
+// === NEW & CORRECTED FUNCTIONS FOR DETAILED SUBREDDIT TAGS ===
+// =================================================================================
+/**
+ * Fetches detailed information about a specific subreddit.
+ * @param {string} subredditName The name of the subreddit (e.g., 'javascript').
+ * @returns {Promise<Object|null>} A promise that resolves to the subreddit's data object or null on error.
+ */
+async function fetchSubredditDetails(subredditName) {
+    try {
+        const payload = { type: 'about', subreddit: subredditName };
+        const response = await fetch(REDDIT_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!response.ok) {
+            throw new Error(`Proxy Error: Server returned status ${response.status} for r/${subredditName}`);
+        }
+        const data = await response.json();
+        return data.data; 
+    } catch (error) {
+        console.error(`Error fetching subreddit details for ${subredditName}:`, error);
+        return null;
+    }
+}
+
+/**
+ * Formats a number into a human-friendly string (e.g., 12345 -> '12.3k', 1234567 -> '1.2m').
+ * @param {number} num The number to format.
+ * @returns {string} The formatted string.
+ */
+function formatMemberCount(num) {
+    if (num === null || num === undefined) return 'N/A';
+    if (num >= 1000000) {
+        return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'm';
+    }
+    if (num >= 1000) {
+        return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+    }
+    return num.toLocaleString();
+}
+
+/**
+ * Determines an activity label based on active users and total members.
+ * @param {number} activeUsers Number of users currently active.
+ * @param {number} totalMembers Total number of subscribers.
+ * @returns {string} An activity label with an emoji.
+ */
+function getActivityLabel(activeUsers, totalMembers) {
+    if (totalMembers === 0 || activeUsers === null || activeUsers === undefined) {
+        return '💤 Quiet Corner';
+    }
+    const ratio = activeUsers / totalMembers;
+
+    if (activeUsers > 5000 || (ratio > 0.01 && totalMembers > 1000)) {
+        return '🔥 Buzzing';
+    }
+    if (activeUsers < 10 || (totalMembers > 20000 && activeUsers < 50)) {
+        return '💤 Quiet Corner';
+    }
+    return '🌤️ Warming Up';
+}
+
+/**
+ * Renders detailed, styled cards for each included subreddit.
+ * This is an async function that fetches details for each subreddit before rendering.
+ * @param {string[]} subreddits An array of subreddit names.
+ */
+async function renderIncludedSubreddits(subreddits) {
     const container = document.getElementById('included-subreddits-container');
     if (!container) return;
-    
-    const tags = subreddits.map(sub => {
-        const safeId = makeSafeId(sub);
-        // Render fast first, then enrich asynchronously
-        return `
-            <div class="subreddit-tag" id="subtag-${safeId}">
-                <div class="subreddit-tag-title">r/${sub}</div>
-                <div class="subreddit-tag-subline" style="font-size:12px; color:#666;">Loading community details…</div>
-            </div>
-        `;
-    }).join('');
-    
-    container.innerHTML = `
-        <h3 class="dashboard-section-title">Analysis Based On</h3>
-        <div class="subreddit-tag-list">${tags}</div>
-    `;
-    
-    // Enrich each tag with description, members, and activity label
-    subreddits.forEach(sub => {
-        enrichAndRenderSubredditTag(sub);
-    });
+
+    container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list" style="display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch;"><p class="loading-text" style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Loading community details...</p></div>`;
+
+    try {
+        const detailPromises = subreddits.map(sub => fetchSubredditDetails(sub));
+        const detailsArray = await Promise.all(detailPromises);
+
+        if (detailsArray.every(d => d === null)) {
+            throw new Error("Could not load details for any subreddit.");
+        }
+
+        const tagsHTML = detailsArray.map((details, index) => {
+            const subName = subreddits[index];
+            
+            // CORRECTED: Use optional chaining (?.) to prevent crashes if 'details' is null or missing properties.
+            const description = details?.public_description || 'No public description available.';
+            const members = formatMemberCount(details?.subscribers);
+            const activityLabel = getActivityLabel(details?.active_user_count, details?.subscribers);
+
+            // Fallback display is now implicitly handled by the default values above, but we can still use a simple card if all details are missing.
+            if (!details) {
+                return `<div class="subreddit-tag-detailed" style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center;">
+                            <div class="tag-header" style="font-weight: bold; color: #007bff;">r/${subName}</div>
+                            <div class="tag-body" style="font-style: italic; color: #6c757d; font-size: 0.9rem; margin-top: 8px;">Details could not be loaded.</div>
+                        </div>`;
+            }
+
+            return `<div class="subreddit-tag-detailed" style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column;">
+                        <div class="tag-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <span class="tag-name" style="font-weight: bold; font-size: 1rem; color: #0056b3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">r/${subName}</span>
+                            <span class="tag-activity" style="font-size: 0.8rem; background: #e9ecef; color: #495057; padding: 3px 8px; border-radius: 12px; flex-shrink: 0; margin-left: 8px;">${activityLabel}</span>
+                        </div>
+                        <p class="tag-description" style="font-size: 0.85rem; color: #495057; margin: 0 0 10px 0; line-height: 1.4; flex-grow: 1;">${description.substring(0, 150)}${description.length > 150 ? '...' : ''}</p>
+                        <div class="tag-footer" style="font-size: 0.8rem; color: #6c757d; text-align: right; border-top: 1px solid #f1f3f5; padding-top: 8px; margin-top: auto;">
+                            <span class="tag-members"><strong>${members}</strong> members</span>
+                        </div>
+                    </div>`;
+        }).join('');
+
+        container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list" style="display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch;">${tagsHTML}</div>`;
+
+    } catch (error) {
+        console.error("Error rendering subreddit details:", error);
+        const tags = subreddits.map(sub => `<div class="subreddit-tag">r/${sub}</div>`).join('');
+        container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list">${tags}<p style="width: 100%; text-align: center; color: #dc3545; font-style: italic; margin-top: 10px;">Could not load community details.</p></div>`;
     }
+}
+
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
 // --- CONSTELLATION MAP FUNCTIONS ---

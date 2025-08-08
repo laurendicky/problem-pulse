@@ -502,7 +502,87 @@ async function enhanceDiscoveryWithComments(posts, nicheContext) {
         }
     }
 }
+// ==========================================================
+// === NEW FEATURE: Power Phrases (Add this section) ========
+// ==========================================================
 
+/**
+ * Generates n-grams (phrases of n words) from a list of words.
+ * @param {string[]} words - The array of words to process.
+ * @param {number} n - The size of the phrases to generate (e.g., 2 for bigrams).
+ * @returns {string[]} An array of valid n-gram phrases.
+ */
+function generateNgrams(words, n) {
+    const ngrams = [];
+    if (n > words.length) return ngrams;
+    for (let i = 0; i <= words.length - n; i++) {
+        const ngram = words.slice(i, i + n);
+        // Filter out phrases that start or end with a common stop word.
+        if (!stopWords.includes(ngram[0]) && !stopWords.includes(ngram[n - 1])) {
+            ngrams.push(ngram.join(' '));
+        }
+    }
+    return ngrams;
+}
+
+/**
+ * Analyzes post text to find the most common phrases and renders them.
+ * This is wrapped in a setTimeout to prevent it from blocking the main thread.
+ * @param {Object[]} posts - The array of filtered Reddit posts.
+ */
+function generateAndRenderPowerPhrases(posts) {
+    setTimeout(() => {
+        console.log("--- Starting Power Phrase Analysis (in background) ---");
+        const container = document.getElementById('power-phrases');
+        if (!container) {
+            console.warn("Power Phrases container not found.");
+            return;
+        }
+
+        const allText = posts
+            .map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`)
+            .join(' ')
+            .toLowerCase()
+            .replace(/[^a-z\s']/g, '') // Keep only letters, spaces, and apostrophes
+            .replace(/\s+/g, ' '); // Normalize whitespace
+
+        const words = allText.split(' ');
+        
+        const bigrams = generateNgrams(words, 2);
+        const trigrams = generateNgrams(words, 3);
+        
+        const allNgrams = [...bigrams, ...trigrams];
+        const freqMap = {};
+        allNgrams.forEach(ngram => {
+            freqMap[ngram] = (freqMap[ngram] || 0) + 1;
+        });
+
+        const sortedPhrases = Object.entries(freqMap)
+            .filter(([phrase, count]) => count > 2) // Only show phrases mentioned at least 3 times
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 10); // Take the top 10
+
+        if (sortedPhrases.length < 3) {
+            container.innerHTML = '<h3 class="dashboard-section-title">Power Phrases</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough common phrases found to generate a map.</p>';
+            return;
+        }
+
+        // Playful Mind Map Rendering
+        const mindMapHTML = sortedPhrases.map(([phrase, count], index) => {
+            const size = 1 + (count / sortedPhrases[0][1]) * 1.5; // Font size based on frequency
+            const rotation = (index * 36) % 360; // Spread them out in a circle
+            const distance = 80 + (Math.random() * 40); // Random distance from center
+            const x = 50 + distance * Math.cos(rotation * Math.PI / 180);
+            const y = 50 + distance * Math.sin(rotation * Math.PI / 180);
+            return `<div class="power-phrase-node" style="font-size: ${size.toFixed(2)}em; top: ${y}%; left: ${x}%; transform: translate(-50%, -50%) rotate(${Math.random() * 20 - 10}deg);">${phrase}</div>`;
+        }).join('');
+
+        // You'll need to add some basic CSS for this to look good.
+        container.innerHTML = `<h3 class="dashboard-section-title">Power Phrases</h3><div class="power-phrase-map">${mindMapHTML}</div>`;
+        
+        console.log("--- Power Phrase Analysis Complete. ---");
+    }, 0); // setTimeout with 0ms delay makes it asynchronous
+}
 // =================================================================================
 // === UPDATED AND HARDENED `runProblemFinder` FUNCTION ===
 // =================================================================================
@@ -517,7 +597,7 @@ async function runProblemFinder() {
     const demandSignalTerms = [ "i'd pay good money for", "buy it in a second", "i'd subscribe to", "throw money at it", "where can i buy", "happily pay", "shut up and take my money", "sick of doing this manually", "can't find anything that", "waste so much time on", "has to be a better way", "shouldn't be this hard", "why is there no tool for", "why is there no app for", "tried everything and nothing works", "tool almost did what i wanted", "it's missing", "tried", "gave up on it", "if only there was an app", "i wish someone would build", "why hasn't anyone made", "waste hours every week", "such a timesuck", "pay just to not have to think", "rather pay than do this myself" ];
     
     const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; }); // Added power-phrases to the cleanup list
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
     const resultsMessageDiv = document.getElementById("results-message");
     const countHeaderDiv = document.getElementById("count-header");

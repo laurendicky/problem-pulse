@@ -133,7 +133,8 @@ async function fetchSubredditDetails(subredditName) {
             throw new Error(`Proxy Error: Server returned status ${response.status} for r/${subredditName}`);
         }
         const data = await response.json();
-        return data.data; 
+        // CORRECTED: Return the top-level object directly, not data.data
+        return data; 
     } catch (error) {
         console.error(`Error fetching subreddit details for ${subredditName}:`, error);
         return null;
@@ -199,12 +200,11 @@ async function renderIncludedSubreddits(subreddits) {
         const tagsHTML = detailsArray.map((details, index) => {
             const subName = subreddits[index];
             
-            // CORRECTED: Use optional chaining (?.) to prevent crashes if 'details' is null or missing properties.
+            // Use optional chaining (?.) to prevent crashes if 'details' is null or missing properties.
             const description = details?.public_description || 'No public description available.';
             const members = formatMemberCount(details?.subscribers);
             const activityLabel = getActivityLabel(details?.active_user_count, details?.subscribers);
 
-            // Fallback display is now implicitly handled by the default values above, but we can still use a simple card if all details are missing.
             if (!details) {
                 return `<div class="subreddit-tag-detailed" style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center;">
                             <div class="tag-header" style="font-weight: bold; color: #007bff;">r/${subName}</div>

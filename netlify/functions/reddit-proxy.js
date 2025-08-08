@@ -1,6 +1,6 @@
 // =================================================================================
-// COMPLETE AND VERIFIED PROXY SCRIPT (VERSION 3 - NOW WITH SUBREDDIT 'ABOUT' DETAILS)
-// This version adds the ability to fetch details for a specific subreddit using the /about.json endpoint.
+// COMPLETE AND VERIFIED PROXY SCRIPT (VERSION 3.1 - 'about.json' SUFFIX REMOVED)
+// This version corrects the URL for fetching subreddit details via the OAuth API.
 // =================================================================================
 
 const { REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT } = process.env;
@@ -43,12 +43,13 @@ exports.handler = async (event) => {
 
         // --- UPDATED: Main routing logic to handle different request types ---
         
-        // **NEW**: Handle requests for subreddit details
+        // Handle requests for subreddit details
         if (body.type === 'about') {
             if (!body.subreddit) {
                 throw new Error("A 'subreddit' name is required for fetching 'about' details.");
             }
-            url = `https://oauth.reddit.com/r/${body.subreddit}/about.json`;
+            // CORRECTED LINE: Removed the '.json' suffix for the OAuth endpoint.
+            url = `https://oauth.reddit.com/r/${body.subreddit}/about`;
         
         // Handle requests for post comments (existing)
         } else if (body.type === 'comments') {

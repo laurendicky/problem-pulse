@@ -1,7 +1,7 @@
 // =================================================================================
-// COMPLETE AND VERIFIED SCRIPT (VERSION 15.1 - DATA RESILIENCY FIX)
-// This version fixes a fatal crash when subreddit data from the API is incomplete.
-// It now uses default values for missing properties (like subscribers) to prevent errors.
+// COMPLETE AND VERIFIED SCRIPT (VERSION 14.3 - UI FLOW FIXED & RESILIENT)
+// This version corrects the product/brand discovery UI flow to be non-destructive.
+// It now displays a status message above the initial results instead of replacing them.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -35,7 +35,36 @@ function renderPosts(posts) { const container = document.getElementById("posts-c
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if (!assignments) return; const finding = window._summaries[summaryIndex]; if (!finding) return; let relevantPosts = []; const addedPostIds = new Set(); const addPost = (post) => { if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) { relevantPosts.push(post); addedPostIds.add(post.data.id); } }; const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber); assignedPostNumbers.forEach(postNum => { if (postNum - 1 < window._postsForAssignment.length) { addPost(window._postsForAssignment[postNum - 1]); } }); if (relevantPosts.length < 8) { const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id)); const scoredCandidates = candidatePool.map(post => ({ post: post, score: calculateRelevanceScore(post, finding) })).filter(item => item.score >= 4).sort((a, b) => b.score - a.score); for (const candidate of scoredCandidates) { if (relevantPosts.length >= 8) break; addPost(candidate.post); } } let html; if (relevantPosts.length === 0) { html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`; } else { const finalPosts = relevantPosts.slice(0, 8); finalPosts.forEach(post => usedPostIds.add(post.data.id)); html = finalPosts.map(post => { const content = post.data.selftext || post.data.body || 'No content.'; const title = post.data.title || post.data.link_title || 'View Comment'; const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : ''; return ` <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${title}</a> <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${content.substring(0, 150) + '...'}</p> <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)}</small> </div> `}).join(''); } const container = document.getElementById(`reddit-div${summaryIndex + 1}`); if (container) { container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">Real Stories from Reddit: "${finding.title}"</div><div class="reddit-samples-posts">${html}</div>`; } }
 async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 15 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 250, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
 function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
-async function fetchCommentsForPosts(postIds, batchSize = 5) { let allComments = []; console.log(`Fetching comments for ${postIds.length} posts...`); for (let i = 0; i < postIds.length; i += batchSize) { const batchIds = postIds.slice(i, i + batchSize); const batchPromises = batchIds.map(postId => { const payload = { type: 'comments', postId: postId }; return fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }).then(res => res.json()).then(data => { if (Array.isArray(data) && data.length > 1 && data[1].data && data[1].data.children) { return data[1].data.children.filter(comment => comment.kind === 't1'); } return []; }).catch(err => { console.error(`Failed to fetch comments for post ${postId}:`, err); return []; }); }); const results = await Promise.all(batchPromises); results.forEach(comments => allComments.push(...comments)); if (i + batchSize < postIds.length) { await new Promise(resolve => setTimeout(resolve, 300)); } } console.log(`Successfully fetched ${allComments.length} comments.`); return allComments; }
+async function fetchCommentsForPosts(postIds, batchSize = 5) {
+    let allComments = [];
+    console.log(`Fetching comments for ${postIds.length} posts...`);
+    for (let i = 0; i < postIds.length; i += batchSize) {
+        const batchIds = postIds.slice(i, i + batchSize);
+        const batchPromises = batchIds.map(postId => {
+            const payload = { type: 'comments', postId: postId };
+            return fetch(REDDIT_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(res => res.json()).then(data => {
+                if (Array.isArray(data) && data.length > 1 && data[1].data && data[1].data.children) {
+                    return data[1].data.children.filter(comment => comment.kind === 't1');
+                }
+                return [];
+            }).catch(err => {
+                console.error(`Failed to fetch comments for post ${postId}:`, err);
+                return [];
+            });
+        });
+        const results = await Promise.all(batchPromises);
+        results.forEach(comments => allComments.push(...comments));
+        if (i + batchSize < postIds.length) {
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+    }
+    console.log(`Successfully fetched ${allComments.length} comments.`);
+    return allComments;
+}
 function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1); return word; }
 async function generateEmotionMapData(posts) { try { const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || p.data.link_title}\nBody: ${(p.data.selftext || p.data.body).substring(0, 1000)}`).join('\n---\n'); const prompt = `You are a world-class market research analyst for '${originalGroupName}'. Analyze the following text to identify the 15 most significant problems, pain points, or key topics.\n\nFor each one, provide:\n1. "problem": A short, descriptive name for the problem (e.g., "Finding Reliable Vendors", "Budgeting Anxiety").\n2. "intensity": A score from 1 (mild) to 10 (severe) of how big a problem this is.\n3. "frequency": A score from 1 (rarely mentioned) to 10 (frequently mentioned) based on its prevalence in the text.\n\nRespond ONLY with a valid JSON object with a single key "problems", which is an array of these objects.\nExample: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequency": 9 }] }`; const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 1500, response_format: { "type": "json_object" } }; const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) { throw new Error(`AI API failed with status: ${response.status}`); } const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const aiProblems = parsed.problems || []; if (aiProblems.length >= 3) { console.log("Successfully used AI analysis for Problem Map."); const chartData = aiProblems.map(item => { if (!item.problem || typeof item.intensity !== 'number' || typeof item.frequency !== 'number') return null; return { x: item.frequency, y: item.intensity, label: item.problem }; }).filter(Boolean); return chartData.sort((a, b) => b.x - a.x); } else { console.warn("AI analysis returned too few problems. Falling back to keyword analysis."); } } catch (error) { console.error("AI analysis for Problem Map failed:", error, "Falling back to reliable keyword-based analysis."); } const emotionFreq = {}; posts.forEach(post => { const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase(); const words = text.replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { const lemma = lemmatize(rawWord); if (emotionalIntensityScores[lemma]) { emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1; } }); }); const chartData = Object.entries(emotionFreq).map(([word, freq]) => ({ x: freq, y: emotionalIntensityScores[word], label: word })); return chartData.sort((a, b) => b.x - a.x).slice(0, 25); }
 function renderEmotionMap(data) { const container = document.getElementById('emotion-map-container'); if (!container) return; if (window.myEmotionChart) { window.myEmotionChart.destroy(); } if (data.length < 3) { container.innerHTML = '<h3 class="dashboard-section-title">Problem Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough distinct problems were found to build a map.</p>'; return; } container.innerHTML = `<h3 class="dashboard-section-title">Problem Polarity Map</h3><p id="problem-map-description">The most frequent and emotionally intense problems appear in the top-right quadrant.</p><div id="emotion-map-wrapper"><div id="emotion-map" style="height: 400px; padding: 10px; border-radius: 8px;"><canvas id="emotion-chart-canvas"></canvas></div><button id="chart-zoom-btn" style="display: none;"></button></div>`; const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d'); if (!ctx) return; const maxFreq = Math.max(...data.map(p => p.x)); const allFrequencies = data.map(p => p.x); const minObservedFreq = Math.min(...allFrequencies); const collapsedMinX = 5; const isCollapseFeatureEnabled = minObservedFreq >= collapsedMinX; const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0; window.myEmotionChart = new Chart(ctx, { type: 'scatter', data: { datasets: [{ label: 'Problems/Topics', data: data, backgroundColor: 'rgba(52, 152, 219, 0.9)', borderColor: 'rgba(41, 128, 185, 1)', borderWidth: 1, pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20, pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20, }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { mode: 'nearest', intersect: false, callbacks: { title: function(tooltipItems) { return tooltipItems[0].raw.label; }, label: function(context) { return ''; }, afterBody: function(tooltipItems) { const point = tooltipItems[0].raw; return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`; } }, displayColors: false, titleFont: { size: 14, weight: 'bold' }, bodyFont: { size: 12 }, backgroundColor: 'rgba(0, 0, 0, 0.8)', titleColor: '#ffffff', bodyColor: '#dddddd', } }, scales: { x: { title: { display: true, text: 'Frequency (1-10)', color: 'white', font: { weight: 'bold' } }, min: initialMinX, max: 10, grid: { color: 'rgba(255, 255, 255, 0.15)' }, ticks: { color: 'white' } }, y: { title: { display: true, text: 'Problem Intensity (1-10)', color: 'white', font: { weight: 'bold' } }, min: 0, max: 10, grid: { color: 'rgba(255, 255, 255, 0.15)' }, ticks: { color: 'white' } } } } }); const zoomButton = document.getElementById('chart-zoom-btn'); if (isCollapseFeatureEnabled) { zoomButton.style.display = 'block'; const updateButtonText = () => { const isCurrentlyCollapsed = window.myEmotionChart.options.scales.x.min !== 0; zoomButton.textContent = isCurrentlyCollapsed ? 'Zoom Out to See Full Range' : 'Zoom In to High-Frequency'; }; zoomButton.addEventListener('click', () => { const chart = window.myEmotionChart; const isCurrentlyCollapsed = chart.options.scales.x.min !== 0; chart.options.scales.x.min = isCurrentlyCollapsed ? 0 : collapsedMinX; chart.update('none'); updateButtonText(); }); updateButtonText(); } }
@@ -44,115 +73,168 @@ function renderSentimentCloud(containerId, wordData, colors) { const container =
 function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : "Snippet not available."; const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if(closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title || p.data.link_title || ''}\nContent: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
-async function extractAndValidateEntities(posts, nicheContext) { const topPostsText = posts.slice(0, 75).map(p => { const title = p.data.title || p.data.link_title; const body = p.data.selftext || p.data.body || ''; if (title) { return `Title: ${title}\nBody: ${body.substring(0, 800)}`; } return `Body: ${body.substring(0, 800)}`; }).join('\n---\n'); const prompt = `You are a market research analyst reviewing Reddit posts from the '${nicheContext}' community. Extract the following: 1. "brands": Specific, proper-noun company, brand, or service names (e.g., "KitchenAid", "Stripe"). 2. "products": Common, generic product categories (e.g., "stand mixer", "CRM software"). CRITICAL RULES: Be strict. Exclude acronyms (MOH, AITA), generic words (UPDATE), etc. Respond ONLY with a JSON object with two keys: "brands" and "products", holding an array of strings. If none, return an empty array. Text: ${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1000, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('AI entity extraction failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const allEntities = { brands: parsed.brands || [], products: parsed.products || [] }; window._entityData = {}; for (const type in allEntities) { window._entityData[type] = {}; allEntities[type].forEach(name => { const regex = new RegExp(`\\b${name.replace(/ /g, '\\s')}(s?)\\b`, 'gi'); const mentioningPosts = posts.filter(post => regex.test(`${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`)); if (mentioningPosts.length > 0) { window._entityData[type][name] = { count: mentioningPosts.length, posts: mentioningPosts }; } }); } return { topBrands: Object.entries(window._entityData.brands || {}).sort((a, b) => b[1].count - a[1].count).slice(0, 8), topProducts: Object.entries(window._entityData.products || {}).sort((a, b) => b[1].count - a[1].count).slice(0, 8) }; } catch (error) { console.error("Entity extraction error:", error); return { topBrands: [], topProducts: [] }; } }
+async function extractAndValidateEntities(posts, nicheContext) {
+    const topPostsText = posts.slice(0, 75).map(p => {
+        const title = p.data.title || p.data.link_title;
+        const body = p.data.selftext || p.data.body || '';
+        if (title) {
+            return `Title: ${title}\nBody: ${body.substring(0, 800)}`;
+        }
+        return `Body: ${body.substring(0, 800)}`;
+    }).join('\n---\n');
+    const prompt = `You are a market research analyst reviewing Reddit posts from the '${nicheContext}' community. Extract the following: 1. "brands": Specific, proper-noun company, brand, or service names (e.g., "KitchenAid", "Stripe"). 2. "products": Common, generic product categories (e.g., "stand mixer", "CRM software"). CRITICAL RULES: Be strict. Exclude acronyms (MOH, AITA), generic words (UPDATE), etc. Respond ONLY with a JSON object with two keys: "brands" and "products", holding an array of strings. If none, return an empty array. Text: ${topPostsText}`;
+    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1000, response_format: { "type": "json_object" } };
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('AI entity extraction failed.');
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        const allEntities = { brands: parsed.brands || [], products: parsed.products || [] };
+        window._entityData = {};
+        for (const type in allEntities) {
+            window._entityData[type] = {};
+            allEntities[type].forEach(name => {
+                const regex = new RegExp(`\\b${name.replace(/ /g, '\\s')}(s?)\\b`, 'gi');
+                const mentioningPosts = posts.filter(post => regex.test(`${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`));
+                if (mentioningPosts.length > 0) {
+                    window._entityData[type][name] = { count: mentioningPosts.length, posts: mentioningPosts };
+                }
+            });
+        }
+        return {
+            topBrands: Object.entries(window._entityData.brands || {}).sort((a, b) => b[1].count - a[1].count).slice(0, 8),
+            topProducts: Object.entries(window._entityData.products || {}).sort((a, b) => b[1].count - a[1].count).slice(0, 8)
+        };
+    } catch (error) {
+        console.error("Entity extraction error:", error);
+        return { topBrands: [], topProducts: [] };
+    }
+}
 function renderDiscoveryList(containerId, data, title, type) { const container = document.getElementById(containerId); if(!container) return; let listItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No significant mentions found.</p>'; if (data.length > 0) { listItems = data.map(([name, details], index) => `<li class="discovery-list-item" data-word="${name}" data-type="${type}"><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${details.count} mentions</span></li>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`; }
 function renderFAQs(faqs) { const container = document.getElementById('faq-container'); if(!container) return; let faqItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">Could not generate common questions from the text.</p>'; if (faqs.length > 0) { faqItems = faqs.map((faq) => `<div class="faq-item"><button class="faq-question">${faq}</button><div class="faq-answer"><p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p></div></div>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">Frequently Asked Questions</h3>${faqItems}`; container.querySelectorAll('.faq-question').forEach(button => { button.addEventListener('click', () => { const answer = button.nextElementSibling; button.classList.toggle('active'); if (answer.style.maxHeight) { answer.style.maxHeight = null; answer.style.padding = '0 1.5rem'; } else { answer.style.padding = '1rem 1.5rem'; answer.style.maxHeight = answer.scrollHeight + "px"; } }); }); }
 
 // =================================================================================
-// === NEW & MODIFIED FUNCTIONS FOR ENHANCED SUBREDDIT TAGS ===
+// === NEW FUNCTIONS AND MODIFIED RENDERER FOR DETAILED SUBREDDIT TAGS ===
 // =================================================================================
-
 /**
- * Fetches detailed information for a list of subreddits.
- * @param {string[]} subredditNames - An array of subreddit names without 'r/'.
- * @returns {Promise<object[]>} - A promise that resolves to an array of subreddit detail objects.
+ * Fetches detailed information about a specific subreddit.
+ * @param {string} subredditName The name of the subreddit (e.g., 'javascript').
+ * @returns {Promise<Object|null>} A promise that resolves to the subreddit's data object or null on error.
  */
-async function fetchSubredditDetails(subredditNames) {
-    const detailPromises = subredditNames.map(name => {
-        const payload = { type: 'about', subredditName: name };
-        return fetch(REDDIT_PROXY_URL, {
+async function fetchSubredditDetails(subredditName) {
+    try {
+        // This assumes the proxy can handle a request of type 'about' to get subreddit info
+        const payload = { type: 'about', subreddit: subredditName };
+        const response = await fetch(REDDIT_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
-        }).then(res => {
-            if (!res.ok) throw new Error(`Failed to fetch details for r/${name}`);
-            return res.json();
-        }).then(data => data.data) // We only need the 'data' object from the response
-          .catch(err => {
-            console.error(err);
-            return { display_name: name, error: true }; // Return a placeholder on failure
         });
-    });
-    // Use Promise.all to ensure we wait for all fetches to complete or fail
-    return Promise.all(detailPromises);
+        if (!response.ok) {
+            throw new Error(`Proxy Error: Server returned status ${response.status} for r/${subredditName}`);
+        }
+        const data = await response.json();
+        return data.data; // The actual subreddit info is nested in the 'data' property
+    } catch (error) {
+        console.error(`Error fetching subreddit details for ${subredditName}:`, error);
+        return null; // Return null to handle failures gracefully
+    }
 }
 
-
 /**
- * Formats a number into a human-readable string (e.g., 123456 -> "123.5k members").
- * @param {number} num - The number to format.
- * @returns {string} - The formatted string.
+ * Formats a number into a human-friendly string (e.g., 12345 -> '12.3k', 1234567 -> '1.2m').
+ * @param {number} num The number to format.
+ * @returns {string} The formatted string.
  */
 function formatMemberCount(num) {
-    // FIX: Handle cases where num might be undefined, null, or not a number.
-    if (typeof num !== 'number' || isNaN(num)) {
-        return 'N/A members';
-    }
+    if (num === null || num === undefined) return 'N/A';
     if (num >= 1000000) {
-        return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'm members';
+        return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'm';
     }
     if (num >= 1000) {
-        return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'k members';
+        return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
     }
-    return num.toLocaleString() + ' members';
+    return num.toString();
 }
 
 /**
- * Renders the list of included subreddits with enhanced details.
- * @param {object[]} subredditDetails - An array of subreddit detail objects from fetchSubredditDetails.
+ * Determines an activity label based on active users and total members.
+ * @param {number} activeUsers Number of users currently active.
+ * @param {number} totalMembers Total number of subscribers.
+ * @returns {string} An activity label with an emoji.
  */
-function renderIncludedSubreddits(subredditDetails) {
+function getActivityLabel(activeUsers, totalMembers) {
+    if (totalMembers === 0 || activeUsers === null || activeUsers === undefined) {
+        return '💤 Quiet Corner';
+    }
+    const ratio = activeUsers / totalMembers;
+
+    // Buzzing: very high absolute activity, or high relative activity in a decent-sized sub
+    if (activeUsers > 5000 || (ratio > 0.01 && totalMembers > 1000)) {
+        return '🔥 Buzzing';
+    }
+    // Quiet: very low absolute activity, or very low relative activity in a larger sub
+    if (activeUsers < 10 || (totalMembers > 20000 && activeUsers < 50)) {
+        return '💤 Quiet Corner';
+    }
+    // Everything else is warming up
+    return '🌤️ Warming Up';
+}
+
+/**
+ * Renders detailed, styled cards for each included subreddit.
+ * This is an async function that fetches details for each subreddit before rendering.
+ * @param {string[]} subreddits An array of subreddit names.
+ */
+async function renderIncludedSubreddits(subreddits) {
     const container = document.getElementById('included-subreddits-container');
     if (!container) return;
 
-    if (!subredditDetails || subredditDetails.length === 0) {
-        container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><p>Could not load subreddit details.</p>`;
-        return;
+    // Set a loading state while fetching details
+    container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list" style="display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch;"><p class="loading-text" style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Loading community details...</p></div>`;
+
+    try {
+        const detailPromises = subreddits.map(sub => fetchSubredditDetails(sub));
+        const detailsArray = await Promise.all(detailPromises);
+
+        if (detailsArray.every(d => d === null)) {
+            throw new Error("Could not load details for any subreddit.");
+        }
+
+        const tagsHTML = detailsArray.map((details, index) => {
+            const subName = subreddits[index];
+            if (!details) {
+                // Graceful fallback for a single failed API call
+                return `<div class="subreddit-tag-detailed" style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center;">
+                            <div class="tag-header" style="font-weight: bold; color: #007bff;">r/${subName}</div>
+                            <div class="tag-body" style="font-style: italic; color: #6c757d; font-size: 0.9rem; margin-top: 8px;">Details could not be loaded.</div>
+                        </div>`;
+            }
+
+            const description = details.public_description || 'No public description available.';
+            const members = formatMemberCount(details.subscribers);
+            const activityLabel = getActivityLabel(details.active_user_count, details.subscribers);
+
+            return `<div class="subreddit-tag-detailed" style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column;">
+                        <div class="tag-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                            <span class="tag-name" style="font-weight: bold; font-size: 1rem; color: #0056b3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">r/${subName}</span>
+                            <span class="tag-activity" style="font-size: 0.8rem; background: #e9ecef; color: #495057; padding: 3px 8px; border-radius: 12px; flex-shrink: 0; margin-left: 8px;">${activityLabel}</span>
+                        </div>
+                        <p class="tag-description" style="font-size: 0.85rem; color: #495057; margin: 0 0 10px 0; line-height: 1.4; flex-grow: 1;">${description.substring(0, 150)}${description.length > 150 ? '...' : ''}</p>
+                        <div class="tag-footer" style="font-size: 0.8rem; color: #6c757d; text-align: right; border-top: 1px solid #f1f3f5; padding-top: 8px; margin-top: auto;">
+                            <span class="tag-members"><strong>${members}</strong> members</span>
+                        </div>
+                    </div>`;
+        }).join('');
+
+        container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list" style="display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch;">${tagsHTML}</div>`;
+
+    } catch (error) {
+        console.error("Error rendering subreddit details:", error);
+        // Fallback to original simple display if the whole process fails
+        const tags = subreddits.map(sub => `<div class="subreddit-tag">r/${sub}</div>`).join('');
+        container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list">${tags}<p style="width: 100%; text-align: center; color: #dc3545; font-style: italic; margin-top: 10px;">Could not load community details.</p></div>`;
     }
-
-    const tags = subredditDetails.map(detail => {
-        // FIX: Use default values to prevent crash if data is incomplete or an error occurred.
-        const {
-            display_name = 'Unknown',
-            public_description = 'Description not available.',
-            subscribers, // Intentionally not defaulting to 0 here to let formatMemberCount handle it
-            active_user_count = 0,
-            error = false
-        } = detail || {};
-        
-        // Handle case where the entire fetch failed for this subreddit
-        if (error) {
-             return `
-            <div class="subreddit-tag error">
-                <div class="tag-header">r/${display_name}</div>
-                <div class="tag-description">Could not load details for this community.</div>
-            </div>`;
-        }
-        
-        const memberCount = formatMemberCount(subscribers); // API field is 'subscribers'
-
-        let activityLabel = '💤 Quiet Corner';
-        // Use a ratio but also absolute numbers to better classify activity
-        const activityRatio = subscribers > 0 ? (active_user_count / subscribers) : 0;
-        if (active_user_count > 5000 || (activityRatio > 0.05 && subscribers > 10000)) {
-            activityLabel = '🔥 Buzzing';
-        } else if (active_user_count > 500 || (activityRatio > 0.01 && subscribers > 5000)) {
-            activityLabel = '🌤️ Warming Up';
-        }
-
-        return `
-            <div class="subreddit-tag">
-                <div class="tag-header">r/${display_name}</div>
-                <div class="tag-description">${public_description}</div>
-                <div class="tag-footer">
-                    <span class="tag-members">${memberCount}</span>
-                    <span class="tag-activity">${activityLabel}</span>
-                </div>
-            </div>
-        `;
-    }).join('');
-
-    container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list">${tags}</div>`;
 }
 
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
@@ -203,7 +285,53 @@ async function generateAndRenderConstellation(items) { console.log("[Constellati
 function initializeConstellationInteractivity() { const container = document.getElementById('constellation-map-container'); const panel = document.getElementById('constellation-side-panel'); if (!container || !panel) return; const panelContent = panel.querySelector('.panel-content'); let hidePanelTimer; const setDefaultPanelState = () => { panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`; }; const hidePanel = () => { setDefaultPanelState(); }; setDefaultPanelState(); container.addEventListener('mouseover', (e) => { if (!e.target.classList.contains('constellation-star')) return; clearTimeout(hidePanelTimer); const star = e.target; panelContent.innerHTML = `<p class="quote">“${star.dataset.quote}”</p><h4 class="problem-theme">${star.dataset.problemTheme}</h4><p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes on related signals</p><a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>`; }); container.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); }); panel.addEventListener('mouseenter', () => { clearTimeout(hidePanelTimer); }); panel.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); }); }
 async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) { console.log("--- Starting Delayed Constellation Analysis (in background) ---"); try { const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false); const postIds = demandSignalPosts.sort((a,b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id); const highIntentComments = await fetchCommentsForPosts(postIds); const allItems = [...demandSignalPosts, ...highIntentComments]; await generateAndRenderConstellation(allItems); console.log("--- Constellation Analysis Complete. ---"); } catch (error) { console.error("Constellation analysis failed in the background:", error); renderConstellationMap([]); } }
 function renderConstellationMap(signals) { const container = document.getElementById('constellation-map-container'); if (!container) return; const loader = container.querySelector('.constellation-loader'); if (loader) loader.remove(); const oldStars = container.querySelectorAll('.constellation-star'); oldStars.forEach(star => star.remove()); if (!signals || signals.length === 0) { const placeholder = document.createElement('div'); placeholder.className = 'panel-placeholder constellation-star'; placeholder.innerHTML = 'No strong purchase intent signals found.<br/>Try a broader search or different communities.'; container.appendChild(placeholder); const panelContent = document.querySelector('#constellation-side-panel .panel-content'); if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No opportunities discovered.</div>`; return; } const aggregatedSignals = {}; signals.forEach(signal => { if (!signal.problem_theme || !signal.source) return; const theme = signal.problem_theme.trim().toLowerCase(); if (!aggregatedSignals[theme]) { aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 }; } aggregatedSignals[theme].quotes.push(signal.quote); aggregatedSignals[theme].frequency++; aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0); }); const starData = Object.values(aggregatedSignals); const maxFreq = Math.max(...starData.map(s => s.frequency), 1); const starsByCategory = {}; starData.forEach(star => { const categoryKey = star.category && CONSTELLATION_CATEGORIES[star.category] ? star.category : 'Other'; if (!starsByCategory[categoryKey]) { starsByCategory[categoryKey] = []; } starsByCategory[categoryKey].push(star); }); starData.forEach(star => { const starEl = document.createElement('div'); starEl.className = 'constellation-star'; const size = 8 + (star.frequency / maxFreq) * 20; starEl.style.width = `${size}px`; starEl.style.height = `${size}px`; starEl.style.backgroundColor = EMOTION_COLORS[star.emotion] || '#ffffff'; const categoryKey = star.category && CONSTELLATION_CATEGORIES[star.category] ? star.category : 'Other'; const categoryCoords = CONSTELLATION_CATEGORIES[categoryKey]; if (categoryKey === 'DemandSignals') { const CLUSTER_SPREAD = 12; const offsetX = (Math.random() - 0.5) * CLUSTER_SPREAD; const offsetY = (Math.random() - 0.5) * CLUSTER_SPREAD; const finalX = (categoryCoords.x * 100) + offsetX; const finalY = (categoryCoords.y * 100) + offsetY; starEl.style.left = `calc(${finalX}% - ${size / 2}px)`; starEl.style.top = `calc(${finalY}% - ${size / 2}px)`; } else { const categoryStars = starsByCategory[categoryKey]; const starIndex = categoryStars.findIndex(s => s.problem_theme === star.problem_theme); const totalInCategory = categoryStars.length; const ORBIT_RADIUS_BASE = 6; const ORBIT_RADIUS_RANDOM_FACTOR = 4; const angle = (starIndex / totalInCategory) * 2 * Math.PI; const radius = ORBIT_RADIUS_BASE + (Math.random() * ORBIT_RADIUS_RANDOM_FACTOR); const offsetX = radius * Math.cos(angle); const offsetY = radius * Math.sin(angle); const finalX = (categoryCoords.x * 100) + offsetX; const finalY = (categoryCoords.y * 100) + offsetY; starEl.style.left = `calc(${finalX}% - ${size / 2}px)`; starEl.style.top = `calc(${finalY}% - ${size / 2}px)`; } starEl.dataset.quote = star.quotes[0]; starEl.dataset.problemTheme = star.problem_theme; starEl.dataset.sourceSubreddit = star.source.subreddit; starEl.dataset.sourcePermalink = star.source.permalink; starEl.dataset.sourceUpvotes = star.totalUpvotes.toLocaleString(); container.appendChild(starEl); }); }
-async function enhanceDiscoveryWithComments(posts, nicheContext) { console.log("--- Starting PHASE 2: Enhancing discovery with comments ---"); const brandContainer = document.getElementById('top-brands-container'); if (!brandContainer) return; const statusMessageEl = document.createElement('div'); statusMessageEl.id = 'discovery-status-message'; statusMessageEl.style.cssText = "font-family: Inter, sans-serif; color: #555; padding: 0.5rem 1rem 1rem 1rem; font-style: italic; text-align: center;"; statusMessageEl.innerHTML = 'Posts are in. Comments are brewing. Sit tight — the juicy bits are almost here. <span class="loader-dots"></span>'; brandContainer.before(statusMessageEl); try { const postIdsToFetch = posts.slice(0, 75).map(p => p.data.id); const comments = await fetchCommentsForPosts(postIdsToFetch); console.log(`Fetched ${comments.length} comments for enhancement.`); const allItemsForAnalysis = [...posts, ...comments]; const enhancedEntities = await extractAndValidateEntities(allItemsForAnalysis, nicheContext); console.log("Enhancement complete. Rendering final brand/product lists."); renderDiscoveryList('top-brands-container', enhancedEntities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', enhancedEntities.topProducts, 'Top Generic Products', 'products'); } catch (error) { console.error("Failed to enhance discovery lists with comments:", error); const statusMsg = document.getElementById('discovery-status-message'); if (statusMsg) { statusMsg.style.color = 'red'; statusMsg.textContent = 'Could not load additional data from comments due to a network error.'; } } finally { const statusMsg = document.getElementById('discovery-status-message'); if (statusMsg) { statusMsg.remove(); } } }
+
+// =================================================================================
+// === MODIFIED FUNCTION: `enhanceDiscoveryWithComments` (implements desired UI flow) ===
+// =================================================================================
+async function enhanceDiscoveryWithComments(posts, nicheContext) {
+    console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
+    const brandContainer = document.getElementById('top-brands-container');
+    if (!brandContainer) return; // Guard clause if the container isn't on the page
+
+    // 1. Create and inject the status message WITHOUT replacing existing content.
+    const statusMessageEl = document.createElement('div');
+    statusMessageEl.id = 'discovery-status-message'; // Give it an ID for easy removal
+    statusMessageEl.style.cssText = "font-family: Inter, sans-serif; color: #555; padding: 0.5rem 1rem 1rem 1rem; font-style: italic; text-align: center;";
+    statusMessageEl.innerHTML = 'Posts are in. Comments are brewing. Sit tight — the juicy bits are almost here. <span class="loader-dots"></span>';
+    
+    // Insert the message *before* the brand container, which should be above both lists.
+    brandContainer.before(statusMessageEl);
+
+    try {
+        // 2. Fetch comments and re-run the analysis
+        const postIdsToFetch = posts.slice(0, 75).map(p => p.data.id);
+        const comments = await fetchCommentsForPosts(postIdsToFetch);
+        console.log(`Fetched ${comments.length} comments for enhancement.`);
+        const allItemsForAnalysis = [...posts, ...comments];
+        const enhancedEntities = await extractAndValidateEntities(allItemsForAnalysis, nicheContext);
+
+        // 3. Render the final, enhanced lists. This will now replace the initial post-only lists.
+        console.log("Enhancement complete. Rendering final brand/product lists.");
+        renderDiscoveryList('top-brands-container', enhancedEntities.topBrands, 'Top Brands & Specific Products', 'brands');
+        renderDiscoveryList('top-products-container', enhancedEntities.topProducts, 'Top Generic Products', 'products');
+
+    } catch (error) {
+        console.error("Failed to enhance discovery lists with comments:", error);
+        // If an error occurs, update the status message to inform the user.
+        const statusMsg = document.getElementById('discovery-status-message');
+        if (statusMsg) {
+            statusMsg.style.color = 'red';
+            statusMsg.textContent = 'Could not load additional data from comments due to a network error.';
+        }
+    } finally {
+        // 4. IMPORTANT: Clean up and remove the status message after the process is finished (or has failed).
+        const statusMsg = document.getElementById('discovery-status-message');
+        if (statusMsg) {
+            statusMsg.remove();
+        }
+    }
+}
 
 // =================================================================================
 // === UPDATED AND HARDENED `runProblemFinder` FUNCTION ===
@@ -229,10 +357,6 @@ async function runProblemFinder() {
     try {
         console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
         
-        // MODIFICATION: Fetch subreddit details early to display them
-        const subredditDetails = await fetchSubredditDetails(selectedSubreddits);
-        renderIncludedSubreddits(subredditDetails);
-
         const constellationContainer = document.getElementById('constellation-map-container');
         if (constellationContainer) {
             const oldLoader = constellationContainer.querySelector('.constellation-loader');
@@ -270,6 +394,7 @@ async function runProblemFinder() {
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
         generateEmotionMapData(filteredItems).then(renderEmotionMap);
+        renderIncludedSubreddits(selectedSubreddits);
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
         const userNicheCount = allItems.filter(p => ((p.data.title || p.data.link_title || '') + (p.data.selftext || p.data.body || '')).toLowerCase().includes(originalGroupName.toLowerCase())).length;

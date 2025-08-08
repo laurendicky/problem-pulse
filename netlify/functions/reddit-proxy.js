@@ -1,13 +1,13 @@
 // =================================================================================
-// COMPLETE AND VERIFIED PROXY SCRIPT (VERSION 3.2 - GRACEFUL 404 HANDLING)
-// This version intelligently handles 404 "Not Found" errors for 'about' requests,
-// preventing crashes when the AI suggests a non-existent subreddit.
+// COMPLETE AND VERIFIED PROXY SCRIPT (VERSION 3.3 - ULTIMATE RESILIENCE)
+// This version handles ALL non-OK responses for 'about' requests (404, 403, etc.)
+// by gracefully returning null, making it immune to AI suggestions of non-existent,
+// private, or banned subreddits.
 // =================================================================================
 
 const { REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT } = process.env;
 
 async function getRedditToken() {
-    // ... (This function remains unchanged)
     const auth = Buffer.from(`${REDDIT_CLIENT_ID}:${REDDIT_CLIENT_SECRET}`).toString('base64');
     const response = await fetch('https://www.reddit.com/api/v1/access_token', {
         method: 'POST',
@@ -69,21 +69,20 @@ exports.handler = async (event) => {
         });
 
         // ======================================================================
-        // *** THE FIX IS HERE: Gracefully handle 'Not Found' for 'about' requests ***
+        // *** THE FINAL FIX IS HERE: Handle ANY failure for 'about' requests ***
         // ======================================================================
         if (!redditResponse.ok) {
-            // If the subreddit doesn't exist, Reddit returns a 404.
-            // This is NOT a server error, it's valid information.
-            // We return a successful response with a null body so the front-end can filter it out.
-            if (body.type === 'about' && redditResponse.status === 404) {
+            // If this was an 'about' request, any failure (404, 403, etc.) simply means
+            // the subreddit is not accessible. This is expected and not a server error.
+            if (body.type === 'about') {
                 return {
-                    statusCode: 200,
+                    statusCode: 200, // Return a success code
                     headers: corsHeaders,
-                    body: JSON.stringify(null) // Send back null, which the front-end handles.
+                    body: JSON.stringify(null) // Signal to the front-end that this one is invalid.
                 };
             }
-            
-            // For all other errors, we still throw a real error.
+
+            // For any OTHER type of request (search, comments), a non-OK status IS a server problem.
             const errorText = await redditResponse.text();
             console.error("Reddit API Error:", errorText);
             throw new Error(`Reddit API failed with status: ${redditResponse.status} for URL: ${url}`);

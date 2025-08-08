@@ -32,7 +32,21 @@ function parseAIAssignments(aiResponse) { try { aiResponse = aiResponse.replace(
 function filterPosts(posts, minUpvotes = 20) { return posts.filter(post => { const title = (post.data.title || post.data.link_title || '').toLowerCase(); const selftext = post.data.selftext || post.data.body || ''; if (title.includes('[ad]') || title.includes('sponsored') || post.data.upvote_ratio < 0.2 || post.data.ups < minUpvotes || !selftext || selftext.length < 20) return false; const isRamblingOrNoisy = (text) => { if (!text) return false; return /&#x[0-9a-fA-F]+;/g.test(text) || /[^a-zA-Z0-9\s]{5,}/g.test(text) || /(.)\1{6,}/g.test(text); }; return !isRamblingOrNoisy(title) && !isRamblingOrNoisy(selftext); }); }
 function getTopKeywords(posts, topN = 10) { const freqMap = {}; posts.forEach(post => { const cleanedText = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.replace(/<[^>]+>/g, '').replace(/[^a-zA-Z0-9\s.,!?]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); const words = cleanedText.split(/\s+/); words.forEach(word => { if (!stopWords.includes(word) && word.length > 2) { freqMap[word] = (freqMap[word] || 0) + 1; } }); }); return Object.keys(freqMap).sort((a, b) => freqMap[b] - freqMap[a]).slice(0, topN); }
 function getFirstTwoSentences(text) { if (!text) return ''; const sentences = text.match(/[^\.!\?]+[\.!\?]+(?:\s|$)/g); return sentences ? sentences.slice(0, 2).join(' ').trim() : text; }
-async function assignPostsToFindings(summaries, posts) { const postsForAI = posts.slice(0, 75); const prompt = `You are an expert data analyst. Your task is to categorize Reddit posts into the most relevant "Finding" from a provided list.\n\nHere are the ${summaries.length} findings:\n${summaries.map((s, i) => `Finding ${i + 1}: ${s.title}`).join('\n')}\n\nHere are the ${postsForAI.length} Reddit posts:\n${postsForAI.map((p, i) => `Post ${i + 1}: ${p.data.title || p.data.link_title}`).join('\n')}\n\nINSTRUCTIONS: For each post, assign it to the most relevant Finding (from 1 to ${summaries.length}). Respond ONLY with a JSON object with a single key "assignments", which is an array of objects like {"postNumber": 1, "finding": 2}.`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data categorization engine that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error(`OpenAI API Error for assignments: ${response.statusText}`); const data = await response.json(); return parseAIAssignments(data.openaiResponse); } catch (error) { console.error("Assignment function error:", error); return []; } }
+// CORRECTED: Reduced payload size to prevent server errors.
+async function assignPostsToFindings(summaries, posts) {
+    const postsForAI = posts.slice(0, 50); // REDUCED from 75 to 50
+    const prompt = `You are an expert data analyst. Your task is to categorize Reddit posts into the most relevant "Finding" from a provided list.\n\nHere are the ${summaries.length} findings:\n${summaries.map((s, i) => `Finding ${i + 1}: ${s.title}`).join('\n')}\n\nHere are the ${postsForAI.length} Reddit posts:\n${postsForAI.map((p, i) => `Post ${i + 1}: ${(p.data.title || p.data.link_title || '').substring(0, 150)}`).join('\n')}\n\nINSTRUCTIONS: For each post, assign it to the most relevant Finding (from 1 to ${summaries.length}). Respond ONLY with a JSON object with a single key "assignments", which is an array of objects like {"postNumber": 1, "finding": 2}.`;
+    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data categorization engine that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1500, response_format: { "type": "json_object" } };
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error(`OpenAI API Error for assignments: ${response.statusText}`);
+        const data = await response.json();
+        return parseAIAssignments(data.openaiResponse);
+    } catch (error) {
+        console.error("Assignment function error:", error);
+        return [];
+    }
+}
 function calculateRelevanceScore(post, finding) { let score = 0; const postTitle = (post.data.title || post.data.link_title || "").toLowerCase(); const postBody = (post.data.selftext || post.data.body || "").toLowerCase(); const findingTitleWords = finding.title.toLowerCase().split(' ').filter(word => word.length > 3 && !stopWords.includes(word)); const findingKeywords = (finding.keywords || []).map(k => k.toLowerCase()); let titleWordMatched = false, keywordMatched = false; for (const word of findingTitleWords) { const regex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'); if (regex.test(postTitle)) { score += 5; titleWordMatched = true; } if (regex.test(postBody)) { score += 2; titleWordMatched = true; } } for (const keyword of findingKeywords) { const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'); if (regex.test(postTitle)) { score += 3; keywordMatched = true; } if (regex.test(postBody)) { score += 1; keywordMatched = true; } } if (titleWordMatched && keywordMatched) { score += 10; } return score; }
 function calculateFindingMetrics(validatedSummaries, filteredPosts) { const metrics = {}; const allProblemPostIds = new Set(); validatedSummaries.forEach((finding, index) => { metrics[index] = { supportCount: 0 }; }); filteredPosts.forEach(post => { let bestFindingIndex = -1; let maxScore = 0; validatedSummaries.forEach((finding, index) => { const score = calculateRelevanceScore(post, finding); if (score > maxScore) { maxScore = score; bestFindingIndex = index; } }); if (bestFindingIndex !== -1 && maxScore > 0) { metrics[bestFindingIndex].supportCount++; allProblemPostIds.add(post.data.id); } }); metrics.totalProblemPosts = allProblemPostIds.size; return metrics; }
 function renderPosts(posts) { const container = document.getElementById("posts-container"); if (!container) { return; } container.innerHTML = posts.map(post => { const content = post.data.selftext || post.data.body || 'No additional content.'; const title = post.data.title || post.data.link_title || 'View Comment Thread'; const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : ''; return ` <div class="insight" style="border:1px solid #ccc; padding:12px; margin-bottom:12px; background:#fafafa; border-radius:8px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1.1rem; color:#007bff; text-decoration:none;"> ${title} </a> <p style="font-size:0.9rem; margin:0.75rem 0; color:#333; line-height:1.5;"> ${content.substring(0, 200) + '...'} </p> <small style="color:#555; font-size:0.8rem;"> r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)} </small> </div> `}).join(''); }
@@ -76,8 +90,9 @@ function renderSentimentCloud(containerId, wordData, colors) { const container =
 function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : "Snippet not available."; const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if(closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title || p.data.link_title || ''}\nContent: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
+// CORRECTED: Reduced payload size to prevent server errors.
 async function extractAndValidateEntities(posts, nicheContext) {
-    const topPostsText = posts.slice(0, 75).map(p => {
+    const topPostsText = posts.slice(0, 50).map(p => { // REDUCED from 75 to 50
         const title = p.data.title || p.data.link_title;
         const body = p.data.selftext || p.data.body || '';
         if (title) {
@@ -136,12 +151,10 @@ async function fetchSubredditDetails(subredditName) {
                 body: JSON.stringify(payload)
             });
 
-            // If we get a server error (5xx), we want to retry.
             if (response.status >= 500) {
                 throw new Error(`Server error: ${response.status}`);
             }
 
-            // If the response is OK or a client error (like 404), we accept the result and stop.
             if (!response.ok) {
                 console.warn(`Subreddit r/${subredditName} not found or failed to load. Status: ${response.status}`);
                 return null;
@@ -153,13 +166,12 @@ async function fetchSubredditDetails(subredditName) {
         } catch (error) {
             console.error(`Attempt ${attempt} failed for r/${subredditName}:`, error.message);
             if (attempt === MAX_RETRIES) {
-                return null; // Give up after the last retry.
+                return null;
             }
-            // Wait a bit before the next retry (exponential backoff).
             await new Promise(r => setTimeout(r, 200 * attempt));
         }
     }
-    return null; // Should not be reached, but as a fallback.
+    return null;
 }
 
 /**
@@ -200,7 +212,7 @@ function getActivityLabel(activeUsers, totalMembers) {
 }
 
 /**
- * NEW LOGIC: Fetches details in batches, filters duds, ranks the rest, and returns a rich object for display.
+ * Fetches details in batches, filters duds, ranks the rest, and returns a rich object for display.
  * @param {string[]} subredditNames - An array of subreddit names from the AI.
  * @returns {Promise<Object[]>} A promise that resolves to a ranked array of rich subreddit objects.
  */
@@ -236,15 +248,6 @@ async function fetchAndRankSubreddits(subredditNames) {
 
 
 /**
- * Helper function to generate the HTML for a list of subreddit choices with pills.
- * @param {Object[]} subreddits - An array of rich subreddit objects.
- * @returns {string} The generated HTML string.
- */
-// =========================================================================
-// === REPLACE THIS FUNCTION in your existing JavaScript ===================
-// =========================================================================
-
-/**
  * Helper function to generate the HTML for a list of subreddit choices with a single unified pill.
  * @param {Object[]} subreddits - An array of rich subreddit objects.
  * @returns {string} The generated HTML string.
@@ -270,19 +273,18 @@ function renderSubredditChoicesHTML(subreddits) {
         </div>
     `).join('');
 }
+
 /**
  * Displays the initial list of subreddits and a "Load More" button if applicable.
  * @param {Object[]} rankedSubreddits - The full, sorted list of rich subreddit objects.
  */
 function displaySubredditChoices(rankedSubreddits) {
     const choicesDiv = document.getElementById('subreddit-choices');
-    const loadMoreContainer = document.getElementById('load-more-container'); // Find our new container
+    const loadMoreContainer = document.getElementById('load-more-container');
     if (!choicesDiv || !loadMoreContainer) return;
 
-    // Clear any existing content in the button container
     loadMoreContainer.innerHTML = '';
-
-    _allRankedSubreddits = rankedSubreddits; // Store the full list globally
+    _allRankedSubreddits = rankedSubreddits;
 
     if (_allRankedSubreddits.length === 0) {
         choicesDiv.innerHTML = '<p class="loading-text">No suitable communities found. Try a different group.</p>';
@@ -292,24 +294,18 @@ function displaySubredditChoices(rankedSubreddits) {
     const initialToShow = _allRankedSubreddits.slice(0, 8);
     choicesDiv.innerHTML = renderSubredditChoicesHTML(initialToShow);
 
-    // If there are more subreddits left to show, create and add the "Load More" button
     if (_allRankedSubreddits.length > 8) {
         const loadMoreBtn = document.createElement('button');
         loadMoreBtn.id = 'load-more-subs-btn';
         loadMoreBtn.textContent = 'Load More Communities';
-        // Updated styles to fit better inside the options area
         loadMoreBtn.style.cssText = "padding: 8px 20px; border-radius: 50px; border: 1px solid var(--minky-glass-border); background-color: var(--minky-glass-bg-hover); color: var(--minky-text-primary); cursor: pointer; font-weight: 500; font-family: var(--pf-font-family); font-size: 1rem;";
         loadMoreBtn.onclick = loadMoreSubreddits;
-        
-        // THIS IS THE KEY CHANGE: Append the button to our new container
         loadMoreContainer.appendChild(loadMoreBtn);
     }
 }
 
 /**
  * Loads the next batch of subreddits and appends them to the list.
- */
-/**
  */
 function loadMoreSubreddits() {
     const choicesDiv = document.getElementById('subreddit-choices');
@@ -321,11 +317,9 @@ function loadMoreSubreddits() {
 
     if (nextBatch.length > 0) {
         const newChoicesHTML = renderSubredditChoicesHTML(nextBatch);
-        // THIS IS THE KEY CHANGE: Append new choices to the END of the choicesDiv
         choicesDiv.insertAdjacentHTML('beforeend', newChoicesHTML);
     }
 
-    // If we've now shown all available subreddits, remove the button
     const newTotalShown = choicesDiv.querySelectorAll('.subreddit-choice').length;
     if (newTotalShown >= _allRankedSubreddits.length) {
         loadMoreBtn.remove();
@@ -385,7 +379,12 @@ function renderSentimentScore(positiveCount, negativeCount) { const container = 
 // --- CONSTELLATION MAP FUNCTIONS ---
 const CONSTELLATION_CATEGORIES = { DemandSignals: { x: 0.5, y: 0.5 }, CostConcerns: { x: 0.5, y: 0.2 }, WillingnessToPay: { x: 0.8, y: 0.4 }, Frustration: { x: 0.7, y: 0.75 }, SubstituteComparisons: { x: 0.3, y: 0.75 }, Urgency: { x: 0.2, y: 0.4 }, Other: { x: 0.5, y: 0.05 }, };
 const EMOTION_COLORS = { Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7', Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316' };
-async function generateAndRenderConstellation(items) { console.log("[Constellation] Starting full generation process..."); const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 200); console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal extraction.`); const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 20 quotes that express a strong purchase intent, an unsolved problem, or a significant pain point.
+// CORRECTED: Reduced payload size to prevent server errors.
+async function generateAndRenderConstellation(items) {
+    console.log("[Constellation] Starting full generation process...");
+    const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 150); // REDUCED from 200 to 150
+    console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
+    const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 20 quotes that express a strong purchase intent, an unsolved problem, or a significant pain point.
 
     Focus ONLY on phrases that directly mention:
     - Willingness to pay ("I'd pay for", "take my money")
@@ -401,8 +400,25 @@ async function generateAndRenderConstellation(items) { console.log("[Constellati
     ${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
 
     Respond ONLY with a valid JSON object: {"signals": [{"quote": "The extracted quote.", "source_index": 4}]}`;
-    let rawSignals = []; try { const extractionResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: extractionPrompt }], temperature: 0.1, max_tokens: 2000, response_format: { "type": "json_object" } } }) }); if (!extractionResponse.ok) throw new Error("AI Signal Extraction Failed"); const extractionData = await extractionResponse.json(); const parsedExtraction = JSON.parse(extractionData.openaiResponse); if (parsedExtraction.signals && Array.isArray(parsedExtraction.signals)) { rawSignals = parsedExtraction.signals.map(signal => ({ quote: signal.quote, sourceItem: prioritizedItems[signal.source_index] })).filter(s => s.sourceItem); } } catch (error) { console.error("CRITICAL ERROR in AI Signal Extraction:", error); renderConstellationMap([]); return; }
-    console.log(`[Constellation] AI extracted ${rawSignals.length} high-quality signals.`); if (rawSignals.length === 0) { renderConstellationMap([]); return; }
+    let rawSignals = [];
+    try {
+        const extractionResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: extractionPrompt }], temperature: 0.1, max_tokens: 2000, response_format: { "type": "json_object" } } }) });
+        if (!extractionResponse.ok) throw new Error("AI Signal Extraction Failed");
+        const extractionData = await extractionResponse.json();
+        const parsedExtraction = JSON.parse(extractionData.openaiResponse);
+        if (parsedExtraction.signals && Array.isArray(parsedExtraction.signals)) {
+            rawSignals = parsedExtraction.signals.map(signal => ({ quote: signal.quote, sourceItem: prioritizedItems[signal.source_index] })).filter(s => s.sourceItem);
+        }
+    } catch (error) {
+        console.error("CRITICAL ERROR in AI Signal Extraction:", error);
+        renderConstellationMap([]);
+        return;
+    }
+    console.log(`[Constellation] AI extracted ${rawSignals.length} high-quality signals.`);
+    if (rawSignals.length === 0) {
+        renderConstellationMap([]);
+        return;
+    }
     const enrichmentPrompt = `You are a market research analyst. For each quote below, provide a short summary of the user's core problem and classify it into the MOST relevant category.
 
     Here are the categories and their definitions:
@@ -422,8 +438,22 @@ async function generateAndRenderConstellation(items) { console.log("[Constellati
     3. "emotion": Classify the primary emotion into ONE of: [${Object.keys(EMOTION_COLORS).join(', ')}].
 
     Respond ONLY with a valid JSON object: {"enriched_signals": [...]}. The array MUST be the same length as the list of quotes.`;
-    let enrichedSignals = []; try { const enrichmentResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-4o", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_tokens: 2500, response_format: { "type": "json_object" } } }) }); if (!enrichmentResponse.ok) throw new Error("AI Signal Enrichment Failed"); const enrichmentData = await enrichmentResponse.json(); const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse); if (parsedEnrichment.enriched_signals && parsedEnrichment.enriched_signals.length === rawSignals.length) { enrichedSignals = rawSignals.map((rawSignal, index) => ({ ...rawSignal, ...parsedEnrichment.enriched_signals[index], source: rawSignal.sourceItem.data })); } } catch (error) { console.error("CRITICAL ERROR in AI Signal Enrichment:", error); renderConstellationMap([]); return; }
-    console.log(`[Constellation] AI enriched ${enrichedSignals.length} signals. Rendering map.`); renderConstellationMap(enrichedSignals);
+    let enrichedSignals = [];
+    try {
+        const enrichmentResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-4o", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_tokens: 2500, response_format: { "type": "json_object" } } }) });
+        if (!enrichmentResponse.ok) throw new Error("AI Signal Enrichment Failed");
+        const enrichmentData = await enrichmentResponse.json();
+        const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse);
+        if (parsedEnrichment.enriched_signals && parsedEnrichment.enriched_signals.length === rawSignals.length) {
+            enrichedSignals = rawSignals.map((rawSignal, index) => ({ ...rawSignal, ...parsedEnrichment.enriched_signals[index], source: rawSignal.sourceItem.data }));
+        }
+    } catch (error) {
+        console.error("CRITICAL ERROR in AI Signal Enrichment:", error);
+        renderConstellationMap([]);
+        return;
+    }
+    console.log(`[Constellation] AI enriched ${enrichedSignals.length} signals. Rendering map.`);
+    renderConstellationMap(enrichedSignals);
 }
 function initializeConstellationInteractivity() { const container = document.getElementById('constellation-map-container'); const panel = document.getElementById('constellation-side-panel'); if (!container || !panel) return; const panelContent = panel.querySelector('.panel-content'); let hidePanelTimer; const setDefaultPanelState = () => { panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`; }; const hidePanel = () => { setDefaultPanelState(); }; setDefaultPanelState(); container.addEventListener('mouseover', (e) => { if (!e.target.classList.contains('constellation-star')) return; clearTimeout(hidePanelTimer); const star = e.target; panelContent.innerHTML = `<p class="quote">“${star.dataset.quote}”</p><h4 class="problem-theme">${star.dataset.problemTheme}</h4><p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes on related signals</p><a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>`; }); container.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); }); panel.addEventListener('mouseenter', () => { clearTimeout(hidePanelTimer); }); panel.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); }); }
 async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) { console.log("--- Starting Delayed Constellation Analysis (in background) ---"); try { const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false); const postIds = demandSignalPosts.sort((a,b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id); const highIntentComments = await fetchCommentsForPosts(postIds); const allItems = [...demandSignalPosts, ...highIntentComments]; await generateAndRenderConstellation(allItems); console.log("--- Constellation Analysis Complete. ---"); } catch (error) { console.error("Constellation analysis failed in the background:", error); renderConstellationMap([]); } }

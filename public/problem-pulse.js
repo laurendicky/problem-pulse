@@ -240,6 +240,15 @@ async function fetchAndRankSubreddits(subredditNames) {
  * @param {Object[]} subreddits - An array of rich subreddit objects.
  * @returns {string} The generated HTML string.
  */
+// =========================================================================
+// === REPLACE THIS FUNCTION in your existing JavaScript ===================
+// =========================================================================
+
+/**
+ * Helper function to generate the HTML for a list of subreddit choices with a single unified pill.
+ * @param {Object[]} subreddits - An array of rich subreddit objects.
+ * @returns {string} The generated HTML string.
+ */
 function renderSubredditChoicesHTML(subreddits) {
     const activityColors = { '🔥 Hot': '#f0fff4', '🌤️ Warm': '#fffbeb', '💤 Cool': '#f9fafb' };
     const activityTextColors = { '🔥 Hot': '#2f855a', '🌤️ Warm': '#b45309', '💤 Cool': '#4b5563' };
@@ -247,15 +256,17 @@ function renderSubredditChoicesHTML(subreddits) {
     return subreddits.map(sub => `
         <div class="subreddit-choice">
             <input type="checkbox" id="sub-${sub.name}" value="${sub.name}" checked>
-            <label for="sub-${sub.name}">r/${sub.name}</label>
-            <div class="subreddit-pills" style="margin-top: 6px; display: flex; gap: 6px;">
-                <span class="pill members-pill" style="display: inline-block; font-size: 0.75rem; padding: 2px 8px; border-radius: 12px; background-color: #eef2ff; color: #4338ca;">
-                    ${formatMemberCount(sub.members)} members
+            <label for="sub-${sub.name}">
+                <span class="sub-name">r/${sub.name}</span>
+                <span class="sub-pills">
+                    <span class="pill members-pill">
+                        ${formatMemberCount(sub.members)}
+                    </span>
+                    <span class="pill activity-pill" style="background-color: ${activityColors[sub.activityLabel]}; color: ${activityTextColors[sub.activityLabel]};">
+                        ${sub.activityLabel}
+                    </span>
                 </span>
-                <span class="pill activity-pill" style="display: inline-block; font-size: 0.75rem; padding: 2px 8px; border-radius: 12px; background-color: ${activityColors[sub.activityLabel]}; color: ${activityTextColors[sub.activityLabel]};">
-                    ${sub.activityLabel}
-                </span>
-            </div>
+            </label>
         </div>
     `).join('');
 }

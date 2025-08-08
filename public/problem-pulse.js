@@ -346,7 +346,7 @@ async function renderIncludedSubreddits(subreddits) {
 
             const description = details.public_description || 'No public description available.';
             const members = formatMemberCount(details.subscribers);
-            const activityData = getActivityLabel(details.active_user_count, details.subscribers).split(' '); // e.g., ['🔥', 'Hot']
+            const activityData = getActivityLabel(details.active_user_count, details.subscribers).split(' ');
             const activityEmoji = activityData[0];
             const activityText = activityData[1];
 
@@ -377,7 +377,6 @@ function renderSentimentScore(positiveCount, negativeCount) { const container = 
 // --- CONSTELLATION MAP FUNCTIONS ---
 const CONSTELLATION_CATEGORIES = { DemandSignals: { x: 0.5, y: 0.5 }, CostConcerns: { x: 0.5, y: 0.2 }, WillingnessToPay: { x: 0.8, y: 0.4 }, Frustration: { x: 0.7, y: 0.75 }, SubstituteComparisons: { x: 0.3, y: 0.75 }, Urgency: { x: 0.2, y: 0.4 }, Other: { x: 0.5, y: 0.05 }, };
 const EMOTION_COLORS = { Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7', Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316' };
-// CORRECTED: Replaced bulk enrichment with a resilient, one-by-one process.
 async function generateAndRenderConstellation(items) {
     console.log("[Constellation] Starting full generation process...");
     const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 150);
@@ -505,6 +504,86 @@ async function enhanceDiscoveryWithComments(posts, nicheContext) {
             statusMsg.remove();
         }
     }
+}
+
+// =================================================================================
+// === NEW FEATURE: Power Phrases (Functions to be added) ========================
+// =================================================================================
+
+/**
+ * Generates n-grams (phrases of n words) from a list of words.
+ * @param {string[]} words - The array of words to process.
+ * @param {number} n - The size of the phrases to generate (e.g., 2 for bigrams).
+ * @returns {string[]} An array of valid n-gram phrases.
+ */
+function generateNgrams(words, n) {
+    const ngrams = [];
+    if (n > words.length) return ngrams;
+    for (let i = 0; i <= words.length - n; i++) {
+        const ngram = words.slice(i, i + n);
+        // Filter out phrases that start or end with a common stop word.
+        if (!stopWords.includes(ngram[0]) && !stopWords.includes(ngram[n - 1])) {
+            ngrams.push(ngram.join(' '));
+        }
+    }
+    return ngrams;
+}
+
+/**
+ * Analyzes post text to find the most common phrases and renders them.
+ * This is wrapped in a setTimeout to prevent it from blocking the main thread.
+ * @param {Object[]} posts - The array of filtered Reddit posts.
+ */
+function generateAndRenderPowerPhrases(posts) {
+    setTimeout(() => {
+        console.log("--- Starting Power Phrase Analysis (in background) ---");
+        const container = document.getElementById('power-phrases');
+        if (!container) {
+            console.warn("Power Phrases container not found.");
+            return;
+        }
+
+        const allText = posts
+            .map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`)
+            .join(' ')
+            .toLowerCase()
+            .replace(/[^a-z\s']/g, '') // Keep only letters, spaces, and apostrophes
+            .replace(/\s+/g, ' '); // Normalize whitespace
+
+        const words = allText.split(' ');
+        
+        const bigrams = generateNgrams(words, 2);
+        const trigrams = generateNgrams(words, 3);
+        
+        const allNgrams = [...bigrams, ...trigrams];
+        const freqMap = {};
+        allNgrams.forEach(ngram => {
+            freqMap[ngram] = (freqMap[ngram] || 0) + 1;
+        });
+
+        const sortedPhrases = Object.entries(freqMap)
+            .filter(([phrase, count]) => count > 2) // Only show phrases mentioned at least 3 times
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 10); // Take the top 10
+
+        if (sortedPhrases.length < 3) {
+            container.innerHTML = '<h3 class="dashboard-section-title">Power Phrases</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough common phrases found to generate a map.</p>';
+            return;
+        }
+        
+        const mindMapHTML = sortedPhrases.map(([phrase, count], index) => {
+            const size = 1 + (count / sortedPhrases[0][1]) * 1.5;
+            const rotation = (index * 36) % 360;
+            const distance = 80 + (Math.random() * 40);
+            const x = 50 + distance * Math.cos(rotation * Math.PI / 180);
+            const y = 50 + distance * Math.sin(rotation * Math.PI / 180);
+            return `<div class="power-phrase-node" style="font-size: ${size.toFixed(2)}em; top: ${y}%; left: ${x}%; transform: translate(-50%, -50%) rotate(${Math.random() * 20 - 10}deg);">${phrase}</div>`;
+        }).join('');
+
+        container.innerHTML = `<h3 class="dashboard-section-title">Power Phrases</h3><div class="power-phrase-map">${mindMapHTML}</div>`;
+        
+        console.log("--- Power Phrase Analysis Complete. ---");
+    }, 10); // setTimeout with a small delay makes it asynchronous
 }
 
 // =================================================================================

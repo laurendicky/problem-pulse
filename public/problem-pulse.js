@@ -377,6 +377,7 @@ function renderSentimentScore(positiveCount, negativeCount) { const container = 
 // --- CONSTELLATION MAP FUNCTIONS ---
 const CONSTELLATION_CATEGORIES = { DemandSignals: { x: 0.5, y: 0.5 }, CostConcerns: { x: 0.5, y: 0.2 }, WillingnessToPay: { x: 0.8, y: 0.4 }, Frustration: { x: 0.7, y: 0.75 }, SubstituteComparisons: { x: 0.3, y: 0.75 }, Urgency: { x: 0.2, y: 0.4 }, Other: { x: 0.5, y: 0.05 }, };
 const EMOTION_COLORS = { Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7', Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316' };
+// CORRECTED: Replaced bulk enrichment with a resilient, one-by-one process.
 async function generateAndRenderConstellation(items) {
     console.log("[Constellation] Starting full generation process...");
     const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 150);
@@ -411,45 +412,54 @@ async function generateAndRenderConstellation(items) {
         renderConstellationMap([]);
         return;
     }
+
     console.log(`[Constellation] AI extracted ${rawSignals.length} high-quality signals.`);
     if (rawSignals.length === 0) {
         renderConstellationMap([]);
         return;
     }
-    const enrichmentPrompt = `You are a market research analyst. For each quote below, provide a short summary of the user's core problem and classify it into the MOST relevant category.
 
-    Here are the categories and their definitions:
-    - DemandSignals: General expressions of a need or problem. Use as a default if no other category fits perfectly.
-    - WillingnessToPay: Direct mentions of being willing to pay, subscribe, or buy a solution.
-    - Frustration: Expressions of frustration, annoyance, or disappointment with current tools or manual processes.
-    - SubstituteComparisons: Mentions or comparisons to other specific products, brands, or competing solutions.
-    - Urgency: Language that implies a high-pressure need or a problem that needs to be solved immediately.
-    - CostConcerns: Direct mentions of price, budget, or something being too expensive or unaffordable.
-    
-    Here are the quotes:
-    ${rawSignals.map((signal, index) => `${index}. "${signal.quote}"`).join('\n')}
+    const enrichedSignals = [];
+    for (const rawSignal of rawSignals) {
+        try {
+            const enrichmentPrompt = `You are a market research analyst. For the quote below, provide a short summary of the user's core problem and classify it into the MOST relevant category.
 
-    For EACH quote, provide a JSON object with:
-    1. "problem_theme": A short, 4-5 word summary of the core problem or desire.
-    2. "category": Classify into ONE of: [${Object.keys(CONSTELLATION_CATEGORIES).join(', ')}].
-    3. "emotion": Classify the primary emotion into ONE of: [${Object.keys(EMOTION_COLORS).join(', ')}].
+            Here are the categories and their definitions:
+            - DemandSignals: General expressions of a need or problem. Use as a default if no other category fits perfectly.
+            - WillingnessToPay: Direct mentions of being willing to pay, subscribe, or buy a solution.
+            - Frustration: Expressions of frustration, annoyance, or disappointment with current tools or manual processes.
+            - SubstituteComparisons: Mentions or comparisons to other specific products, brands, or competing solutions.
+            - Urgency: Language that implies a high-pressure need or a problem that needs to be solved immediately.
+            - CostConcerns: Direct mentions of price, budget, or something being too expensive or unaffordable.
+            
+            Quote: "${rawSignal.quote}"
 
-    Respond ONLY with a valid JSON object: {"enriched_signals": [...]}. The array MUST be the same length as the list of quotes.`;
-    let enrichedSignals = [];
-    try {
-        const enrichmentResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-4o", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_tokens: 2500, response_format: { "type": "json_object" } } }) });
-        if (!enrichmentResponse.ok) throw new Error("AI Signal Enrichment Failed");
-        const enrichmentData = await enrichmentResponse.json();
-        const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse);
-        if (parsedEnrichment.enriched_signals && parsedEnrichment.enriched_signals.length === rawSignals.length) {
-            enrichedSignals = rawSignals.map((rawSignal, index) => ({ ...rawSignal, ...parsedEnrichment.enriched_signals[index], source: rawSignal.sourceItem.data }));
+            Provide a JSON object with:
+            1. "problem_theme": A short, 4-5 word summary of the core problem or desire.
+            2. "category": Classify into ONE of: [${Object.keys(CONSTELLATION_CATEGORIES).join(', ')}].
+            3. "emotion": Classify the primary emotion into ONE of: [${Object.keys(EMOTION_COLORS).join(', ')}].
+
+            Respond ONLY with a valid JSON object.`;
+
+            const enrichmentResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_tokens: 250, response_format: { "type": "json_object" } } }) });
+            
+            if (enrichmentResponse.ok) {
+                const enrichmentData = await enrichmentResponse.json();
+                const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse);
+                if(parsedEnrichment.problem_theme && parsedEnrichment.category && parsedEnrichment.emotion) {
+                    enrichedSignals.push({ ...rawSignal, ...parsedEnrichment, source: rawSignal.sourceItem.data });
+                } else {
+                     console.warn("Skipping a signal due to missing fields in AI enrichment response:", parsedEnrichment);
+                }
+            } else {
+                 console.warn(`Failed to enrich a signal. Status: ${enrichmentResponse.status}`);
+            }
+        } catch (error) {
+            console.error("CRITICAL ERROR during individual signal enrichment:", error);
         }
-    } catch (error) {
-        console.error("CRITICAL ERROR in AI Signal Enrichment:", error);
-        renderConstellationMap([]);
-        return;
     }
-    console.log(`[Constellation] AI enriched ${enrichedSignals.length} signals. Rendering map.`);
+    
+    console.log(`[Constellation] AI successfully enriched ${enrichedSignals.length} signals. Rendering map.`);
     renderConstellationMap(enrichedSignals);
 }
 function initializeConstellationInteractivity() { const container = document.getElementById('constellation-map-container'); const panel = document.getElementById('constellation-side-panel'); if (!container || !panel) return; const panelContent = panel.querySelector('.panel-content'); let hidePanelTimer; const setDefaultPanelState = () => { panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`; }; const hidePanel = () => { setDefaultPanelState(); }; setDefaultPanelState(); container.addEventListener('mouseover', (e) => { if (!e.target.classList.contains('constellation-star')) return; clearTimeout(hidePanelTimer); const star = e.target; panelContent.innerHTML = `<p class="quote">“${star.dataset.quote}”</p><h4 class="problem-theme">${star.dataset.problemTheme}</h4><p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes on related signals</p><a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>`; }); container.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); }); panel.addEventListener('mouseenter', () => { clearTimeout(hidePanelTimer); }); panel.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); }); }
@@ -462,127 +472,41 @@ function renderConstellationMap(signals) { const container = document.getElement
 async function enhanceDiscoveryWithComments(posts, nicheContext) {
     console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
     const brandContainer = document.getElementById('top-brands-container');
-    if (!brandContainer) return; // Guard clause if the container isn't on the page
+    if (!brandContainer) return;
 
-    // 1. Create and inject the status message WITHOUT replacing existing content.
     const statusMessageEl = document.createElement('div');
-    statusMessageEl.id = 'discovery-status-message'; // Give it an ID for easy removal
+    statusMessageEl.id = 'discovery-status-message';
     statusMessageEl.style.cssText = "font-family: Inter, sans-serif; color: #555; padding: 0.5rem 1rem 1rem 1rem; font-style: italic; text-align: center;";
     statusMessageEl.innerHTML = 'Posts are in. Comments are brewing. Sit tight — the juicy bits are almost here. <span class="loader-dots"></span>';
     
-    // Insert the message *before* the brand container, which should be above both lists.
     brandContainer.before(statusMessageEl);
 
     try {
-        // 2. Fetch comments and re-run the analysis
         const postIdsToFetch = posts.slice(0, 75).map(p => p.data.id);
         const comments = await fetchCommentsForPosts(postIdsToFetch);
         console.log(`Fetched ${comments.length} comments for enhancement.`);
         const allItemsForAnalysis = [...posts, ...comments];
         const enhancedEntities = await extractAndValidateEntities(allItemsForAnalysis, nicheContext);
 
-        // 3. Render the final, enhanced lists. This will now replace the initial post-only lists.
         console.log("Enhancement complete. Rendering final brand/product lists.");
         renderDiscoveryList('top-brands-container', enhancedEntities.topBrands, 'Top Brands & Specific Products', 'brands');
         renderDiscoveryList('top-products-container', enhancedEntities.topProducts, 'Top Generic Products', 'products');
 
     } catch (error) {
         console.error("Failed to enhance discovery lists with comments:", error);
-        // If an error occurs, update the status message to inform the user.
         const statusMsg = document.getElementById('discovery-status-message');
         if (statusMsg) {
             statusMsg.style.color = 'red';
             statusMsg.textContent = 'Could not load additional data from comments due to a network error.';
         }
     } finally {
-        // 4. IMPORTANT: Clean up and remove the status message after the process is finished (or has failed).
         const statusMsg = document.getElementById('discovery-status-message');
         if (statusMsg) {
             statusMsg.remove();
         }
     }
 }
-// ==========================================================
-// === NEW FEATURE: Power Phrases (Add this section) ========
-// ==========================================================
 
-/**
- * Generates n-grams (phrases of n words) from a list of words.
- * @param {string[]} words - The array of words to process.
- * @param {number} n - The size of the phrases to generate (e.g., 2 for bigrams).
- * @returns {string[]} An array of valid n-gram phrases.
- */
-function generateNgrams(words, n) {
-    const ngrams = [];
-    if (n > words.length) return ngrams;
-    for (let i = 0; i <= words.length - n; i++) {
-        const ngram = words.slice(i, i + n);
-        // Filter out phrases that start or end with a common stop word.
-        if (!stopWords.includes(ngram[0]) && !stopWords.includes(ngram[n - 1])) {
-            ngrams.push(ngram.join(' '));
-        }
-    }
-    return ngrams;
-}
-
-/**
- * Analyzes post text to find the most common phrases and renders them.
- * This is wrapped in a setTimeout to prevent it from blocking the main thread.
- * @param {Object[]} posts - The array of filtered Reddit posts.
- */
-function generateAndRenderPowerPhrases(posts) {
-    setTimeout(() => {
-        console.log("--- Starting Power Phrase Analysis (in background) ---");
-        const container = document.getElementById('power-phrases');
-        if (!container) {
-            console.warn("Power Phrases container not found.");
-            return;
-        }
-
-        const allText = posts
-            .map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`)
-            .join(' ')
-            .toLowerCase()
-            .replace(/[^a-z\s']/g, '') // Keep only letters, spaces, and apostrophes
-            .replace(/\s+/g, ' '); // Normalize whitespace
-
-        const words = allText.split(' ');
-        
-        const bigrams = generateNgrams(words, 2);
-        const trigrams = generateNgrams(words, 3);
-        
-        const allNgrams = [...bigrams, ...trigrams];
-        const freqMap = {};
-        allNgrams.forEach(ngram => {
-            freqMap[ngram] = (freqMap[ngram] || 0) + 1;
-        });
-
-        const sortedPhrases = Object.entries(freqMap)
-            .filter(([phrase, count]) => count > 2) // Only show phrases mentioned at least 3 times
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 10); // Take the top 10
-
-        if (sortedPhrases.length < 3) {
-            container.innerHTML = '<h3 class="dashboard-section-title">Power Phrases</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough common phrases found to generate a map.</p>';
-            return;
-        }
-
-        // Playful Mind Map Rendering
-        const mindMapHTML = sortedPhrases.map(([phrase, count], index) => {
-            const size = 1 + (count / sortedPhrases[0][1]) * 1.5; // Font size based on frequency
-            const rotation = (index * 36) % 360; // Spread them out in a circle
-            const distance = 80 + (Math.random() * 40); // Random distance from center
-            const x = 50 + distance * Math.cos(rotation * Math.PI / 180);
-            const y = 50 + distance * Math.sin(rotation * Math.PI / 180);
-            return `<div class="power-phrase-node" style="font-size: ${size.toFixed(2)}em; top: ${y}%; left: ${x}%; transform: translate(-50%, -50%) rotate(${Math.random() * 20 - 10}deg);">${phrase}</div>`;
-        }).join('');
-
-        // You'll need to add some basic CSS for this to look good.
-        container.innerHTML = `<h3 class="dashboard-section-title">Power Phrases</h3><div class="power-phrase-map">${mindMapHTML}</div>`;
-        
-        console.log("--- Power Phrase Analysis Complete. ---");
-    }, 0); // setTimeout with 0ms delay makes it asynchronous
-}
 // =================================================================================
 // === UPDATED AND HARDENED `runProblemFinder` FUNCTION ===
 // =================================================================================
@@ -597,7 +521,7 @@ async function runProblemFinder() {
     const demandSignalTerms = [ "i'd pay good money for", "buy it in a second", "i'd subscribe to", "throw money at it", "where can i buy", "happily pay", "shut up and take my money", "sick of doing this manually", "can't find anything that", "waste so much time on", "has to be a better way", "shouldn't be this hard", "why is there no tool for", "why is there no app for", "tried everything and nothing works", "tool almost did what i wanted", "it's missing", "tried", "gave up on it", "if only there was an app", "i wish someone would build", "why hasn't anyone made", "waste hours every week", "such a timesuck", "pay just to not have to think", "rather pay than do this myself" ];
     
     const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; }); // Added power-phrases to the cleanup list
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
     const resultsMessageDiv = document.getElementById("results-message");
     const countHeaderDiv = document.getElementById("count-header");
@@ -645,6 +569,7 @@ async function runProblemFinder() {
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
         generateEmotionMapData(filteredItems).then(renderEmotionMap);
         renderIncludedSubreddits(selectedSubreddits);
+        generateAndRenderPowerPhrases(filteredItems);
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
         const userNicheCount = allItems.filter(p => ((p.data.title || p.data.link_title || '') + (p.data.selftext || p.data.body || '')).toLowerCase().includes(originalGroupName.toLowerCase())).length;

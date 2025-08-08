@@ -528,72 +528,68 @@ function generateNgrams(words, n) {
     }
     return ngrams;
 }
-// =========================================================================
-// === REPLACE THIS FUNCTION in your existing JavaScript ===================
-// =========================================================================
 
 /**
- * Analyzes post text to find the most common phrases and renders them.
- * This is wrapped in a setTimeout to prevent it from blocking the main thread.
+ * Analyzes post text to find the most common phrases and acronyms, then renders them in a simple list.
  * @param {Object[]} posts - The array of filtered Reddit posts.
  */
 function generateAndRenderPowerPhrases(posts) {
     setTimeout(() => {
-        console.log("--- Starting Power Phrase Analysis (in background) ---");
+        console.log("--- Starting Power Phrases & Acronyms Analysis (in background) ---");
         const container = document.getElementById('power-phrases');
-        if (!container) {
-            console.warn("Power Phrases container not found.");
-            return;
-        }
+        if (!container) return;
 
-        const allText = posts
-            .map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`)
-            .join(' ')
-            .toLowerCase()
-            .replace(/[^a-z\s']/g, '') // Keep only letters, spaces, and apostrophes
-            .replace(/\s+/g, ' '); // Normalize whitespace
+        // --- 1. Acronym Analysis (from original case text) ---
+        const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
+        const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
+        const acronymRegex = /\b[A-Z]{2,5}\b/g;
+        const acronyms = rawText.match(acronymRegex) || [];
+        const acronymFreq = {};
+        acronyms.forEach(acronym => {
+            if (!stopAcronyms.has(acronym)) {
+                acronymFreq[acronym] = (acronymFreq[acronym] || 0) + 1;
+            }
+        });
+        const topAcronyms = Object.entries(acronymFreq)
+            .filter(([_, count]) => count > 2)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 5) // Take top 5 acronyms
+            .map(item => item[0]);
 
-        const words = allText.split(' ');
+        // --- 2. Phrase Analysis (from cleaned, lowercase text) ---
+        const cleanedText = rawText.toLowerCase().replace(/[^a-z\s']/g, '').replace(/\s+/g, ' ');
+        const words = cleanedText.split(' ');
         
         const bigrams = generateNgrams(words, 2);
         const trigrams = generateNgrams(words, 3);
-        const quadgrams = generateNgrams(words, 4); // Also generate 4-word phrases
         
-        const allNgrams = [...bigrams, ...trigrams, ...quadgrams];
-        const freqMap = {};
-        allNgrams.forEach(ngram => {
-            freqMap[ngram] = (freqMap[ngram] || 0) + 1;
+        const phraseFreq = {};
+        [...bigrams, ...trigrams].forEach(phrase => {
+            phraseFreq[phrase] = (phraseFreq[phrase] || 0) + 1;
         });
 
-        // NEW SCORING LOGIC: Prioritize longer, meaningful phrases
-        const scoredPhrases = Object.entries(freqMap)
-            .filter(([phrase, count]) => count > 1) // Must appear at least twice
-            .map(([phrase, count]) => {
-                const wordCount = phrase.split(' ').length;
-                // Score = frequency * (word count)^1.5. This heavily favors longer phrases.
-                const score = count * Math.pow(wordCount, 1.5);
-                return { phrase, count, score };
-            })
-            .sort((a, b) => b.score - a.score) // Sort by the new score
-            .slice(0, 12); // Take the top 12
+        const topPhrases = Object.entries(phraseFreq)
+            .filter(([_, count]) => count > 2) // Must appear at least 3 times
+            .sort((a, b) => b[1] - a[1]) // Sort purely by frequency
+            .slice(0, 12 - topAcronyms.length) // Fill remaining spots
+            .map(item => item[0]);
 
-        if (scoredPhrases.length < 3) {
-            container.innerHTML = '<h3 class="dashboard-section-title">Power Phrases</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough common phrases found to generate a map.</p>';
+        // --- 3. Combine and Render ---
+        const finalResults = [...topAcronyms, ...topPhrases];
+
+        if (finalResults.length < 3) {
+            container.innerHTML = '<h3 class="dashboard-section-title">Phrases & Acronyms</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough common phrases found.</p>';
             return;
         }
 
-        // Playful Mind Map Rendering
-        const mindMapHTML = scoredPhrases.map((item, index) => {
-            // Base the size on the original count for visual accuracy
-            const size = 0.8 + (item.count / scoredPhrases[0].count) * 1.2;
-            const rotation = (index * 30) % 360; 
-            const distance = 60 + (Math.random() * 60);
-            const x = 50 + distance * Math.cos(rotation * Math.PI / 180);
-            const y = 50 + distance * Math.sin(rotation * Math.PI / 180);
-            return `<div class="power-phrase-node" style="font-size: ${size.toFixed(2)}em; top: ${y.toFixed(2)}%; left: ${x.toFixed(2)}%; transform: translate(-50%, -50%) rotate(${Math.random() * 20 - 10}deg);">${item.phrase}</div>`;
-        }).join('');
+        const phrasesHTML = finalResults.map(item => 
+            `<div class="power-phrase-item">${item}</div>`
+        ).join('');
 
-        container.innerHTML = `<h3 class="dashboard-section-title">Power Phrases</h3><div class="power-phrase-map">${mindMapHTML}<span class="map-center-dot"></span></div>`;
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Phrases & Acronyms</h3>
+            <div class="power-phrases-list">${phrasesHTML}</div>
+        `;
         
         console.log("--- Power Phrase Analysis Complete. ---");
     }, 10);

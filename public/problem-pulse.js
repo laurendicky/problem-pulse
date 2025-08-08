@@ -1,7 +1,7 @@
 // =================================================================================
-// COMPLETE AND VERIFIED SCRIPT (VERSION 15.0 - ENHANCED SUBREDDIT TAGS)
-// This version enhances the subreddit tags in the "Analysis Based On" section
-// to include a description, member count, and an activity level label.
+// COMPLETE AND VERIFIED SCRIPT (VERSION 15.1 - DATA RESILIENCY FIX)
+// This version fixes a fatal crash when subreddit data from the API is incomplete.
+// It now uses default values for missing properties (like subscribers) to prevent errors.
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -44,43 +44,7 @@ function renderSentimentCloud(containerId, wordData, colors) { const container =
 function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : "Snippet not available."; const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if(closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title || p.data.link_title || ''}\nContent: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
-async function extractAndValidateEntities(posts, nicheContext) {
-    const topPostsText = posts.slice(0, 75).map(p => {
-        const title = p.data.title || p.data.link_title;
-        const body = p.data.selftext || p.data.body || '';
-        if (title) {
-            return `Title: ${title}\nBody: ${body.substring(0, 800)}`;
-        }
-        return `Body: ${body.substring(0, 800)}`;
-    }).join('\n---\n');
-    const prompt = `You are a market research analyst reviewing Reddit posts from the '${nicheContext}' community. Extract the following: 1. "brands": Specific, proper-noun company, brand, or service names (e.g., "KitchenAid", "Stripe"). 2. "products": Common, generic product categories (e.g., "stand mixer", "CRM software"). CRITICAL RULES: Be strict. Exclude acronyms (MOH, AITA), generic words (UPDATE), etc. Respond ONLY with a JSON object with two keys: "brands" and "products", holding an array of strings. If none, return an empty array. Text: ${topPostsText}`;
-    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1000, response_format: { "type": "json_object" } };
-    try {
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        if (!response.ok) throw new Error('AI entity extraction failed.');
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
-        const allEntities = { brands: parsed.brands || [], products: parsed.products || [] };
-        window._entityData = {};
-        for (const type in allEntities) {
-            window._entityData[type] = {};
-            allEntities[type].forEach(name => {
-                const regex = new RegExp(`\\b${name.replace(/ /g, '\\s')}(s?)\\b`, 'gi');
-                const mentioningPosts = posts.filter(post => regex.test(`${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`));
-                if (mentioningPosts.length > 0) {
-                    window._entityData[type][name] = { count: mentioningPosts.length, posts: mentioningPosts };
-                }
-            });
-        }
-        return {
-            topBrands: Object.entries(window._entityData.brands || {}).sort((a, b) => b[1].count - a[1].count).slice(0, 8),
-            topProducts: Object.entries(window._entityData.products || {}).sort((a, b) => b[1].count - a[1].count).slice(0, 8)
-        };
-    } catch (error) {
-        console.error("Entity extraction error:", error);
-        return { topBrands: [], topProducts: [] };
-    }
-}
+async function extractAndValidateEntities(posts, nicheContext) { const topPostsText = posts.slice(0, 75).map(p => { const title = p.data.title || p.data.link_title; const body = p.data.selftext || p.data.body || ''; if (title) { return `Title: ${title}\nBody: ${body.substring(0, 800)}`; } return `Body: ${body.substring(0, 800)}`; }).join('\n---\n'); const prompt = `You are a market research analyst reviewing Reddit posts from the '${nicheContext}' community. Extract the following: 1. "brands": Specific, proper-noun company, brand, or service names (e.g., "KitchenAid", "Stripe"). 2. "products": Common, generic product categories (e.g., "stand mixer", "CRM software"). CRITICAL RULES: Be strict. Exclude acronyms (MOH, AITA), generic words (UPDATE), etc. Respond ONLY with a JSON object with two keys: "brands" and "products", holding an array of strings. If none, return an empty array. Text: ${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a meticulous market research analyst that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_tokens: 1000, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('AI entity extraction failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const allEntities = { brands: parsed.brands || [], products: parsed.products || [] }; window._entityData = {}; for (const type in allEntities) { window._entityData[type] = {}; allEntities[type].forEach(name => { const regex = new RegExp(`\\b${name.replace(/ /g, '\\s')}(s?)\\b`, 'gi'); const mentioningPosts = posts.filter(post => regex.test(`${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`)); if (mentioningPosts.length > 0) { window._entityData[type][name] = { count: mentioningPosts.length, posts: mentioningPosts }; } }); } return { topBrands: Object.entries(window._entityData.brands || {}).sort((a, b) => b[1].count - a[1].count).slice(0, 8), topProducts: Object.entries(window._entityData.products || {}).sort((a, b) => b[1].count - a[1].count).slice(0, 8) }; } catch (error) { console.error("Entity extraction error:", error); return { topBrands: [], topProducts: [] }; } }
 function renderDiscoveryList(containerId, data, title, type) { const container = document.getElementById(containerId); if(!container) return; let listItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No significant mentions found.</p>'; if (data.length > 0) { listItems = data.map(([name, details], index) => `<li class="discovery-list-item" data-word="${name}" data-type="${type}"><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${details.count} mentions</span></li>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`; }
 function renderFAQs(faqs) { const container = document.getElementById('faq-container'); if(!container) return; let faqItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">Could not generate common questions from the text.</p>'; if (faqs.length > 0) { faqItems = faqs.map((faq) => `<div class="faq-item"><button class="faq-question">${faq}</button><div class="faq-answer"><p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p></div></div>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">Frequently Asked Questions</h3>${faqItems}`; container.querySelectorAll('.faq-question').forEach(button => { button.addEventListener('click', () => { const answer = button.nextElementSibling; button.classList.toggle('active'); if (answer.style.maxHeight) { answer.style.maxHeight = null; answer.style.padding = '0 1.5rem'; } else { answer.style.padding = '1rem 1.5rem'; answer.style.maxHeight = answer.scrollHeight + "px"; } }); }); }
 
@@ -106,27 +70,29 @@ async function fetchSubredditDetails(subredditNames) {
         }).then(data => data.data) // We only need the 'data' object from the response
           .catch(err => {
             console.error(err);
-            return null; // Return null on failure so Promise.allSettled can handle it
+            return { display_name: name, error: true }; // Return a placeholder on failure
         });
     });
-
-    const results = await Promise.allSettled(detailPromises);
-    return results
-        .filter(result => result.status === 'fulfilled' && result.value)
-        .map(result => result.value);
+    // Use Promise.all to ensure we wait for all fetches to complete or fail
+    return Promise.all(detailPromises);
 }
 
+
 /**
- * Formats a number into a human-readable string (e.g., 12345 -> "12.3k members").
+ * Formats a number into a human-readable string (e.g., 123456 -> "123.5k members").
  * @param {number} num - The number to format.
  * @returns {string} - The formatted string.
  */
 function formatMemberCount(num) {
+    // FIX: Handle cases where num might be undefined, null, or not a number.
+    if (typeof num !== 'number' || isNaN(num)) {
+        return 'N/A members';
+    }
     if (num >= 1000000) {
-        return (num / 1000000).toFixed(1) + 'm members';
+        return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'm members';
     }
     if (num >= 1000) {
-        return (num / 1000).toFixed(1) + 'k members';
+        return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'k members';
     }
     return num.toLocaleString() + ' members';
 }
@@ -139,29 +105,44 @@ function renderIncludedSubreddits(subredditDetails) {
     const container = document.getElementById('included-subreddits-container');
     if (!container) return;
 
-    // Fallback for when details can't be fetched
     if (!subredditDetails || subredditDetails.length === 0) {
         container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><p>Could not load subreddit details.</p>`;
         return;
     }
 
     const tags = subredditDetails.map(detail => {
-        const { display_name, public_description, subscribers, active_user_count } = detail;
+        // FIX: Use default values to prevent crash if data is incomplete or an error occurred.
+        const {
+            display_name = 'Unknown',
+            public_description = 'Description not available.',
+            subscribers, // Intentionally not defaulting to 0 here to let formatMemberCount handle it
+            active_user_count,
+            error = false
+        } = detail || {};
         
-        const memberCount = formatMemberCount(subscribers);
+        // Handle case where the entire fetch failed for this subreddit
+        if (error) {
+             return `
+            <div class="subreddit-tag error">
+                <div class="tag-header">r/${display_name}</div>
+                <div class="tag-description">Could not load details for this community.</div>
+            </div>`;
+        }
+        
+        const memberCount = formatMemberCount(subscribers); // API field is 'subscribers'
 
         let activityLabel = '💤 Quiet Corner';
-        const activityRatio = active_user_count / subscribers;
-        if (active_user_count > 5000 || activityRatio > 0.05) {
+        const activityRatio = subscribers > 0 ? (active_user_count / subscribers) : 0;
+        if (active_user_count > 5000 || (activityRatio > 0.05 && subscribers > 10000)) {
             activityLabel = '🔥 Buzzing';
-        } else if (active_user_count > 500 || activityRatio > 0.01) {
+        } else if (active_user_count > 500 || (activityRatio > 0.01 && subscribers > 5000)) {
             activityLabel = '🌤️ Warming Up';
         }
 
         return `
             <div class="subreddit-tag">
                 <div class="tag-header">r/${display_name}</div>
-                <div class="tag-description">${public_description || 'No description available.'}</div>
+                <div class="tag-description">${public_description}</div>
                 <div class="tag-footer">
                     <span class="tag-members">${memberCount}</span>
                     <span class="tag-activity">${activityLabel}</span>
@@ -288,8 +269,6 @@ async function runProblemFinder() {
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
         generateEmotionMapData(filteredItems).then(renderEmotionMap);
-        // MODIFICATION: The call to render subreddits is now done earlier with more data.
-        // renderIncludedSubreddits(selectedSubreddits); 
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
         const userNicheCount = allItems.filter(p => ((p.data.title || p.data.link_title || '') + (p.data.selftext || p.data.body || '')).toLowerCase().includes(originalGroupName.toLowerCase())).length;

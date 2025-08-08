@@ -271,7 +271,6 @@ function renderSubredditChoicesHTML(subreddits) {
     `).join('');
 }
 
-
 /**
  * Displays the initial list of subreddits and a "Load More" button if applicable.
  * @param {Object[]} rankedSubreddits - The full, sorted list of rich subreddit objects.
@@ -280,7 +279,10 @@ function displaySubredditChoices(rankedSubreddits) {
     const choicesDiv = document.getElementById('subreddit-choices');
     if (!choicesDiv) return;
 
-    _allRankedSubreddits = rankedSubreddits;
+    // Clear any existing "load more" button before re-rendering
+    document.getElementById('load-more-subs-btn')?.remove();
+
+    _allRankedSubreddits = rankedSubreddits; // Store the full list globally
 
     if (_allRankedSubreddits.length === 0) {
         choicesDiv.innerHTML = '<p class="loading-text">No suitable communities found. Try a different group.</p>';
@@ -290,18 +292,24 @@ function displaySubredditChoices(rankedSubreddits) {
     const initialToShow = _allRankedSubreddits.slice(0, 8);
     choicesDiv.innerHTML = renderSubredditChoicesHTML(initialToShow);
 
+    // If there are more subreddits left to show, add the "Load More" button
     if (_allRankedSubreddits.length > 8) {
         const loadMoreBtn = document.createElement('button');
         loadMoreBtn.id = 'load-more-subs-btn';
         loadMoreBtn.textContent = 'Load More Communities';
-        loadMoreBtn.style.cssText = "width: 100%; padding: 10px; margin-top: 15px; border-radius: 6px; border: 1px solid #ccc; background-color: #f0f0f0; cursor: pointer; font-weight: bold;";
+        loadMoreBtn.style.cssText = "width: 100%; max-width: 450px; padding: 12px; margin-top: 15px; border-radius: 8px; border: 1px solid var(--minky-glass-border); background-color: var(--minky-glass-bg-hover); color: var(--minky-text-primary); cursor: pointer; font-weight: bold; font-family: var(--pf-font-family); font-size: 1rem;";
         loadMoreBtn.onclick = loadMoreSubreddits;
-        choicesDiv.appendChild(loadMoreBtn);
+        
+        // THIS IS THE KEY CHANGE: Use .after() to place it outside the div
+        choicesDiv.after(loadMoreBtn);
     }
 }
 
+
 /**
  * Loads the next batch of subreddits and appends them to the list.
+ */
+/**
  */
 function loadMoreSubreddits() {
     const choicesDiv = document.getElementById('subreddit-choices');
@@ -313,9 +321,11 @@ function loadMoreSubreddits() {
 
     if (nextBatch.length > 0) {
         const newChoicesHTML = renderSubredditChoicesHTML(nextBatch);
-        loadMoreBtn.insertAdjacentHTML('beforebegin', newChoicesHTML);
+        // THIS IS THE KEY CHANGE: Append new choices to the END of the choicesDiv
+        choicesDiv.insertAdjacentHTML('beforeend', newChoicesHTML);
     }
 
+    // If we've now shown all available subreddits, remove the button
     const newTotalShown = choicesDiv.querySelectorAll('.subreddit-choice').length;
     if (newTotalShown >= _allRankedSubreddits.length) {
         loadMoreBtn.remove();

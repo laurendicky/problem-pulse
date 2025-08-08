@@ -7,6 +7,7 @@
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
+const MIN_SUBSCRIBERS = 10000; // New constant: Minimum members for a subreddit to be suggested.
 let originalGroupName = '';
 const suggestions = ["Dog Lovers", "Start-up Founders", "Fitness Beginners", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Developers", "Brides To Be"];
 const positiveColors = ['#2E7D32', '#388E3C', '#43A047', '#1B5E20'];
@@ -34,7 +35,7 @@ function calculateFindingMetrics(validatedSummaries, filteredPosts) { const metr
 function renderPosts(posts) { const container = document.getElementById("posts-container"); if (!container) { return; } container.innerHTML = posts.map(post => { const content = post.data.selftext || post.data.body || 'No additional content.'; const title = post.data.title || post.data.link_title || 'View Comment Thread'; const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : ''; return ` <div class="insight" style="border:1px solid #ccc; padding:12px; margin-bottom:12px; background:#fafafa; border-radius:8px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1.1rem; color:#007bff; text-decoration:none;"> ${title} </a> <p style="font-size:0.9rem; margin:0.75rem 0; color:#333; line-height:1.5;"> ${content.substring(0, 200) + '...'} </p> <small style="color:#555; font-size:0.8rem;"> r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)} </small> </div> `}).join(''); }
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if (!assignments) return; const finding = window._summaries[summaryIndex]; if (!finding) return; let relevantPosts = []; const addedPostIds = new Set(); const addPost = (post) => { if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) { relevantPosts.push(post); addedPostIds.add(post.data.id); } }; const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber); assignedPostNumbers.forEach(postNum => { if (postNum - 1 < window._postsForAssignment.length) { addPost(window._postsForAssignment[postNum - 1]); } }); if (relevantPosts.length < 8) { const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id)); const scoredCandidates = candidatePool.map(post => ({ post: post, score: calculateRelevanceScore(post, finding) })).filter(item => item.score >= 4).sort((a, b) => b.score - a.score); for (const candidate of scoredCandidates) { if (relevantPosts.length >= 8) break; addPost(candidate.post); } } let html; if (relevantPosts.length === 0) { html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`; } else { const finalPosts = relevantPosts.slice(0, 8); finalPosts.forEach(post => usedPostIds.add(post.data.id)); html = finalPosts.map(post => { const content = post.data.selftext || post.data.body || 'No content.'; const title = post.data.title || post.data.link_title || 'View Comment'; const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : ''; return ` <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${title}</a> <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${content.substring(0, 150) + '...'}</p> <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)}</small> </div> `}).join(''); } const container = document.getElementById(`reddit-div${summaryIndex + 1}`); if (container) { container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">Real Stories from Reddit: "${finding.title}"</div><div class="reddit-samples-posts">${html}</div>`; } }
 async function findSubredditsForGroup(groupName) { const prompt = `Given the user-defined group "${groupName}", suggest up to 15 relevant and active Reddit subreddits. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 250, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI API request failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array."); return parsed.subreddits; } catch (error) { console.error("Error finding subreddits:", error); alert("Sorry, I couldn't find any relevant communities. Please try another group name."); return []; } }
-function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No communities found.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
+function displaySubredditChoices(subreddits) { const choicesDiv = document.getElementById('subreddit-choices'); if (!choicesDiv) return; choicesDiv.innerHTML = ''; if (subreddits.length === 0) { choicesDiv.innerHTML = '<p class="loading-text">No suitable communities found. Try a different group.</p>'; return; } choicesDiv.innerHTML = subreddits.map(sub => `<div class="subreddit-choice"><input type="checkbox" id="sub-${sub}" value="${sub}" checked><label for="sub-${sub}">r/${sub}</label></div>`).join(''); }
 async function fetchCommentsForPosts(postIds, batchSize = 5) {
     let allComments = [];
     console.log(`Fetching comments for ${postIds.length} posts...`);
@@ -114,8 +115,9 @@ function renderDiscoveryList(containerId, data, title, type) { const container =
 function renderFAQs(faqs) { const container = document.getElementById('faq-container'); if(!container) return; let faqItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">Could not generate common questions from the text.</p>'; if (faqs.length > 0) { faqItems = faqs.map((faq) => `<div class="faq-item"><button class="faq-question">${faq}</button><div class="faq-answer"><p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p></div></div>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">Frequently Asked Questions</h3>${faqItems}`; container.querySelectorAll('.faq-question').forEach(button => { button.addEventListener('click', () => { const answer = button.nextElementSibling; button.classList.toggle('active'); if (answer.style.maxHeight) { answer.style.maxHeight = null; answer.style.padding = '0 1.5rem'; } else { answer.style.padding = '1rem 1.5rem'; answer.style.maxHeight = answer.scrollHeight + "px"; } }); }); }
 
 // =================================================================================
-// === NEW & CORRECTED FUNCTIONS FOR DETAILED SUBREDDIT TAGS ===
+// === NEW & CORRECTED FUNCTIONS FOR SUBREDDIT VALIDATION & DISPLAY ===
 // =================================================================================
+
 /**
  * Fetches detailed information about a specific subreddit.
  * @param {string} subredditName The name of the subreddit (e.g., 'javascript').
@@ -130,10 +132,12 @@ async function fetchSubredditDetails(subredditName) {
             body: JSON.stringify(payload)
         });
         if (!response.ok) {
-            throw new Error(`Proxy Error: Server returned status ${response.status} for r/${subredditName}`);
+            // This is a common case for non-existent subreddits, so we don't throw an error, just return null.
+            console.warn(`Subreddit r/${subredditName} not found or failed to load. Status: ${response.status}`);
+            return null;
         }
         const data = await response.json();
-        // CORRECTED: Return the inner 'data' object, but only if it exists.
+        // CORRECTED AND FINAL: Safely return the inner 'data' object.
         return data && data.data ? data.data : null;
     } catch (error) {
         console.error(`Error fetching subreddit details for ${subredditName}:`, error);
@@ -196,7 +200,6 @@ async function renderIncludedSubreddits(subreddits) {
         const tagsHTML = detailsArray.map((details, index) => {
             const subName = subreddits[index];
             
-            // If fetching details for a specific subreddit failed, 'details' will be null.
             if (!details) {
                 return `<div class="subreddit-tag-detailed" style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center;">
                             <div class="tag-header" style="font-weight: bold; color: #007bff;">r/${subName}</div>
@@ -204,7 +207,6 @@ async function renderIncludedSubreddits(subreddits) {
                         </div>`;
             }
 
-            // If we have details, we can safely access its properties.
             const description = details.public_description || 'No public description available.';
             const members = formatMemberCount(details.subscribers);
             const activityLabel = getActivityLabel(details.active_user_count, details.subscribers);
@@ -229,6 +231,31 @@ async function renderIncludedSubreddits(subreddits) {
         container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list">${tags}<p style="width: 100%; text-align: center; color: #dc3545; font-style: italic; margin-top: 10px;">Could not load community details.</p></div>`;
     }
 }
+
+/**
+ * Takes a list of subreddit names, fetches their details, and filters them based on size and activity.
+ * @param {string[]} subredditNames - An array of subreddit names from the AI.
+ * @returns {Promise<string[]>} A promise that resolves to a filtered array of valid, active, and sizeable subreddit names.
+ */
+async function validateAndFilterSubreddits(subredditNames) {
+    console.log(`AI suggested ${subredditNames.length} subreddits. Validating...`);
+    const promises = subredditNames.map(name => fetchSubredditDetails(name));
+    const results = await Promise.all(promises);
+
+    const validSubreddits = results.filter(details => {
+        if (!details) return false; // Filter out non-existent subs
+
+        const activity = getActivityLabel(details.active_user_count, details.subscribers);
+        const isBigEnough = details.subscribers >= MIN_SUBSCRIBERS;
+        const isActiveEnough = activity !== '💤 Quiet Corner';
+
+        return isBigEnough && isActiveEnough;
+    });
+
+    console.log(`Found ${validSubreddits.length} high-quality subreddits after filtering.`);
+    return validSubreddits.map(details => details.display_name); // Return just the names
+}
+
 
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
@@ -455,10 +482,29 @@ async function runProblemFinder() {
 }
 
 // =================================================================================
-// INITIALIZATION LOGIC (UNCHANGED)
+// INITIALIZATION LOGIC (UPDATED)
 // =================================================================================
 function initializeDashboardInteractivity() { const dashboard = document.getElementById('results-wrapper-b'); if (!dashboard) return; initializeConstellationInteractivity(); dashboard.addEventListener('click', (e) => { const cloudWordEl = e.target.closest('.cloud-word'); const entityEl = e.target.closest('.discovery-list-item'); if (cloudWordEl) { const word = cloudWordEl.dataset.word; const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative'; const postsData = window._sentimentData?.[category]?.[word]?.posts; if (postsData) { showSlidingPanel(word, Array.from(postsData), category); } } else if (entityEl) { const word = entityEl.dataset.word; const type = entityEl.dataset.type; const postsData = window._entityData?.[type]?.[word]?.posts; if (postsData) { renderContextContent(word, postsData); } } }); }
-function initializeProblemFinderTool() { console.log("Problem Finder elements found. Initializing..."); const pillsContainer = document.getElementById('pf-suggestion-pills'); const groupInput = document.getElementById('group-input'); const findCommunitiesBtn = document.getElementById('find-communities-btn'); const searchSelectedBtn = document.getElementById('search-selected-btn'); const step1Container = document.getElementById('step-1-container'); const step2Container = document.getElementById('subreddit-selection-container'); const inspireButton = document.getElementById('inspire-me-button'); const choicesContainer = document.getElementById('subreddit-choices'); const audienceTitle = document.getElementById('pf-audience-title'); const backButton = document.getElementById('back-to-step1-btn'); if (!findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer) { console.error("Critical error: A key element was null. Aborting initialization."); return; } const transitionToStep2 = () => { if (step2Container.classList.contains('visible')) return; step1Container.classList.add('hidden'); step2Container.classList.add('visible'); choicesContainer.innerHTML = '<p class="loading-text">Finding relevant communities...</p>'; audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`; }; const transitionToStep1 = () => { step2Container.classList.remove('visible'); step1Container.classList.remove('hidden'); const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; } }; pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join(''); pillsContainer.addEventListener('click', (event) => { if (event.target.classList.contains('pf-suggestion-pill')) { groupInput.value = event.target.getAttribute('data-value'); findCommunitiesBtn.click(); } }); inspireButton.addEventListener('click', () => { pillsContainer.classList.toggle('visible'); }); findCommunitiesBtn.addEventListener("click", async (event) => { event.preventDefault(); const groupName = groupInput.value.trim(); if (!groupName) { alert("Please enter a group of people or select a suggestion."); return; } originalGroupName = groupName; transitionToStep2(); const subreddits = await findSubredditsForGroup(groupName); displaySubredditChoices(subreddits); }); searchSelectedBtn.addEventListener("click", (event) => { event.preventDefault(); runProblemFinder(); }); backButton.addEventListener('click', () => { transitionToStep1(); }); choicesContainer.addEventListener('click', (event) => { const choiceDiv = event.target.closest('.subreddit-choice'); if (choiceDiv) { const checkbox = choiceDiv.querySelector('input[type="checkbox"]'); if (checkbox) checkbox.checked = !checkbox.checked; } }); initializeDashboardInteractivity(); console.log("Problem Finder tool successfully initialized."); }
+function initializeProblemFinderTool() { console.log("Problem Finder elements found. Initializing..."); const pillsContainer = document.getElementById('pf-suggestion-pills'); const groupInput = document.getElementById('group-input'); const findCommunitiesBtn = document.getElementById('find-communities-btn'); const searchSelectedBtn = document.getElementById('search-selected-btn'); const step1Container = document.getElementById('step-1-container'); const step2Container = document.getElementById('subreddit-selection-container'); const inspireButton = document.getElementById('inspire-me-button'); const choicesContainer = document.getElementById('subreddit-choices'); const audienceTitle = document.getElementById('pf-audience-title'); const backButton = document.getElementById('back-to-step1-btn'); if (!findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer) { console.error("Critical error: A key element was null. Aborting initialization."); return; } const transitionToStep2 = () => { if (step2Container.classList.contains('visible')) return; step1Container.classList.add('hidden'); step2Container.classList.add('visible'); choicesContainer.innerHTML = '<p class="loading-text">Finding & filtering communities...</p>'; audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`; }; const transitionToStep1 = () => { step2Container.classList.remove('visible'); step1Container.classList.remove('hidden'); const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; } }; pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join(''); pillsContainer.addEventListener('click', (event) => { if (event.target.classList.contains('pf-suggestion-pill')) { groupInput.value = event.target.getAttribute('data-value'); findCommunitiesBtn.click(); } }); inspireButton.addEventListener('click', () => { pillsContainer.classList.toggle('visible'); }); 
+    
+    // MODIFIED: Integrate the validation and filtering step.
+    findCommunitiesBtn.addEventListener("click", async (event) => { 
+        event.preventDefault(); 
+        const groupName = groupInput.value.trim(); 
+        if (!groupName) { alert("Please enter a group of people or select a suggestion."); return; } 
+        originalGroupName = groupName; 
+        transitionToStep2(); 
+        try {
+            const initialSuggestions = await findSubredditsForGroup(groupName); 
+            const validatedSubreddits = await validateAndFilterSubreddits(initialSuggestions);
+            displaySubredditChoices(validatedSubreddits);
+        } catch (error) {
+            console.error("Failed during subreddit validation process:", error);
+            displaySubredditChoices([]); // Show the "not found" message
+        }
+    }); 
+    
+    searchSelectedBtn.addEventListener("click", (event) => { event.preventDefault(); runProblemFinder(); }); backButton.addEventListener('click', () => { transitionToStep1(); }); choicesContainer.addEventListener('click', (event) => { const choiceDiv = event.target.closest('.subreddit-choice'); if (choiceDiv) { const checkbox = choiceDiv.querySelector('input[type="checkbox"]'); if (checkbox) checkbox.checked = !checkbox.checked; } }); initializeDashboardInteractivity(); console.log("Problem Finder tool successfully initialized."); }
 function waitForElementAndInit() { const keyElementId = 'find-communities-btn'; let retries = 0; const maxRetries = 50; const intervalId = setInterval(() => { const keyElement = document.getElementById(keyElementId); if (keyElement) { clearInterval(intervalId); initializeProblemFinderTool(); } else { retries++; if (retries > maxRetries) { clearInterval(intervalId); console.error(`Initialization FAILED. Key element "#${keyElementId}" not found.`); } } }, 100); }
 
 // --- SCRIPT ENTRY POINT ---

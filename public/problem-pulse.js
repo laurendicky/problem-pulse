@@ -166,25 +166,40 @@ function renderFAQs(faqs) { const container = document.getElementById('faq-conta
 // === NEW & CORRECTED FUNCTIONS FOR SUBREDDIT VALIDATION & DISPLAY ===
 // =================================================================================
 
+// ### NEW FUNCTION ###
 /**
  * Handles the click event for removing a subreddit from the analysis.
  * @param {Event} event - The click event object.
  */
 async function handleRemoveSubClick(event) {
-    // This function is delegated, so we ensure the click is on the correct button.
     const button = event.target.closest('.remove-sub-btn');
     if (!button) return;
 
+    const cardElement = button.closest('.subreddit-tag-detailed');
+    if (!cardElement) return;
+
     const subName = button.dataset.subname;
-    if (!subName) {
-        console.error("Missing subreddit name on the 'Remove' button.");
+    const subDetailsJSON = button.dataset.subDetails;
+
+    if (!subName || !subDetailsJSON) {
+        console.error("Missing subreddit data on the 'Remove' button.");
         return;
     }
     
     button.disabled = true;
     button.textContent = 'Removing...';
 
-    // Uncheck the hidden checkbox that tracks the state of selected subreddits.
+    // --- INSTANT UI MOVE ---
+    const similarList = document.querySelector('#similar-subreddits-container .subreddit-tag-list');
+    if (similarList) {
+         cardElement.querySelector('.tag-footer-action').innerHTML = `
+            <button class="add-related-sub-btn" data-subname="${subName}" data-sub-details='${subDetailsJSON}' style="flex-grow: 1; padding: 8px 12px; border-radius: 6px; border: 1px solid #007bff; background-color: #007bff; color: white; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease;">+ Add to Analysis</button>
+            <a href="https://www.reddit.com/r/${subName}" target="_blank" rel="noopener noreferrer" class="view-sub-btn" style="flex-grow: 1; text-decoration: none; padding: 8px 12px; border-radius: 6px; border: 1px solid #6c757d; background-color: #f8f9fa; color: #343a40; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; text-align: center; transition: all 0.2s ease;">View on Reddit</a>
+         `;
+         similarList.appendChild(cardElement);
+    }
+    // --- END UI MOVE ---
+
     const checkbox = document.getElementById(`sub-${subName}`);
     if (checkbox) {
         checkbox.checked = false;
@@ -195,7 +210,6 @@ async function handleRemoveSubClick(event) {
         countHeaderDiv.innerHTML = 'Updating analysis... <span class="loader-dots"></span>';
     }
 
-    // Re-run the entire analysis with the updated list of subreddits.
     await runProblemFinder({ isUpdate: true });
 }
 
@@ -467,7 +481,6 @@ async function renderIncludedSubreddits(subreddits) {
  * @param {string} audienceContext - The original group name for context (e.g., "brides to be").
  * @returns {Promise<string[]>} A promise that resolves to an array of new subreddit names.
  */
-// ### MODIFIED FUNCTION ###
 async function findRelatedSubredditsAI(analyzedSubsData, audienceContext) {
     const subNames = analyzedSubsData.map(d => d.name).join(', ');
     
@@ -519,10 +532,14 @@ async function findRelatedSubredditsAI(analyzedSubsData, audienceContext) {
  * Handles the click event for adding a related subreddit to the analysis.
  * @param {Event} event - The click event object.
  */
+// ### MODIFIED FUNCTION ###
 async function handleAddRelatedSubClick(event) {
     if (!event.target.classList.contains('add-related-sub-btn')) return;
 
     const button = event.target;
+    const cardElement = button.closest('.subreddit-tag-detailed');
+    if (!cardElement) return;
+
     const subName = button.dataset.subname;
     const subDetailsJSON = button.dataset.subDetails;
 
@@ -533,6 +550,17 @@ async function handleAddRelatedSubClick(event) {
 
     button.disabled = true;
     button.textContent = 'Adding...';
+
+    // --- INSTANT UI MOVE ---
+    const includedList = document.querySelector('#included-subreddits-container .subreddit-tag-list');
+    if (includedList) {
+        cardElement.querySelector('.tag-footer-action').innerHTML = `
+           <button class="remove-sub-btn" data-subname="${subName}" data-sub-details='${subDetailsJSON}' style="flex-grow: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid #dc3545; background-color: #f8d7da; color: #721c24; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease;">Remove</button>
+           <a href="https://www.reddit.com/r/${subName}" target="_blank" rel="noopener noreferrer" class="view-sub-btn" style="flex-grow: 1; text-decoration: none; padding: 6px 10px; border-radius: 6px; border: 1px solid #6c757d; background-color: #f8f9fa; color: #343a40; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; text-align: center; transition: all 0.2s ease;">View on Reddit</a>
+        `;
+        includedList.appendChild(cardElement);
+    }
+    // --- END UI MOVE ---
 
     try {
         const countHeaderDiv = document.getElementById("count-header");
@@ -562,9 +590,6 @@ async function handleAddRelatedSubClick(event) {
     } catch (error) {
         console.error("Failed to add related sub and re-run analysis:", error);
         alert("An error occurred while adding the community. Please try again.");
-    } finally {
-        button.disabled = false;
-        button.textContent = '+ Add to Analysis';
     }
 }
 
@@ -1021,34 +1046,34 @@ async function runProblemFinder(options = {}) {
 // =================================================================================
 // INITIALIZATION LOGIC (UPDATED)
 // =================================================================================
-function initializeDashboardInteractivity() { 
-    const dashboard = document.getElementById('results-wrapper-b'); 
-    if (!dashboard) return; 
-    initializeConstellationInteractivity(); 
-    dashboard.addEventListener('click', (e) => { 
-        const cloudWordEl = e.target.closest('.cloud-word'); 
+// ### MODIFIED FUNCTION ###
+function initializeDashboardInteractivity() {
+    const dashboard = document.getElementById('results-wrapper-b');
+    if (!dashboard) return;
+    initializeConstellationInteractivity();
+    dashboard.addEventListener('click', (e) => {
+        const cloudWordEl = e.target.closest('.cloud-word');
         const entityEl = e.target.closest('.discovery-list-item');
         const removeBtnEl = e.target.closest('.remove-sub-btn');
-        
-        if (cloudWordEl) { 
-            const word = cloudWordEl.dataset.word; 
-            const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative'; 
-            const postsData = window._sentimentData?.[category]?.[word]?.posts; 
-            if (postsData) { 
-                showSlidingPanel(word, Array.from(postsData), category); 
-            } 
-        } else if (entityEl) { 
-            const word = entityEl.dataset.word; 
-            const type = entityEl.dataset.type; 
-            const postsData = window._entityData?.[type]?.[word]?.posts; 
-            if (postsData) { 
-                renderContextContent(word, postsData); 
-            } 
+
+        if (cloudWordEl) {
+            const word = cloudWordEl.dataset.word;
+            const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
+            const postsData = window._sentimentData?.[category]?.[word]?.posts;
+            if (postsData) {
+                showSlidingPanel(word, Array.from(postsData), category);
+            }
+        } else if (entityEl) {
+            const word = entityEl.dataset.word;
+            const type = entityEl.dataset.type;
+            const postsData = window._entityData?.[type]?.[word]?.posts;
+            if (postsData) {
+                renderContextContent(word, postsData);
+            }
         } else if (removeBtnEl) {
-            // New handler for the remove button
             handleRemoveSubClick(e);
         }
-    }); 
+    });
 }
 function initializeProblemFinderTool() { console.log("Problem Finder elements found. Initializing..."); const pillsContainer = document.getElementById('pf-suggestion-pills'); const groupInput = document.getElementById('group-input'); const findCommunitiesBtn = document.getElementById('find-communities-btn'); const searchSelectedBtn = document.getElementById('search-selected-btn'); const step1Container = document.getElementById('step-1-container'); const step2Container = document.getElementById('subreddit-selection-container'); const inspireButton = document.getElementById('inspire-me-button'); const choicesContainer = document.getElementById('subreddit-choices'); const audienceTitle = document.getElementById('pf-audience-title'); const backButton = document.getElementById('back-to-step1-btn'); if (!findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer) { console.error("Critical error: A key element was null. Aborting initialization."); return; } const transitionToStep2 = () => { if (step2Container.classList.contains('visible')) return; step1Container.classList.add('hidden'); step2Container.classList.add('visible'); choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>'; audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`; }; const transitionToStep1 = () => { step2Container.classList.remove('visible'); step1Container.classList.remove('hidden'); _allRankedSubreddits = []; const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; } }; pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join(''); pillsContainer.addEventListener('click', (event) => { if (event.target.classList.contains('pf-suggestion-pill')) { groupInput.value = event.target.getAttribute('data-value'); findCommunitiesBtn.click(); } }); inspireButton.addEventListener('click', () => { pillsContainer.classList.toggle('visible'); }); 
     

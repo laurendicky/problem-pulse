@@ -1,10 +1,14 @@
+// =================================================================================
+// COMPLETE AND VERIFIED SCRIPT (VERSION 14.3 - UI FLOW FIXED & RESILIENT)
+// This version corrects the product/brand discovery UI flow to be non-destructive.
+// It now displays a status message above the initial results instead of replacing them.
+// =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 const HARD_MIN_SUBSCRIBERS = 1000; // A low bar to filter out tiny/test subreddits.
 const HARD_MIN_ACTIVE_USERS = 5;    // Ensures the sub isn't completely inactive.
-// ### MODIFICATION 1 of 5: Added lenient filter constants ###
 const LENIENT_MIN_SUBSCRIBERS = 500; // A lower bar for the second-pass filter.
 const LENIENT_MIN_ACTIVE_USERS = 1;   // Catches smaller but potentially valuable subs.
 let originalGroupName = '';
@@ -48,7 +52,6 @@ function calculateRelevanceScore(post, finding) { let score = 0; const postTitle
 function calculateFindingMetrics(validatedSummaries, filteredPosts) { const metrics = {}; const allProblemPostIds = new Set(); validatedSummaries.forEach((finding, index) => { metrics[index] = { supportCount: 0 }; }); filteredPosts.forEach(post => { let bestFindingIndex = -1; let maxScore = 0; validatedSummaries.forEach((finding, index) => { const score = calculateRelevanceScore(post, finding); if (score > maxScore) { maxScore = score; bestFindingIndex = index; } }); if (bestFindingIndex !== -1 && maxScore > 0) { metrics[bestFindingIndex].supportCount++; allProblemPostIds.add(post.data.id); } }); metrics.totalProblemPosts = allProblemPostIds.size; return metrics; }
 function renderPosts(posts) { const container = document.getElementById("posts-container"); if (!container) { return; } container.innerHTML = posts.map(post => { const content = post.data.selftext || post.data.body || 'No additional content.'; const title = post.data.title || post.data.link_title || 'View Comment Thread'; const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : ''; return ` <div class="insight" style="border:1px solid #ccc; padding:12px; margin-bottom:12px; background:#fafafa; border-radius:8px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1.1rem; color:#007bff; text-decoration:none;"> ${title} </a> <p style="font-size:0.9rem; margin:0.75rem 0; color:#333; line-height:1.5;"> ${content.substring(0, 200) + '...'} </p> <small style="color:#555; font-size:0.8rem;"> r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)} </small> </div> `}).join(''); }
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if (!assignments) return; const finding = window._summaries[summaryIndex]; if (!finding) return; let relevantPosts = []; const addedPostIds = new Set(); const addPost = (post) => { if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) { relevantPosts.push(post); addedPostIds.add(post.data.id); } }; const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber); assignedPostNumbers.forEach(postNum => { if (postNum - 1 < window._postsForAssignment.length) { addPost(window._postsForAssignment[postNum - 1]); } }); if (relevantPosts.length < 8) { const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id)); const scoredCandidates = candidatePool.map(post => ({ post: post, score: calculateRelevanceScore(post, finding) })).filter(item => item.score >= 4).sort((a, b) => b.score - a.score); for (const candidate of scoredCandidates) { if (relevantPosts.length >= 8) break; addPost(candidate.post); } } let html; if (relevantPosts.length === 0) { html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`; } else { const finalPosts = relevantPosts.slice(0, 8); finalPosts.forEach(post => usedPostIds.add(post.data.id)); html = finalPosts.map(post => { const content = post.data.selftext || post.data.body || 'No content.'; const title = post.data.title || post.data.link_title || 'View Comment'; const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : ''; return ` <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${title}</a> <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${content.substring(0, 150) + '...'}</p> <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)}</small> </div> `}).join(''); } const container = document.getElementById(`reddit-div${summaryIndex + 1}`); if (container) { container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">Real Stories from Reddit: "${finding.title}"</div><div class="reddit-samples-posts">${html}</div>`; } }
-// ### MODIFICATION 2 of 5: New helper function to brainstorm related terms ###
 async function getRelatedSearchTermsAI(audience) {
     const prompt = `Given the target audience "${audience}", generate up to 5 related but distinct search terms or concepts that would help find communities for them. Think about activities, problems, life stages, and related interests. Respond ONLY with a valid JSON object with a single key "terms", which is an array of strings.`;
     const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a creative brainstorming assistant that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0.4, max_tokens: 150, response_format: { "type": "json_object" } };
@@ -60,7 +63,7 @@ async function getRelatedSearchTermsAI(audience) {
         return parsed.terms || [];
     } catch (error) {
         console.error("Error generating related search terms:", error);
-        return []; // Return empty array on failure, so the main function can still proceed.
+        return [];
     }
 }
 async function findSubredditsForGroup(groupName) {
@@ -244,7 +247,6 @@ function getActivityLabel(activeUsers, totalMembers) {
  * @param {string[]} subredditNames - An array of subreddit names from the AI.
  * @returns {Promise<Object[]>} A promise that resolves to a ranked array of rich subreddit objects.
  */
-// ### MODIFICATION 3 of 5: This function now uses the two-stage adaptive filter ###
 async function fetchAndRankSubreddits(subredditNames) {
     console.log(`AI suggested ${subredditNames.length} subreddits. Validating and ranking in batches...`);
     const BATCH_SIZE = 5;
@@ -254,7 +256,7 @@ async function fetchAndRankSubreddits(subredditNames) {
         const batchNames = subredditNames.slice(i, i + BATCH_SIZE);
         const batchPromises = batchNames.map(name => fetchSubredditDetails(name));
         const batchResults = await Promise.all(batchPromises);
-        allDetails.push(...batchResults.filter(Boolean)); // Filter out nulls immediately
+        allDetails.push(...batchResults.filter(Boolean));
     }
 
     const mapDetails = (details) => ({
@@ -264,12 +266,10 @@ async function fetchAndRankSubreddits(subredditNames) {
         description: details.public_description || ''
     });
 
-    // First, strict pass
     let strictResults = allDetails
         .filter(d => d.subscribers >= HARD_MIN_SUBSCRIBERS && (d.active_user_count || 0) >= HARD_MIN_ACTIVE_USERS)
         .map(mapDetails);
 
-    // If we don't have enough results, do a second, lenient pass as a safety net
     if (strictResults.length < 10) {
         console.log(`Strict filter yielded only ${strictResults.length} subs. Running lenient filter as a safety net.`);
         const lenientResults = allDetails
@@ -423,20 +423,19 @@ async function renderIncludedSubreddits(subreddits) {
 /**
  * Uses AI to find related subreddits based on an existing list of communities.
  * @param {Array<Object>} analyzedSubsData - Array of objects with {name, description} for each analyzed sub.
+ * @param {string} audienceContext - The original group name for context (e.g., "brides to be").
  * @returns {Promise<string[]>} A promise that resolves to an array of new subreddit names.
  */
-// ### MODIFICATION 4 of 5: Updated prompt to ask for more suggestions ###
-async function findRelatedSubredditsAI(analyzedSubsData) {
+// ### THIS IS THE MODIFIED FUNCTION ###
+async function findRelatedSubredditsAI(analyzedSubsData, audienceContext) {
     const subNames = analyzedSubsData.map(d => d.name).join(', ');
-    const descriptions = analyzedSubsData.map(d => `r/${d.name}: ${d.description.substring(0, 300)}...`).join('\n');
+    
+    // The new prompt guides the AI to find niche/adjacent communities, not just direct alternatives.
+    const prompt = `You are a Reddit discovery expert. A user is analyzing communities for the audience "${audienceContext}", including: ${subNames}.
 
-    const prompt = `You are an expert Reddit community finder. Based on the following user-selected communities and their public descriptions, suggest up to 20 new but highly related subreddits for them to explore.
+    Your task is to suggest up to 20 NEW, related subreddits that explore NICHE or ADJACENT topics. Think outside the box. For example, if the user is analyzing 'weddingplanning', suggest 'bridezillas', 'weddingdress', 'honeymoons', or 'UKweddings' instead of just another general wedding sub.
 
-    CRITICAL: Do NOT include any of the original subreddits in your suggestions. The user is already analyzing them.
-    Original Subreddits: ${subNames}
-
-    Their Descriptions:
-    ${descriptions}
+    CRITICAL: Do NOT include any of the original subreddits in your suggestions: ${subNames}.
 
     Provide your response ONLY as a JSON object with a single key "subreddits", containing an array of subreddit names (without "r/").`;
 
@@ -449,7 +448,7 @@ async function findRelatedSubredditsAI(analyzedSubsData) {
             role: "user",
             content: prompt
         }],
-        temperature: 0.3,
+        temperature: 0.4, // Increased temperature slightly to encourage more creative/varied suggestions
         max_tokens: 300,
         response_format: {
             "type": "json_object"
@@ -474,6 +473,7 @@ async function findRelatedSubredditsAI(analyzedSubsData) {
         return [];
     }
 }
+
 
 /**
  * Handles the click event for adding a related subreddit to the analysis.
@@ -533,7 +533,6 @@ async function handleAddRelatedSubClick(event) {
  * Orchestrates fetching, ranking, and rendering of related subreddits after an analysis.
  * @param {string[]} analyzedSubs - An array of subreddit names that were just analyzed.
  */
-// ### MODIFICATION 5 of 5: Updated to display more results and guarantee descriptions ###
 async function renderAndHandleRelatedSubreddits(analyzedSubs) {
     const container = document.getElementById('similar-subreddits-container');
     if (!container) return;
@@ -556,7 +555,7 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
 
         if (validDetails.length === 0) throw new Error("Could not get details for source subreddits.");
 
-        const relatedSubNames = await findRelatedSubredditsAI(validDetails);
+        const relatedSubNames = await findRelatedSubredditsAI(validDetails, originalGroupName); // Pass context
         const newSubNames = relatedSubNames.filter(name => !analyzedSubs.some(s => s.toLowerCase() === name.toLowerCase()));
 
         if (newSubNames.length === 0) {

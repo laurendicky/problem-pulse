@@ -1,3 +1,4 @@
+
 // =================================================================================
 // COMPLETE AND VERIFIED SCRIPT (VERSION 14.3 - UI FLOW FIXED & RESILIENT)
 // This version corrects the product/brand discovery UI flow to be non-destructive.
@@ -166,7 +167,6 @@ function renderFAQs(faqs) { const container = document.getElementById('faq-conta
 // === NEW & CORRECTED FUNCTIONS FOR SUBREDDIT VALIDATION & DISPLAY ===
 // =================================================================================
 
-// ### NEW FUNCTION ###
 /**
  * Handles the click event for removing a subreddit from the analysis.
  * @param {Event} event - The click event object.
@@ -422,6 +422,9 @@ async function renderIncludedSubreddits(subreddits) {
     if (!container) return;
 
     container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list" style="display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch;"><p class="loading-text" style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Loading community details...</p></div>`;
+    // Add event listener for remove buttons
+    container.removeEventListener('click', handleRemoveSubClick);
+    container.addEventListener('click', handleRemoveSubClick);
 
     try {
         const detailPromises = subreddits.map(sub => fetchSubredditDetails(sub));
@@ -444,7 +447,7 @@ async function renderIncludedSubreddits(subreddits) {
             const activityEmoji = activityData[0];
             const activityText = activityData[1];
 
-            return `<div class="subreddit-tag-detailed" style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: space-between;">
+            return `<div class="subreddit-tag-detailed" data-subname-card="${subName}" style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: space-between;">
                         <div>
                             <div class="tag-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                                 <span class="tag-name" style="font-weight: bold; font-size: 1rem; color: #0056b3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">r/${subName}</span>
@@ -462,7 +465,7 @@ async function renderIncludedSubreddits(subreddits) {
                     </div>`;
         }).join('');
 
-        container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list" style="display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch;">${tagsHTML}</div>`;
+        container.querySelector('.subreddit-tag-list').innerHTML = tagsHTML;
 
     } catch (error) {
         console.error("Error rendering subreddit details:", error);
@@ -598,7 +601,6 @@ async function handleAddRelatedSubClick(event) {
  * Orchestrates fetching, ranking, and rendering of related subreddits after an analysis.
  * @param {string[]} analyzedSubs - An array of subreddit names that were just analyzed.
  */
-// ### MODIFIED FUNCTION ###
 async function renderAndHandleRelatedSubreddits(analyzedSubs) {
     const container = document.getElementById('similar-subreddits-container');
     if (!container) return;
@@ -645,7 +647,7 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
             
             const description = sub.description.trim() ? sub.description : `A community for discussions and content related to r/${sub.name}.`;
 
-            return `<div class="subreddit-tag-detailed" style="background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: space-between;">
+            return `<div class="subreddit-tag-detailed" data-subname-card="${sub.name}" style="background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: space-between;">
                         <div>
                             <div class="tag-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                                 <span class="tag-name" style="font-weight: bold; font-size: 1rem; color: #0056b3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">r/${sub.name}</span>
@@ -899,11 +901,25 @@ function generateAndRenderPowerPhrases(posts) {
 // =================================================================================
 // === UPDATED AND HARDENED `runProblemFinder` FUNCTION ===
 // =================================================================================
+// ### MODIFIED FUNCTION ###
 async function runProblemFinder(options = {}) {
     const { isUpdate = false } = options; 
 
     const searchButton = document.getElementById('search-selected-btn'); if (!searchButton) { console.error("Could not find button."); return; }
-    const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked'); if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
+    const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked'); 
+    
+    // Check if there are any communities left to analyze. If not, stop and clear the dashboard.
+    if (selectedCheckboxes.length === 0) {
+        if (isUpdate) { // Only clear if it's an update, not an initial empty click
+            alert("No communities left to analyze. Please add a community to see results.");
+            ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "constellation-map-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+            return;
+        } else {
+            alert("Please select at least one community.");
+            return;
+        }
+    }
+    
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value); const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
     
     if (!isUpdate) {
@@ -919,12 +935,16 @@ async function runProblemFinder(options = {}) {
     const resultsMessageDiv = document.getElementById("results-message");
     const countHeaderDiv = document.getElementById("count-header");
     
+    // Clear all core analysis containers every time.
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "constellation-map-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+    const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
+    if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
+    findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
+
     if (!isUpdate) {
         if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-        ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
-        const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
-        if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
-        findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
+        // Only wipe the subreddit lists on a fresh, initial search
+        ["included-subreddits-container", "similar-subreddits-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     }
 
     try {
@@ -932,10 +952,6 @@ async function runProblemFinder(options = {}) {
         
         const constellationContainer = document.getElementById('constellation-map-container');
         if (constellationContainer) {
-            const oldLoader = constellationContainer.querySelector('.constellation-loader');
-            if (oldLoader) oldLoader.remove();
-            const oldStars = constellationContainer.querySelectorAll('.constellation-star');
-            oldStars.forEach(star => star.remove());
             const loaderEl = document.createElement('div');
             loaderEl.className = 'panel-placeholder constellation-loader';
             loaderEl.textContent = 'Loading purchase signals...';
@@ -967,7 +983,13 @@ async function runProblemFinder(options = {}) {
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
         generateEmotionMapData(filteredItems).then(renderEmotionMap);
-        renderIncludedSubreddits(selectedSubreddits);
+        
+        // On an update, we don't re-render the sub lists because the UI move is now the source of truth.
+        if (!isUpdate) {
+             renderIncludedSubreddits(selectedSubreddits);
+             renderAndHandleRelatedSubreddits(selectedSubreddits);
+        }
+
         generateAndRenderPowerPhrases(filteredItems);
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
@@ -1028,7 +1050,6 @@ async function runProblemFinder(options = {}) {
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); setTimeout(() => { if (resultsWrapper) { resultsWrapper.style.opacity = '1'; if (!isUpdate) { resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); } } }, 50); } }
 
         setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
-        setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
         setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
         
     } catch (err) {
@@ -1046,34 +1067,30 @@ async function runProblemFinder(options = {}) {
 // =================================================================================
 // INITIALIZATION LOGIC (UPDATED)
 // =================================================================================
-// ### MODIFIED FUNCTION ###
-function initializeDashboardInteractivity() {
-    const dashboard = document.getElementById('results-wrapper-b');
-    if (!dashboard) return;
-    initializeConstellationInteractivity();
-    dashboard.addEventListener('click', (e) => {
-        const cloudWordEl = e.target.closest('.cloud-word');
+function initializeDashboardInteractivity() { 
+    const dashboard = document.getElementById('results-wrapper-b'); 
+    if (!dashboard) return; 
+    initializeConstellationInteractivity(); 
+    dashboard.addEventListener('click', (e) => { 
+        const cloudWordEl = e.target.closest('.cloud-word'); 
         const entityEl = e.target.closest('.discovery-list-item');
-        const removeBtnEl = e.target.closest('.remove-sub-btn');
-
-        if (cloudWordEl) {
-            const word = cloudWordEl.dataset.word;
-            const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
-            const postsData = window._sentimentData?.[category]?.[word]?.posts;
-            if (postsData) {
-                showSlidingPanel(word, Array.from(postsData), category);
-            }
-        } else if (entityEl) {
-            const word = entityEl.dataset.word;
-            const type = entityEl.dataset.type;
-            const postsData = window._entityData?.[type]?.[word]?.posts;
-            if (postsData) {
-                renderContextContent(word, postsData);
-            }
-        } else if (removeBtnEl) {
-            handleRemoveSubClick(e);
+        
+        if (cloudWordEl) { 
+            const word = cloudWordEl.dataset.word; 
+            const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative'; 
+            const postsData = window._sentimentData?.[category]?.[word]?.posts; 
+            if (postsData) { 
+                showSlidingPanel(word, Array.from(postsData), category); 
+            } 
+        } else if (entityEl) { 
+            const word = entityEl.dataset.word; 
+            const type = entityEl.dataset.type; 
+            const postsData = window._entityData?.[type]?.[word]?.posts; 
+            if (postsData) { 
+                renderContextContent(word, postsData); 
+            } 
         }
-    });
+    }); 
 }
 function initializeProblemFinderTool() { console.log("Problem Finder elements found. Initializing..."); const pillsContainer = document.getElementById('pf-suggestion-pills'); const groupInput = document.getElementById('group-input'); const findCommunitiesBtn = document.getElementById('find-communities-btn'); const searchSelectedBtn = document.getElementById('search-selected-btn'); const step1Container = document.getElementById('step-1-container'); const step2Container = document.getElementById('subreddit-selection-container'); const inspireButton = document.getElementById('inspire-me-button'); const choicesContainer = document.getElementById('subreddit-choices'); const audienceTitle = document.getElementById('pf-audience-title'); const backButton = document.getElementById('back-to-step1-btn'); if (!findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer) { console.error("Critical error: A key element was null. Aborting initialization."); return; } const transitionToStep2 = () => { if (step2Container.classList.contains('visible')) return; step1Container.classList.add('hidden'); step2Container.classList.add('visible'); choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>'; audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`; }; const transitionToStep1 = () => { step2Container.classList.remove('visible'); step1Container.classList.remove('hidden'); _allRankedSubreddits = []; const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; } }; pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join(''); pillsContainer.addEventListener('click', (event) => { if (event.target.classList.contains('pf-suggestion-pill')) { groupInput.value = event.target.getAttribute('data-value'); findCommunitiesBtn.click(); } }); inspireButton.addEventListener('click', () => { pillsContainer.classList.toggle('visible'); }); 
     

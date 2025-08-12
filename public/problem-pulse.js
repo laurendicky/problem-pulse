@@ -167,6 +167,39 @@ function renderFAQs(faqs) { const container = document.getElementById('faq-conta
 // =================================================================================
 
 /**
+ * Handles the click event for removing a subreddit from the analysis.
+ * @param {Event} event - The click event object.
+ */
+async function handleRemoveSubClick(event) {
+    // This function is delegated, so we ensure the click is on the correct button.
+    const button = event.target.closest('.remove-sub-btn');
+    if (!button) return;
+
+    const subName = button.dataset.subname;
+    if (!subName) {
+        console.error("Missing subreddit name on the 'Remove' button.");
+        return;
+    }
+    
+    button.disabled = true;
+    button.textContent = 'Removing...';
+
+    // Uncheck the hidden checkbox that tracks the state of selected subreddits.
+    const checkbox = document.getElementById(`sub-${subName}`);
+    if (checkbox) {
+        checkbox.checked = false;
+    }
+
+    const countHeaderDiv = document.getElementById("count-header");
+    if (countHeaderDiv) {
+        countHeaderDiv.innerHTML = 'Updating analysis... <span class="loader-dots"></span>';
+    }
+
+    // Re-run the entire analysis with the updated list of subreddits.
+    await runProblemFinder({ isUpdate: true });
+}
+
+/**
  * Fetches detailed information about a specific subreddit with a retry mechanism for server errors.
  * @param {string} subredditName The name of the subreddit.
  * @returns {Promise<Object|null>} A promise that resolves to the subreddit's data object or null on error.
@@ -369,6 +402,7 @@ function loadMoreSubreddits() {
     }
 }
 
+// ### MODIFIED FUNCTION ###
 async function renderIncludedSubreddits(subreddits) {
     const container = document.getElementById('included-subreddits-container');
     if (!container) return;
@@ -381,6 +415,7 @@ async function renderIncludedSubreddits(subreddits) {
 
         const tagsHTML = detailsArray.map((details, index) => {
             const subName = subreddits[index];
+            const detailsString = details ? JSON.stringify(details).replace(/'/g, "&apos;") : "{}";
             
             if (!details) {
                 return `<div class="subreddit-tag-detailed" style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center;">
@@ -395,14 +430,20 @@ async function renderIncludedSubreddits(subreddits) {
             const activityEmoji = activityData[0];
             const activityText = activityData[1];
 
-            return `<div class="subreddit-tag-detailed" style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column;">
-                        <div class="tag-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                            <span class="tag-name" style="font-weight: bold; font-size: 1rem; color: #0056b3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">r/${subName}</span>
-                            <span class="tag-activity" style="font-size: 0.8rem; background: #e9ecef; color: #495057; padding: 3px 8px; border-radius: 12px; flex-shrink: 0; margin-left: 8px;">${activityEmoji} ${activityText}</span>
+            return `<div class="subreddit-tag-detailed" style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div class="tag-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <span class="tag-name" style="font-weight: bold; font-size: 1rem; color: #0056b3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">r/${subName}</span>
+                                <span class="tag-activity" style="font-size: 0.8rem; background: #e9ecef; color: #495057; padding: 3px 8px; border-radius: 12px; flex-shrink: 0; margin-left: 8px;">${activityEmoji} ${activityText}</span>
+                            </div>
+                            <p class="tag-description" style="font-size: 0.85rem; color: #495057; margin: 0 0 10px 0; line-height: 1.4; flex-grow: 1;">${description.substring(0, 150)}${description.length > 150 ? '...' : ''}</p>
+                            <div class="tag-footer" style="font-size: 0.8rem; color: #6c757d; text-align: right;">
+                                <span class="tag-members"><strong>${members}</strong> members</span>
+                            </div>
                         </div>
-                        <p class="tag-description" style="font-size: 0.85rem; color: #495057; margin: 0 0 10px 0; line-height: 1.4; flex-grow: 1;">${description.substring(0, 150)}${description.length > 150 ? '...' : ''}</p>
-                        <div class="tag-footer" style="font-size: 0.8rem; color: #6c757d; text-align: right; border-top: 1px solid #f1f3f5; padding-top: 8px; margin-top: auto;">
-                            <span class="tag-members"><strong>${members}</strong> members</span>
+                        <div class="tag-footer-action" style="margin-top: 12px; display: flex; gap: 8px;">
+                           <button class="remove-sub-btn" data-subname="${subName}" data-sub-details='${detailsString}' style="flex-grow: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid #dc3545; background-color: #f8d7da; color: #721c24; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease;">Remove</button>
+                           <a href="https://www.reddit.com/r/${subName}" target="_blank" rel="noopener noreferrer" class="view-sub-btn" style="flex-grow: 1; text-decoration: none; padding: 6px 10px; border-radius: 6px; border: 1px solid #6c757d; background-color: #f8f9fa; color: #343a40; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; text-align: center; transition: all 0.2s ease;">View on Reddit</a>
                         </div>
                     </div>`;
         }).join('');
@@ -426,11 +467,10 @@ async function renderIncludedSubreddits(subreddits) {
  * @param {string} audienceContext - The original group name for context (e.g., "brides to be").
  * @returns {Promise<string[]>} A promise that resolves to an array of new subreddit names.
  */
-// ### THIS IS THE MODIFIED FUNCTION ###
+// ### MODIFIED FUNCTION ###
 async function findRelatedSubredditsAI(analyzedSubsData, audienceContext) {
     const subNames = analyzedSubsData.map(d => d.name).join(', ');
     
-    // The new prompt guides the AI to find niche/adjacent communities, not just direct alternatives.
     const prompt = `You are a Reddit discovery expert. A user is analyzing communities for the audience "${audienceContext}", including: ${subNames}.
 
     Your task is to suggest up to 20 NEW, related subreddits that explore NICHE or ADJACENT topics. Think outside the box. For example, if the user is analyzing 'weddingplanning', suggest 'bridezillas', 'weddingdress', 'honeymoons', or 'UKweddings' instead of just another general wedding sub.
@@ -448,7 +488,7 @@ async function findRelatedSubredditsAI(analyzedSubsData, audienceContext) {
             role: "user",
             content: prompt
         }],
-        temperature: 0.4, // Increased temperature slightly to encourage more creative/varied suggestions
+        temperature: 0.4,
         max_tokens: 300,
         response_format: {
             "type": "json_object"
@@ -491,8 +531,8 @@ async function handleAddRelatedSubClick(event) {
         return;
     }
 
-    button.textContent = 'Adding...';
     button.disabled = true;
+    button.textContent = 'Adding...';
 
     try {
         const countHeaderDiv = document.getElementById("count-header");
@@ -523,8 +563,8 @@ async function handleAddRelatedSubClick(event) {
         console.error("Failed to add related sub and re-run analysis:", error);
         alert("An error occurred while adding the community. Please try again.");
     } finally {
-        button.textContent = '+ Add to Analysis';
         button.disabled = false;
+        button.textContent = '+ Add to Analysis';
     }
 }
 
@@ -533,6 +573,7 @@ async function handleAddRelatedSubClick(event) {
  * Orchestrates fetching, ranking, and rendering of related subreddits after an analysis.
  * @param {string[]} analyzedSubs - An array of subreddit names that were just analyzed.
  */
+// ### MODIFIED FUNCTION ###
 async function renderAndHandleRelatedSubreddits(analyzedSubs) {
     const container = document.getElementById('similar-subreddits-container');
     if (!container) return;
@@ -555,7 +596,7 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
 
         if (validDetails.length === 0) throw new Error("Could not get details for source subreddits.");
 
-        const relatedSubNames = await findRelatedSubredditsAI(validDetails, originalGroupName); // Pass context
+        const relatedSubNames = await findRelatedSubredditsAI(validDetails, originalGroupName);
         const newSubNames = relatedSubNames.filter(name => !analyzedSubs.some(s => s.toLowerCase() === name.toLowerCase()));
 
         if (newSubNames.length === 0) {
@@ -588,12 +629,13 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
                             <p class="tag-description" style="font-size: 0.85rem; color: #495057; margin: 0 0 10px 0; line-height: 1.4; flex-grow: 1; word-wrap: break-word;">
                                 ${description.substring(0, 150)}${description.length > 150 ? '...' : ''}
                             </p>
-                            <div class="tag-footer" style="font-size: 0.8rem; color: #6c757d; text-align: right; border-top: 1px solid #f1f3f5; padding-top: 8px; margin-top: 10px;">
+                            <div class="tag-footer" style="font-size: 0.8rem; color: #6c757d; text-align: right; border-top: 1px solid #f1f3f5; padding-top: 8px;">
                                 <span class="tag-members"><strong>${members}</strong> members</span>
                             </div>
                         </div>
-                        <div class="tag-footer-action" style="margin-top: 12px; text-align: center;">
-                           <button class="add-related-sub-btn" data-subname="${sub.name}" data-sub-details='${subDetailsString}' style="width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid #007bff; background-color: #007bff; color: white; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease;">+ Add to Analysis</button>
+                        <div class="tag-footer-action" style="margin-top: 12px; display: flex; gap: 8px;">
+                           <button class="add-related-sub-btn" data-subname="${sub.name}" data-sub-details='${subDetailsString}' style="flex-grow: 1; padding: 8px 12px; border-radius: 6px; border: 1px solid #007bff; background-color: #007bff; color: white; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease;">+ Add to Analysis</button>
+                           <a href="https://www.reddit.com/r/${sub.name}" target="_blank" rel="noopener noreferrer" class="view-sub-btn" style="flex-grow: 1; text-decoration: none; padding: 8px 12px; border-radius: 6px; border: 1px solid #6c757d; background-color: #f8f9fa; color: #343a40; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; text-align: center; transition: all 0.2s ease;">View on Reddit</a>
                         </div>
                     </div>`;
         }).join('');
@@ -979,7 +1021,35 @@ async function runProblemFinder(options = {}) {
 // =================================================================================
 // INITIALIZATION LOGIC (UPDATED)
 // =================================================================================
-function initializeDashboardInteractivity() { const dashboard = document.getElementById('results-wrapper-b'); if (!dashboard) return; initializeConstellationInteractivity(); dashboard.addEventListener('click', (e) => { const cloudWordEl = e.target.closest('.cloud-word'); const entityEl = e.target.closest('.discovery-list-item'); if (cloudWordEl) { const word = cloudWordEl.dataset.word; const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative'; const postsData = window._sentimentData?.[category]?.[word]?.posts; if (postsData) { showSlidingPanel(word, Array.from(postsData), category); } } else if (entityEl) { const word = entityEl.dataset.word; const type = entityEl.dataset.type; const postsData = window._entityData?.[type]?.[word]?.posts; if (postsData) { renderContextContent(word, postsData); } } }); }
+function initializeDashboardInteractivity() { 
+    const dashboard = document.getElementById('results-wrapper-b'); 
+    if (!dashboard) return; 
+    initializeConstellationInteractivity(); 
+    dashboard.addEventListener('click', (e) => { 
+        const cloudWordEl = e.target.closest('.cloud-word'); 
+        const entityEl = e.target.closest('.discovery-list-item');
+        const removeBtnEl = e.target.closest('.remove-sub-btn');
+        
+        if (cloudWordEl) { 
+            const word = cloudWordEl.dataset.word; 
+            const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative'; 
+            const postsData = window._sentimentData?.[category]?.[word]?.posts; 
+            if (postsData) { 
+                showSlidingPanel(word, Array.from(postsData), category); 
+            } 
+        } else if (entityEl) { 
+            const word = entityEl.dataset.word; 
+            const type = entityEl.dataset.type; 
+            const postsData = window._entityData?.[type]?.[word]?.posts; 
+            if (postsData) { 
+                renderContextContent(word, postsData); 
+            } 
+        } else if (removeBtnEl) {
+            // New handler for the remove button
+            handleRemoveSubClick(e);
+        }
+    }); 
+}
 function initializeProblemFinderTool() { console.log("Problem Finder elements found. Initializing..."); const pillsContainer = document.getElementById('pf-suggestion-pills'); const groupInput = document.getElementById('group-input'); const findCommunitiesBtn = document.getElementById('find-communities-btn'); const searchSelectedBtn = document.getElementById('search-selected-btn'); const step1Container = document.getElementById('step-1-container'); const step2Container = document.getElementById('subreddit-selection-container'); const inspireButton = document.getElementById('inspire-me-button'); const choicesContainer = document.getElementById('subreddit-choices'); const audienceTitle = document.getElementById('pf-audience-title'); const backButton = document.getElementById('back-to-step1-btn'); if (!findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer) { console.error("Critical error: A key element was null. Aborting initialization."); return; } const transitionToStep2 = () => { if (step2Container.classList.contains('visible')) return; step1Container.classList.add('hidden'); step2Container.classList.add('visible'); choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>'; audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`; }; const transitionToStep1 = () => { step2Container.classList.remove('visible'); step1Container.classList.remove('hidden'); _allRankedSubreddits = []; const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; } }; pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join(''); pillsContainer.addEventListener('click', (event) => { if (event.target.classList.contains('pf-suggestion-pill')) { groupInput.value = event.target.getAttribute('data-value'); findCommunitiesBtn.click(); } }); inspireButton.addEventListener('click', () => { pillsContainer.classList.toggle('visible'); }); 
     
     findCommunitiesBtn.addEventListener("click", async (event) => { 

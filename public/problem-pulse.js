@@ -430,9 +430,10 @@ async function findRelatedSubredditsAI(analyzedSubsData) {
 }
 
 /**
- * Handles the click event for adding a related subreddit to the analysis with a seamless UX.
+ * Handles the click event for adding a related subreddit to the analysis.
  * @param {Event} event - The click event object.
  */
+// ### MODIFIED FUNCTION ###
 async function handleAddRelatedSubClick(event) {
     if (!event.target.classList.contains('add-related-sub-btn')) return;
 
@@ -448,34 +449,37 @@ async function handleAddRelatedSubClick(event) {
     button.textContent = 'Adding...';
     button.disabled = true;
 
-    // 1. Update header for seamless loading state
+    // --- SEAMLESS UX CHANGE 1: Update header with loading message ---
     const countHeaderDiv = document.getElementById("count-header");
     if (countHeaderDiv) {
-        countHeaderDiv.innerHTML = `Adding new audiences... <span class="loader-dots"></span>`;
+        // Using a span with a class assumes CSS exists for animated dots, similar to other parts of the script.
+        countHeaderDiv.innerHTML = 'Adding new audiences... <span class="loader-dots"></span>';
     }
 
-    // 2. Get the list of currently analyzed subreddits from the DOM
+    // 1. Get the list of currently analyzed subreddits from the DOM
     const currentSubTags = document.querySelectorAll('#included-subreddits-container .tag-name');
     const currentSubs = Array.from(currentSubTags).map(tag => tag.textContent.replace('r/', '').trim());
-    const newSubList = [...new Set([...currentSubs, subName])];
+    const newSubList = [...new Set([...currentSubs, subName])]; // Use Set to avoid duplicates
 
-    // 3. Update the hidden checkboxes in Step 2.
+    // 2. Update the hidden checkboxes in Step 2.
     const choicesDiv = document.getElementById('subreddit-choices');
     let checkbox = document.getElementById(`sub-${subName}`);
 
     if (!checkbox && choicesDiv) {
+        // Checkbox doesn't exist, create and append it.
         const subDetails = JSON.parse(subDetailsJSON);
         const newChoiceHTML = renderSubredditChoicesHTML([subDetails]);
         choicesDiv.insertAdjacentHTML('beforeend', newChoiceHTML);
     }
 
+    // 3. Update all checkboxes to reflect the new combined list.
     const allCheckboxes = document.querySelectorAll('#subreddit-choices input[type="checkbox"]');
     allCheckboxes.forEach(cb => {
         cb.checked = newSubList.includes(cb.value);
     });
 
-    // 4. Re-run the analysis with seamless update option.
-    await runProblemFinder({ isSeamlessUpdate: true });
+    // 4. Re-run the entire analysis with a flag for a seamless update.
+    await runProblemFinder({ isUpdate: true });
 }
 
 
@@ -776,47 +780,35 @@ function generateAndRenderPowerPhrases(posts) {
 }
 
 // =================================================================================
-// === UPDATED AND HARDENED `runProblemFinder` FUNCTION ===
+// === ### MODIFIED AND HARDENED `runProblemFinder` FUNCTION ### ===
 // =================================================================================
 async function runProblemFinder(options = {}) {
-    const { isSeamlessUpdate = false } = options;
+    const { isUpdate = false } = options; // SEAMLESS UX: Check if this is a seamless update
 
     const searchButton = document.getElementById('search-selected-btn'); if (!searchButton) { console.error("Could not find button."); return; }
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked'); if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value); const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
     
-    if (!isSeamlessUpdate) {
-        searchButton.classList.add('is-loading');
-    }
+    searchButton.classList.add('is-loading');
     searchButton.disabled = true;
-    
+
     const problemTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
     const deepProblemTerms = [ "struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent" ];
     const demandSignalTerms = [ "i'd pay good money for", "buy it in a second", "i'd subscribe to", "throw money at it", "where can i buy", "happily pay", "shut up and take my money", "sick of doing this manually", "can't find anything that", "waste so much time on", "has to be a better way", "shouldn't be this hard", "why is there no tool for", "why is there no app for", "tried everything and nothing works", "tool almost did what i wanted", "it's missing", "tried", "gave up on it", "if only there was an app", "i wish someone would build", "why hasn't anyone made", "waste hours every week", "such a timesuck", "pay just to not have to think", "rather pay than do this myself" ];
     
     const resultsWrapper = document.getElementById('results-wrapper-b');
-    const allElementIds = ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"];
-    const elementsToClear = isSeamlessUpdate ? allElementIds.filter(id => id !== 'count-header') : allElementIds;
-    
-    // Clear results containers
-    elementsToClear.forEach(id => {
-        const el = document.getElementById(id);
-        if (el) el.innerHTML = "";
-    });
-
-    // On a full (non-seamless) run, hide the wrapper and clear the error message
-    if (!isSeamlessUpdate) {
-        if (resultsWrapper) {
-            resultsWrapper.style.display = 'none';
-            resultsWrapper.style.opacity = '0';
-        }
-        const resultsMessageDiv = document.getElementById("results-message");
-        if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
-    }
-    
-    const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
+    const resultsMessageDiv = document.getElementById("results-message");
     const countHeaderDiv = document.getElementById("count-header");
-    findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
+    
+    // SEAMLESS UX: Only reset UI on initial search, not on update.
+    if (!isUpdate) {
+        if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
+        // Clear all result containers for a fresh search.
+        ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+        const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
+        if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
+        findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
+    }
 
     try {
         console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
@@ -876,6 +868,15 @@ async function runProblemFinder(options = {}) {
         const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
         const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
         window._summaries = sortedFindings.map(item => item.summary);
+        
+        // Clear previous findings before rendering new ones to prevent leftovers from old searches.
+        for (let i = 1; i <= 5; i++) {
+             const block = document.getElementById(`findings-block${i}`);
+             const content = document.getElementById(`findings-${i}`);
+             if (block) block.style.display = "none";
+             if (content) content.innerHTML = "";
+        }
+        
         sortedFindings.forEach((findingData, index) => {
             const displayIndex = index + 1; if (displayIndex > 5) return;
             const block = document.getElementById(`findings-block${displayIndex}`); const content = document.getElementById(`findings-${displayIndex}`); const btn = document.getElementById(`button-sample${displayIndex}`);
@@ -908,14 +909,14 @@ async function runProblemFinder(options = {}) {
             }
         }
 
+        // SEAMLESS UX: Only scroll into view on initial search.
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { 
             if (resultsWrapper) { 
                 resultsWrapper.style.setProperty('display', 'flex', 'important'); 
                 setTimeout(() => { 
                     if (resultsWrapper) { 
-                        resultsWrapper.style.opacity = '1';
-                        // Only scroll on a full, initial run
-                        if (!isSeamlessUpdate) {
+                        resultsWrapper.style.opacity = '1'; 
+                        if (!isUpdate) {
                             resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); 
                         }
                     } 
@@ -932,7 +933,6 @@ async function runProblemFinder(options = {}) {
         
     } catch (err) {
         console.error("A fatal error stopped the primary analysis:", err);
-        const resultsMessageDiv = document.getElementById("results-message");
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
         if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); resultsWrapper.style.opacity = '1'; }
     } finally {
@@ -941,8 +941,9 @@ async function runProblemFinder(options = {}) {
     }
 }
 
+
 // =================================================================================
-// INITIALIZATION LOGIC (UPDATED WITH WORKAROUND)
+// INITIALIZATION LOGIC (UPDATED)
 // =================================================================================
 function initializeDashboardInteractivity() { const dashboard = document.getElementById('results-wrapper-b'); if (!dashboard) return; initializeConstellationInteractivity(); dashboard.addEventListener('click', (e) => { const cloudWordEl = e.target.closest('.cloud-word'); const entityEl = e.target.closest('.discovery-list-item'); if (cloudWordEl) { const word = cloudWordEl.dataset.word; const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative'; const postsData = window._sentimentData?.[category]?.[word]?.posts; if (postsData) { showSlidingPanel(word, Array.from(postsData), category); } } else if (entityEl) { const word = entityEl.dataset.word; const type = entityEl.dataset.type; const postsData = window._entityData?.[type]?.[word]?.posts; if (postsData) { renderContextContent(word, postsData); } } }); }
 function initializeProblemFinderTool() { console.log("Problem Finder elements found. Initializing..."); const pillsContainer = document.getElementById('pf-suggestion-pills'); const groupInput = document.getElementById('group-input'); const findCommunitiesBtn = document.getElementById('find-communities-btn'); const searchSelectedBtn = document.getElementById('search-selected-btn'); const step1Container = document.getElementById('step-1-container'); const step2Container = document.getElementById('subreddit-selection-container'); const inspireButton = document.getElementById('inspire-me-button'); const choicesContainer = document.getElementById('subreddit-choices'); const audienceTitle = document.getElementById('pf-audience-title'); const backButton = document.getElementById('back-to-step1-btn'); if (!findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer) { console.error("Critical error: A key element was null. Aborting initialization."); return; } const transitionToStep2 = () => { if (step2Container.classList.contains('visible')) return; step1Container.classList.add('hidden'); step2Container.classList.add('visible'); choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>'; audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`; }; const transitionToStep1 = () => { step2Container.classList.remove('visible'); step1Container.classList.remove('hidden'); _allRankedSubreddits = []; const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; } }; pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join(''); pillsContainer.addEventListener('click', (event) => { if (event.target.classList.contains('pf-suggestion-pill')) { groupInput.value = event.target.getAttribute('data-value'); findCommunitiesBtn.click(); } }); inspireButton.addEventListener('click', () => { pillsContainer.classList.toggle('visible'); }); 
@@ -954,20 +955,12 @@ function initializeProblemFinderTool() { console.log("Problem Finder elements fo
         originalGroupName = groupName; 
         transitionToStep2(); 
         try {
-            const initialSuggestions = await findSubredditsForGroup(groupName);
-            if (initialSuggestions.length === 0) {
-                 // This condition will be met if the catch block in findSubredditsForGroup returns an empty array.
-                 throw new Error("AI suggestion failed or returned no results.");
-            }
+            const initialSuggestions = await findSubredditsForGroup(groupName); 
             const rankedSubreddits = await fetchAndRankSubreddits(initialSuggestions);
             displaySubredditChoices(rankedSubreddits);
         } catch (error) {
-            console.error("Failed during AI subreddit suggestion process:", error.message);
-            // *** FALLBACK WORKAROUND LOGIC ***
-            alert("Could not get AI suggestions due to a server error. Using a default list of communities for demonstration. Please check your Netlify proxy configuration and OpenAI API key.");
-            const fallbackSubs = ["HomeImprovement", "DIY", "personalfinance", "travel", "Cooking", "Fitness", "gadgets"];
-            const rankedSubreddits = await fetchAndRankSubreddits(fallbackSubs);
-            displaySubredditChoices(rankedSubreddits);
+            console.error("Failed during subreddit validation process:", error);
+            displaySubredditChoices([]);
         }
     }); 
     

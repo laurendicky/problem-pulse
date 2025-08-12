@@ -987,8 +987,11 @@ async function runProblemFinder(options = {}) {
         generateAndRenderPowerPhrases(filteredItems);
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
-        const userNicheCount = allItems.filter(p => ((p.data.title || p.data.link_title || '') + (p.data.selftext || p.data.body || '')).toLowerCase().includes(originalGroupName.toLowerCase())).length;
-        if (countHeaderDiv) countHeaderDiv.textContent = `Found over ${userNicheCount.toLocaleString()} posts discussing problems related to "${originalGroupName}".`;
+
+        if (countHeaderDiv) {
+            countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`;
+        }
+    
         const topKeywords = getTopKeywords(filteredItems, 10);
         const topPosts = filteredItems.slice(0, 30);
         const combinedTexts = topPosts.map(post => `${post.data.title || post.data.link_title || ''}. ${getFirstTwoSentences(post.data.selftext || post.data.body || '')}`).join("\n\n");

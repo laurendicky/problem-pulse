@@ -433,7 +433,7 @@ async function findRelatedSubredditsAI(analyzedSubsData) {
  * Handles the click event for adding a related subreddit to the analysis.
  * @param {Event} event - The click event object.
  */
-// ### MODIFIED FUNCTION ###
+// ### FIX 1 of 2: Corrected this function to be more robust. ###
 async function handleAddRelatedSubClick(event) {
     if (!event.target.classList.contains('add-related-sub-btn')) return;
 
@@ -449,37 +449,45 @@ async function handleAddRelatedSubClick(event) {
     button.textContent = 'Adding...';
     button.disabled = true;
 
-    // --- SEAMLESS UX CHANGE 1: Update header with loading message ---
-    const countHeaderDiv = document.getElementById("count-header");
-    if (countHeaderDiv) {
-        // Using a span with a class assumes CSS exists for animated dots, similar to other parts of the script.
-        countHeaderDiv.innerHTML = 'Adding new audiences... <span class="loader-dots"></span>';
+    try {
+        // --- SEAMLESS UX CHANGE 1: Update header with loading message ---
+        const countHeaderDiv = document.getElementById("count-header");
+        if (countHeaderDiv) {
+            countHeaderDiv.innerHTML = 'Adding new audiences... <span class="loader-dots"></span>';
+        }
+
+        // 1. Get the list of currently analyzed subreddits from the DOM
+        const currentSubTags = document.querySelectorAll('#included-subreddits-container .tag-name');
+        const currentSubs = Array.from(currentSubTags).map(tag => tag.textContent.replace('r/', '').trim());
+        const newSubList = [...new Set([...currentSubs, subName])]; // Use Set to avoid duplicates
+
+        // 2. Update the hidden checkboxes in Step 2.
+        const choicesDiv = document.getElementById('subreddit-choices');
+        let checkbox = document.getElementById(`sub-${subName}`);
+
+        if (!checkbox && choicesDiv) {
+            // Checkbox doesn't exist, create and append it.
+            const subDetails = JSON.parse(subDetailsJSON);
+            const newChoiceHTML = renderSubredditChoicesHTML([subDetails]);
+            choicesDiv.insertAdjacentHTML('beforeend', newChoiceHTML);
+        }
+
+        // 3. Update all checkboxes to reflect the new combined list.
+        const allCheckboxes = document.querySelectorAll('#subreddit-choices input[type="checkbox"]');
+        allCheckboxes.forEach(cb => {
+            cb.checked = newSubList.includes(cb.value);
+        });
+
+        // 4. Re-run the entire analysis with a flag for a seamless update.
+        await runProblemFinder({ isUpdate: true });
+    } catch (error) {
+        console.error("Failed to add related sub and re-run analysis:", error);
+        alert("An error occurred while adding the community. Please try again.");
+    } finally {
+        // Re-enable the button regardless of success or failure.
+        button.textContent = '+ Add to Analysis';
+        button.disabled = false;
     }
-
-    // 1. Get the list of currently analyzed subreddits from the DOM
-    const currentSubTags = document.querySelectorAll('#included-subreddits-container .tag-name');
-    const currentSubs = Array.from(currentSubTags).map(tag => tag.textContent.replace('r/', '').trim());
-    const newSubList = [...new Set([...currentSubs, subName])]; // Use Set to avoid duplicates
-
-    // 2. Update the hidden checkboxes in Step 2.
-    const choicesDiv = document.getElementById('subreddit-choices');
-    let checkbox = document.getElementById(`sub-${subName}`);
-
-    if (!checkbox && choicesDiv) {
-        // Checkbox doesn't exist, create and append it.
-        const subDetails = JSON.parse(subDetailsJSON);
-        const newChoiceHTML = renderSubredditChoicesHTML([subDetails]);
-        choicesDiv.insertAdjacentHTML('beforeend', newChoiceHTML);
-    }
-
-    // 3. Update all checkboxes to reflect the new combined list.
-    const allCheckboxes = document.querySelectorAll('#subreddit-choices input[type="checkbox"]');
-    allCheckboxes.forEach(cb => {
-        cb.checked = newSubList.includes(cb.value);
-    });
-
-    // 4. Re-run the entire analysis with a flag for a seamless update.
-    await runProblemFinder({ isUpdate: true });
 }
 
 
@@ -780,17 +788,21 @@ function generateAndRenderPowerPhrases(posts) {
 }
 
 // =================================================================================
-// === ### MODIFIED AND HARDENED `runProblemFinder` FUNCTION ### ===
+// === UPDATED AND HARDENED `runProblemFinder` FUNCTION ===
 // =================================================================================
+// ### FIX 2 of 2: The main run function, now with delays for background tasks. ###
 async function runProblemFinder(options = {}) {
-    const { isUpdate = false } = options; // SEAMLESS UX: Check if this is a seamless update
+    const { isUpdate = false } = options; // Check if this is a seamless update
 
     const searchButton = document.getElementById('search-selected-btn'); if (!searchButton) { console.error("Could not find button."); return; }
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked'); if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value); const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
     
-    searchButton.classList.add('is-loading');
-    searchButton.disabled = true;
+    // On a fresh search, the main button shows loading. On an update, it's the 'Add' button, which is handled separately.
+    if (!isUpdate) {
+        searchButton.classList.add('is-loading');
+        searchButton.disabled = true;
+    }
 
     const problemTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
     const deepProblemTerms = [ "struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent" ];
@@ -800,10 +812,9 @@ async function runProblemFinder(options = {}) {
     const resultsMessageDiv = document.getElementById("results-message");
     const countHeaderDiv = document.getElementById("count-header");
     
-    // SEAMLESS UX: Only reset UI on initial search, not on update.
+    // Only reset UI on initial search, not on a seamless update.
     if (!isUpdate) {
         if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-        // Clear all result containers for a fresh search.
         ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
         const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
@@ -869,7 +880,6 @@ async function runProblemFinder(options = {}) {
         const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
         window._summaries = sortedFindings.map(item => item.summary);
         
-        // Clear previous findings before rendering new ones to prevent leftovers from old searches.
         for (let i = 1; i <= 5; i++) {
              const block = document.getElementById(`findings-block${i}`);
              const content = document.getElementById(`findings-${i}`);
@@ -909,38 +919,24 @@ async function runProblemFinder(options = {}) {
             }
         }
 
-        // SEAMLESS UX: Only scroll into view on initial search.
-        if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { 
-            if (resultsWrapper) { 
-                resultsWrapper.style.setProperty('display', 'flex', 'important'); 
-                setTimeout(() => { 
-                    if (resultsWrapper) { 
-                        resultsWrapper.style.opacity = '1'; 
-                        if (!isUpdate) {
-                            resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); 
-                        }
-                    } 
-                }, 50); 
-            } 
-        }
+        if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); setTimeout(() => { if (resultsWrapper) { resultsWrapper.style.opacity = '1'; if (!isUpdate) { resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); } } }, 50); } }
 
-        runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime);
-        renderAndHandleRelatedSubreddits(selectedSubreddits);
-        
-        setTimeout(() => {
-            enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName);
-        }, 5000);
+        // Added delays to background tasks to prevent API overloading.
+        setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1000);
+        setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 1500);
+        setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
         
     } catch (err) {
         console.error("A fatal error stopped the primary analysis:", err);
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
         if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); resultsWrapper.style.opacity = '1'; }
     } finally {
-        searchButton.classList.remove('is-loading');
-        searchButton.disabled = false;
+        if (!isUpdate) {
+            searchButton.classList.remove('is-loading');
+            searchButton.disabled = false;
+        }
     }
 }
-
 
 // =================================================================================
 // INITIALIZATION LOGIC (UPDATED)

@@ -430,7 +430,7 @@ async function findRelatedSubredditsAI(analyzedSubsData) {
 }
 
 /**
- * Handles the click event for adding a related subreddit to the analysis.
+ * Handles the click event for adding a related subreddit to the analysis with a seamless UX.
  * @param {Event} event - The click event object.
  */
 async function handleAddRelatedSubClick(event) {
@@ -448,30 +448,34 @@ async function handleAddRelatedSubClick(event) {
     button.textContent = 'Adding...';
     button.disabled = true;
 
-    // 1. Get the list of currently analyzed subreddits from the DOM
+    // 1. Update header for seamless loading state
+    const countHeaderDiv = document.getElementById("count-header");
+    if (countHeaderDiv) {
+        countHeaderDiv.innerHTML = `Adding new audiences... <span class="loader-dots"></span>`;
+    }
+
+    // 2. Get the list of currently analyzed subreddits from the DOM
     const currentSubTags = document.querySelectorAll('#included-subreddits-container .tag-name');
     const currentSubs = Array.from(currentSubTags).map(tag => tag.textContent.replace('r/', '').trim());
-    const newSubList = [...new Set([...currentSubs, subName])]; // Use Set to avoid duplicates
+    const newSubList = [...new Set([...currentSubs, subName])];
 
-    // 2. Update the hidden checkboxes in Step 2.
+    // 3. Update the hidden checkboxes in Step 2.
     const choicesDiv = document.getElementById('subreddit-choices');
     let checkbox = document.getElementById(`sub-${subName}`);
 
     if (!checkbox && choicesDiv) {
-        // Checkbox doesn't exist, create and append it.
         const subDetails = JSON.parse(subDetailsJSON);
         const newChoiceHTML = renderSubredditChoicesHTML([subDetails]);
         choicesDiv.insertAdjacentHTML('beforeend', newChoiceHTML);
     }
 
-    // 3. Update all checkboxes to reflect the new combined list.
     const allCheckboxes = document.querySelectorAll('#subreddit-choices input[type="checkbox"]');
     allCheckboxes.forEach(cb => {
         cb.checked = newSubList.includes(cb.value);
     });
 
-    // 4. Re-run the entire analysis.
-    await runProblemFinder();
+    // 4. Re-run the analysis with seamless update option.
+    await runProblemFinder({ isSeamlessUpdate: true });
 }
 
 
@@ -774,7 +778,9 @@ function generateAndRenderPowerPhrases(posts) {
 // =================================================================================
 // === UPDATED AND HARDENED `runProblemFinder` FUNCTION ===
 // =================================================================================
-async function runProblemFinder() {
+async function runProblemFinder(options = {}) {
+    const { isSeamlessUpdate = false } = options;
+
     const searchButton = document.getElementById('search-selected-btn'); if (!searchButton) { console.error("Could not find button."); return; }
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked'); if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value); const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
@@ -784,12 +790,28 @@ async function runProblemFinder() {
     const deepProblemTerms = [ "struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent" ];
     const demandSignalTerms = [ "i'd pay good money for", "buy it in a second", "i'd subscribe to", "throw money at it", "where can i buy", "happily pay", "shut up and take my money", "sick of doing this manually", "can't find anything that", "waste so much time on", "has to be a better way", "shouldn't be this hard", "why is there no tool for", "why is there no app for", "tried everything and nothing works", "tool almost did what i wanted", "it's missing", "tried", "gave up on it", "if only there was an app", "i wish someone would build", "why hasn't anyone made", "waste hours every week", "such a timesuck", "pay just to not have to think", "rather pay than do this myself" ];
     
-    const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+    const resultsWrapper = document.getElementById('results-wrapper-b');
+    const allElementIds = ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"];
+    const elementsToClear = isSeamlessUpdate ? allElementIds.filter(id => id !== 'count-header') : allElementIds;
+    
+    // Clear results containers
+    elementsToClear.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.innerHTML = "";
+    });
+
+    // On a full (non-seamless) run, hide the wrapper and clear the error message
+    if (!isSeamlessUpdate) {
+        if (resultsWrapper) {
+            resultsWrapper.style.display = 'none';
+            resultsWrapper.style.opacity = '0';
+        }
+        const resultsMessageDiv = document.getElementById("results-message");
+        if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
+    }
+    
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
-    const resultsMessageDiv = document.getElementById("results-message");
     const countHeaderDiv = document.getElementById("count-header");
-    if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
     findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
 
     try {
@@ -882,10 +904,23 @@ async function runProblemFinder() {
             }
         }
 
-        if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); setTimeout(() => { if (resultsWrapper) { resultsWrapper.style.opacity = '1'; resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, 50); } }
+        if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { 
+            if (resultsWrapper) { 
+                resultsWrapper.style.setProperty('display', 'flex', 'important'); 
+                setTimeout(() => { 
+                    if (resultsWrapper) { 
+                        resultsWrapper.style.opacity = '1';
+                        // Only scroll on a full, initial run
+                        if (!isSeamlessUpdate) {
+                            resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); 
+                        }
+                    } 
+                }, 50); 
+            } 
+        }
 
         runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime);
-        renderAndHandleRelatedSubreddits(selectedSubreddits); // <-- ADDED: Trigger related subs feature
+        renderAndHandleRelatedSubreddits(selectedSubreddits);
         
         setTimeout(() => {
             enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName);
@@ -893,6 +928,7 @@ async function runProblemFinder() {
         
     } catch (err) {
         console.error("A fatal error stopped the primary analysis:", err);
+        const resultsMessageDiv = document.getElementById("results-message");
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
         if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); resultsWrapper.style.opacity = '1'; }
     } finally {

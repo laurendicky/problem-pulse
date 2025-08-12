@@ -214,6 +214,7 @@ function getActivityLabel(activeUsers, totalMembers) {
  * @param {string[]} subredditNames - An array of subreddit names from the AI.
  * @returns {Promise<Object[]>} A promise that resolves to a ranked array of rich subreddit objects.
  */
+// ### MODIFICATION 1 of 3 ###
 async function fetchAndRankSubreddits(subredditNames) {
     console.log(`AI suggested ${subredditNames.length} subreddits. Validating and ranking in batches...`);
     const BATCH_SIZE = 5;
@@ -236,7 +237,9 @@ async function fetchAndRankSubreddits(subredditNames) {
         .map(details => ({
             name: details.display_name,
             members: details.subscribers,
-            activityLabel: getActivityLabel(details.active_user_count, details.subscribers)
+            activityLabel: getActivityLabel(details.active_user_count, details.subscribers),
+            // Pass the description through for later use
+            description: details.public_description || ''
         }))
         .sort((a, b) => b.members - a.members);
 
@@ -380,11 +383,13 @@ async function renderIncludedSubreddits(subreddits) {
  * @param {Array<Object>} analyzedSubsData - Array of objects with {name, description} for each analyzed sub.
  * @returns {Promise<string[]>} A promise that resolves to an array of new subreddit names.
  */
+// ### MODIFICATION 2 of 3 ###
 async function findRelatedSubredditsAI(analyzedSubsData) {
     const subNames = analyzedSubsData.map(d => d.name).join(', ');
     const descriptions = analyzedSubsData.map(d => `r/${d.name}: ${d.description.substring(0, 300)}...`).join('\n');
 
-    const prompt = `You are an expert Reddit community finder. Based on the following user-selected communities and their public descriptions, suggest up to 8 new but highly related subreddits for them to explore.
+    // Ask for more suggestions to ensure we have enough to show after filtering.
+    const prompt = `You are an expert Reddit community finder. Based on the following user-selected communities and their public descriptions, suggest up to 20 new but highly related subreddits for them to explore.
 
     CRITICAL: Do NOT include any of the original subreddits in your suggestions. The user is already analyzing them.
     Original Subreddits: ${subNames}
@@ -487,6 +492,7 @@ async function handleAddRelatedSubClick(event) {
  * Orchestrates fetching, ranking, and rendering of related subreddits after an analysis.
  * @param {string[]} analyzedSubs - An array of subreddit names that were just analyzed.
  */
+// ### MODIFICATION 3 of 3 ###
 async function renderAndHandleRelatedSubreddits(analyzedSubs) {
     const container = document.getElementById('similar-subreddits-container');
     if (!container) return;
@@ -523,13 +529,17 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
             container.querySelector('.subreddit-tag-list').innerHTML = `<p style="font-style: italic; color: #777; padding: 1rem;">No suitable communities found after validation.</p>`;
             return;
         }
-
-        const tagsHTML = rankedRelatedSubs.slice(0, 6).map(sub => {
+        
+        // Show top 10 suggestions and add description with fallback
+        const tagsHTML = rankedRelatedSubs.slice(0, 10).map(sub => {
             const subDetailsString = JSON.stringify(sub).replace(/'/g, "&apos;");
             const members = formatMemberCount(sub.members);
             const activityData = sub.activityLabel.split(' ');
             const activityEmoji = activityData[0];
             const activityText = activityData[1];
+            
+            // Generate description with a guaranteed fallback.
+            const description = sub.description.trim() ? sub.description : `A community for discussions and content related to r/${sub.name}.`;
 
             return `<div class="subreddit-tag-detailed" style="background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: space-between;">
                         <div>
@@ -537,6 +547,9 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
                                 <span class="tag-name" style="font-weight: bold; font-size: 1rem; color: #0056b3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">r/${sub.name}</span>
                                 <span class="tag-activity" style="font-size: 0.8rem; background: #e9ecef; color: #495057; padding: 3px 8px; border-radius: 12px; flex-shrink: 0; margin-left: 8px;">${activityEmoji} ${activityText}</span>
                             </div>
+                            <p class="tag-description" style="font-size: 0.85rem; color: #495057; margin: 0 0 10px 0; line-height: 1.4; flex-grow: 1; word-wrap: break-word;">
+                                ${description.substring(0, 150)}${description.length > 150 ? '...' : ''}
+                            </p>
                             <div class="tag-footer" style="font-size: 0.8rem; color: #6c757d; text-align: right; border-top: 1px solid #f1f3f5; padding-top: 8px; margin-top: 10px;">
                                 <span class="tag-members"><strong>${members}</strong> members</span>
                             </div>
@@ -560,10 +573,8 @@ function renderSentimentScore(positiveCount, negativeCount) { const container = 
 // --- CONSTELLATION MAP FUNCTIONS ---
 const CONSTELLATION_CATEGORIES = { DemandSignals: { x: 0.5, y: 0.5 }, CostConcerns: { x: 0.5, y: 0.2 }, WillingnessToPay: { x: 0.8, y: 0.4 }, Frustration: { x: 0.7, y: 0.75 }, SubstituteComparisons: { x: 0.3, y: 0.75 }, Urgency: { x: 0.2, y: 0.4 }, Other: { x: 0.5, y: 0.05 }, };
 const EMOTION_COLORS = { Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7', Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316' };
-// ### MAJOR FIX ### The root cause of the network error was here.
 async function generateAndRenderConstellation(items) {
     console.log("[Constellation] Starting full generation process...");
-    // Sliced to 60 instead of 150 to prevent the request body from being too large.
     const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 60);
     console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
     const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 20 quotes that express a strong purchase intent, an unsolved problem, or a significant pain point.
@@ -593,7 +604,7 @@ async function generateAndRenderConstellation(items) {
         }
     } catch (error) {
         console.error("CRITICAL ERROR in AI Signal Extraction:", error);
-        renderConstellationMap([]); // Render an empty map on failure
+        renderConstellationMap([]);
         return;
     }
 
@@ -911,7 +922,6 @@ async function runProblemFinder(options = {}) {
 
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); setTimeout(() => { if (resultsWrapper) { resultsWrapper.style.opacity = '1'; if (!isUpdate) { resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); } } }, 50); } }
 
-        // Stagger background tasks to prevent overloading the network and proxy.
         setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
         setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
         setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);

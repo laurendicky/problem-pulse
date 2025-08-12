@@ -784,7 +784,11 @@ async function runProblemFinder(options = {}) {
     const searchButton = document.getElementById('search-selected-btn'); if (!searchButton) { console.error("Could not find button."); return; }
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked'); if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value); const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
-    searchButton.classList.add('is-loading'); searchButton.disabled = true;
+    
+    if (!isSeamlessUpdate) {
+        searchButton.classList.add('is-loading');
+    }
+    searchButton.disabled = true;
     
     const problemTerms = [ "problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for" ];
     const deepProblemTerms = [ "struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent" ];
@@ -938,7 +942,7 @@ async function runProblemFinder(options = {}) {
 }
 
 // =================================================================================
-// INITIALIZATION LOGIC (UPDATED)
+// INITIALIZATION LOGIC (UPDATED WITH WORKAROUND)
 // =================================================================================
 function initializeDashboardInteractivity() { const dashboard = document.getElementById('results-wrapper-b'); if (!dashboard) return; initializeConstellationInteractivity(); dashboard.addEventListener('click', (e) => { const cloudWordEl = e.target.closest('.cloud-word'); const entityEl = e.target.closest('.discovery-list-item'); if (cloudWordEl) { const word = cloudWordEl.dataset.word; const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative'; const postsData = window._sentimentData?.[category]?.[word]?.posts; if (postsData) { showSlidingPanel(word, Array.from(postsData), category); } } else if (entityEl) { const word = entityEl.dataset.word; const type = entityEl.dataset.type; const postsData = window._entityData?.[type]?.[word]?.posts; if (postsData) { renderContextContent(word, postsData); } } }); }
 function initializeProblemFinderTool() { console.log("Problem Finder elements found. Initializing..."); const pillsContainer = document.getElementById('pf-suggestion-pills'); const groupInput = document.getElementById('group-input'); const findCommunitiesBtn = document.getElementById('find-communities-btn'); const searchSelectedBtn = document.getElementById('search-selected-btn'); const step1Container = document.getElementById('step-1-container'); const step2Container = document.getElementById('subreddit-selection-container'); const inspireButton = document.getElementById('inspire-me-button'); const choicesContainer = document.getElementById('subreddit-choices'); const audienceTitle = document.getElementById('pf-audience-title'); const backButton = document.getElementById('back-to-step1-btn'); if (!findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer) { console.error("Critical error: A key element was null. Aborting initialization."); return; } const transitionToStep2 = () => { if (step2Container.classList.contains('visible')) return; step1Container.classList.add('hidden'); step2Container.classList.add('visible'); choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>'; audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`; }; const transitionToStep1 = () => { step2Container.classList.remove('visible'); step1Container.classList.remove('hidden'); _allRankedSubreddits = []; const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; } }; pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join(''); pillsContainer.addEventListener('click', (event) => { if (event.target.classList.contains('pf-suggestion-pill')) { groupInput.value = event.target.getAttribute('data-value'); findCommunitiesBtn.click(); } }); inspireButton.addEventListener('click', () => { pillsContainer.classList.toggle('visible'); }); 
@@ -950,12 +954,20 @@ function initializeProblemFinderTool() { console.log("Problem Finder elements fo
         originalGroupName = groupName; 
         transitionToStep2(); 
         try {
-            const initialSuggestions = await findSubredditsForGroup(groupName); 
+            const initialSuggestions = await findSubredditsForGroup(groupName);
+            if (initialSuggestions.length === 0) {
+                 // This condition will be met if the catch block in findSubredditsForGroup returns an empty array.
+                 throw new Error("AI suggestion failed or returned no results.");
+            }
             const rankedSubreddits = await fetchAndRankSubreddits(initialSuggestions);
             displaySubredditChoices(rankedSubreddits);
         } catch (error) {
-            console.error("Failed during subreddit validation process:", error);
-            displaySubredditChoices([]);
+            console.error("Failed during AI subreddit suggestion process:", error.message);
+            // *** FALLBACK WORKAROUND LOGIC ***
+            alert("Could not get AI suggestions due to a server error. Using a default list of communities for demonstration. Please check your Netlify proxy configuration and OpenAI API key.");
+            const fallbackSubs = ["HomeImprovement", "DIY", "personalfinance", "travel", "Cooking", "Fitness", "gadgets"];
+            const rankedSubreddits = await fetchAndRankSubreddits(fallbackSubs);
+            displaySubredditChoices(rankedSubreddits);
         }
     }); 
     

@@ -1,5 +1,4 @@
-
-// =================================================================================
+/ =================================================================================
 // COMPLETE AND VERIFIED SCRIPT (VERSION 14.3 - UI FLOW FIXED & RESILIENT)
 // This version corrects the product/brand discovery UI flow to be non-destructive.
 // It now displays a status message above the initial results instead of replacing them.
@@ -175,31 +174,42 @@ async function handleRemoveSubClick(event) {
     const button = event.target.closest('.remove-sub-btn');
     if (!button) return;
 
-    const cardElement = button.closest('.subreddit-tag-detailed');
-    if (!cardElement) return;
+    // --- START: Instant move and button swap ---
+    const card = button.closest('.subreddit-tag-detailed');
+    const destinationList = document.querySelector('#similar-subreddits-container .subreddit-tag-list');
+    
+    if (card && destinationList) {
+        const actionContainer = card.querySelector('.tag-footer-action');
+        const subName = button.dataset.subname;
+        const subDetailsString = button.dataset.subDetails || '{}'; 
+
+        if (actionContainer && subName) {
+            // Create the new "Add to Analysis" button
+            const newButton = document.createElement('button');
+            newButton.className = 'add-related-sub-btn';
+            newButton.dataset.subname = subName;
+            newButton.dataset.subDetails = subDetailsString;
+            newButton.textContent = '+ Add to Analysis';
+            newButton.style.cssText = "flex-grow: 1; padding: 8px 12px; border-radius: 6px; border: 1px solid #007bff; background-color: #007bff; color: white; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease;";
+            
+            // Replace the old "Remove" button with the new "Add" button
+            actionContainer.replaceChild(newButton, button);
+            
+            // Instantly move the card to the "Related Communities" container
+            destinationList.prepend(card);
+        }
+    }
+    // --- END: Instant move and button swap ---
 
     const subName = button.dataset.subname;
-    const subDetailsJSON = button.dataset.subDetails;
-
-    if (!subName || !subDetailsJSON) {
-        console.error("Missing subreddit data on the 'Remove' button.");
+    if (!subName) {
+        console.error("Missing subreddit name on the 'Remove' button.");
         return;
     }
     
-    button.disabled = true;
-    button.textContent = 'Removing...';
+    // The original button is now gone, so we don't disable it or change its text.
 
-    // --- INSTANT UI MOVE ---
-    const similarList = document.querySelector('#similar-subreddits-container .subreddit-tag-list');
-    if (similarList) {
-         cardElement.querySelector('.tag-footer-action').innerHTML = `
-            <button class="add-related-sub-btn" data-subname="${subName}" data-sub-details='${subDetailsJSON}' style="flex-grow: 1; padding: 8px 12px; border-radius: 6px; border: 1px solid #007bff; background-color: #007bff; color: white; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease;">+ Add to Analysis</button>
-            <a href="https://www.reddit.com/r/${subName}" target="_blank" rel="noopener noreferrer" class="view-sub-btn" style="flex-grow: 1; text-decoration: none; padding: 8px 12px; border-radius: 6px; border: 1px solid #6c757d; background-color: #f8f9fa; color: #343a40; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; text-align: center; transition: all 0.2s ease;">View on Reddit</a>
-         `;
-         similarList.appendChild(cardElement);
-    }
-    // --- END UI MOVE ---
-
+    // Uncheck the hidden checkbox that tracks the state of selected subreddits.
     const checkbox = document.getElementById(`sub-${subName}`);
     if (checkbox) {
         checkbox.checked = false;
@@ -210,6 +220,7 @@ async function handleRemoveSubClick(event) {
         countHeaderDiv.innerHTML = 'Updating analysis... <span class="loader-dots"></span>';
     }
 
+    // Re-run the entire analysis with the updated list of subreddits.
     await runProblemFinder({ isUpdate: true });
 }
 
@@ -422,9 +433,6 @@ async function renderIncludedSubreddits(subreddits) {
     if (!container) return;
 
     container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list" style="display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch;"><p class="loading-text" style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Loading community details...</p></div>`;
-    // Add event listener for remove buttons
-    container.removeEventListener('click', handleRemoveSubClick);
-    container.addEventListener('click', handleRemoveSubClick);
 
     try {
         const detailPromises = subreddits.map(sub => fetchSubredditDetails(sub));
@@ -447,7 +455,7 @@ async function renderIncludedSubreddits(subreddits) {
             const activityEmoji = activityData[0];
             const activityText = activityData[1];
 
-            return `<div class="subreddit-tag-detailed" data-subname-card="${subName}" style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: space-between;">
+            return `<div class="subreddit-tag-detailed" style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: space-between;">
                         <div>
                             <div class="tag-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                                 <span class="tag-name" style="font-weight: bold; font-size: 1rem; color: #0056b3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">r/${subName}</span>
@@ -465,7 +473,7 @@ async function renderIncludedSubreddits(subreddits) {
                     </div>`;
         }).join('');
 
-        container.querySelector('.subreddit-tag-list').innerHTML = tagsHTML;
+        container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list" style="display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch;">${tagsHTML}</div>`;
 
     } catch (error) {
         console.error("Error rendering subreddit details:", error);
@@ -484,6 +492,7 @@ async function renderIncludedSubreddits(subreddits) {
  * @param {string} audienceContext - The original group name for context (e.g., "brides to be").
  * @returns {Promise<string[]>} A promise that resolves to an array of new subreddit names.
  */
+// ### MODIFIED FUNCTION ###
 async function findRelatedSubredditsAI(analyzedSubsData, audienceContext) {
     const subNames = analyzedSubsData.map(d => d.name).join(', ');
     
@@ -535,14 +544,10 @@ async function findRelatedSubredditsAI(analyzedSubsData, audienceContext) {
  * Handles the click event for adding a related subreddit to the analysis.
  * @param {Event} event - The click event object.
  */
-// ### MODIFIED FUNCTION ###
 async function handleAddRelatedSubClick(event) {
     if (!event.target.classList.contains('add-related-sub-btn')) return;
 
     const button = event.target;
-    const cardElement = button.closest('.subreddit-tag-detailed');
-    if (!cardElement) return;
-
     const subName = button.dataset.subname;
     const subDetailsJSON = button.dataset.subDetails;
 
@@ -551,19 +556,31 @@ async function handleAddRelatedSubClick(event) {
         return;
     }
 
-    button.disabled = true;
-    button.textContent = 'Adding...';
+    // --- START: Instant move and button swap ---
+    const card = button.closest('.subreddit-tag-detailed');
+    const destinationList = document.querySelector('#included-subreddits-container .subreddit-tag-list');
 
-    // --- INSTANT UI MOVE ---
-    const includedList = document.querySelector('#included-subreddits-container .subreddit-tag-list');
-    if (includedList) {
-        cardElement.querySelector('.tag-footer-action').innerHTML = `
-           <button class="remove-sub-btn" data-subname="${subName}" data-sub-details='${subDetailsJSON}' style="flex-grow: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid #dc3545; background-color: #f8d7da; color: #721c24; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease;">Remove</button>
-           <a href="https://www.reddit.com/r/${subName}" target="_blank" rel="noopener noreferrer" class="view-sub-btn" style="flex-grow: 1; text-decoration: none; padding: 6px 10px; border-radius: 6px; border: 1px solid #6c757d; background-color: #f8f9fa; color: #343a40; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; text-align: center; transition: all 0.2s ease;">View on Reddit</a>
-        `;
-        includedList.appendChild(cardElement);
+    if (card && destinationList) {
+        const actionContainer = card.querySelector('.tag-footer-action');
+        if (actionContainer) {
+            // Create the new "Remove" button
+            const newButton = document.createElement('button');
+            newButton.className = 'remove-sub-btn';
+            newButton.dataset.subname = subName;
+            newButton.dataset.subDetails = subDetailsJSON;
+            newButton.textContent = 'Remove';
+            newButton.style.cssText = "flex-grow: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid #dc3545; background-color: #f8d7da; color: #721c24; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease;";
+
+            // Replace the old "Add" button with the new "Remove" button
+            actionContainer.replaceChild(newButton, button);
+            
+            // Instantly move the card to the "Analysis Based On" container
+            destinationList.prepend(card);
+        }
     }
-    // --- END UI MOVE ---
+    // --- END: Instant move and button swap ---
+    
+    // The original button is now gone, so we don't disable it or change its text.
 
     try {
         const countHeaderDiv = document.getElementById("count-header");
@@ -594,6 +611,7 @@ async function handleAddRelatedSubClick(event) {
         console.error("Failed to add related sub and re-run analysis:", error);
         alert("An error occurred while adding the community. Please try again.");
     }
+    // The 'finally' block is removed as the original 'button' element no longer exists in the DOM.
 }
 
 
@@ -601,6 +619,7 @@ async function handleAddRelatedSubClick(event) {
  * Orchestrates fetching, ranking, and rendering of related subreddits after an analysis.
  * @param {string[]} analyzedSubs - An array of subreddit names that were just analyzed.
  */
+// ### MODIFIED FUNCTION ###
 async function renderAndHandleRelatedSubreddits(analyzedSubs) {
     const container = document.getElementById('similar-subreddits-container');
     if (!container) return;
@@ -647,7 +666,7 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
             
             const description = sub.description.trim() ? sub.description : `A community for discussions and content related to r/${sub.name}.`;
 
-            return `<div class="subreddit-tag-detailed" data-subname-card="${sub.name}" style="background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: space-between;">
+            return `<div class="subreddit-tag-detailed" style="background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: space-between;">
                         <div>
                             <div class="tag-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                                 <span class="tag-name" style="font-weight: bold; font-size: 1rem; color: #0056b3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">r/${sub.name}</span>
@@ -901,25 +920,11 @@ function generateAndRenderPowerPhrases(posts) {
 // =================================================================================
 // === UPDATED AND HARDENED `runProblemFinder` FUNCTION ===
 // =================================================================================
-// ### MODIFIED FUNCTION ###
 async function runProblemFinder(options = {}) {
     const { isUpdate = false } = options; 
 
     const searchButton = document.getElementById('search-selected-btn'); if (!searchButton) { console.error("Could not find button."); return; }
-    const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked'); 
-    
-    // Check if there are any communities left to analyze. If not, stop and clear the dashboard.
-    if (selectedCheckboxes.length === 0) {
-        if (isUpdate) { // Only clear if it's an update, not an initial empty click
-            alert("No communities left to analyze. Please add a community to see results.");
-            ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "constellation-map-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
-            return;
-        } else {
-            alert("Please select at least one community.");
-            return;
-        }
-    }
-    
+    const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked'); if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value); const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
     
     if (!isUpdate) {
@@ -935,16 +940,12 @@ async function runProblemFinder(options = {}) {
     const resultsMessageDiv = document.getElementById("results-message");
     const countHeaderDiv = document.getElementById("count-header");
     
-    // Clear all core analysis containers every time.
-    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "constellation-map-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
-    const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
-    if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
-    findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
-
     if (!isUpdate) {
         if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-        // Only wipe the subreddit lists on a fresh, initial search
-        ["included-subreddits-container", "similar-subreddits-container"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+        ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+        const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
+        if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
+        findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
     }
 
     try {
@@ -952,6 +953,10 @@ async function runProblemFinder(options = {}) {
         
         const constellationContainer = document.getElementById('constellation-map-container');
         if (constellationContainer) {
+            const oldLoader = constellationContainer.querySelector('.constellation-loader');
+            if (oldLoader) oldLoader.remove();
+            const oldStars = constellationContainer.querySelectorAll('.constellation-star');
+            oldStars.forEach(star => star.remove());
             const loaderEl = document.createElement('div');
             loaderEl.className = 'panel-placeholder constellation-loader';
             loaderEl.textContent = 'Loading purchase signals...';
@@ -983,13 +988,7 @@ async function runProblemFinder(options = {}) {
         renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
         generateEmotionMapData(filteredItems).then(renderEmotionMap);
-        
-        // On an update, we don't re-render the sub lists because the UI move is now the source of truth.
-        if (!isUpdate) {
-             renderIncludedSubreddits(selectedSubreddits);
-             renderAndHandleRelatedSubreddits(selectedSubreddits);
-        }
-
+        renderIncludedSubreddits(selectedSubreddits);
         generateAndRenderPowerPhrases(filteredItems);
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
@@ -1050,6 +1049,7 @@ async function runProblemFinder(options = {}) {
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); setTimeout(() => { if (resultsWrapper) { resultsWrapper.style.opacity = '1'; if (!isUpdate) { resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); } } }, 50); } }
 
         setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
+        setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
         setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
         
     } catch (err) {
@@ -1074,6 +1074,7 @@ function initializeDashboardInteractivity() {
     dashboard.addEventListener('click', (e) => { 
         const cloudWordEl = e.target.closest('.cloud-word'); 
         const entityEl = e.target.closest('.discovery-list-item');
+        const removeBtnEl = e.target.closest('.remove-sub-btn');
         
         if (cloudWordEl) { 
             const word = cloudWordEl.dataset.word; 
@@ -1089,6 +1090,9 @@ function initializeDashboardInteractivity() {
             if (postsData) { 
                 renderContextContent(word, postsData); 
             } 
+        } else if (removeBtnEl) {
+            // New handler for the remove button
+            handleRemoveSubClick(e);
         }
     }); 
 }

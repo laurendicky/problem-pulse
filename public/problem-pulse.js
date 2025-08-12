@@ -371,6 +371,182 @@ async function renderIncludedSubreddits(subreddits) {
     }
 }
 
+// =================================================================================
+// === NEW FEATURE: RELATED SUBREDDIT SUGGESTIONS (ADDED PER REQUEST) ===
+// =================================================================================
+
+/**
+ * Uses AI to find related subreddits based on an existing list of communities.
+ * @param {Array<Object>} analyzedSubsData - Array of objects with {name, description} for each analyzed sub.
+ * @returns {Promise<string[]>} A promise that resolves to an array of new subreddit names.
+ */
+async function findRelatedSubredditsAI(analyzedSubsData) {
+    const subNames = analyzedSubsData.map(d => d.name).join(', ');
+    const descriptions = analyzedSubsData.map(d => `r/${d.name}: ${d.description.substring(0, 300)}...`).join('\n');
+
+    const prompt = `You are an expert Reddit community finder. Based on the following user-selected communities and their public descriptions, suggest up to 8 new but highly related subreddits for them to explore.
+
+    CRITICAL: Do NOT include any of the original subreddits in your suggestions. The user is already analyzing them.
+    Original Subreddits: ${subNames}
+
+    Their Descriptions:
+    ${descriptions}
+
+    Provide your response ONLY as a JSON object with a single key "subreddits", containing an array of subreddit names (without "r/").`;
+
+    const openAIParams = {
+        model: "gpt-4o-mini",
+        messages: [{
+            role: "system",
+            content: "You are an expert Reddit community finder providing answers in strict JSON format."
+        }, {
+            role: "user",
+            content: prompt
+        }],
+        temperature: 0.3,
+        max_tokens: 300,
+        response_format: {
+            "type": "json_object"
+        }
+    };
+
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        });
+        if (!response.ok) throw new Error('OpenAI related subreddits request failed.');
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) {
+            throw new Error("AI response for related subs did not contain a 'subreddits' array.");
+        }
+        return parsed.subreddits;
+    } catch (error) {
+        console.error("Error finding related subreddits via AI:", error);
+        return [];
+    }
+}
+
+/**
+ * Handles the click event for adding a related subreddit to the analysis.
+ * @param {Event} event - The click event object.
+ */
+async function handleAddRelatedSubClick(event) {
+    if (!event.target.classList.contains('add-related-sub-btn')) return;
+
+    const button = event.target;
+    const subName = button.dataset.subname;
+    const subDetailsJSON = button.dataset.subDetails;
+
+    if (!subName || !subDetailsJSON) {
+        console.error("Missing subreddit data on the 'Add' button.");
+        return;
+    }
+
+    button.textContent = 'Adding...';
+    button.disabled = true;
+
+    // 1. Get the list of currently analyzed subreddits from the DOM
+    const currentSubTags = document.querySelectorAll('#included-subreddits-container .tag-name');
+    const currentSubs = Array.from(currentSubTags).map(tag => tag.textContent.replace('r/', '').trim());
+    const newSubList = [...new Set([...currentSubs, subName])]; // Use Set to avoid duplicates
+
+    // 2. Update the hidden checkboxes in Step 2.
+    const choicesDiv = document.getElementById('subreddit-choices');
+    let checkbox = document.getElementById(`sub-${subName}`);
+
+    if (!checkbox && choicesDiv) {
+        // Checkbox doesn't exist, create and append it.
+        const subDetails = JSON.parse(subDetailsJSON);
+        const newChoiceHTML = renderSubredditChoicesHTML([subDetails]);
+        choicesDiv.insertAdjacentHTML('beforeend', newChoiceHTML);
+    }
+
+    // 3. Update all checkboxes to reflect the new combined list.
+    const allCheckboxes = document.querySelectorAll('#subreddit-choices input[type="checkbox"]');
+    allCheckboxes.forEach(cb => {
+        cb.checked = newSubList.includes(cb.value);
+    });
+
+    // 4. Re-run the entire analysis.
+    await runProblemFinder();
+}
+
+
+/**
+ * Orchestrates fetching, ranking, and rendering of related subreddits after an analysis.
+ * @param {string[]} analyzedSubs - An array of subreddit names that were just analyzed.
+ */
+async function renderAndHandleRelatedSubreddits(analyzedSubs) {
+    const container = document.getElementById('similar-subreddits-container');
+    if (!container) return;
+
+    // Clear previous results and set up listener
+    container.innerHTML = `
+        <h3 class="dashboard-section-title" style="margin-top: 2.5rem; margin-bottom: 1rem;">Related Communities to Explore</h3>
+        <div class="subreddit-tag-list" style="display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch;">
+            <p class="loading-text" style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Finding similar communities...</p>
+        </div>`;
+    container.removeEventListener('click', handleAddRelatedSubClick); // Prevent duplicate listeners
+    container.addEventListener('click', handleAddRelatedSubClick);
+
+    try {
+        const detailPromises = analyzedSubs.map(sub => fetchSubredditDetails(sub));
+        const detailsArray = await Promise.all(detailPromises);
+        const validDetails = detailsArray.filter(Boolean).map(d => ({
+            name: d.display_name,
+            description: d.public_description || ''
+        }));
+
+        if (validDetails.length === 0) throw new Error("Could not get details for source subreddits.");
+
+        const relatedSubNames = await findRelatedSubredditsAI(validDetails);
+        const newSubNames = relatedSubNames.filter(name => !analyzedSubs.some(s => s.toLowerCase() === name.toLowerCase()));
+
+        if (newSubNames.length === 0) {
+            container.querySelector('.subreddit-tag-list').innerHTML = `<p style="font-style: italic; color: #777; padding: 1rem;">No new related communities were found.</p>`;
+            return;
+        }
+
+        const rankedRelatedSubs = await fetchAndRankSubreddits(newSubNames);
+
+        if (rankedRelatedSubs.length === 0) {
+            container.querySelector('.subreddit-tag-list').innerHTML = `<p style="font-style: italic; color: #777; padding: 1rem;">No suitable communities found after validation.</p>`;
+            return;
+        }
+
+        const tagsHTML = rankedRelatedSubs.slice(0, 6).map(sub => { // Show top 6 suggestions
+            const subDetailsString = JSON.stringify(sub).replace(/'/g, "&apos;");
+            const members = formatMemberCount(sub.members);
+            const activityData = sub.activityLabel.split(' ');
+            const activityEmoji = activityData[0];
+            const activityText = activityData[1];
+
+            return `<div class="subreddit-tag-detailed" style="background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div class="tag-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <span class="tag-name" style="font-weight: bold; font-size: 1rem; color: #0056b3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">r/${sub.name}</span>
+                                <span class="tag-activity" style="font-size: 0.8rem; background: #e9ecef; color: #495057; padding: 3px 8px; border-radius: 12px; flex-shrink: 0; margin-left: 8px;">${activityEmoji} ${activityText}</span>
+                            </div>
+                            <div class="tag-footer" style="font-size: 0.8rem; color: #6c757d; text-align: right; border-top: 1px solid #f1f3f5; padding-top: 8px; margin-top: 10px;">
+                                <span class="tag-members"><strong>${members}</strong> members</span>
+                            </div>
+                        </div>
+                        <div class="tag-footer-action" style="margin-top: 12px; text-align: center;">
+                           <button class="add-related-sub-btn" data-subname="${sub.name}" data-sub-details='${subDetailsString}' style="width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid #007bff; background-color: #007bff; color: white; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease;">+ Add to Analysis</button>
+                        </div>
+                    </div>`;
+        }).join('');
+
+        container.querySelector('.subreddit-tag-list').innerHTML = tagsHTML;
+    } catch (error) {
+        console.error("Error in renderAndHandleRelatedSubreddits:", error);
+        container.querySelector('.subreddit-tag-list').innerHTML = `<p style="color: #dc3545; font-style: italic; padding: 1rem;">Could not load related community suggestions.</p>`;
+    }
+}
+
 
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
@@ -609,7 +785,7 @@ async function runProblemFinder() {
     const demandSignalTerms = [ "i'd pay good money for", "buy it in a second", "i'd subscribe to", "throw money at it", "where can i buy", "happily pay", "shut up and take my money", "sick of doing this manually", "can't find anything that", "waste so much time on", "has to be a better way", "shouldn't be this hard", "why is there no tool for", "why is there no app for", "tried everything and nothing works", "tool almost did what i wanted", "it's missing", "tried", "gave up on it", "if only there was an app", "i wish someone would build", "why hasn't anyone made", "waste hours every week", "such a timesuck", "pay just to not have to think", "rather pay than do this myself" ];
     
     const resultsWrapper = document.getElementById('results-wrapper-b'); if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+    ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
     const resultsMessageDiv = document.getElementById("results-message");
     const countHeaderDiv = document.getElementById("count-header");
@@ -709,6 +885,7 @@ async function runProblemFinder() {
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); setTimeout(() => { if (resultsWrapper) { resultsWrapper.style.opacity = '1'; resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); } }, 50); } }
 
         runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime);
+        renderAndHandleRelatedSubreddits(selectedSubreddits); // <-- ADDED: Trigger related subs feature
         
         setTimeout(() => {
             enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName);

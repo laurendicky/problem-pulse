@@ -1,8 +1,3 @@
-===============================================================
-// COMPLETE AND VERIFIED SCRIPT (VERSION 14.3 - UI FLOW FIXED & RESILIENT)
-// This version corrects the product/brand discovery UI flow to be non-destructive.
-// It now displays a status message above the initial results instead of replacing them.
-// =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';

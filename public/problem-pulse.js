@@ -1094,111 +1094,104 @@ function initializeDashboardInteractivity() {
     }); 
 }
 
-function initializeProblemFinderTool() {
-    console.log("Problem Finder elements found. Initializing...");
-    const pillsContainer = document.getElementById('pf-suggestion-pills');
-    const groupInput = document.getElementById('group-input');
-    const findCommunitiesBtn = document.getElementById('find-communities-btn');
-    const searchSelectedBtn = document.getElementById('search-selected-btn');
-    const step2Container = document.getElementById('subreddit-selection-container');
-    const inspireButton = document.getElementById('inspire-me-button');
-    const choicesContainer = document.getElementById('subreddit-choices');
-    const audienceTitle = document.getElementById('pf-audience-title');
-    const backButton = document.getElementById('back-to-step1-btn');
+
+
+function initializeProblemFinderTool() { 
+    console.log("Problem Finder elements found. Initializing..."); 
     
-    // --- MODIFICATION START ---
+    // --- Get references to all necessary elements ---
     const welcomeDiv = document.getElementById('welcome-div'); 
-    // This was the only element missing from the original check.
-    if (!pillsContainer || !groupInput || !findCommunitiesBtn || !searchSelectedBtn || !welcomeDiv || !step2Container || !inspireButton || !choicesContainer || !audienceTitle || !backButton) {
-        console.error("Critical error: A key UI element was not found. Aborting initialization.");
-        return;
-    }
+    const pillsContainer = document.getElementById('pf-suggestion-pills'); 
+    const groupInput = document.getElementById('group-input'); 
+    const findCommunitiesBtn = document.getElementById('find-communities-btn'); 
+    const searchSelectedBtn = document.getElementById('search-selected-btn'); 
+    const step1Container = document.getElementById('step-1-container'); 
+    const step2Container = document.getElementById('subreddit-selection-container'); 
+    const inspireButton = document.getElementById('inspire-me-button'); 
+    const choicesContainer = document.getElementById('subreddit-choices'); 
+    const audienceTitle = document.getElementById('pf-audience-title'); 
+    const backButton = document.getElementById('back-to-step1-btn'); 
+    
+    if (!findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer) { 
+        console.error("Critical error: A key element was null. Aborting initialization."); 
+        return; 
+    } 
 
-    const transitionToStep2 = () => {
-        if (step2Container.classList.contains('visible')) return;
+    // --- Define the transition functions with the new logic ---
+    const transitionToStep2 = () => { 
+        if (step2Container.classList.contains('visible')) return; 
 
-        // Hide the entire welcome section
-        welcomeDiv.classList.add('hidden');
+        if (welcomeDiv) { welcomeDiv.style.display = 'none'; }
         
-        // Show the subreddit selection container
-        step2Container.classList.remove('hidden');
-        step2Container.classList.add('visible');
+        step1Container.classList.add('hidden'); 
+        step2Container.classList.add('visible'); 
+        choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>'; 
+        audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`; 
+    }; 
+    
+    const transitionToStep1 = () => { 
+        if (welcomeDiv) { welcomeDiv.style.display = 'block'; }
         
-        // Populate the container
-        choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>';
-        audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`;
-    };
+        step2Container.classList.remove('visible'); 
+        step1Container.classList.remove('hidden'); 
+        _allRankedSubreddits = []; 
+        const resultsWrapper = document.getElementById('results-wrapper-b'); 
+        if (resultsWrapper) { 
+            resultsWrapper.style.display = 'none'; 
+        } 
+    }; 
 
-    const transitionToStep1 = () => {
-        // Hide the subreddit selection container
-        step2Container.classList.add('hidden');
-        step2Container.classList.remove('visible');
-        
-        // Show the welcome section again
-        welcomeDiv.classList.remove('hidden');
-        
-        // Clear old data and hide results
-        _allRankedSubreddits = [];
-        const resultsWrapper = document.getElementById('results-wrapper-b');
-        if (resultsWrapper) {
-            resultsWrapper.style.display = 'none';
-        }
-    };
-    // --- MODIFICATION END ---
+    // --- Set up event listeners ---
+    pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join(''); 
+    pillsContainer.addEventListener('click', (event) => { 
+        if (event.target.classList.contains('pf-suggestion-pill')) { 
+            groupInput.value = event.target.getAttribute('data-value'); 
+            findCommunitiesBtn.click(); 
+        } 
+    }); 
     
-    pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
+    inspireButton.addEventListener('click', () => { 
+        pillsContainer.classList.toggle('visible'); 
+    }); 
     
-    pillsContainer.addEventListener('click', (event) => {
-        if (event.target.classList.contains('pf-suggestion-pill')) {
-            groupInput.value = event.target.getAttribute('data-value');
-            findCommunitiesBtn.click();
-        }
-    });
-    
-    inspireButton.addEventListener('click', () => {
-        pillsContainer.classList.toggle('visible');
-    });
-    
-    findCommunitiesBtn.addEventListener("click", async (event) => {
-        event.preventDefault();
-        const groupName = groupInput.value.trim();
-        if (!groupName) {
-            alert("Please enter a group of people or select a suggestion.");
-            return;
-        }
-        originalGroupName = groupName;
-        transitionToStep2();
+    findCommunitiesBtn.addEventListener("click", async (event) => { 
+        event.preventDefault(); 
+        const groupName = groupInput.value.trim(); 
+        if (!groupName) { 
+            alert("Please enter a group of people or select a suggestion."); 
+            return; 
+        } 
+        originalGroupName = groupName; 
+        transitionToStep2(); 
         try {
-            const initialSuggestions = await findSubredditsForGroup(groupName);
+            const initialSuggestions = await findSubredditsForGroup(groupName); 
             const rankedSubreddits = await fetchAndRankSubreddits(initialSuggestions);
             displaySubredditChoices(rankedSubreddits);
         } catch (error) {
             console.error("Failed during subreddit validation process:", error);
             displaySubredditChoices([]);
         }
-    });
+    }); 
     
-    searchSelectedBtn.addEventListener("click", (event) => {
-        event.preventDefault();
-        runProblemFinder();
-    });
+    searchSelectedBtn.addEventListener("click", (event) => { 
+        event.preventDefault(); 
+        runProblemFinder(); 
+    }); 
     
-    backButton.addEventListener('click', () => {
-        transitionToStep1();
-    });
+    backButton.addEventListener('click', () => { 
+        transitionToStep1(); 
+    }); 
     
-    choicesContainer.addEventListener('click', (event) => {
-        const choiceDiv = event.target.closest('.subreddit-choice');
-        if (choiceDiv) {
-            const checkbox = choiceDiv.querySelector('input[type="checkbox"]');
-            if (checkbox) {
-                checkbox.checked = !checkbox.checked;
-            }
-        }
-    });
+    choicesContainer.addEventListener('click', (event) => { 
+        const choiceDiv = event.target.closest('.subreddit-choice'); 
+        if (choiceDiv) { 
+            const checkbox = choiceDiv.querySelector('input[type="checkbox"]'); 
+            if (checkbox) checkbox.checked = !checkbox.checked; 
+        } 
+    }); 
     
-    initializeDashboardInteractivity();
-    console.log("Problem Finder tool successfully initialized.");
+    initializeDashboardInteractivity(); 
+    console.log("Problem Finder tool successfully initialized."); 
 }
 
 function waitForElementAndInit() { 

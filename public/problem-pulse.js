@@ -1,4 +1,3 @@
-
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
@@ -1101,39 +1100,42 @@ function initializeProblemFinderTool() {
     const groupInput = document.getElementById('group-input');
     const findCommunitiesBtn = document.getElementById('find-communities-btn');
     const searchSelectedBtn = document.getElementById('search-selected-btn');
-    const step1Container = document.getElementById('step-1-container');
     const step2Container = document.getElementById('subreddit-selection-container');
     const inspireButton = document.getElementById('inspire-me-button');
     const choicesContainer = document.getElementById('subreddit-choices');
     const audienceTitle = document.getElementById('pf-audience-title');
     const backButton = document.getElementById('back-to-step1-btn');
-
-    // Abort if any critical element is missing
-    if (!pillsContainer || !groupInput || !findCommunitiesBtn || !searchSelectedBtn || !step1Container || !step2Container || !inspireButton || !choicesContainer || !audienceTitle || !backButton) {
-        console.error("Critical error: A key UI element for the Problem Finder tool was not found. Aborting initialization.");
+    
+    // --- MODIFICATION START ---
+    const welcomeDiv = document.getElementById('welcome-div'); 
+    // This was the only element missing from the original check.
+    if (!pillsContainer || !groupInput || !findCommunitiesBtn || !searchSelectedBtn || !welcomeDiv || !step2Container || !inspireButton || !choicesContainer || !audienceTitle || !backButton) {
+        console.error("Critical error: A key UI element was not found. Aborting initialization.");
         return;
     }
 
-    // --- CORRECTED TRANSITION LOGIC ---
     const transitionToStep2 = () => {
         if (step2Container.classList.contains('visible')) return;
-        
-        // Hide the input form container from step 1
-        step1Container.classList.add('hidden');
+
+        // Hide the entire welcome section
+        welcomeDiv.classList.add('hidden');
         
         // Show the subreddit selection container
+        step2Container.classList.remove('hidden');
         step2Container.classList.add('visible');
         
+        // Populate the container
         choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>';
         audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`;
     };
 
     const transitionToStep1 = () => {
         // Hide the subreddit selection container
+        step2Container.classList.add('hidden');
         step2Container.classList.remove('visible');
         
-        // Show the input form container for step 1
-        step1Container.classList.remove('hidden');
+        // Show the welcome section again
+        welcomeDiv.classList.remove('hidden');
         
         // Clear old data and hide results
         _allRankedSubreddits = [];
@@ -1142,8 +1144,8 @@ function initializeProblemFinderTool() {
             resultsWrapper.style.display = 'none';
         }
     };
+    // --- MODIFICATION END ---
     
-    // --- EVENT LISTENERS (UNCHANGED) ---
     pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
     
     pillsContainer.addEventListener('click', (event) => {
@@ -1198,7 +1200,6 @@ function initializeProblemFinderTool() {
     initializeDashboardInteractivity();
     console.log("Problem Finder tool successfully initialized.");
 }
-
 
 function waitForElementAndInit() { 
     const keyElementId = 'find-communities-btn'; 

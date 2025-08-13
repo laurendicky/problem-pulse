@@ -1,4 +1,3 @@
-
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
@@ -1094,117 +1093,125 @@ function initializeDashboardInteractivity() {
         }
     }); 
 }
-
-
-
-function initializeProblemFinderTool() {
-    console.log("Problem Finder elements found. Initializing...");
-
-    // --- MODIFICATION START ---
-    // 1. We get a reference to your #welcome-div.
-    // 2. The old 'step1Container' variable has been removed as it's no longer needed.
-    const welcomeDiv = document.getElementById('welcome-div');
-    // --- MODIFICATION END ---
-
-    const pillsContainer = document.getElementById('pf-suggestion-pills');
-    const groupInput = document.getElementById('group-input');
-    const findCommunitiesBtn = document.getElementById('find-communities-btn');
-    const searchSelectedBtn = document.getElementById('search-selected-btn');
-    const step2Container = document.getElementById('subreddit-selection-container');
-    const inspireButton = document.getElementById('inspire-me-button');
-    const choicesContainer = document.getElementById('subreddit-choices');
-    const audienceTitle = document.getElementById('pf-audience-title');
+function initializeProblemFinderTool() { 
+    console.log("Problem Finder elements found. Initializing..."); 
+    const pillsContainer = document.getElementById('pf-suggestion-pills'); 
+    const groupInput = document.getElementById('group-input'); 
+    const findCommunitiesBtn = document.getElementById('find-communities-btn'); 
+    const searchSelectedBtn = document.getElementById('search-selected-btn'); 
+    const step2Container = document.getElementById('subreddit-selection-container'); 
+    const inspireButton = document.getElementById('inspire-me-button'); 
+    const choicesContainer = document.getElementById('subreddit-choices'); 
+    const audienceTitle = document.getElementById('pf-audience-title'); 
     const backButton = document.getElementById('back-to-step1-btn');
     
-    // We've added a check here for your welcomeDiv to ensure everything is loaded correctly.
-    if (!welcomeDiv || !findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer) {
-        console.error("Critical error: A key element (like #welcome-div) was null. Aborting initialization.");
-        return;
-    }
+    // --- MODIFICATION START ---
+    // Get a reference to the main welcome div
+    const welcomeDiv = document.getElementById('welcome-div');
+    if (!findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer || !welcomeDiv) { 
+        console.error("Critical error: A key element was null. Aborting initialization."); 
+        return; 
+    } 
 
-    const transitionToStep2 = () => {
-        if (step2Container.classList.contains('visible')) return;
-
-        // --- MODIFICATION START ---
-        // 3. This now hides the #welcome-div instead of the old container.
-        if (welcomeDiv) welcomeDiv.classList.add('hidden');
-        // --- MODIFICATION END ---
-
-        step2Container.classList.add('visible');
-        choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>';
-        audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`;
-    };
-
-    const transitionToStep1 = () => {
-        step2Container.classList.remove('visible');
-
-        // --- MODIFICATION START ---
-        // 4. This ensures the "back" button shows the #welcome-div again.
-        if (welcomeDiv) welcomeDiv.classList.remove('hidden');
-        // --- MODIFICATION END ---
+    const transitionToStep2 = () => { 
+        if (step2Container.classList.contains('visible')) return; 
         
-        _allRankedSubreddits = [];
-        const resultsWrapper = document.getElementById('results-wrapper-b');
-        if (resultsWrapper) {
-            resultsWrapper.style.display = 'none';
-        }
-    };
+        // Hide the entire welcome section
+        welcomeDiv.style.display = 'none';
 
-    // NO CHANGES BELOW THIS LINE IN THIS FUNCTION.
-    // The existing event listeners will now use the modified transition helpers above.
-    pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
-    pillsContainer.addEventListener('click', (event) => {
-        if (event.target.classList.contains('pf-suggestion-pill')) {
-            groupInput.value = event.target.getAttribute('data-value');
-            findCommunitiesBtn.click();
-        }
-    });
-    inspireButton.addEventListener('click', () => {
-        pillsContainer.classList.toggle('visible');
-    });
+        // Show the subreddit selection container
+        step2Container.classList.add('visible');
+        
+        choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>'; 
+        audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`; 
+    }; 
+    
+    const transitionToStep1 = () => { 
+        // Hide the subreddit selection container
+        step2Container.classList.remove('visible'); 
+        
+        // Show the welcome section again
+        welcomeDiv.style.display = 'block';
 
-    findCommunitiesBtn.addEventListener("click", async (event) => {
-        event.preventDefault();
-        const groupName = groupInput.value.trim();
-        if (!groupName) {
-            alert("Please enter a group of people or select a suggestion.");
-            return;
-        }
-        originalGroupName = groupName;
-        transitionToStep2();
+        // Clear data and hide results
+        _allRankedSubreddits = []; 
+        const resultsWrapper = document.getElementById('results-wrapper-b'); 
+        if (resultsWrapper) { 
+            resultsWrapper.style.display = 'none'; 
+        } 
+    }; 
+    // --- MODIFICATION END ---
+    
+    pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join(''); 
+    pillsContainer.addEventListener('click', (event) => { 
+        if (event.target.classList.contains('pf-suggestion-pill')) { 
+            groupInput.value = event.target.getAttribute('data-value'); 
+            findCommunitiesBtn.click(); 
+        } 
+    }); 
+    
+    inspireButton.addEventListener('click', () => { 
+        pillsContainer.classList.toggle('visible'); 
+    }); 
+    
+    findCommunitiesBtn.addEventListener("click", async (event) => { 
+        event.preventDefault(); 
+        const groupName = groupInput.value.trim(); 
+        if (!groupName) { 
+            alert("Please enter a group of people or select a suggestion."); 
+            return; 
+        } 
+        originalGroupName = groupName; 
+        transitionToStep2(); 
         try {
-            const initialSuggestions = await findSubredditsForGroup(groupName);
+            const initialSuggestions = await findSubredditsForGroup(groupName); 
             const rankedSubreddits = await fetchAndRankSubreddits(initialSuggestions);
             displaySubredditChoices(rankedSubreddits);
         } catch (error) {
             console.error("Failed during subreddit validation process:", error);
             displaySubredditChoices([]);
         }
-    });
-
-    searchSelectedBtn.addEventListener("click", (event) => {
-        event.preventDefault();
-        runProblemFinder();
-    });
-    backButton.addEventListener('click', () => {
-        transitionToStep1();
-    });
-    choicesContainer.addEventListener('click', (event) => {
-        const choiceDiv = event.target.closest('.subreddit-choice');
-        if (choiceDiv) {
-            const checkbox = choiceDiv.querySelector('input[type="checkbox"]');
-            if (checkbox) checkbox.checked = !checkbox.checked;
-        }
-    });
-    initializeDashboardInteractivity();
-    console.log("Problem Finder tool successfully initialized.");
+    }); 
+    
+    searchSelectedBtn.addEventListener("click", (event) => { 
+        event.preventDefault(); 
+        runProblemFinder(); 
+    }); 
+    
+    backButton.addEventListener('click', () => { 
+        transitionToStep1(); 
+    }); 
+    
+    choicesContainer.addEventListener('click', (event) => { 
+        const choiceDiv = event.target.closest('.subreddit-choice'); 
+        if (choiceDiv) { 
+            const checkbox = choiceDiv.querySelector('input[type="checkbox"]'); 
+            if (checkbox) checkbox.checked = !checkbox.checked; 
+        } 
+    }); 
+    
+    initializeDashboardInteractivity(); 
+    console.log("Problem Finder tool successfully initialized."); 
 }
 
-
-
-
-
-function waitForElementAndInit() { const keyElementId = 'find-communities-btn'; let retries = 0; const maxRetries = 50; const intervalId = setInterval(() => { const keyElement = document.getElementById(keyElementId); if (keyElement) { clearInterval(intervalId); initializeProblemFinderTool(); } else { retries++; if (retries > maxRetries) { clearInterval(intervalId); console.error(`Initialization FAILED. Key element "#${keyElementId}" not found.`); } } }, 100); }
+function waitForElementAndInit() { 
+    const keyElementId = 'find-communities-btn'; 
+    let retries = 0; 
+    const maxRetries = 50; 
+    const intervalId = setInterval(() => { 
+        const keyElement = document.getElementById(keyElementId); 
+        if (keyElement) { 
+            clearInterval(intervalId); 
+            initializeProblemFinderTool(); 
+        } else { 
+            retries++; 
+            if (retries > maxRetries) { 
+                clearInterval(intervalId); 
+                console.error(`Initialization FAILED. Key element "#${keyElementId}" not found.`); 
+            } 
+        } 
+    }, 100); 
+}
 
 // --- SCRIPT ENTRY POINT ---
 document.addEventListener('DOMContentLoaded', waitForElementAndInit);

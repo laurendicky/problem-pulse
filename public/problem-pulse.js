@@ -1,3 +1,7 @@
+// =================================================================================
+// COMPLETE SCRIPT WITH HEADER HIDE/SHOW FUNCTIONALITY
+// =================================================================================
+
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
@@ -605,7 +609,6 @@ async function handleAddRelatedSubClick(event) {
         console.error("Failed to add related sub and re-run analysis:", error);
         alert("An error occurred while adding the community. Please try again.");
     }
-    // The 'finally' block is removed as the original 'button' element no longer exists in the DOM.
 }
 
 
@@ -1043,16 +1046,32 @@ async function runProblemFinder(options = {}) {
             }
         }
 
-        if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); setTimeout(() => { if (resultsWrapper) { resultsWrapper.style.opacity = '1'; if (!isUpdate) { resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });onst fullHeader = document.getElementById('full-header');
-        if (fullHeader) {
-            // 1. Start the fade-out animation
-            fullHeader.classList.add('header-hidden');
+        if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { 
+            if (resultsWrapper) { 
+                resultsWrapper.style.setProperty('display', 'flex', 'important'); 
+                setTimeout(() => { 
+                    if (resultsWrapper) { 
+                        resultsWrapper.style.opacity = '1'; 
+                        if (!isUpdate) { 
+                            resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); 
 
-            // 2. After the animation finishes, set display:none
-            fullHeader.addEventListener('transitionend', () => {
-                fullHeader.style.display = 'none';
-            }, { once: true }); // 'once:true' removes the listener after it runs
-        } } } }, 50); } }
+                            // --- NEW CODE TO HIDE HEADER ---
+                            const fullHeader = document.getElementById('full-header');
+                            if (fullHeader) {
+                                // 1. Start the fade-out animation
+                                fullHeader.classList.add('header-hidden');
+
+                                // 2. After the animation finishes, set display:none to remove it from the layout
+                                fullHeader.addEventListener('transitionend', () => {
+                                    fullHeader.style.display = 'none';
+                                }, { once: true }); // 'once:true' automatically removes the listener after it runs
+                            }
+                            // --- END NEW CODE ---
+                        } 
+                    } 
+                }, 50); 
+            } 
+        }
 
         setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
         setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
@@ -1103,8 +1122,6 @@ function initializeDashboardInteractivity() {
     }); 
 }
 
-
-
 function initializeProblemFinderTool() { 
     console.log("Problem Finder elements found. Initializing..."); 
     
@@ -1139,6 +1156,19 @@ function initializeProblemFinderTool() {
     }; 
     
     const transitionToStep1 = () => { 
+        // --- NEW CODE TO SHOW HEADER ---
+        const fullHeader = document.getElementById('full-header');
+        if (fullHeader) {
+            // 1. Remove display:none so the element is part of the layout again
+            fullHeader.style.display = ''; 
+
+            // 2. Use a tiny delay to ensure the browser registers the display change before animating
+            setTimeout(() => {
+                fullHeader.classList.remove('header-hidden');
+            }, 20);
+        }
+        // --- END NEW CODE ---
+
         if (welcomeDiv) { welcomeDiv.style.display = 'block'; }
         
         step2Container.classList.remove('visible'); 

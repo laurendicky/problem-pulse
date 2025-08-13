@@ -1,5 +1,5 @@
 // =================================================================================
-// COMPLETE SCRIPT WITH HEADER HIDE/SHOW FUNCTIONALITY
+// COMPLETE SCRIPT WITH FINAL UX TWEAKS
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -1055,18 +1055,13 @@ async function runProblemFinder(options = {}) {
                         if (!isUpdate) { 
                             resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); 
 
-                            // --- NEW CODE TO HIDE HEADER ---
                             const fullHeader = document.getElementById('full-header');
                             if (fullHeader) {
-                                // 1. Start the fade-out animation
                                 fullHeader.classList.add('header-hidden');
-
-                                // 2. After the animation finishes, set display:none to remove it from the layout
                                 fullHeader.addEventListener('transitionend', () => {
                                     fullHeader.style.display = 'none';
-                                }, { once: true }); // 'once:true' automatically removes the listener after it runs
+                                }, { once: true });
                             }
-                            // --- END NEW CODE ---
                         } 
                     } 
                 }, 50); 
@@ -1116,7 +1111,6 @@ function initializeDashboardInteractivity() {
                 renderContextContent(word, postsData); 
             } 
         } else if (removeBtnEl) {
-            // New handler for the remove button
             handleRemoveSubClick(e);
         }
     }); 
@@ -1125,7 +1119,6 @@ function initializeDashboardInteractivity() {
 function initializeProblemFinderTool() { 
     console.log("Problem Finder elements found. Initializing..."); 
     
-    // --- Get references to all necessary elements ---
     const welcomeDiv = document.getElementById('welcome-div'); 
     const pillsContainer = document.getElementById('pf-suggestion-pills'); 
     const groupInput = document.getElementById('group-input'); 
@@ -1143,34 +1136,26 @@ function initializeProblemFinderTool() {
         return; 
     } 
 
-    // --- Define the transition functions with the new logic ---
     const transitionToStep2 = () => { 
         if (step2Container.classList.contains('visible')) return; 
-
         if (welcomeDiv) { welcomeDiv.style.display = 'none'; }
-        
         step1Container.classList.add('hidden'); 
         step2Container.classList.add('visible'); 
         choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>'; 
         audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`; 
     }; 
     
+    // This function is no longer needed for the UI, but we keep it in case other logic relies on it.
+    // The "Start Again" button will now trigger a full page reload.
     const transitionToStep1 = () => { 
-        // --- NEW CODE TO SHOW HEADER ---
         const fullHeader = document.getElementById('full-header');
         if (fullHeader) {
-            // 1. Remove display:none so the element is part of the layout again
             fullHeader.style.display = ''; 
-
-            // 2. Use a tiny delay to ensure the browser registers the display change before animating
             setTimeout(() => {
                 fullHeader.classList.remove('header-hidden');
             }, 20);
         }
-        // --- END NEW CODE ---
-
         if (welcomeDiv) { welcomeDiv.style.display = 'block'; }
-        
         step2Container.classList.remove('visible'); 
         step1Container.classList.remove('hidden'); 
         _allRankedSubreddits = []; 
@@ -1180,7 +1165,6 @@ function initializeProblemFinderTool() {
         } 
     }; 
 
-    // --- Set up event listeners ---
     pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join(''); 
     pillsContainer.addEventListener('click', (event) => { 
         if (event.target.classList.contains('pf-suggestion-pill')) { 
@@ -1217,8 +1201,9 @@ function initializeProblemFinderTool() {
         runProblemFinder(); 
     }); 
     
+    // --- MODIFIED: "Start Again" button now reloads the page ---
     backButton.addEventListener('click', () => { 
-        transitionToStep1(); 
+        location.reload(); 
     }); 
     
     choicesContainer.addEventListener('click', (event) => { 

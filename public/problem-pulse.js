@@ -1043,7 +1043,16 @@ async function runProblemFinder(options = {}) {
             }
         }
 
-        if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); setTimeout(() => { if (resultsWrapper) { resultsWrapper.style.opacity = '1'; if (!isUpdate) { resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }); } } }, 50); } }
+        if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") { if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); setTimeout(() => { if (resultsWrapper) { resultsWrapper.style.opacity = '1'; if (!isUpdate) { resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });onst fullHeader = document.getElementById('full-header');
+        if (fullHeader) {
+            // 1. Start the fade-out animation
+            fullHeader.classList.add('header-hidden');
+
+            // 2. After the animation finishes, set display:none
+            fullHeader.addEventListener('transitionend', () => {
+                fullHeader.style.display = 'none';
+            }, { once: true }); // 'once:true' removes the listener after it runs
+        } } } }, 50); } }
 
         setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
         setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);

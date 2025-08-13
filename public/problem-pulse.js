@@ -707,8 +707,8 @@ function initializeDashboardInteractivity() {
     // We don't need to get the dashboard element anymore for this.
     // Attach the listener directly to the document. It's always there.
     document.addEventListener('click', (e) => {
-        // --- 1. Check for the "Start Again" Button ---
-        // This selector now specifically looks for a button inside the dashboard.
+        console.log('A click happened on the page! The element clicked was:', e.target);
+
         const backButton = e.target.closest('#results-wrapper-b #back-to-step1-btn');
         if (backButton) {
             console.log("'Start Again' button clicked via DOCUMENT delegation. Reloading page.");

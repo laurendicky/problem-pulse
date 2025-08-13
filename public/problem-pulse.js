@@ -703,36 +703,45 @@ async function runProblemFinder(options = {}) {
 // INITIALIZATION LOGIC (UPDATED)
 // =================================================================================
 // Located inside your initializeDashboardInteractivity function
-
 function initializeDashboardInteractivity() {
-    const dashboard = document.getElementById('results-wrapper-b');
-    if (!dashboard) return;
-
-    initializeConstellationInteractivity();
-
-    // The listener is on the parent `dashboard` element
-    dashboard.addEventListener('click', (e) => {
-        // Check if the clicked element (or one of its parents) is the "Start Again" button
-        const backButton = e.target.closest('#back-to-step1-btn');
+    // We don't need to get the dashboard element anymore for this.
+    // Attach the listener directly to the document. It's always there.
+    document.addEventListener('click', (e) => {
+        // --- 1. Check for the "Start Again" Button ---
+        // This selector now specifically looks for a button inside the dashboard.
+        const backButton = e.target.closest('#results-wrapper-b #back-to-step1-btn');
         if (backButton) {
-            console.log("'Start Again' button clicked via delegation. Reloading page.");
+            console.log("'Start Again' button clicked via DOCUMENT delegation. Reloading page.");
             location.reload();
             return; // Stop further processing
         }
 
-        // --- Your existing logic ---
-        const cloudWordEl = e.target.closest('.cloud-word');
-        const entityEl = e.target.closest('.discovery-list-item');
-        const removeBtnEl = e.target.closest('.remove-sub-btn');
+        // --- 2. Check for other interactive elements ONLY if they are inside the dashboard ---
+        // We wrap the rest of the checks to make sure they don't fire on clicks outside the results.
+        if (e.target.closest('#results-wrapper-b')) {
+            const cloudWordEl = e.target.closest('.cloud-word');
+            const entityEl = e.target.closest('.discovery-list-item');
+            const removeBtnEl = e.target.closest('.remove-sub-btn');
 
-        if (cloudWordEl) {
-            // ... (rest of your code is fine)
-        } else if (entityEl) {
-            // ... (rest of your code is fine)
-        } else if (removeBtnEl) {
-            handleRemoveSubClick(e);
+            if (cloudWordEl) {
+                const word = cloudWordEl.dataset.word;
+                const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
+                const postsData = window._sentimentData?.[category]?.[word]?.posts;
+                if (postsData) { showSlidingPanel(word, Array.from(postsData), category); }
+            } else if (entityEl) {
+                const word = entityEl.dataset.word;
+                const type = entityEl.dataset.type;
+                const postsData = window._entityData?.[type]?.[word]?.posts;
+                if (postsData) { renderContextContent(word, postsData); }
+            } else if (removeBtnEl) {
+                handleRemoveSubClick(e);
+            }
         }
     });
+
+    // This function can still be called from the same place,
+    // but now it handles its own interactivity.
+    initializeConstellationInteractivity();
 }
 
 function initializeProblemFinderTool() {

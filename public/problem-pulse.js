@@ -702,24 +702,33 @@ async function runProblemFinder(options = {}) {
 // =================================================================================
 // INITIALIZATION LOGIC (UPDATED)
 // =================================================================================
+// Located inside your initializeDashboardInteractivity function
+
 function initializeDashboardInteractivity() {
     const dashboard = document.getElementById('results-wrapper-b');
     if (!dashboard) return;
+
     initializeConstellationInteractivity();
+
+    // The listener is on the parent `dashboard` element
     dashboard.addEventListener('click', (e) => {
+        // Check if the clicked element (or one of its parents) is the "Start Again" button
+        const backButton = e.target.closest('#back-to-step1-btn');
+        if (backButton) {
+            console.log("'Start Again' button clicked via delegation. Reloading page.");
+            location.reload();
+            return; // Stop further processing
+        }
+
+        // --- Your existing logic ---
         const cloudWordEl = e.target.closest('.cloud-word');
         const entityEl = e.target.closest('.discovery-list-item');
         const removeBtnEl = e.target.closest('.remove-sub-btn');
+
         if (cloudWordEl) {
-            const word = cloudWordEl.dataset.word;
-            const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
-            const postsData = window._sentimentData?.[category]?.[word]?.posts;
-            if (postsData) { showSlidingPanel(word, Array.from(postsData), category); }
+            // ... (rest of your code is fine)
         } else if (entityEl) {
-            const word = entityEl.dataset.word;
-            const type = entityEl.dataset.type;
-            const postsData = window._entityData?.[type]?.[word]?.posts;
-            if (postsData) { renderContextContent(word, postsData); }
+            // ... (rest of your code is fine)
         } else if (removeBtnEl) {
             handleRemoveSubClick(e);
         }
@@ -791,15 +800,6 @@ function initializeProblemFinderTool() {
     });
 
     // --- MODIFIED: "Start Again" button now reloads the page ---
-    if(backButton) {
-        backButton.addEventListener('click', () => {
-            console.log("'Start Again' button clicked. Reloading page.");
-            location.reload();
-        });
-        console.log("INFO: 'Start Again' button listener attached successfully.");
-    } else {
-        console.error("ERROR: Could not find 'Start Again' button with ID 'back-to-step1-btn'.");
-    }
 
     choicesContainer.addEventListener('click', (event) => {
         const choiceDiv = event.target.closest('.subreddit-choice');

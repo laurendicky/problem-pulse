@@ -444,9 +444,6 @@ function renderSentimentScore(positiveCount, negativeCount) { const container = 
 // --- CONSTELLATION MAP FUNCTIONS ---
 const CONSTELLATION_CATEGORIES = { DemandSignals: { x: 0.5, y: 0.5 }, CostConcerns: { x: 0.5, y: 0.2 }, WillingnessToPay: { x: 0.8, y: 0.4 }, Frustration: { x: 0.7, y: 0.75 }, SubstituteComparisons: { x: 0.3, y: 0.75 }, Urgency: { x: 0.2, y: 0.4 }, Other: { x: 0.5, y: 0.05 }, };
 const EMOTION_COLORS = { Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7', Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316' };
-// --- MODIFICATION START: Added complementary shadow colors ---
-const EMOTION_SHADOWS = { Frustration: 'rgba(239, 68, 68, 0.5)', Anger: 'rgba(220, 38, 38, 0.5)', Longing: 'rgba(139, 92, 246, 0.5)', Desire: 'rgba(168, 85, 247, 0.5)', Excitement: 'rgba(34, 197, 94, 0.5)', Hope: 'rgba(16, 185, 129, 0.5)', Urgency: 'rgba(249, 115, 22, 0.5)' };
-// --- MODIFICATION END ---
 async function generateAndRenderConstellation(items) {
     console.log("[Constellation] Starting full generation process...");
     const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 60);
@@ -484,7 +481,7 @@ async function generateAndRenderConstellation(items) {
 function initializeConstellationInteractivity() { const container = document.getElementById('constellation-map-container'); const panel = document.getElementById('constellation-side-panel'); if (!container || !panel) return; const panelContent = panel.querySelector('.panel-content'); let hidePanelTimer; const setDefaultPanelState = () => { panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`; }; const hidePanel = () => { setDefaultPanelState(); }; setDefaultPanelState(); container.addEventListener('mouseover', (e) => { if (!e.target.classList.contains('constellation-star')) return; clearTimeout(hidePanelTimer); const star = e.target; panelContent.innerHTML = `<p class="quote">“${star.dataset.quote}”</p><h4 class="problem-theme">${star.dataset.problemTheme}</h4><p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes</p><a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>`; }); container.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); }); panel.addEventListener('mouseenter', () => { clearTimeout(hidePanelTimer); }); panel.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); }); }
 async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) { console.log("--- Starting Delayed Constellation Analysis (in background) ---"); try { const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false); const postIds = demandSignalPosts.sort((a,b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id); const highIntentComments = await fetchCommentsForPosts(postIds); const allItems = [...demandSignalPosts, ...highIntentComments]; await generateAndRenderConstellation(allItems); } catch (error) { console.error("Constellation analysis failed in the background:", error); renderConstellationMap([]); } finally { console.log("--- Constellation Analysis Complete. ---"); } }
 
-// --- MODIFICATION START: Updated renderConstellationMap function ---
+// --- START: MODIFIED FUNCTION ---
 function renderConstellationMap(signals) {
     const container = document.getElementById('constellation-map-container');
     if (!container) return;
@@ -519,18 +516,23 @@ function renderConstellationMap(signals) {
         if (!starsByCategory[categoryKey]) starsByCategory[categoryKey] = [];
         starsByCategory[categoryKey].push(star);
     });
-    starData.forEach((star, index) => { // Added index for animation delay
+    // MODIFICATION: Added 'index' to the forEach loop to use for animation delay
+    starData.forEach((star, index) => {
         const starEl = document.createElement('div');
-        starEl.className = 'constellation-star pulsing'; // Added 'pulsing' class
+        starEl.className = 'constellation-star';
         const size = 8 + (star.frequency / maxFreq) * 20;
-        const bgColor = EMOTION_COLORS[star.emotion] || '#ffffff';
-        const shadowColor = EMOTION_SHADOWS[star.emotion] || 'rgba(255, 255, 255, 0.5)';
-        
         starEl.style.width = `${size}px`;
         starEl.style.height = `${size}px`;
-        starEl.style.backgroundColor = bgColor;
-        starEl.style.boxShadow = `0 0 ${size / 2}px ${size / 4}px ${shadowColor}`; // Dynamic shadow
-        starEl.style.animationDelay = `${index * 150}ms`; // Staggered animation
+        starEl.style.backgroundColor = EMOTION_COLORS[star.emotion] || '#ffffff';
+
+        // --- NEW FEATURE: COMPLEMENTARY BOX SHADOW ---
+        // The glow color is the same as the star's background for a complementary effect.
+        starEl.style.boxShadow = `0 0 10px 2px ${starEl.style.backgroundColor}`;
+
+        // --- NEW FEATURE: STAGGERED PULSE ANIMATION ---
+        // Calculate a delay based on the star's index to create a rotating pulse effect.
+        const animationDelay = (index / starData.length) * 4; // Stagger over 4 seconds
+        starEl.style.animation = `pulse 2.5s infinite ${animationDelay.toFixed(2)}s ease-in-out`;
 
         const categoryKey = star.category && CONSTELLATION_CATEGORIES[star.category] ? star.category : 'Other';
         const categoryCoords = CONSTELLATION_CATEGORIES[categoryKey];
@@ -564,7 +566,7 @@ function renderConstellationMap(signals) {
         container.appendChild(starEl);
     });
 }
-// --- MODIFICATION END ---
+// --- END: MODIFIED FUNCTION ---
 
 // =================================================================================
 // === ENHANCEMENT & POWER PHRASES FUNCTIONS ===
@@ -638,6 +640,7 @@ function generateAndRenderPowerPhrases(posts) {
 // =================================================================================
 // === CORE `runProblemFinder` FUNCTION ===
 // =================================================================================
+// --- START: MODIFIED FUNCTION ---
 async function runProblemFinder(options = {}) {
     const { isUpdate = false } = options;
     const searchButton = document.getElementById('search-selected-btn');
@@ -665,17 +668,21 @@ async function runProblemFinder(options = {}) {
     }
     try {
         console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
-        // --- MODIFICATION START: Move loading message to side panel ---
+        
+        // --- MODIFICATION: Loading message location changed ---
+        const constellationContainer = document.getElementById('constellation-map-container');
+        if (constellationContainer) {
+            // Clear old container content, but don't add the loader here anymore.
+            const oldLoader = constellationContainer.querySelector('.constellation-loader'); if (oldLoader) oldLoader.remove();
+            const oldStars = constellationContainer.querySelectorAll('.constellation-star'); oldStars.forEach(star => star.remove());
+        }
+        // Move the "loading" message to the side panel.
         const panelContent = document.querySelector('#constellation-side-panel .panel-content');
         if (panelContent) {
             panelContent.innerHTML = `<div class="panel-placeholder">Loading purchase signals...</div>`;
         }
-        const constellationContainer = document.getElementById('constellation-map-container');
-        if (constellationContainer) {
-            const oldStars = constellationContainer.querySelectorAll('.constellation-star');
-            oldStars.forEach(star => star.remove());
-        }
-        // --- MODIFICATION END ---
+        // --- END MODIFICATION ---
+
         const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
         let generalSearchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms] : problemTerms;
         let limitPerTerm = (searchDepth === 'deep') ? 75 : 40;
@@ -751,8 +758,10 @@ async function runProblemFinder(options = {}) {
                     if (resultsWrapper) {
                         resultsWrapper.style.opacity = '1';
                         if (!isUpdate) {
+                            // --- MODIFIED & ROBUST SCROLL LOGIC ---
                             const topOfResults = resultsWrapper.getBoundingClientRect().top + window.pageYOffset;
                             window.scrollTo({ top: topOfResults, behavior: 'smooth' });
+                            
                             const fullHeader = document.getElementById('full-header');
                             if (fullHeader) {
                                 fullHeader.classList.add('header-hidden');
@@ -760,6 +769,7 @@ async function runProblemFinder(options = {}) {
                                     fullHeader.style.display = 'none';
                                 }, { once: true });
                             }
+                            // --- END MODIFIED SCROLL LOGIC ---
                         }
                     }
                 }, 50);
@@ -779,21 +789,32 @@ async function runProblemFinder(options = {}) {
         }
     }
 }
+// --- END: MODIFIED FUNCTION ---
 
 // =================================================================================
 // INITIALIZATION LOGIC (UPDATED)
 // =================================================================================
+// Located inside your initializeDashboardInteractivity function
 function initializeDashboardInteractivity() {
+    // We don't need to get the dashboard element anymore for this.
+    // Attach the listener directly to the document. It's always there.
     document.addEventListener('click', (e) => {
+        console.log('A click happened on the page! The element clicked was:', e.target);
+
         const backButton = e.target.closest('#results-wrapper-b #back-to-step1-btn');
         if (backButton) {
+            console.log("'Start Again' button clicked via DOCUMENT delegation. Reloading page.");
             location.reload();
-            return;
+            return; // Stop further processing
         }
+
+        // --- 2. Check for other interactive elements ONLY if they are inside the dashboard ---
+        // We wrap the rest of the checks to make sure they don't fire on clicks outside the results.
         if (e.target.closest('#results-wrapper-b')) {
             const cloudWordEl = e.target.closest('.cloud-word');
             const entityEl = e.target.closest('.discovery-list-item');
             const removeBtnEl = e.target.closest('.remove-sub-btn');
+
             if (cloudWordEl) {
                 const word = cloudWordEl.dataset.word;
                 const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
@@ -809,32 +830,58 @@ function initializeDashboardInteractivity() {
             }
         }
     });
+
+    // This function can still be called from the same place,
+    // but now it handles its own interactivity.
     initializeConstellationInteractivity();
 }
 
+// --- START: MODIFIED FUNCTION ---
 function initializeProblemFinderTool() {
+    // --- NEW FEATURE: Inject CSS for star animation ---
+    // This adds the @keyframes for the pulse effect to the document's head
+    // so it's available for the stars to use.
+    const style = document.createElement('style');
+    style.textContent = `
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 0.9; }
+            50% { transform: scale(1.15); opacity: 1; }
+            100% { transform: scale(1); opacity: 0.9; }
+        }
+        .constellation-star {
+            transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
+        }
+    `;
+    document.head.appendChild(style);
+    // --- END NEW FEATURE ---
+
     console.log("Problem Finder elements found. Initializing...");
     const welcomeDiv = document.getElementById('welcome-div');
     const pillsContainer = document.getElementById('pf-suggestion-pills');
     const groupInput = document.getElementById('group-input');
     const findCommunitiesBtn = document.getElementById('find-communities-btn');
     const searchSelectedBtn = document.getElementById('search-selected-btn');
+    const step1Container = document.getElementById('step-1-container');
     const step2Container = document.getElementById('subreddit-selection-container');
     const inspireButton = document.getElementById('inspire-me-button');
     const choicesContainer = document.getElementById('subreddit-choices');
     const audienceTitle = document.getElementById('pf-audience-title');
+    const backButton = document.getElementById('back-to-step1-btn');
 
-    if (!findCommunitiesBtn || !searchSelectedBtn || !choicesContainer || !welcomeDiv || !step2Container) {
+    if (!findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer) {
         console.error("Critical error: A key element was null. Aborting initialization.");
         return;
     }
+
     const transitionToStep2 = () => {
         if (step2Container.classList.contains('visible')) return;
-        welcomeDiv.style.display = 'none';
+        if (welcomeDiv) { welcomeDiv.style.display = 'none'; }
+        step1Container.classList.add('hidden');
         step2Container.classList.add('visible');
         choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>';
         audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`;
     };
+
     pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
     pillsContainer.addEventListener('click', (event) => {
         if (event.target.classList.contains('pf-suggestion-pill')) {
@@ -842,9 +889,11 @@ function initializeProblemFinderTool() {
             findCommunitiesBtn.click();
         }
     });
+
     inspireButton.addEventListener('click', () => {
         pillsContainer.classList.toggle('visible');
     });
+
     findCommunitiesBtn.addEventListener("click", async (event) => {
         event.preventDefault();
         const groupName = groupInput.value.trim();
@@ -863,10 +912,14 @@ function initializeProblemFinderTool() {
             displaySubredditChoices([]);
         }
     });
+
     searchSelectedBtn.addEventListener("click", (event) => {
         event.preventDefault();
         runProblemFinder();
     });
+
+    // --- MODIFIED: "Start Again" button now reloads the page ---
+
     choicesContainer.addEventListener('click', (event) => {
         const choiceDiv = event.target.closest('.subreddit-choice');
         if (choiceDiv) {
@@ -874,9 +927,11 @@ function initializeProblemFinderTool() {
             if (checkbox) checkbox.checked = !checkbox.checked;
         }
     });
+
     initializeDashboardInteractivity();
     console.log("Problem Finder tool successfully initialized.");
 }
+// --- END: MODIFIED FUNCTION ---
 
 function waitForElementAndInit() {
     const keyElementId = 'find-communities-btn';

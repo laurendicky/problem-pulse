@@ -1,4 +1,4 @@
- // =================================================================================
+// =================================================================================
 // COMPLETE SCRIPT WITH FINAL UX TWEAKS (VERSION 2 - ROBUST SCROLL & RELOAD)
 // =================================================================================
 
@@ -444,23 +444,78 @@ function renderSentimentScore(positiveCount, negativeCount) { const container = 
 // --- CONSTELLATION MAP FUNCTIONS ---
 const CONSTELLATION_CATEGORIES = { DemandSignals: { x: 0.5, y: 0.5 }, CostConcerns: { x: 0.5, y: 0.2 }, WillingnessToPay: { x: 0.8, y: 0.4 }, Frustration: { x: 0.7, y: 0.75 }, SubstituteComparisons: { x: 0.3, y: 0.75 }, Urgency: { x: 0.2, y: 0.4 }, Other: { x: 0.5, y: 0.05 }, };
 const EMOTION_COLORS = { Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7', Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316' };
+
+
+// =================================================================================
+// === START: Corrected generateAndRenderConstellation Function ===
+// =================================================================================
+
 async function generateAndRenderConstellation(items) {
-    console.log("[Constellation] Starting full generation process...");
+    console.log("[Constellation] Starting full generation process with new batching strategy...");
     const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 60);
     console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
-    const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 20 quotes that express a strong purchase intent, an unsolved problem, or a significant pain point. Focus ONLY on phrases that directly mention: Willingness to pay, Frustration with a lack of a tool, A specific, unmet need, Mentions of high cost, Comparisons to other products, or A sense of urgency. CRITICAL: IGNORE general complaints, emotional support, or sentences that use words like "love" or "need" in a non-commercial context. Here are the comments:\n${prioritizedItems.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}\nRespond ONLY with a valid JSON object: {"signals": [{"quote": "The extracted quote.", "source_index": 4}]}`;
+
+    // --- MODIFICATION: Process items in smaller batches for reliability ---
+    const BATCH_SIZE = 10;
+    const batchPromises = [];
+
+    for (let i = 0; i < prioritizedItems.length; i += BATCH_SIZE) {
+        const batch = prioritizedItems.slice(i, i + BATCH_SIZE);
+        const batchStartIndex = i;
+
+        // Create the prompt for this specific batch
+        const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 5 quotes that express a strong purchase intent, an unsolved problem, or a significant pain point. Focus ONLY on phrases that directly mention: Willingness to pay, Frustration with a lack of a tool, A specific, unmet need, Mentions of high cost, Comparisons to other products, or A sense of urgency. CRITICAL: IGNORE general complaints or non-commercial emotional support. Here are the comments:\n${batch.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}\nRespond ONLY with a valid JSON object: {"signals": [{"quote": "The extracted quote.", "source_index": 4}]}`;
+
+        const apiCallPromise = fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                openaiPayload: {
+                    model: "gpt-4o-mini",
+                    messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: extractionPrompt }],
+                    temperature: 0.1,
+                    max_tokens: 1500, // Reduced max tokens per batch call
+                    response_format: { "type": "json_object" }
+                }
+            })
+        }).then(response => {
+            if (!response.ok) throw new Error(`Batch from index ${batchStartIndex} failed.`);
+            return response.json();
+        }).then(data => {
+            // Process the response for this batch
+            const parsedExtraction = JSON.parse(data.openaiResponse);
+            if (parsedExtraction.signals && Array.isArray(parsedExtraction.signals)) {
+                // IMPORTANT: Remap the batch-local `source_index` to the global `prioritizedItems` index
+                return parsedExtraction.signals.map(signal => ({
+                    quote: signal.quote,
+                    sourceItem: prioritizedItems[batchStartIndex + signal.source_index]
+                })).filter(s => s.sourceItem); // Ensure the source item exists
+            }
+            return [];
+        }).catch(error => {
+            console.error(`[Constellation] Error processing batch starting at index ${batchStartIndex}:`, error);
+            return []; // Return an empty array on failure so Promise.allSettled can proceed
+        });
+
+        batchPromises.push(apiCallPromise);
+    }
+    
+    // --- END MODIFICATION ---
+
+    const results = await Promise.allSettled(batchPromises);
     let rawSignals = [];
-    try {
-        const extractionResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: extractionPrompt }], temperature: 0.1, max_tokens: 2000, response_format: { "type": "json_object" } } }) });
-        if (!extractionResponse.ok) throw new Error(`AI Signal Extraction Failed. Status: ${extractionResponse.statusText}`);
-        const extractionData = await extractionResponse.json();
-        const parsedExtraction = JSON.parse(extractionData.openaiResponse);
-        if (parsedExtraction.signals && Array.isArray(parsedExtraction.signals)) {
-            rawSignals = parsedExtraction.signals.map(signal => ({ quote: signal.quote, sourceItem: prioritizedItems[signal.source_index] })).filter(s => s.sourceItem);
+    results.forEach(result => {
+        if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+            rawSignals.push(...result.value);
         }
-    } catch (error) { console.error("CRITICAL ERROR in AI Signal Extraction:", error); renderConstellationMap([]); return; }
-    console.log(`[Constellation] AI extracted ${rawSignals.length} high-quality signals.`);
-    if (rawSignals.length === 0) { renderConstellationMap([]); return; }
+    });
+
+    console.log(`[Constellation] AI extracted a total of ${rawSignals.length} high-quality signals from all batches.`);
+    if (rawSignals.length === 0) {
+        renderConstellationMap([]); // Call the renderer with an empty array
+        return;
+    }
+
     const enrichedSignals = [];
     for (const rawSignal of rawSignals) {
         try {
@@ -475,14 +530,13 @@ async function generateAndRenderConstellation(items) {
             } else { console.warn(`Failed to enrich a signal. Status: ${enrichmentResponse.status}`); }
         } catch (error) { console.error("CRITICAL ERROR during individual signal enrichment:", error); }
     }
+
     console.log(`[Constellation] AI successfully enriched ${enrichedSignals.length} signals. Rendering map.`);
     renderConstellationMap(enrichedSignals);
 }
-function initializeConstellationInteractivity() { const container = document.getElementById('constellation-map-container'); const panel = document.getElementById('constellation-side-panel'); if (!container || !panel) return; const panelContent = panel.querySelector('.panel-content'); let hidePanelTimer; const setDefaultPanelState = () => { panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`; }; const hidePanel = () => { setDefaultPanelState(); }; setDefaultPanelState(); container.addEventListener('mouseover', (e) => { if (!e.target.classList.contains('constellation-star')) return; clearTimeout(hidePanelTimer); const star = e.target; panelContent.innerHTML = `<p class="quote">“${star.dataset.quote}”</p><h4 class="problem-theme">${star.dataset.problemTheme}</h4><p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes</p><a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>`; }); container.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); }); panel.addEventListener('mouseenter', () => { clearTimeout(hidePanelTimer); }); panel.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); }); }
-async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) { console.log("--- Starting Delayed Constellation Analysis (in background) ---"); try { const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false); const postIds = demandSignalPosts.sort((a,b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id); const highIntentComments = await fetchCommentsForPosts(postIds); const allItems = [...demandSignalPosts, ...highIntentComments]; await generateAndRenderConstellation(allItems); } catch (error) { console.error("Constellation analysis failed in the background:", error); renderConstellationMap([]); } finally { console.log("--- Constellation Analysis Complete. ---"); } }
 
 // =================================================================================
-// === START: Corrected renderConstellationMap Function ===
+// === END: Corrected generateAndRenderConstellation Function ===
 // =================================================================================
 
 function renderConstellationMap(signals) {

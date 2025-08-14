@@ -1,4 +1,4 @@
-// =================================================================================
+ // =================================================================================
 // COMPLETE SCRIPT WITH FINAL UX TWEAKS (VERSION 2 - ROBUST SCROLL & RELOAD)
 // =================================================================================
 
@@ -481,22 +481,36 @@ async function generateAndRenderConstellation(items) {
 function initializeConstellationInteractivity() { const container = document.getElementById('constellation-map-container'); const panel = document.getElementById('constellation-side-panel'); if (!container || !panel) return; const panelContent = panel.querySelector('.panel-content'); let hidePanelTimer; const setDefaultPanelState = () => { panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`; }; const hidePanel = () => { setDefaultPanelState(); }; setDefaultPanelState(); container.addEventListener('mouseover', (e) => { if (!e.target.classList.contains('constellation-star')) return; clearTimeout(hidePanelTimer); const star = e.target; panelContent.innerHTML = `<p class="quote">“${star.dataset.quote}”</p><h4 class="problem-theme">${star.dataset.problemTheme}</h4><p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes</p><a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>`; }); container.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); }); panel.addEventListener('mouseenter', () => { clearTimeout(hidePanelTimer); }); panel.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); }); }
 async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) { console.log("--- Starting Delayed Constellation Analysis (in background) ---"); try { const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false); const postIds = demandSignalPosts.sort((a,b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id); const highIntentComments = await fetchCommentsForPosts(postIds); const allItems = [...demandSignalPosts, ...highIntentComments]; await generateAndRenderConstellation(allItems); } catch (error) { console.error("Constellation analysis failed in the background:", error); renderConstellationMap([]); } finally { console.log("--- Constellation Analysis Complete. ---"); } }
 
-// --- START: MODIFIED FUNCTION ---
+// =================================================================================
+// === START: Corrected renderConstellationMap Function ===
+// =================================================================================
+
 function renderConstellationMap(signals) {
     const container = document.getElementById('constellation-map-container');
     if (!container) return;
-    const loader = container.querySelector('.constellation-loader');
-    if (loader) loader.remove();
-    container.querySelectorAll('.constellation-star').forEach(star => star.remove());
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    // Always clear the container of previous stars or loaders
+    container.innerHTML = '';
+
     if (!signals || signals.length === 0) {
-        const placeholder = document.createElement('div');
-        placeholder.className = 'panel-placeholder constellation-star';
-        placeholder.innerHTML = 'No strong purchase intent signals found.<br/>Try a broader search.';
-        container.appendChild(placeholder);
-        const panelContent = document.querySelector('#constellation-side-panel .panel-content');
-        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No opportunities discovered.</div>`;
+        // MODIFICATION: If no signals, display the message in the side panel.
+        if (panelContent) {
+            panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase intent signals found.<br/>Try a broader search.</div>`;
+        }
+        // Ensure the "hover" placeholder is not shown for an empty result set.
+        const defaultPlaceholder = document.querySelector('#constellation-side-panel .panel-placeholder');
+        if (defaultPlaceholder && defaultPlaceholder.textContent.includes("Hover over a star")) {
+            defaultPlaceholder.innerHTML = `No strong purchase intent signals found.<br/>Try a broader search.`;
+        }
         return;
     }
+
+    // When signals are found, ensure the side panel has the correct default message.
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`;
+    }
+
     const aggregatedSignals = {};
     signals.forEach(signal => {
         if (!signal.problem_theme || !signal.source) return;
@@ -508,34 +522,42 @@ function renderConstellationMap(signals) {
         aggregatedSignals[theme].frequency++;
         aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
     });
+
     const starData = Object.values(aggregatedSignals);
     const maxFreq = Math.max(...starData.map(s => s.frequency), 1);
+    
+    // MODIFICATION: Helper function to get category key case-insensitively.
+    const getCategoryKey = (starCategory) => {
+        const validCategoryKeys = Object.keys(CONSTELLATION_CATEGORIES);
+        const foundKey = validCategoryKeys.find(key => key.toLowerCase() === (starCategory || '').toLowerCase());
+        return foundKey || 'Other';
+    };
+
     const starsByCategory = {};
     starData.forEach(star => {
-        const categoryKey = star.category && CONSTELLATION_CATEGORIES[star.category] ? star.category : 'Other';
+        const categoryKey = getCategoryKey(star.category); // Use helper
         if (!starsByCategory[categoryKey]) starsByCategory[categoryKey] = [];
         starsByCategory[categoryKey].push(star);
     });
-    // MODIFICATION: Added 'index' to the forEach loop to use for animation delay
+    
     starData.forEach((star, index) => {
         const starEl = document.createElement('div');
         starEl.className = 'constellation-star';
         const size = 8 + (star.frequency / maxFreq) * 20;
         starEl.style.width = `${size}px`;
         starEl.style.height = `${size}px`;
-        starEl.style.backgroundColor = EMOTION_COLORS[star.emotion] || '#ffffff';
+        
+        const starColor = EMOTION_COLORS[star.emotion] || '#ffffff';
+        starEl.style.backgroundColor = starColor;
+        starEl.style.boxShadow = `0 0 10px 2px ${starColor}`;
 
-        // --- NEW FEATURE: COMPLEMENTARY BOX SHADOW ---
-        // The glow color is the same as the star's background for a complementary effect.
-        starEl.style.boxShadow = `0 0 10px 2px ${starEl.style.backgroundColor}`;
-
-        // --- NEW FEATURE: STAGGERED PULSE ANIMATION ---
-        // Calculate a delay based on the star's index to create a rotating pulse effect.
-        const animationDelay = (index / starData.length) * 4; // Stagger over 4 seconds
+        const animationDelay = (index / starData.length) * 4;
         starEl.style.animation = `pulse 2.5s infinite ${animationDelay.toFixed(2)}s ease-in-out`;
 
-        const categoryKey = star.category && CONSTELLATION_CATEGORIES[star.category] ? star.category : 'Other';
+        // MODIFICATION: Use the helper function again to ensure correct positioning.
+        const categoryKey = getCategoryKey(star.category);
         const categoryCoords = CONSTELLATION_CATEGORIES[categoryKey];
+        
         let finalX, finalY;
         if (categoryKey === 'DemandSignals') {
             const CLUSTER_SPREAD = 12;
@@ -556,6 +578,7 @@ function renderConstellationMap(signals) {
             finalX = (categoryCoords.x * 100) + offsetX;
             finalY = (categoryCoords.y * 100) + offsetY;
         }
+        
         starEl.style.left = `calc(${finalX}% - ${size / 2}px)`;
         starEl.style.top = `calc(${finalY}% - ${size / 2}px)`;
         starEl.dataset.quote = star.quotes[0];
@@ -566,7 +589,10 @@ function renderConstellationMap(signals) {
         container.appendChild(starEl);
     });
 }
-// --- END: MODIFIED FUNCTION ---
+
+// =================================================================================
+// === END: Corrected renderConstellationMap Function ===
+// =================================================================================
 
 // =================================================================================
 // === ENHANCEMENT & POWER PHRASES FUNCTIONS ===

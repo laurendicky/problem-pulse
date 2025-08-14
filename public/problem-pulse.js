@@ -445,8 +445,6 @@ function renderSentimentScore(positiveCount, negativeCount) { const container = 
 const CONSTELLATION_CATEGORIES = { DemandSignals: { x: 0.5, y: 0.5 }, CostConcerns: { x: 0.5, y: 0.2 }, WillingnessToPay: { x: 0.8, y: 0.4 }, Frustration: { x: 0.7, y: 0.75 }, SubstituteComparisons: { x: 0.3, y: 0.75 }, Urgency: { x: 0.2, y: 0.4 }, Other: { x: 0.5, y: 0.05 }, };
 const EMOTION_COLORS = { Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7', Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316' };
 
-// --- START: FULLY CORRECTED CONSTELLATION ANALYSIS SECTION ---
-
 async function generateAndRenderConstellation(items) {
     console.log("[Constellation] Starting full generation process with new batching strategy...");
     const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 60);
@@ -547,7 +545,6 @@ function initializeConstellationInteractivity() {
     panel.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); });
 }
 
-// --- RESTORED THIS FUNCTION ---
 async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
     console.log("--- Starting Delayed Constellation Analysis (in background) ---");
     try {
@@ -564,25 +561,20 @@ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms,
     }
 }
 
+// --- START: MODIFIED FUNCTION ---
 function renderConstellationMap(signals) {
     const container = document.getElementById('constellation-map-container');
     if (!container) return;
     const panelContent = document.querySelector('#constellation-side-panel .panel-content');
 
-    // --- FIX: Only remove the old stars, not the entire container's content. ---
     container.querySelectorAll('.constellation-star').forEach(star => star.remove());
     container.querySelectorAll('.constellation-loader').forEach(loader => loader.remove());
-
 
     if (!signals || signals.length === 0) {
         if (panelContent) {
             panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase intent signals found.<br/>Try a broader search.</div>`;
         }
         return;
-    }
-
-    if (panelContent) {
-        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`;
     }
 
     const aggregatedSignals = {};
@@ -660,8 +652,14 @@ function renderConstellationMap(signals) {
         starEl.dataset.sourceUpvotes = star.totalUpvotes.toLocaleString();
         container.appendChild(starEl);
     });
+
+    // --- MODIFICATION: Set the hover message ONLY after all stars are created. ---
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`;
+    }
 }
-// --- END: FULLY CORRECTED CONSTELLATION ANALYSIS SECTION ---
+// --- END: MODIFIED FUNCTION ---
+
 
 // =================================================================================
 // === ENHANCEMENT & POWER PHRASES FUNCTIONS ===
@@ -735,6 +733,7 @@ function generateAndRenderPowerPhrases(posts) {
 // =================================================================================
 // === CORE `runProblemFinder` FUNCTION ===
 // =================================================================================
+// --- START: MODIFIED FUNCTION ---
 async function runProblemFinder(options = {}) {
     const { isUpdate = false } = options;
     const searchButton = document.getElementById('search-selected-btn');
@@ -765,7 +764,8 @@ async function runProblemFinder(options = {}) {
         
         const panelContent = document.querySelector('#constellation-side-panel .panel-content');
         if (panelContent) {
-            panelContent.innerHTML = `<div class="panel-placeholder">Loading purchase signals...</div>`;
+            // MODIFICATION: Added animated dots to the loading message
+            panelContent.innerHTML = `<div class="panel-placeholder">Loading purchase signals... <span class="loader-dots"></span></div>`;
         }
 
         const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
@@ -872,6 +872,7 @@ async function runProblemFinder(options = {}) {
         }
     }
 }
+// --- END: MODIFIED FUNCTION ---
 
 // =================================================================================
 // INITIALIZATION LOGIC (UPDATED)

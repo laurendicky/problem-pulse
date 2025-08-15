@@ -543,6 +543,10 @@ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms,
 // === START: Replace this entire function in your script ===
 // =================================================================================
 
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
 function renderHighchartsBubbleChart(signals) {
     const container = document.getElementById('constellation-map-container');
     const panelContent = document.querySelector('#constellation-side-panel .panel-content');
@@ -617,20 +621,23 @@ function renderHighchartsBubbleChart(signals) {
         plotOptions: {
             packedbubble: {
                 minSize: '25%',
-                maxSize: '120%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
                 zMin: 0,
                 zMax: 1000,
                 layoutAlgorithm: {
                     splitSeries: true,
-                    // --- MODIFICATIONS FOR STABILITY ---
-                    gravitationalConstant: 0.05, // Increased from 0.02 to pull bubbles together more strongly
-                    seriesInteraction: false, // Prevents series from pushing each other away on hover
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
                     dragBetweenSeries: true,
-                    parentNodeLimit: true
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
                 },
                 dataLabels: {
                     enabled: true,
-                    // --- MODIFICATIONS FOR LABEL CONTROL ---
                     useHTML: true,
                     style: {
                         color: 'black',
@@ -641,12 +648,9 @@ function renderHighchartsBubbleChart(signals) {
                     },
                     formatter: function() {
                         const radius = this.point.marker.radius;
-                        // A rough estimate: average character width is about half the font size.
-                        // Hide label if the estimated text width is greater than the bubble diameter.
                         if (this.point.name.length * 6 > radius * 1.8) {
-                             return null; // Hide the label
+                             return null;
                         }
-                        // Dynamically adjust font size based on bubble radius
                         const fontSize = Math.max(8, radius / 3.5);
                         return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
                     }
@@ -660,6 +664,15254 @@ function renderHighchartsBubbleChart(signals) {
         panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
     }
 }
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================a// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '25%',
+                // --- MODIFICATION: Increased max size for a fuller look ---
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    // --- MODIFICATION: Reduced internal padding to allow bubbles to expand ---
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
+    }
+}
+
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
 
 // =================================================================================
 // === END: Replace this entire function in your script ===

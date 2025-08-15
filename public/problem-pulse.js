@@ -539,6 +539,9 @@ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms,
         console.log("--- Highcharts Analysis Complete. ---");
     }
 }
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
 
 function renderHighchartsBubbleChart(signals) {
     const container = document.getElementById('constellation-map-container');
@@ -552,7 +555,7 @@ function renderHighchartsBubbleChart(signals) {
 
     if (!signals || signals.length === 0) {
         if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
-        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] }); // Render an empty chart
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
         return;
     }
 
@@ -613,25 +616,39 @@ function renderHighchartsBubbleChart(signals) {
         },
         plotOptions: {
             packedbubble: {
-                minSize: '20%',
+                minSize: '25%',
                 maxSize: '120%',
+                zMin: 0,
+                zMax: 1000,
                 layoutAlgorithm: {
                     splitSeries: true,
-                    gravitationalConstant: 0.02
+                    // --- MODIFICATIONS FOR STABILITY ---
+                    gravitationalConstant: 0.05, // Increased from 0.02 to pull bubbles together more strongly
+                    seriesInteraction: false, // Prevents series from pushing each other away on hover
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true
                 },
                 dataLabels: {
                     enabled: true,
-                    format: '{point.name}',
-                    filter: {
-                        property: 'value',
-                        operator: '>',
-                        value: 0
-                    },
+                    // --- MODIFICATIONS FOR LABEL CONTROL ---
+                    useHTML: true,
                     style: {
                         color: 'black',
                         textOutline: 'none',
                         fontWeight: 'normal',
-                        fontFamily: 'Inter, sans-serif'
+                        fontFamily: 'Inter, sans-serif',
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        // A rough estimate: average character width is about half the font size.
+                        // Hide label if the estimated text width is greater than the bubble diameter.
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null; // Hide the label
+                        }
+                        // Dynamically adjust font size based on bubble radius
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
                     }
                 }
             }
@@ -644,6 +661,9 @@ function renderHighchartsBubbleChart(signals) {
     }
 }
 
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
 // =================================================================================
 // === ENHANCEMENT & POWER PHRASES FUNCTIONS ===
 // =================================================================================

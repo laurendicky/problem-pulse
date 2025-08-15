@@ -1,5 +1,5 @@
 // =================================================================================
-// FINAL SCRIPT WITH D3.JS PACKED BUBBLE CHART (ANIMATED & COMPACT)
+// FINAL SCRIPT WITH HIGHCHARTS SPLIT PACKED BUBBLE CHART
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -442,13 +442,13 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
 // =================================================================================
-// === NEW D3.JS VISUALIZATION MODULE ===
+// === NEW HIGHCHARTS VISUALIZATION MODULE ===
 // =================================================================================
 
 async function generateAndRenderConstellation(items) {
-    console.log("[D3] Starting full generation process with batching strategy...");
+    console.log("[Highcharts] Starting full generation process with batching strategy...");
     const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 60);
-    console.log(`[D3] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
+    console.log(`[Highcharts] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
 
     const BATCH_SIZE = 10;
     const batchPromises = [];
@@ -484,7 +484,7 @@ async function generateAndRenderConstellation(items) {
             }
             return [];
         }).catch(error => {
-            console.error(`[D3] Error processing batch starting at index ${batchStartIndex}:`, error);
+            console.error(`[Highcharts] Error processing batch starting at index ${batchStartIndex}:`, error);
             return [];
         });
         batchPromises.push(apiCallPromise);
@@ -498,9 +498,9 @@ async function generateAndRenderConstellation(items) {
         }
     });
 
-    console.log(`[D3] AI extracted a total of ${rawSignals.length} high-quality signals from all batches.`);
+    console.log(`[Highcharts] AI extracted a total of ${rawSignals.length} high-quality signals from all batches.`);
     if (rawSignals.length === 0) {
-        renderD3BubbleChart([]);
+        renderHighchartsBubbleChart([]);
         return;
     }
 
@@ -520,12 +520,12 @@ async function generateAndRenderConstellation(items) {
         } catch (error) { console.error("CRITICAL ERROR during individual signal enrichment:", error); }
     }
 
-    console.log(`[D3] AI successfully enriched ${enrichedSignals.length} signals. Rendering chart.`);
-    renderD3BubbleChart(enrichedSignals);
+    console.log(`[Highcharts] AI successfully enriched ${enrichedSignals.length} signals. Rendering chart.`);
+    renderHighchartsBubbleChart(enrichedSignals);
 }
 
 async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
-    console.log("--- Starting Delayed D3 Chart Analysis (in background) ---");
+    console.log("--- Starting Delayed Highcharts Chart Analysis (in background) ---");
     try {
         const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false);
         const postIds = demandSignalPosts.sort((a,b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id);
@@ -533,33 +533,26 @@ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms,
         const allItems = [...demandSignalPosts, ...highIntentComments];
         await generateAndRenderConstellation(allItems);
     } catch (error) {
-        console.error("D3 chart analysis failed in the background:", error);
-        renderD3BubbleChart([]);
+        console.error("Highcharts analysis failed in the background:", error);
+        renderHighchartsBubbleChart([]);
     } finally {
-        console.log("--- D3 Chart Analysis Complete. ---");
+        console.log("--- Highcharts Analysis Complete. ---");
     }
 }
 
-function renderD3BubbleChart(signals) {
-    if (typeof d3 === 'undefined') {
-        console.error("D3.js is not loaded. Please ensure the D3 script tag is in your HTML before your main script.");
-        const panelContent = document.querySelector('#constellation-side-panel .panel-content');
-        if (panelContent) {
-            panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: D3.js library not found.</div>`;
-        }
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
         return;
     }
 
-    const container = d3.select('#constellation-map-container');
-    const panelContent = d3.select('#constellation-side-panel .panel-content');
-
-    container.selectAll('svg').remove();
-    d3.select('body').selectAll('.d3-tooltip').remove();
-
     if (!signals || signals.length === 0) {
-        if (!panelContent.empty()) {
-            panelContent.html(`<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`);
-        }
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] }); // Render an empty chart
         return;
     }
 
@@ -575,138 +568,79 @@ function renderD3BubbleChart(signals) {
         aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
     });
 
-    const groupedByCategory = d3.group(Object.values(aggregatedSignals), d => d.category);
-
-    const hierarchicalData = {
-        name: "root",
-        children: Array.from(groupedByCategory, ([key, value]) => ({
-            name: key.replace(/([A-Z])/g, ' $1').trim(),
-            children: value.map(d => ({
-                name: d.problem_theme,
-                value: d.frequency,
-                quote: d.quotes[0],
-                source: d.source
-            }))
-        }))
-    };
-
-    const width = container.node().getBoundingClientRect().width;
-    const height = width * 0.65; // MODIFICATION: Make chart wider than it is tall
-    
-    const pack = data => d3.pack()
-        .size([width, height])
-        .padding(5)
-        (d3.hierarchy(data)
-            .sum(d => d.value)
-            .sort((a, b) => b.value - a.value));
-
-    const root = pack(hierarchicalData);
-    const color = d3.scaleOrdinal(hierarchicalData.children.map(d => d.name), d3.schemeTableau10);
-
-    const tooltip = d3.select("body").append("div")
-        .attr("class", "d3-tooltip")
-        .style("opacity", 0);
-
-    const svg = container.append("svg")
-        .attr("viewBox", `-${width / 2} -${height / 2} ${width} ${height}`)
-        .attr("width", "100%")
-        .attr("height", "100%")
-        .attr("style", `max-width: 100%; height: auto; display: block; margin: 0 auto; background: transparent; cursor: pointer;`)
-        .on("click", (event) => zoom(event, root));
-
-    const node = svg.append("g")
-      .selectAll("g")
-      .data(root.descendants())
-      .join("g")
-        .attr("transform", d => `translate(${d.x - root.x},${d.y - root.y})`);
-
-    const circle = node.append("circle")
-        .attr("fill", d => d.children ? color(d.data.name) : d.parent.children.length === 1 ? color(d.parent.data.name) : d3.color(color(d.parent.data.name)).brighter(0.6))
-        .attr("fill-opacity", d => d.children ? 0.35 : 1) // MODIFICATION: Parents more transparent
-        .on("mouseover", function(event, d) {
-            if (!d.children) {
-                d3.select(this).attr("stroke", "#000").attr("stroke-width", 2);
-                tooltip.transition().duration(200).style("opacity", 1);
-                tooltip.html(
-                    `<div class="d3-tooltip-theme">${d.data.name}</div>` +
-                    `<div class="d3-tooltip-quote">“${d.data.quote}”</div>` +
-                    `<a href="https://www.reddit.com${d.data.source.permalink}" target="_blank" rel="noopener noreferrer" class="d3-tooltip-source">r/${d.data.source.subreddit} | 👍 ${d.data.source.ups.toLocaleString()}</a>`
-                );
-            }
-        })
-        .on("mousemove", function(event) {
-             tooltip.style("left", (event.pageX + 15) + "px")
-                    .style("top", (event.pageY - 28) + "px");
-        })
-        .on("mouseout", function() {
-            d3.select(this).attr("stroke", null);
-            tooltip.transition().duration(500).style("opacity", 0);
-        })
-        .on("click", (event, d) => focus !== d && (zoom(event, d), event.stopPropagation()));
-    
-    // MODIFICATION: Animate bubbles on load
-    circle.transition()
-        .duration(750)
-        .ease(d3.easeExpOut)
-        .attr("r", d => d.r);
-
-    const label = node.append("text")
-        .attr("text-anchor", "middle")
-        .style("font-family", "Inter, sans-serif")
-        .style("fill", "#111")
-        .style("pointer-events", "none")
-        .style("fill-opacity", 0) // MODIFICATION: Start transparent for animation
-        .selectAll("tspan")
-        .data(d => d.children ? d.data.name.split(' ') : d.data.name.split(' ').concat(`(${d.data.value})`))
-        .join("tspan")
-        .attr("x", 0)
-        .attr("y", (d, i, nodes) => `${i - (nodes.length - 1) * 0.5 + 0.1}em`)
-        .text(d => d);
-        
-    // MODIFICATION: Animate labels fading in
-    label.transition()
-        .delay(200)
-        .duration(500)
-        .style("fill-opacity", 1);
-
-    // MODIFICATION: Improved font sizing logic
-    node.each(function(d) {
-        const textNode = d3.select(this).select('text');
-        if (d.children) { // Parent nodes
-             textNode.style("font-size", `${Math.max(10, d.r / 5)}px`).style("font-weight", "bold").style("fill", "#fff");
-        } else { // Leaf nodes
-            textNode.style("font-size", "12px");
-            if (textNode.node().getBBox().width > d.r * 1.8) {
-                textNode.style("display", "none");
-            }
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
         }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
     });
-        
-    let focus = root;
-    let view;
 
-    function zoomTo(v) {
-        const k = width / v[2];
-        view = v;
-        label.attr("transform", d => `translate(${(d.x - v[0]) * k},${(d.y - v[1]) * k})`);
-        node.attr("transform", d => `translate(${(d.x - v[0]) * k},${(d.y - v[1]) * k})`);
-        node.select("circle").attr("r", d => d.r * k);
-    }
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
 
-    function zoom(event, d) {
-        focus = d;
-        svg.transition()
-            .duration(750)
-            .tween("zoom", () => {
-                const i = d3.interpolateZoom(view, [focus.x, focus.y, focus.r * 2]);
-                return t => zoomTo(i(t));
-            });
-    }
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#2c3e50',
+            borderColor: '#2c3e50',
+            style: {
+                color: '#ecf0f1',
+                fontFamily: 'Inter, sans-serif'
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid rgba(255,255,255,0.2); padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-style: italic; font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #bdc3c7; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '20%',
+                maxSize: '120%',
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.02
+                },
+                dataLabels: {
+                    enabled: true,
+                    format: '{point.name}',
+                    filter: {
+                        property: 'value',
+                        operator: '>',
+                        value: 0
+                    },
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: 'Inter, sans-serif'
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
     
-    zoomTo([root.x, root.y, root.r * 2]);
-    
-    if (!panelContent.empty()) {
-        panelContent.html(`<div class="panel-placeholder">Click a category to zoom in. Hover over a bubble to see details.</div>`);
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a bubble to see the opportunity.</div>`;
     }
 }
 
@@ -951,49 +885,13 @@ function initializeDashboardInteractivity() {
             }
         }
     });
-    // The D3 chart now manages all its own interactivity.
 }
 
 function initializeProblemFinderTool() {
-    // --- NEW: Inject CSS for D3 tooltip ---
+    // --- Inject CSS for Highcharts Tooltip ---
     const style = document.createElement('style');
-    style.textContent = `
-        .d3-tooltip {
-            position: absolute;
-            text-align: left;
-            padding: 12px;
-            font-family: Inter, sans-serif;
-            background: #2c3e50;
-            color: #ecf0f1;
-            border: 0px;
-            border-radius: 8px;
-            pointer-events: none;
-            max-width: 320px;
-            z-index: 9999;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-            transition: opacity 0.2s;
-        }
-        .d3-tooltip-theme {
-            font-weight: bold;
-            font-size: 1rem;
-            margin-bottom: 8px;
-            border-bottom: 1px solid rgba(255,255,255,0.2);
-            padding-bottom: 6px;
-        }
-        .d3-tooltip-quote {
-            font-style: italic;
-            font-size: 0.9rem;
-            margin-bottom: 8px;
-        }
-        .d3-tooltip-source {
-            font-size: 0.8rem;
-            color: #bdc3c7;
-            text-decoration: none;
-        }
-        .d3-tooltip-source:hover {
-            text-decoration: underline;
-        }
-    `;
+    // Note: Highcharts injects its own styles, so we primarily need to style the tooltip content.
+    // The tooltip itself is styled in the chart options.
     document.head.appendChild(style);
 
     console.log("Problem Finder elements found. Initializing...");

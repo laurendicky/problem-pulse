@@ -1,5 +1,5 @@
 // =================================================================================
-// COMPLETE SCRIPT WITH FINAL UX TWEAKS (VERSION 2 - ROBUST SCROLL & RELOAD)
+// FINAL SCRIPT WITH D3.JS PACKED BUBBLE CHART
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -441,14 +441,14 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
 }
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
-// --- CONSTELLATION MAP FUNCTIONS ---
-const CONSTELLATION_CATEGORIES = { DemandSignals: { x: 0.5, y: 0.5 }, CostConcerns: { x: 0.5, y: 0.2 }, WillingnessToPay: { x: 0.8, y: 0.4 }, Frustration: { x: 0.7, y: 0.75 }, SubstituteComparisons: { x: 0.3, y: 0.75 }, Urgency: { x: 0.2, y: 0.4 }, Other: { x: 0.5, y: 0.05 }, };
-const EMOTION_COLORS = { Frustration: '#ef4444', Anger: '#dc2626', Longing: '#8b5cf6', Desire: '#a855f7', Excitement: '#22c55e', Hope: '#10b981', Urgency: '#f97316' };
+// =================================================================================
+// === NEW D3.JS VISUALIZATION MODULE ===
+// =================================================================================
 
 async function generateAndRenderConstellation(items) {
-    console.log("[Constellation] Starting full generation process with new batching strategy...");
+    console.log("[D3] Starting full generation process with batching strategy...");
     const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 60);
-    console.log(`[Constellation] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
+    console.log(`[D3] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
 
     const BATCH_SIZE = 10;
     const batchPromises = [];
@@ -484,7 +484,7 @@ async function generateAndRenderConstellation(items) {
             }
             return [];
         }).catch(error => {
-            console.error(`[Constellation] Error processing batch starting at index ${batchStartIndex}:`, error);
+            console.error(`[D3] Error processing batch starting at index ${batchStartIndex}:`, error);
             return [];
         });
         batchPromises.push(apiCallPromise);
@@ -498,55 +498,35 @@ async function generateAndRenderConstellation(items) {
         }
     });
 
-    console.log(`[Constellation] AI extracted a total of ${rawSignals.length} high-quality signals from all batches.`);
+    console.log(`[D3] AI extracted a total of ${rawSignals.length} high-quality signals from all batches.`);
     if (rawSignals.length === 0) {
-        renderConstellationMap([]);
+        renderD3BubbleChart([]);
         return;
     }
 
     const enrichedSignals = [];
+    // Define categories that have a higher chance of being returned by the AI
+    const validCategories = ["DemandSignals", "WillingnessToPay", "Frustration", "SubstituteComparisons", "Urgency", "CostConcerns"];
     for (const rawSignal of rawSignals) {
         try {
-            const enrichmentPrompt = `You are a market research analyst. For the quote below, provide a short summary of the user's core problem and classify it into the MOST relevant category. Here are the categories and their definitions: [DemandSignals, WillingnessToPay, Frustration, SubstituteComparisons, Urgency, CostConcerns]. Quote: "${rawSignal.quote}" Provide a JSON object with: 1. "problem_theme": A short, 4-5 word summary of the core problem. 2. "category": Classify into ONE of the categories. 3. "emotion": Classify the primary emotion into ONE of: [${Object.keys(EMOTION_COLORS).join(', ')}]. Respond ONLY with a valid JSON object.`;
+            const enrichmentPrompt = `You are a market research analyst. For the quote below, provide a short summary of the user's core problem and classify it into the MOST relevant category. Here are the categories: [${validCategories.join(', ')}]. Quote: "${rawSignal.quote}" Provide a JSON object with: 1. "problem_theme": A short, 4-5 word summary of the core problem. 2. "category": Classify into ONE of the categories. Respond ONLY with a valid JSON object.`;
             const enrichmentResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_tokens: 250, response_format: { "type": "json_object" } } }) });
             if (enrichmentResponse.ok) {
                 const enrichmentData = await enrichmentResponse.json();
                 const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse);
-                if (parsedEnrichment.problem_theme && parsedEnrichment.category && parsedEnrichment.emotion) {
+                if (parsedEnrichment.problem_theme && parsedEnrichment.category) {
                     enrichedSignals.push({ ...rawSignal, ...parsedEnrichment, source: rawSignal.sourceItem.data });
                 } else { console.warn("Skipping a signal due to missing fields in AI enrichment response:", parsedEnrichment); }
             } else { console.warn(`Failed to enrich a signal. Status: ${enrichmentResponse.status}`); }
         } catch (error) { console.error("CRITICAL ERROR during individual signal enrichment:", error); }
     }
 
-    console.log(`[Constellation] AI successfully enriched ${enrichedSignals.length} signals. Rendering map.`);
-    renderConstellationMap(enrichedSignals);
-}
-
-function initializeConstellationInteractivity() {
-    const container = document.getElementById('constellation-map-container');
-    const panel = document.getElementById('constellation-side-panel');
-    if (!container || !panel) return;
-    const panelContent = panel.querySelector('.panel-content');
-    let hidePanelTimer;
-    const setDefaultPanelState = () => {
-        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`;
-    };
-    const hidePanel = () => { setDefaultPanelState(); };
-    setDefaultPanelState();
-    container.addEventListener('mouseover', (e) => {
-        if (!e.target.classList.contains('constellation-star')) return;
-        clearTimeout(hidePanelTimer);
-        const star = e.target;
-        panelContent.innerHTML = `<p class="quote">“${star.dataset.quote}”</p><h4 class="problem-theme">${star.dataset.problemTheme}</h4><p class="meta-info">From r/${star.dataset.sourceSubreddit} with ~${star.dataset.sourceUpvotes} upvotes</p><a href="https://www.reddit.com${star.dataset.sourcePermalink}" target="_blank" rel="noopener noreferrer" class="full-thread-link">View Original Thread →</a>`;
-    });
-    container.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); });
-    panel.addEventListener('mouseenter', () => { clearTimeout(hidePanelTimer); });
-    panel.addEventListener('mouseleave', () => { hidePanelTimer = setTimeout(hidePanel, 300); });
+    console.log(`[D3] AI successfully enriched ${enrichedSignals.length} signals. Rendering chart.`);
+    renderD3BubbleChart(enrichedSignals);
 }
 
 async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
-    console.log("--- Starting Delayed Constellation Analysis (in background) ---");
+    console.log("--- Starting Delayed D3 Chart Analysis (in background) ---");
     try {
         const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false);
         const postIds = demandSignalPosts.sort((a,b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id);
@@ -554,33 +534,33 @@ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms,
         const allItems = [...demandSignalPosts, ...highIntentComments];
         await generateAndRenderConstellation(allItems);
     } catch (error) {
-        console.error("Constellation analysis failed in the background:", error);
-        renderConstellationMap([]);
+        console.error("D3 chart analysis failed in the background:", error);
+        renderD3BubbleChart([]);
     } finally {
-        console.log("--- Constellation Analysis Complete. ---");
+        console.log("--- D3 Chart Analysis Complete. ---");
     }
 }
 
-// --- START: MODIFIED FUNCTION ---
-function renderConstellationMap(signals) {
-    const container = document.getElementById('constellation-map-container');
-    if (!container) return;
-    const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+function renderD3BubbleChart(signals) {
+    const container = d3.select('#constellation-map-container');
+    const panelContent = d3.select('#constellation-side-panel .panel-content');
 
-    container.querySelectorAll('.constellation-star').forEach(star => star.remove());
-    container.querySelectorAll('.constellation-loader').forEach(loader => loader.remove());
+    // Clear previous chart and any stray tooltips
+    container.selectAll('svg').remove();
+    d3.select('body').selectAll('.d3-tooltip').remove();
 
     if (!signals || signals.length === 0) {
-        if (panelContent) {
-            panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase intent signals found.<br/>Try a broader search.</div>`;
+        if (!panelContent.empty()) {
+            panelContent.html(`<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`);
         }
         return;
     }
 
+    // --- 1. Data Transformation ---
     const aggregatedSignals = {};
     signals.forEach(signal => {
-        if (!signal.problem_theme || !signal.source) return;
-        const theme = signal.problem_theme.trim().toLowerCase();
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
         if (!aggregatedSignals[theme]) {
             aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
         }
@@ -589,76 +569,121 @@ function renderConstellationMap(signals) {
         aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
     });
 
-    const starData = Object.values(aggregatedSignals);
-    const maxFreq = Math.max(...starData.map(s => s.frequency), 1);
-    
-    const getCategoryKey = (starCategory) => {
-        const validCategoryKeys = Object.keys(CONSTELLATION_CATEGORIES);
-        const foundKey = validCategoryKeys.find(key => key.toLowerCase() === (starCategory || '').toLowerCase());
-        return foundKey || 'Other';
+    const groupedByCategory = d3.group(Object.values(aggregatedSignals), d => d.category);
+
+    const hierarchicalData = {
+        name: "root",
+        children: Array.from(groupedByCategory, ([key, value]) => ({
+            name: key.replace(/([A-Z])/g, ' $1').trim(), // Add spaces for readability
+            children: value.map(d => ({
+                name: d.problem_theme,
+                value: d.frequency,
+                quote: d.quotes[0],
+                source: d.source
+            }))
+        }))
     };
 
-    const starsByCategory = {};
-    starData.forEach(star => {
-        const categoryKey = getCategoryKey(star.category);
-        if (!starsByCategory[categoryKey]) starsByCategory[categoryKey] = [];
-        starsByCategory[categoryKey].push(star);
-    });
+    // --- 2. D3 Setup ---
+    const width = container.node().getBoundingClientRect().width;
+    const height = width;
     
-    starData.forEach((star, index) => {
-        const starEl = document.createElement('div');
-        starEl.className = 'constellation-star';
-        const size = 8 + (star.frequency / maxFreq) * 20;
-        starEl.style.width = `${size}px`;
-        starEl.style.height = `${size}px`;
-        
-        const starColor = EMOTION_COLORS[star.emotion] || '#ffffff';
-        starEl.style.backgroundColor = starColor;
-        starEl.style.boxShadow = `0 0 10px 2px ${starColor}`;
+    const pack = data => d3.pack()
+        .size([width - 2, height - 2])
+        .padding(3)
+        (d3.hierarchy(data)
+            .sum(d => d.value)
+            .sort((a, b) => b.value - a.value));
 
-        const animationDelay = (index / starData.length) * 4;
-        starEl.style.animation = `pulse 2.5s infinite ${animationDelay.toFixed(2)}s ease-in-out`;
+    const root = pack(hierarchicalData);
+    const color = d3.scaleOrdinal(hierarchicalData.children.map(d => d.name), d3.schemeTableau10);
 
-        const categoryKey = getCategoryKey(star.category);
-        const categoryCoords = CONSTELLATION_CATEGORIES[categoryKey];
-        
-        let finalX, finalY;
-        if (categoryKey === 'DemandSignals') {
-            const CLUSTER_SPREAD = 12;
-            const offsetX = (Math.random() - 0.5) * CLUSTER_SPREAD;
-            const offsetY = (Math.random() - 0.5) * CLUSTER_SPREAD;
-            finalX = (categoryCoords.x * 100) + offsetX;
-            finalY = (categoryCoords.y * 100) + offsetY;
-        } else {
-            const categoryStars = starsByCategory[categoryKey];
-            const starIndex = categoryStars.findIndex(s => s.problem_theme === star.problem_theme);
-            const totalInCategory = categoryStars.length;
-            const ORBIT_RADIUS_BASE = 6;
-            const ORBIT_RADIUS_RANDOM_FACTOR = 4;
-            const angle = (starIndex / totalInCategory) * 2 * Math.PI;
-            const radius = ORBIT_RADIUS_BASE + (Math.random() * ORBIT_RADIUS_RANDOM_FACTOR);
-            const offsetX = radius * Math.cos(angle);
-            const offsetY = radius * Math.sin(angle);
-            finalX = (categoryCoords.x * 100) + offsetX;
-            finalY = (categoryCoords.y * 100) + offsetY;
-        }
-        
-        starEl.style.left = `calc(${finalX}% - ${size / 2}px)`;
-        starEl.style.top = `calc(${finalY}% - ${size / 2}px)`;
-        starEl.dataset.quote = star.quotes[0];
-        starEl.dataset.problemTheme = star.problem_theme;
-        starEl.dataset.sourceSubreddit = star.source.subreddit;
-        starEl.dataset.sourcePermalink = star.source.permalink;
-        starEl.dataset.sourceUpvotes = star.totalUpvotes.toLocaleString();
-        container.appendChild(starEl);
-    });
+    // --- 3. SVG and Tooltip Creation ---
+    const svg = container.append("svg")
+        .attr("viewBox", `-${width / 2} -${height / 2} ${width} ${height}`)
+        .attr("width", width)
+        .attr("height", height)
+        .attr("style", `max-width: 100%; height: auto; display: block; margin: 0 auto; background: transparent; cursor: pointer; font-family: Inter, sans-serif;`)
+        .on("click", (event) => zoom(event, root));
 
-    // --- MODIFICATION: Set the hover message ONLY after all stars are created. ---
-    if (panelContent) {
-        panelContent.innerHTML = `<div class="panel-placeholder">Hover over a star to see the opportunity.</div>`;
+    const tooltip = d3.select("body").append("div")
+        .attr("class", "d3-tooltip")
+        .style("opacity", 0);
+
+    // --- 4. Render Bubbles and Labels ---
+    const node = svg.append("g")
+      .selectAll("g")
+      .data(root.descendants())
+      .join("g")
+        .attr("transform", d => `translate(${d.x - root.x},${d.y - root.y})`);
+
+    node.append("circle")
+        .attr("r", d => d.r)
+        .attr("fill", d => d.depth === 1 ? color(d.data.name) : d.depth > 1 ? d3.color(color(d.parent.data.name)).brighter(0.6) : "#fff")
+        .attr("fill-opacity", d => d.depth === 1 ? 0.3 : 0.9)
+        .attr("stroke", d => d.depth === 1 ? d3.color(color(d.data.name)).darker(0.5) : null)
+        .attr("stroke-width", d => d.depth === 1 ? 2 : 0)
+        .on("mouseover", function(event, d) {
+            if (!d.children) { // Only for leaf nodes
+                d3.select(this).attr("stroke", "#000").attr("stroke-width", 2);
+                tooltip.transition().duration(200).style("opacity", 1);
+                tooltip.html(
+                    `<div class="d3-tooltip-theme">${d.data.name}</div>` +
+                    `<div class="d3-tooltip-quote">“${d.data.quote}”</div>` +
+                    `<a href="https://www.reddit.com${d.data.source.permalink}" target="_blank" rel="noopener noreferrer" class="d3-tooltip-source">r/${d.data.source.subreddit} | 👍 ${d.data.source.ups.toLocaleString()}</a>`
+                );
+            }
+        })
+        .on("mousemove", function(event) {
+             tooltip.style("left", (event.pageX + 15) + "px")
+                    .style("top", (event.pageY - 28) + "px");
+        })
+        .on("mouseout", function() {
+            d3.select(this).attr("stroke", null).attr("stroke-width", null);
+            tooltip.transition().duration(500).style("opacity", 0);
+        })
+        .on("click", (event, d) => focus !== d && (zoom(event, d), event.stopPropagation()));
+
+    const label = node.append("text")
+        .attr("text-anchor", "middle")
+        .attr("dy", "0.3em")
+        .style("font-size", d => `${Math.max(8, d.r / 4)}px`)
+        .style("fill", d => d.depth === 1 ? "#fff" : "#222")
+        .style("pointer-events", "none")
+        .selectAll("tspan")
+        .data(d => d.data.name.split(' ').concat(d.children ? '' : `(${d.data.value})`))
+        .join("tspan")
+        .attr("x", 0)
+        .attr("y", (d, i, nodes) => `${i - (nodes.length - 1) * 0.5 + 0.8}em`)
+        .text(d => d);
+        
+    // --- 5. Zoom Logic ---
+    let focus = root;
+    let view;
+
+    function zoomTo(v) {
+        const k = width / v[2];
+        view = v;
+        node.attr("transform", d => `translate(${(d.x - v[0]) * k},${(d.y - v[1]) * k})`);
+        node.select("circle").attr("r", d => d.r * k);
+    }
+
+    function zoom(event, d) {
+        focus = d;
+        const transition = svg.transition()
+            .duration(event.altKey ? 7500 : 750)
+            .tween("zoom", () => {
+                const i = d3.interpolateZoom(view, [focus.x, focus.y, focus.r * 2]);
+                return t => zoomTo(i(t));
+            });
+    }
+    
+    zoomTo([root.x, root.y, root.r * 2]);
+    
+    if (!panelContent.empty()) {
+        panelContent.html(`<div class="panel-placeholder">Click a category to zoom in. Hover over a bubble to see details.</div>`);
     }
 }
-// --- END: MODIFIED FUNCTION ---
 
 
 // =================================================================================
@@ -733,7 +758,6 @@ function generateAndRenderPowerPhrases(posts) {
 // =================================================================================
 // === CORE `runProblemFinder` FUNCTION ===
 // =================================================================================
-// --- START: MODIFIED FUNCTION ---
 async function runProblemFinder(options = {}) {
     const { isUpdate = false } = options;
     const searchButton = document.getElementById('search-selected-btn');
@@ -764,7 +788,6 @@ async function runProblemFinder(options = {}) {
         
         const panelContent = document.querySelector('#constellation-side-panel .panel-content');
         if (panelContent) {
-            // MODIFICATION: Added animated dots to the loading message
             panelContent.innerHTML = `<div class="panel-placeholder">Loading purchase signals... <span class="loader-dots"></span></div>`;
         }
 
@@ -872,18 +895,14 @@ async function runProblemFinder(options = {}) {
         }
     }
 }
-// --- END: MODIFIED FUNCTION ---
 
 // =================================================================================
 // INITIALIZATION LOGIC (UPDATED)
 // =================================================================================
 function initializeDashboardInteractivity() {
     document.addEventListener('click', (e) => {
-        console.log('A click happened on the page! The element clicked was:', e.target);
-
         const backButton = e.target.closest('#results-wrapper-b #back-to-step1-btn');
         if (backButton) {
-            console.log("'Start Again' button clicked via DOCUMENT delegation. Reloading page.");
             location.reload();
             return;
         }
@@ -908,19 +927,47 @@ function initializeDashboardInteractivity() {
             }
         }
     });
-    initializeConstellationInteractivity();
+    // The D3 chart now manages all its own interactivity.
 }
 
 function initializeProblemFinderTool() {
+    // --- NEW: Inject CSS for D3 tooltip ---
     const style = document.createElement('style');
     style.textContent = `
-        @keyframes pulse {
-            0% { transform: scale(1); opacity: 0.9; }
-            50% { transform: scale(1.15); opacity: 1; }
-            100% { transform: scale(1); opacity: 0.9; }
+        .d3-tooltip {
+            position: absolute;
+            text-align: left;
+            padding: 12px;
+            font-family: Inter, sans-serif;
+            background: #2c3e50;
+            color: #ecf0f1;
+            border: 0px;
+            border-radius: 8px;
+            pointer-events: none;
+            max-width: 320px;
+            z-index: 9999;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+            transition: opacity 0.2s;
         }
-        .constellation-star {
-            transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
+        .d3-tooltip-theme {
+            font-weight: bold;
+            font-size: 1rem;
+            margin-bottom: 8px;
+            border-bottom: 1px solid rgba(255,255,255,0.2);
+            padding-bottom: 6px;
+        }
+        .d3-tooltip-quote {
+            font-style: italic;
+            font-size: 0.9rem;
+            margin-bottom: 8px;
+        }
+        .d3-tooltip-source {
+            font-size: 0.8rem;
+            color: #bdc3c7;
+            text-decoration: none;
+        }
+        .d3-tooltip-source:hover {
+            text-decoration: underline;
         }
     `;
     document.head.appendChild(style);
@@ -936,9 +983,8 @@ function initializeProblemFinderTool() {
     const inspireButton = document.getElementById('inspire-me-button');
     const choicesContainer = document.getElementById('subreddit-choices');
     const audienceTitle = document.getElementById('pf-audience-title');
-    const backButton = document.getElementById('back-to-step1-btn');
 
-    if (!findCommunitiesBtn || !searchSelectedBtn || !backButton || !choicesContainer) {
+    if (!findCommunitiesBtn || !searchSelectedBtn || !choicesContainer) {
         console.error("Critical error: A key element was null. Aborting initialization.");
         return;
     }

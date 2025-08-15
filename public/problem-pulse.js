@@ -12,9 +12,9 @@ const LENIENT_MIN_ACTIVE_USERS = 1;
 let originalGroupName = '';
 let _allRankedSubreddits = [];
 
-const suggestions = ["Dog Lovers", "Start-up Founders", "Fitness Beginners", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Developers", "Brides To Be"];
-const positiveColors = ['#2E7D32', '#388E3C', '#43A047', '#1B5E20'];
-const negativeColors = ['#C62828', '#D32F2F', '#E53935', '#B71C1C'];
+const suggestions = ["Dog Lovers", "Start-up Founders", "Fitness Freaks", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Software Developers", "Brides To Be"];
+const positiveColors = ['#00a5ce', '#0090b5', '#00c0e6', '#7bd9ec', '#b3e8f3', '#006d85'];
+const negativeColors = ['#fd80c7', '#d6539d', '#ff4fa3', '#ff99d6', '#fbb6ce', '#f472b6'];
 const lemmaMap = { 'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': 'love', 'loving': 'love', 'hates': 'hate', 'wishes': 'wish', 'wishing': 'wish', 'solutions': 'solution', 'challenges': 'challenge', 'recommended': 'recommend', 'disappointed': 'disappoint', 'frustrated': 'frustrate', 'annoyed': 'annoy' };
 const positiveWords = new Set(['love', 'amazing', 'awesome', 'beautiful', 'best', 'brilliant', 'celebrate', 'charming', 'dope', 'excellent', 'excited', 'exciting', 'epic', 'fantastic', 'flawless', 'gorgeous', 'happy', 'impressed', 'incredible', 'insane', 'joy', 'keen', 'lit', 'perfect', 'phenomenal', 'proud', 'rad', 'super', 'stoked', 'thrilled', 'vibrant', 'wow', 'wonderful', 'blessed', 'calm', 'chill', 'comfortable', 'cozy', 'grateful', 'loyal', 'peaceful', 'pleased', 'relaxed', 'relieved', 'satisfied', 'secure', 'thankful', 'want', 'wish', 'hope', 'desire', 'craving', 'benefit', 'bonus', 'deal', 'hack', 'improvement', 'quality', 'solution', 'strength', 'advice', 'tip', 'trick', 'recommend']);
 const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'broken', 'hate', 'challenge', 'confused', 'crazy', 'critical', 'danger', 'desperate', 'disappoint', 'disgusted', 'dreadful', 'fear', 'frustrate', 'furious', 'horrible', 'irritated', 'jealous', 'nightmare', 'outraged', 'pain', 'panic', 'problem', 'rant', 'scared', 'shocked', 'stressful', 'terrible', 'terrified', 'trash', 'alone', 'ashamed', 'bored', 'depressed', 'discouraged', 'dull', 'empty', 'exhausted', 'failure', 'guilty', 'heartbroken', 'hopeless', 'hurt', 'insecure', 'lonely', 'miserable', 'sad', 'sorry', 'tired', 'unhappy', 'upset', 'weak', 'need', 'disadvantage', 'issue', 'flaw']);
@@ -700,6 +700,51 @@ function renderHighchartsBubbleChart(signals) {
 // =================================================================================
 // === ENHANCEMENT & POWER PHRASES FUNCTIONS ===
 // =================================================================================
+// =================================================================================
+// === NEW FUNCTION: AI MINDSET SUMMARY ===
+// =================================================================================
+
+async function generateAndRenderMindsetSummary(posts, audienceContext) {
+    const container = document.getElementById('mindset-summary-container');
+    if (!container) return;
+
+    container.innerHTML = `<h3 class="dashboard-section-title">Audience Mindset & Beliefs</h3><p class="loading-text">Analyzing underlying motivations...</p>`;
+
+    try {
+        const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+
+        const prompt = `You are a skilled market psychologist and qualitative analyst, specializing in the "${audienceContext}" community. Analyze the following Reddit posts to synthesize a brief, insightful summary of the audience's collective mindset, core beliefs, and primary motivations. Focus on their worldview, what they value most, and their general attitude towards the topics discussed. Provide a 2-3 sentence summary. Be concise and capture the *essence* of their perspective. Do not list problems; instead, describe their underlying attitude.\n\nPosts:\n${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You are an expert market psychologist who provides concise summaries of audience mindsets." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.3,
+            max_tokens: 250,
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        
+        if (!response.ok) throw new Error('Mindset analysis API call failed.');
+
+        const data = await response.json();
+        const summaryText = data.openaiResponse;
+
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Audience Mindset & Beliefs</h3>
+            <p class="mindset-summary-text">${summaryText}</p>
+        `;
+
+    } catch (error) {
+        console.error("Mindset summary generation error:", error);
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Audience Mindset & Beliefs</h3>
+            <p class="loading-text" style="color: red;">Could not generate mindset summary.</p>
+        `;
+    }
+}
 async function enhanceDiscoveryWithComments(posts, nicheContext) {
     console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
     const brandContainer = document.getElementById('top-brands-container');
@@ -823,6 +868,8 @@ async function runProblemFinder(options = {}) {
         generateEmotionMapData(filteredItems).then(renderEmotionMap);
         renderIncludedSubreddits(selectedSubreddits);
         generateAndRenderPowerPhrases(filteredItems);
+        generateAndRenderMindsetSummary(filteredItems, originalGroupName);
+
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
         if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }

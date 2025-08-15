@@ -745,6 +745,85 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
         `;
     }
 }
+// =================================================================================
+// === NEW FUNCTION: AI STRATEGIC PILLARS (GOALS & FEARS) ===
+// =================================================================================
+
+async function generateAndRenderStrategicPillars(posts, audienceContext) {
+    const goalsContainer = document.getElementById('goals-pillar');
+    const fearsContainer = document.getElementById('fears-pillar');
+    if (!goalsContainer || !fearsContainer) return;
+
+    // Set initial loading states
+    goalsContainer.innerHTML = `<p class="loading-text">Analyzing goals...</p>`;
+    fearsContainer.innerHTML = `<p class="loading-text">Analyzing fears...</p>`;
+
+    try {
+        const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+
+        const prompt = `You are an expert market psychologist specializing in the "${audienceContext}" community. Based on the following user posts, identify their 3 core "Ultimate Goals" and their 3 "Greatest Fears".
+
+        - **Ultimate Goals:** These are not simple wants, but deep, aspirational end-states. What is the ideal future they are trying to achieve? (e.g., "Achieving financial freedom", "Feeling confident in their own skin", "Building a lasting legacy").
+        - **Greatest Fears:** These are not minor annoyances, but significant anxieties or risks they want to avoid. What is the worst-case scenario they worry about? (e.g., "Wasting their life on the wrong path", "Being scammed by a vendor", "Failing their family").
+        
+        Respond ONLY with a valid JSON object with two keys: "goals" and "fears", where each key holds an array of 3 short, insightful strings.
+        Example: { "goals": ["Goal 1", "Goal 2", "Goal 3"], "fears": ["Fear 1", "Fear 2", "Fear 3"] }
+        
+        Posts:\n${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You are an expert market psychologist providing concise lists of audience goals and fears in strict JSON format." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.3,
+            max_tokens: 400,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        
+        if (!response.ok) throw new Error('Strategic pillars API call failed.');
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        const { goals, fears } = parsed;
+
+        // Render Goals
+        if (goals && goals.length > 0) {
+            const goalsList = goals.map(goal => `<li>${goal}</li>`).join('');
+            goalsContainer.innerHTML = `
+                <div class="pillar-header">
+                    <span class="pillar-icon">🎯</span>
+                    <h4 class="pillar-title">Ultimate Goals</h4>
+                </div>
+                <ul class="pillar-list">${goalsList}</ul>
+            `;
+        } else {
+            goalsContainer.innerHTML = `<h4 class="pillar-title">Ultimate Goals</h4><p class="loading-text">Could not identify distinct goals.</p>`;
+        }
+
+        // Render Fears
+        if (fears && fears.length > 0) {
+            const fearsList = fears.map(fear => `<li>${fear}</li>`).join('');
+            fearsContainer.innerHTML = `
+                <div class="pillar-header">
+                    <span class="pillar-icon">⚠️</span>
+                    <h4 class="pillar-title">Greatest Fears</h4>
+                </div>
+                <ul class="pillar-list">${fearsList}</ul>
+            `;
+        } else {
+            fearsContainer.innerHTML = `<h4 class="pillar-title">Greatest Fears</h4><p class="loading-text">Could not identify distinct fears.</p>`;
+        }
+
+    } catch (error) {
+        console.error("Strategic pillars generation error:", error);
+        goalsContainer.innerHTML = `<h4 class="pillar-title">Ultimate Goals</h4><p class="loading-text" style="color: red;">Analysis failed.</p>`;
+        fearsContainer.innerHTML = `<h4 class="pillar-title">Greatest Fears</h4><p class="loading-text" style="color: red;">Analysis failed.</p>`;
+    }
+}
 async function enhanceDiscoveryWithComments(posts, nicheContext) {
     console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
     const brandContainer = document.getElementById('top-brands-container');
@@ -869,6 +948,7 @@ async function runProblemFinder(options = {}) {
         renderIncludedSubreddits(selectedSubreddits);
         generateAndRenderPowerPhrases(filteredItems);
         generateAndRenderMindsetSummary(filteredItems, originalGroupName);
+        generateAndRenderStrategicPillars(filteredItems, originalGroupName);
 
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));

@@ -1,5 +1,5 @@
 // =================================================================================
-// FINAL SCRIPT WITH D3.JS PACKED BUBBLE CHART
+// FINAL SCRIPT WITH D3.JS PACKED BUBBLE CHART (ANIMATED & COMPACT)
 // =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
@@ -505,7 +505,6 @@ async function generateAndRenderConstellation(items) {
     }
 
     const enrichedSignals = [];
-    // Define categories that have a higher chance of being returned by the AI
     const validCategories = ["DemandSignals", "WillingnessToPay", "Frustration", "SubstituteComparisons", "Urgency", "CostConcerns"];
     for (const rawSignal of rawSignals) {
         try {
@@ -542,10 +541,18 @@ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms,
 }
 
 function renderD3BubbleChart(signals) {
+    if (typeof d3 === 'undefined') {
+        console.error("D3.js is not loaded. Please ensure the D3 script tag is in your HTML before your main script.");
+        const panelContent = document.querySelector('#constellation-side-panel .panel-content');
+        if (panelContent) {
+            panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: D3.js library not found.</div>`;
+        }
+        return;
+    }
+
     const container = d3.select('#constellation-map-container');
     const panelContent = d3.select('#constellation-side-panel .panel-content');
 
-    // Clear previous chart and any stray tooltips
     container.selectAll('svg').remove();
     d3.select('body').selectAll('.d3-tooltip').remove();
 
@@ -556,7 +563,6 @@ function renderD3BubbleChart(signals) {
         return;
     }
 
-    // --- 1. Data Transformation ---
     const aggregatedSignals = {};
     signals.forEach(signal => {
         if (!signal.problem_theme || !signal.source || !signal.category) return;
@@ -574,7 +580,7 @@ function renderD3BubbleChart(signals) {
     const hierarchicalData = {
         name: "root",
         children: Array.from(groupedByCategory, ([key, value]) => ({
-            name: key.replace(/([A-Z])/g, ' $1').trim(), // Add spaces for readability
+            name: key.replace(/([A-Z])/g, ' $1').trim(),
             children: value.map(d => ({
                 name: d.problem_theme,
                 value: d.frequency,
@@ -584,13 +590,12 @@ function renderD3BubbleChart(signals) {
         }))
     };
 
-    // --- 2. D3 Setup ---
     const width = container.node().getBoundingClientRect().width;
-    const height = width;
+    const height = width * 0.65; // MODIFICATION: Make chart wider than it is tall
     
     const pack = data => d3.pack()
-        .size([width - 2, height - 2])
-        .padding(3)
+        .size([width, height])
+        .padding(5)
         (d3.hierarchy(data)
             .sum(d => d.value)
             .sort((a, b) => b.value - a.value));
@@ -598,33 +603,28 @@ function renderD3BubbleChart(signals) {
     const root = pack(hierarchicalData);
     const color = d3.scaleOrdinal(hierarchicalData.children.map(d => d.name), d3.schemeTableau10);
 
-    // --- 3. SVG and Tooltip Creation ---
-    const svg = container.append("svg")
-        .attr("viewBox", `-${width / 2} -${height / 2} ${width} ${height}`)
-        .attr("width", width)
-        .attr("height", height)
-        .attr("style", `max-width: 100%; height: auto; display: block; margin: 0 auto; background: transparent; cursor: pointer; font-family: Inter, sans-serif;`)
-        .on("click", (event) => zoom(event, root));
-
     const tooltip = d3.select("body").append("div")
         .attr("class", "d3-tooltip")
         .style("opacity", 0);
 
-    // --- 4. Render Bubbles and Labels ---
+    const svg = container.append("svg")
+        .attr("viewBox", `-${width / 2} -${height / 2} ${width} ${height}`)
+        .attr("width", "100%")
+        .attr("height", "100%")
+        .attr("style", `max-width: 100%; height: auto; display: block; margin: 0 auto; background: transparent; cursor: pointer;`)
+        .on("click", (event) => zoom(event, root));
+
     const node = svg.append("g")
       .selectAll("g")
       .data(root.descendants())
       .join("g")
         .attr("transform", d => `translate(${d.x - root.x},${d.y - root.y})`);
 
-    node.append("circle")
-        .attr("r", d => d.r)
-        .attr("fill", d => d.depth === 1 ? color(d.data.name) : d.depth > 1 ? d3.color(color(d.parent.data.name)).brighter(0.6) : "#fff")
-        .attr("fill-opacity", d => d.depth === 1 ? 0.3 : 0.9)
-        .attr("stroke", d => d.depth === 1 ? d3.color(color(d.data.name)).darker(0.5) : null)
-        .attr("stroke-width", d => d.depth === 1 ? 2 : 0)
+    const circle = node.append("circle")
+        .attr("fill", d => d.children ? color(d.data.name) : d.parent.children.length === 1 ? color(d.parent.data.name) : d3.color(color(d.parent.data.name)).brighter(0.6))
+        .attr("fill-opacity", d => d.children ? 0.35 : 1) // MODIFICATION: Parents more transparent
         .on("mouseover", function(event, d) {
-            if (!d.children) { // Only for leaf nodes
+            if (!d.children) {
                 d3.select(this).attr("stroke", "#000").attr("stroke-width", 2);
                 tooltip.transition().duration(200).style("opacity", 1);
                 tooltip.html(
@@ -639,39 +639,64 @@ function renderD3BubbleChart(signals) {
                     .style("top", (event.pageY - 28) + "px");
         })
         .on("mouseout", function() {
-            d3.select(this).attr("stroke", null).attr("stroke-width", null);
+            d3.select(this).attr("stroke", null);
             tooltip.transition().duration(500).style("opacity", 0);
         })
         .on("click", (event, d) => focus !== d && (zoom(event, d), event.stopPropagation()));
+    
+    // MODIFICATION: Animate bubbles on load
+    circle.transition()
+        .duration(750)
+        .ease(d3.easeExpOut)
+        .attr("r", d => d.r);
 
     const label = node.append("text")
         .attr("text-anchor", "middle")
-        .attr("dy", "0.3em")
-        .style("font-size", d => `${Math.max(8, d.r / 4)}px`)
-        .style("fill", d => d.depth === 1 ? "#fff" : "#222")
+        .style("font-family", "Inter, sans-serif")
+        .style("fill", "#111")
         .style("pointer-events", "none")
+        .style("fill-opacity", 0) // MODIFICATION: Start transparent for animation
         .selectAll("tspan")
-        .data(d => d.data.name.split(' ').concat(d.children ? '' : `(${d.data.value})`))
+        .data(d => d.children ? d.data.name.split(' ') : d.data.name.split(' ').concat(`(${d.data.value})`))
         .join("tspan")
         .attr("x", 0)
-        .attr("y", (d, i, nodes) => `${i - (nodes.length - 1) * 0.5 + 0.8}em`)
+        .attr("y", (d, i, nodes) => `${i - (nodes.length - 1) * 0.5 + 0.1}em`)
         .text(d => d);
         
-    // --- 5. Zoom Logic ---
+    // MODIFICATION: Animate labels fading in
+    label.transition()
+        .delay(200)
+        .duration(500)
+        .style("fill-opacity", 1);
+
+    // MODIFICATION: Improved font sizing logic
+    node.each(function(d) {
+        const textNode = d3.select(this).select('text');
+        if (d.children) { // Parent nodes
+             textNode.style("font-size", `${Math.max(10, d.r / 5)}px`).style("font-weight", "bold").style("fill", "#fff");
+        } else { // Leaf nodes
+            textNode.style("font-size", "12px");
+            if (textNode.node().getBBox().width > d.r * 1.8) {
+                textNode.style("display", "none");
+            }
+        }
+    });
+        
     let focus = root;
     let view;
 
     function zoomTo(v) {
         const k = width / v[2];
         view = v;
+        label.attr("transform", d => `translate(${(d.x - v[0]) * k},${(d.y - v[1]) * k})`);
         node.attr("transform", d => `translate(${(d.x - v[0]) * k},${(d.y - v[1]) * k})`);
         node.select("circle").attr("r", d => d.r * k);
     }
 
     function zoom(event, d) {
         focus = d;
-        const transition = svg.transition()
-            .duration(event.altKey ? 7500 : 750)
+        svg.transition()
+            .duration(750)
             .tween("zoom", () => {
                 const i = d3.interpolateZoom(view, [focus.x, focus.y, focus.r * 2]);
                 return t => zoomTo(i(t));
@@ -684,7 +709,6 @@ function renderD3BubbleChart(signals) {
         panelContent.html(`<div class="panel-placeholder">Click a category to zoom in. Hover over a bubble to see details.</div>`);
     }
 }
-
 
 // =================================================================================
 // === ENHANCEMENT & POWER PHRASES FUNCTIONS ===

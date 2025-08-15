@@ -444,6 +444,256 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
 // =================================================================================
 // === ENHANCEMENT & POWER PHRASES FUNCTIONS ===
 // =================================================================================
+
+function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
+
+// =================================================================================
+// === NEW HIGHCHARTS VISUALIZATION MODULE ===
+// =================================================================================
+
+async function generateAndRenderConstellation(items) {
+    console.log("[Highcharts] Starting full generation process with batching strategy...");
+    const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 60);
+    console.log(`[Highcharts] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
+
+    const BATCH_SIZE = 10;
+    const batchPromises = [];
+
+    for (let i = 0; i < prioritizedItems.length; i += BATCH_SIZE) {
+        const batch = prioritizedItems.slice(i, i + BATCH_SIZE);
+        const batchStartIndex = i;
+
+        const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 5 quotes that express a strong purchase intent, an unsolved problem, or a significant pain point. Focus ONLY on phrases that directly mention: Willingness to pay, Frustration with a lack of a tool, A specific, unmet need, Mentions of high cost, Comparisons to other products, or A sense of urgency. CRITICAL: IGNORE general complaints or non-commercial emotional support. Here are the comments:\n${batch.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}\nRespond ONLY with a valid JSON object: {"signals": [{"quote": "The extracted quote.", "source_index": 4}]}`;
+
+        const apiCallPromise = fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                openaiPayload: {
+                    model: "gpt-4o-mini",
+                    messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: extractionPrompt }],
+                    temperature: 0.1,
+                    max_tokens: 1500,
+                    response_format: { "type": "json_object" }
+                }
+            })
+        }).then(response => {
+            if (!response.ok) throw new Error(`Batch from index ${batchStartIndex} failed.`);
+            return response.json();
+        }).then(data => {
+            const parsedExtraction = JSON.parse(data.openaiResponse);
+            if (parsedExtraction.signals && Array.isArray(parsedExtraction.signals)) {
+                return parsedExtraction.signals.map(signal => ({
+                    quote: signal.quote,
+                    sourceItem: prioritizedItems[batchStartIndex + signal.source_index]
+                })).filter(s => s.sourceItem);
+            }
+            return [];
+        }).catch(error => {
+            console.error(`[Highcharts] Error processing batch starting at index ${batchStartIndex}:`, error);
+            return [];
+        });
+        batchPromises.push(apiCallPromise);
+    }
+    
+    const results = await Promise.allSettled(batchPromises);
+    let rawSignals = [];
+    results.forEach(result => {
+        if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+            rawSignals.push(...result.value);
+        }
+    });
+
+    console.log(`[Highcharts] AI extracted a total of ${rawSignals.length} high-quality signals from all batches.`);
+    if (rawSignals.length === 0) {
+        renderHighchartsBubbleChart([]);
+        return;
+    }
+
+    const enrichedSignals = [];
+    const validCategories = ["DemandSignals", "WillingnessToPay", "Frustration", "SubstituteComparisons", "Urgency", "CostConcerns"];
+    for (const rawSignal of rawSignals) {
+        try {
+            const enrichmentPrompt = `You are a market research analyst. For the quote below, provide a short summary of the user's core problem and classify it into the MOST relevant category. Here are the categories: [${validCategories.join(', ')}]. Quote: "${rawSignal.quote}" Provide a JSON object with: 1. "problem_theme": A short, 4-5 word summary of the core problem. 2. "category": Classify into ONE of the categories. Respond ONLY with a valid JSON object.`;
+            const enrichmentResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_tokens: 250, response_format: { "type": "json_object" } } }) });
+            if (enrichmentResponse.ok) {
+                const enrichmentData = await enrichmentResponse.json();
+                const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse);
+                if (parsedEnrichment.problem_theme && parsedEnrichment.category) {
+                    enrichedSignals.push({ ...rawSignal, ...parsedEnrichment, source: rawSignal.sourceItem.data });
+                } else { console.warn("Skipping a signal due to missing fields in AI enrichment response:", parsedEnrichment); }
+            } else { console.warn(`Failed to enrich a signal. Status: ${enrichmentResponse.status}`); }
+        } catch (error) { console.error("CRITICAL ERROR during individual signal enrichment:", error); }
+    }
+
+    console.log(`[Highcharts] AI successfully enriched ${enrichedSignals.length} signals. Rendering chart.`);
+    renderHighchartsBubbleChart(enrichedSignals);
+}
+
+async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
+    console.log("--- Starting Delayed Highcharts Chart Analysis (in background) ---");
+    try {
+        const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false);
+        const postIds = demandSignalPosts.sort((a,b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id);
+        const highIntentComments = await fetchCommentsForPosts(postIds);
+        const allItems = [...demandSignalPosts, ...highIntentComments];
+        await generateAndRenderConstellation(allItems);
+    } catch (error) {
+        console.error("Highcharts analysis failed in the background:", error);
+        renderHighchartsBubbleChart([]);
+    } finally {
+        console.log("--- Highcharts Analysis Complete. ---");
+    }
+}
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.getElementById('bubble-content'); // Use the new ID
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#FFFFFF',
+            borderColor: '#E0E0E0',
+            borderWidth: 1,
+            shadow: {
+                color: 'rgba(0, 0, 0, 0.15)',
+                offsetX: 0,
+                offsetY: 3,
+                opacity: 1,
+                width: 10
+            },
+            style: {
+                color: '#333333',
+                fontFamily: "'Plus Jakarta Sans', sans-serif"
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid #E0E0E0; padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #555555; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '35%',
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false, 
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: "'Plus Jakarta Sans', sans-serif",
+                        textAlign: 'center'
+                    },
+                    formatter: function() {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                             return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                },
+                // --- NEW FEATURE: Click Event Handler ---
+                point: {
+                    events: {
+                        click: function() {
+                            // isParentNode is true for the large category bubbles
+                            if (!this.isParentNode) {
+                                const bubbleContent = document.getElementById('bubble-content');
+                                if (bubbleContent) {
+                                    const { name, quote, source } = this.options;
+                                    bubbleContent.innerHTML = `
+                                        <h4 class="bubble-detail-title">${name}</h4>
+                                        <p class="bubble-detail-quote">“${quote}”</p>
+                                        <a href="https://www.reddit.com${source.permalink}" target="_blank" rel="noopener noreferrer" class="bubble-detail-source">
+                                            View on Reddit (r/${source.subreddit} | 👍 ${source.ups.toLocaleString()})
+                                        </a>
+                                    `;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+    
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Click a bubble to see details.</div>`;
+    }
+}
+
+// =================================================================================
+// === ENHANCEMENT & POWER PHRASES FUNCTIONS ===
+// =================================================================================
 async function enhanceDiscoveryWithComments(posts, nicheContext) {
     console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
     const brandContainer = document.getElementById('top-brands-container');
@@ -685,10 +935,7 @@ function initializeDashboardInteractivity() {
 }
 
 function initializeProblemFinderTool() {
-    // --- Inject CSS for Highcharts Tooltip ---
     const style = document.createElement('style');
-    // Note: Highcharts injects its own styles, so we primarily need to style the tooltip content.
-    // The tooltip itself is styled in the chart options.
     document.head.appendChild(style);
 
     console.log("Problem Finder elements found. Initializing...");

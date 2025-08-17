@@ -860,36 +860,84 @@ function generateNgrams(words, n) {
     }
     return ngrams;
 }
-function generateAndRenderPowerPhrases(posts) {
-    setTimeout(() => {
-        console.log("--- Starting Power Phrases Analysis (in background) ---");
-        const container = document.getElementById('power-phrases');
-        if (!container) return;
-        const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
-        const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
-        const acronymRegex = /\b[A-Z]{2,5}\b/g;
-        const acronyms = rawText.match(acronymRegex) || [];
-        const acronymFreq = {};
-        acronyms.forEach(acronym => { if (!stopAcronyms.has(acronym)) { acronymFreq[acronym] = (acronymFreq[acronym] || 0) + 1; } });
-        const topAcronyms = Object.entries(acronymFreq).filter(([_, count]) => count > 2).sort((a, b) => b[1] - a[1]).slice(0, 5).map(item => item[0]);
-        const cleanedText = rawText.toLowerCase().replace(/[^a-z\s']/g, '').replace(/\s+/g, ' ');
-        const words = cleanedText.split(' ');
-        const bigrams = generateNgrams(words, 2);
-        const trigrams = generateNgrams(words, 3);
-        const phraseFreq = {};
-        [...bigrams, ...trigrams].forEach(phrase => { phraseFreq[phrase] = (phraseFreq[phrase] || 0) + 1; });
-        const topPhrases = Object.entries(phraseFreq).filter(([_, count]) => count > 2).sort((a, b) => b[1] - a[1]).slice(0, 12 - topAcronyms.length).map(item => item[0]);
-        const finalResults = [...topAcronyms, ...topPhrases];
-        if (finalResults.length < 3) {
-            container.innerHTML = '<h3 class="dashboard-section-title">Phrases & Acronyms</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough common phrases found.</p>';
-            return;
-        }
-        const phrasesHTML = finalResults.map(item => `<div class="power-phrase-item">${item}</div>`).join('');
-        container.innerHTML = `<h3 class="dashboard-section-title">Phrases & Acronyms</h3><div class="power-phrases-list">${phrasesHTML}</div>`;
-        console.log("--- Power Phrase Analysis Complete. ---");
-    }, 10);
-}
+// =================================================================================
+// === START: Replace this entire function in your script ===
+// =================================================================================
 
+async function generateAndRenderPowerPhrases(posts, audienceContext) {
+    const container = document.getElementById('power-phrases');
+    if (!container) return;
+
+    // --- 1. Find Phrases (No changes to this part) ---
+    const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
+    const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
+    const acronymRegex = /\b[A-Z]{2,5}\b/g;
+    const acronyms = rawText.match(acronymRegex) || [];
+    const acronymFreq = {};
+    acronyms.forEach(acronym => { if (!stopAcronyms.has(acronym)) { acronymFreq[acronym] = (acronymFreq[acronym] || 0) + 1; } });
+    const topAcronyms = Object.entries(acronymFreq).filter(([_, count]) => count > 2).sort((a, b) => b[1] - a[1]).slice(0, 5).map(item => item[0]);
+    const cleanedText = rawText.toLowerCase().replace(/[^a-z\s']/g, '').replace(/\s+/g, ' ');
+    const words = cleanedText.split(' ');
+    const bigrams = generateNgrams(words, 2);
+    const trigrams = generateNgrams(words, 3);
+    const phraseFreq = {};
+    [...bigrams, ...trigrams].forEach(phrase => { phraseFreq[phrase] = (phraseFreq[phrase] || 0) + 1; });
+    const topPhrases = Object.entries(phraseFreq).filter(([_, count]) => count > 2).sort((a, b) => b[1] - a[1]).slice(0, 12 - topAcronyms.length).map(item => item[0]);
+    const finalResults = [...topAcronyms, ...topPhrases];
+
+    if (finalResults.length < 3) {
+        container.innerHTML = '<p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough common phrases found.</p>';
+        return;
+    }
+
+    // --- 2. Generate Dropdown HTML Structure ---
+    const phrasesHTML = finalResults.map((item, index) => `
+        <details class="power-phrase-item" id="phrase-item-${index}">
+            <summary class="power-phrase-summary">${item}</summary>
+            <div class="power-phrase-definition" id="phrase-def-${index}">
+                <p class="loading-text">Loading definition...</p>
+            </div>
+        </details>
+    `).join('');
+
+    // --- 3. Render the Dropdowns (Header is removed) ---
+    container.innerHTML = `<div class="power-phrases-list">${phrasesHTML}</div>`;
+
+    // --- 4. Fetch Definitions Asynchronously ---
+    finalResults.forEach(async (phrase, index) => {
+        try {
+            const prompt = `For the target audience "${audienceContext}", what does the phrase or acronym "${phrase}" mean? Provide a single, concise sentence explanation.`;
+            const openAIParams = {
+                model: "gpt-4o-mini",
+                messages: [
+                    { role: "system", content: "You are an expert at defining niche community jargon. Provide only a single sentence." },
+                    { role: "user", content: prompt }
+                ],
+                temperature: 0.1,
+                max_tokens: 100,
+            };
+            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+            if (!response.ok) throw new Error('Definition API call failed.');
+            
+            const data = await response.json();
+            const definitionText = data.openaiResponse;
+            
+            const definitionDiv = document.getElementById(`phrase-def-${index}`);
+            if (definitionDiv) {
+                definitionDiv.innerHTML = `<p>${definitionText}</p>`;
+            }
+        } catch (error) {
+            console.error(`Failed to get definition for "${phrase}":`, error);
+            const definitionDiv = document.getElementById(`phrase-def-${index}`);
+            if (definitionDiv) {
+                definitionDiv.innerHTML = `<p class="loading-text" style="color: red;">Could not load definition.</p>`;
+            }
+        }
+    });
+}
+// =================================================================================
+// === END: Replace this entire function in your script ===
+// =================================================================================
 // =================================================================================
 // === CORE `runProblemFinder` FUNCTION ===
 // =================================================================================
@@ -946,7 +994,7 @@ async function runProblemFinder(options = {}) {
         renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
         generateEmotionMapData(filteredItems).then(renderEmotionMap);
         renderIncludedSubreddits(selectedSubreddits);
-        generateAndRenderPowerPhrases(filteredItems);
+        generateAndRenderPowerPhrases(filteredItems, originalGroupName);
         generateAndRenderMindsetSummary(filteredItems, originalGroupName);
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);
 

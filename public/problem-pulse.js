@@ -897,6 +897,83 @@ Your writing should adopt the following characteristics:
         `;
     }
 }
+// =================================================================================
+// === NEW FUNCTION: AI KEYWORD OPPORTUNITIES ===
+// =================================================================================
+
+async function generateAndRenderKeywords(posts, audienceContext) {
+    const container = document.getElementById('keyword-opportunities-container');
+    if (!container) return;
+
+    container.innerHTML = `<h3 class="dashboard-section-title">Keyword Opportunities</h3><p class="loading-text">Extracting high-intent keywords...</p>`;
+
+    try {
+        const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+
+        const prompt = `You are an expert SEO strategist specializing in identifying user intent from raw text for the "${audienceContext}" audience.
+        Analyze the following user posts and extract up to 15 high-value keywords and phrases. Categorize them into three distinct groups based on user intent:
+
+        1.  "problem_aware": Keywords used by people who know they have a problem but are seeking information or understanding. (e.g., "how to fix...", "why is my...", "is it normal...")
+        2.  "solution_seeking": Keywords used by people actively looking for and comparing types of solutions. (e.g., "best software for...", "alternatives to...", "[product category] reviews")
+        3.  "purchase_intent": Keywords used by people close to making a purchase, often including brand names or commercial terms. (e.g., "[Brand A] vs [Brand B]", "[Product] pricing", "is [Brand] worth it")
+
+        Respond ONLY with a valid JSON object with three keys: "problem_aware", "solution_seeking", and "purchase_intent", each holding an array of up to 5 relevant keyword strings.
+
+        Posts:\n${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You are an SEO strategist who outputs structured JSON with keyword categories." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.1,
+            max_tokens: 600,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        
+        if (!response.ok) throw new Error('Keyword analysis API call failed.');
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        const { problem_aware, solution_seeking, purchase_intent } = parsed;
+        
+        const renderCluster = (title, icon, description, keywords) => {
+            if (!keywords || keywords.length === 0) return '';
+            const keywordList = keywords.map(kw => `<li>${kw}</li>`).join('');
+            return `
+                <div class="keyword-cluster">
+                    <div class="keyword-cluster-header">
+                        <span class="keyword-cluster-icon">${icon}</span>
+                        <div>
+                            <h4 class="keyword-cluster-title">${title}</h4>
+                            <p class="keyword-cluster-description">${description}</p>
+                        </div>
+                    </div>
+                    <ul class="keyword-list">${keywordList}</ul>
+                </div>
+            `;
+        };
+        
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Keyword Opportunities</h3>
+            <div class="keyword-clusters-grid">
+                ${renderCluster('Problem-Aware', '🤔', 'For blog posts & guides', problem_aware)}
+                ${renderCluster('Solution-Seeking', '🔍', 'For comparisons & reviews', solution_seeking)}
+                ${renderCluster('Purchase-Intent', '💳', 'For landing pages & ads', purchase_intent)}
+            </div>
+        `;
+
+    } catch (error) {
+        console.error("Keyword generation error:", error);
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Keyword Opportunities</h3>
+            <p class="loading-text" style="color: red;">Could not generate keyword opportunities.</p>
+        `;
+    }
+}
 async function enhanceDiscoveryWithComments(posts, nicheContext) {
     console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
     const brandContainer = document.getElementById('top-brands-container');
@@ -1071,6 +1148,7 @@ async function runProblemFinder(options = {}) {
         generateAndRenderMindsetSummary(filteredItems, originalGroupName);
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);
         generateAndRenderAIPrompt(filteredItems, originalGroupName);
+        generateAndRenderKeywords(filteredItems, originalGroupName);
 
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));

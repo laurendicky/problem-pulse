@@ -824,6 +824,79 @@ async function generateAndRenderStrategicPillars(posts, audienceContext) {
         fearsContainer.innerHTML = `<h4 class="pillar-title">Greatest Fears</h4><p class="loading-text" style="color: red;">Analysis failed.</p>`;
     }
 }
+// =================================================================================
+// === NEW FUNCTION: AI GENERATIVE PROMPT ===
+// =================================================================================
+
+async function generateAndRenderAIPrompt(posts, audienceContext) {
+    const container = document.getElementById('ai-prompt-container');
+    if (!container) return;
+
+    container.innerHTML = `<h3 class="dashboard-section-title">Generative AI Prompt</h3><p class="loading-text">Crafting a tone of voice prompt...</p>`;
+
+    try {
+        const topPostsText = posts.slice(0, 30).map(p => `"${p.data.title || ''} ${getFirstTwoSentences(p.data.selftext || p.data.body || '')}"`).join('\n');
+
+        const prompt = `You are a world-class brand strategist and copywriter. Analyze the following sample of posts from the "${audienceContext}" community. Your task is to create a "Generative AI Prompt" that a marketer could use to write content in the authentic voice of this audience.
+
+        Based on the text, identify the following:
+        - **tone:** 3-4 descriptive adjectives for the overall emotional tone.
+        - **vocabulary:** 3-5 key slang words, acronyms, or insider phrases they use.
+        - **style:** 2-3 bullet points describing their writing style (e.g., sentence structure, use of humor, etc.).
+        - **sentiment:** 1 sentence describing their general outlook (e.g., are they generally optimistic, critical, helpful?).
+
+        Respond ONLY with a valid JSON object with the keys "tone", "vocabulary", "style", and "sentiment".
+
+        Sample Posts:\n${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You are a brand strategist who creates structured JSON output for AI prompts." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.2,
+            max_tokens: 500,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        
+        if (!response.ok) throw new Error('AI prompt generation API call failed.');
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        
+        const promptText = `Write a blog post about [YOUR TOPIC] for an audience of ${audienceContext}.
+
+Your writing should adopt the following characteristics:
+
+**TONE:**
+- ${parsed.tone.join('\n- ')}
+
+**VOCABULARY:**
+- Use terms like: ${parsed.vocabulary.join(', ')}
+
+**STYLE:**
+- ${parsed.style.join('\n- ')}
+
+**SENTIMENT:**
+- ${parsed.sentiment}
+`;
+
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Generative AI Prompt</h3>
+            <div class="ai-prompt-content" id="ai-prompt-text">${promptText}</div>
+        `;
+
+    } catch (error) {
+        console.error("AI prompt generation error:", error);
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Generative AI Prompt</h3>
+            <p class="loading-text" style="color: red;">Could not generate AI prompt.</p>
+        `;
+    }
+}
 async function enhanceDiscoveryWithComments(posts, nicheContext) {
     console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
     const brandContainer = document.getElementById('top-brands-container');
@@ -997,6 +1070,7 @@ async function runProblemFinder(options = {}) {
         generateAndRenderPowerPhrases(filteredItems, originalGroupName);
         generateAndRenderMindsetSummary(filteredItems, originalGroupName);
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);
+        generateAndRenderAIPrompt(filteredItems, originalGroupName);
 
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));

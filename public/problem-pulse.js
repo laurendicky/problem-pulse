@@ -1088,9 +1088,6 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
 // =================================================================================
 // === END: Replace this entire function in your script ===
 // =================================================================================
-// =================================================================================
-// === CORE `runProblemFinder` FUNCTION ===
-// =================================================================================
 async function runProblemFinder(options = {}) {
     const { isUpdate = false } = options;
     const searchButton = document.getElementById('search-selected-btn');
@@ -1115,6 +1112,7 @@ if (!isUpdate) {
     if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
     // This array no longer contains "findings-1" etc.
     ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+
     
     if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
     
@@ -1278,7 +1276,20 @@ sortedFindings.forEach((findingData, index) => {
     }
 });
         
-        
+
+// This loop cleans up any unused cards.
+for (let i = sortedFindings.length; i < 5; i++) {
+    const displayIndex = i + 1;
+    const unusedBlock = document.getElementById(`findings-block${displayIndex}`);
+    if (unusedBlock) {
+        unusedBlock.style.display = 'none';
+    }
+}
+
+
+try {
+    window._postsForAssignment = filteredItems.slice(0, 75);
+    // ...       
 
 
 // --- START OF DEBUGGING BLOCK ---

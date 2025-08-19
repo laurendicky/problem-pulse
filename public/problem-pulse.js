@@ -1169,33 +1169,36 @@ async function runProblemFinder(options = {}) {
         for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); const content = document.getElementById(`findings-${i}`); if (block) block.style.display = "none"; if (content) content.innerHTML = ""; }
         // =================== START: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
 // =================== START: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
+// =================== START: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
 
 sortedFindings.forEach((findingData, index) => {
     const displayIndex = index + 1;
     if (displayIndex > 5) return;
 
-    // We still get the main block for the card
     const block = document.getElementById(`findings-block${displayIndex}`);
+    // THIS IS THE KEY: We get the specific inner container where your feedback-wrapper lives.
+    const content = document.getElementById(`findings-${displayIndex}`); 
     const btn = document.getElementById(`button-sample${displayIndex}`);
 
-    if (block) { // We will now work directly with the 'block'
+    if (block) {
         block.style.display = "flex";
+    }
 
+    // We check if the inner 'content' div exists before doing anything else.
+    if (content) {
         const { summary, prevalence, supportCount } = findingData;
 
         // --- 1. Update the Title ---
-        // THE FIX IS HERE: We now search inside `block`, not `content`.
-        const titleEl = block.querySelector('.section-title');
+        // It now correctly looks for .section-title INSIDE #findings-1 (etc.)
+        const titleEl = content.querySelector('.section-title');
         if (titleEl) {
             titleEl.textContent = summary.title;
         }
 
-        // --- 2. Update the Summary Body with "See more" logic ---
-        // THE FIX IS HERE: Searching inside `block`.
-        const teaserEl = block.querySelector('.summary-teaser');
-        const fullEl = block.querySelector('.summary-full');
-        const seeMoreBtn = block.querySelector('.see-more-btn');
-
+        // --- 2. Update the Summary Body ---
+        const teaserEl = content.querySelector('.summary-teaser');
+        const fullEl = content.querySelector('.summary-full');
+        const seeMoreBtn = content.querySelector('.see-more-btn');
         if (teaserEl && fullEl && seeMoreBtn) {
             if (summary.body.length > 95) {
                 teaserEl.textContent = summary.body.substring(0, 95) + "…";
@@ -1222,8 +1225,7 @@ sortedFindings.forEach((findingData, index) => {
         }
         
         // --- 3. Update the Quotes ---
-        // THE FIX IS HERE: Searching inside `block`.
-        const quotesContainer = block.querySelector('.quotes-container');
+        const quotesContainer = content.querySelector('.quotes-container');
         if (quotesContainer) {
             const quoteElements = quotesContainer.querySelectorAll('.quote');
             summary.quotes.forEach((quoteText, i) => {
@@ -1238,8 +1240,7 @@ sortedFindings.forEach((findingData, index) => {
         }
 
         // --- 4. Update the Metrics / Prevalence Bar ---
-        // THE FIX IS HERE: Searching inside `block`.
-        const metricsWrapper = block.querySelector('.prevalence-container-wrapper');
+        const metricsWrapper = content.querySelector('.prevalence-container-wrapper');
         if (metricsWrapper) {
             let metricsHtml = (sortedFindings.length === 1) 
                 ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` 
@@ -1254,6 +1255,8 @@ sortedFindings.forEach((findingData, index) => {
       };
     }
 });
+
+// =================== END: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
 
 // =================== END: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
 

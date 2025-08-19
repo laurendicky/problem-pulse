@@ -1181,90 +1181,52 @@ if (!isUpdate) {
 // =================== START: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
 // =================== THIS IS THE CORRECT LOOPING CODE ===================
 
+// =================== PASTE THIS TEMPORARY DEBUGGING CODE ===================
+
+// --- START OF DEBUGGING BLOCK ---
+console.log("--- DEBUGGING FINDINGS ---");
+console.log("Total findings to render:", sortedFindings.length);
+console.log("Full findings object:", sortedFindings);
+// --- END OF DEBUGGING BLOCK ---
+
 sortedFindings.forEach((findingData, index) => {
     const displayIndex = index + 1;
     if (displayIndex > 5) return;
 
+    console.log(`--- DEBUGGING LOOP FOR CARD #${displayIndex} ---`);
+
     const block = document.getElementById(`findings-block${displayIndex}`);
-    // This correctly gets your 'feedback-wrapper' by its ID
-    const content = document.getElementById(`findings-${displayIndex}`); 
+    console.log(`Searching for #findings-block${displayIndex}. Found:`, block);
+
+    const content = document.getElementById(`findings-${displayIndex}`);
+    console.log(`Searching for #findings-${displayIndex}. Found:`, content);
+    
     const btn = document.getElementById(`button-sample${displayIndex}`);
+    console.log(`Searching for #button-sample${displayIndex}. Found:`, btn);
 
     if (block) {
         block.style.display = "flex";
     }
 
-    // Now we can safely find elements inside your 'feedback-wrapper'
     if (content) {
-        const { summary, prevalence, supportCount } = findingData;
+        console.log(`Data for this card:`, findingData.summary);
 
-        // --- 1. Update the Title ---
         const titleEl = content.querySelector('.section-title');
+        console.log(`Searching for .section-title inside #findings-${displayIndex}. Found:`, titleEl);
         if (titleEl) {
-            titleEl.textContent = summary.title;
+            titleEl.textContent = findingData.summary.title;
         }
 
-        // --- 2. Update the Summary Body ---
-        const teaserEl = content.querySelector('.summary-teaser');
-        const fullEl = content.querySelector('.summary-full');
-        const seeMoreBtn = content.querySelector('.see-more-btn');
-        if (teaserEl && fullEl && seeMoreBtn) {
-            if (summary.body.length > 95) {
-                teaserEl.textContent = summary.body.substring(0, 95) + "…";
-                fullEl.textContent = summary.body;
-                teaserEl.style.display = 'inline';
-                fullEl.style.display = 'none';
-                seeMoreBtn.style.display = 'inline-block';
-                seeMoreBtn.textContent = 'See more';
-                
-                const newBtn = seeMoreBtn.cloneNode(true);
-                seeMoreBtn.parentNode.replaceChild(newBtn, seeMoreBtn);
-                newBtn.addEventListener('click', function() {
-                    const isHidden = teaserEl.style.display !== 'none';
-                    teaserEl.style.display = isHidden ? 'none' : 'inline';
-                    fullEl.style.display = isHidden ? 'inline' : 'none';
-                    newBtn.textContent = isHidden ? 'See less' : 'See more';
-                });
-            } else {
-                teaserEl.textContent = summary.body;
-                teaserEl.style.display = 'inline';
-                fullEl.style.display = 'none';
-                seeMoreBtn.style.display = 'none';
-            }
-        }
-        
-        // --- 3. Update the Quotes ---
         const quotesContainer = content.querySelector('.quotes-container');
+        console.log(`Searching for .quotes-container inside #findings-${displayIndex}. Found:`, quotesContainer);
         if (quotesContainer) {
             const quoteElements = quotesContainer.querySelectorAll('.quote');
-            summary.quotes.forEach((quoteText, i) => {
-                if (quoteElements[i]) {
-                    quoteElements[i].textContent = `"${quoteText}"`;
-                    quoteElements[i].style.display = 'block';
-                }
-            });
-            for (let i = summary.quotes.length; i < quoteElements.length; i++) {
-                quoteElements[i].style.display = 'none';
-            }
+            console.log(`Found ${quoteElements.length} elements with class .quote.`);
         }
-
-        // --- 4. Update the Metrics / Prevalence Bar ---
-        const metricsWrapper = content.querySelector('.prevalence-container-wrapper');
-        if (metricsWrapper) {
-            let metricsHtml = (sortedFindings.length === 1) 
-                ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` 
-                : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
-            metricsWrapper.innerHTML = metricsHtml;
-        }
-    }
-
-    if (btn) {
-      btn.onclick = function() { 
-        showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); 
-      };
+    } else {
+        console.error(`CRITICAL ERROR: Could not find the content container #findings-${displayIndex}. All updates for this card will fail.`);
     }
 });
-
 // =================== END: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
 
 // =================== END: REPLACE THIS BLOCK IN YOUR SCRIPT ===================

@@ -700,9 +700,9 @@ function renderHighchartsBubbleChart(signals) {
 // =================================================================================
 // === ENHANCEMENT & POWER PHRASES FUNCTIONS ===
 // =================================================================================
-
-
-
+// =================================================================================
+// === NEW FUNCTION: AI MINDSET SUMMARY ===
+// =================================================================================
 
 async function generateAndRenderMindsetSummary(posts, audienceContext) {
     const container = document.getElementById('mindset-summary-container');
@@ -1085,8 +1085,9 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
         }
     });
 }
+
 // =================================================================================
-// === END: Replace this entire function in your script ===
+// === CORE `runProblemFinder` FUNCTION (CORRECTED) ===
 // =================================================================================
 async function runProblemFinder(options = {}) {
     const { isUpdate = false } = options;
@@ -1106,29 +1107,30 @@ async function runProblemFinder(options = {}) {
     const resultsWrapper = document.getElementById('results-wrapper-b');
     const resultsMessageDiv = document.getElementById("results-message");
     const countHeaderDiv = document.getElementById("count-header");
-    // REPLACE THE OLD BLOCK WITH THIS NEW ONE
-    // PASTE THIS CORRECTED BLOCK
-if (!isUpdate) {
-    if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-    // This array no longer contains "findings-1" etc.
-    ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
 
-    
-    if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
-    
-    // This loop safely puts a loading message inside the prevalence wrapper without destroying anything.
-    for (let i = 1; i <= 5; i++) {
-        const block = document.getElementById(`findings-block${i}`);
-        if (block) {
-            // Hide the block initially until it's ready to be shown
-            block.style.display = 'none'; 
-            const prevalenceWrapper = block.querySelector('.prevalence-container-wrapper');
-            if (prevalenceWrapper) {
-                prevalenceWrapper.innerHTML = "<p class='loading-text' style='text-align: center; padding: 2rem;'>Brewing insights...</p>";
+    // --- CHANGE #1: MODIFIED INITIALIZATION BLOCK ---
+    // This new block correctly resets and prepares the UI for new results.
+    if (!isUpdate) {
+        if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
+        // Clear all dynamic content containers
+        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+        
+        if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
+        
+        // This loop now hides the parent block and sets the loading message inside.
+        // The block will remain hidden until it's populated with data.
+        for (let i = 1; i <= 5; i++) {
+            const block = document.getElementById(`findings-block${i}`);
+            if (block) {
+                block.style.display = 'none'; // Hide the entire finding block by default
+                const prevalenceWrapper = block.querySelector('.prevalence-container-wrapper');
+                if (prevalenceWrapper) {
+                    prevalenceWrapper.innerHTML = "<p class='loading-text' style='text-align: center; padding: 2rem;'>Brewing insights...</p>";
+                }
             }
         }
     }
-}
+
     try {
         console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
         
@@ -1176,30 +1178,22 @@ if (!isUpdate) {
         const summaries = parseAISummary(openAIData.openaiResponse);
         const validatedSummaries = summaries.filter(finding => filteredItems.filter(post => calculateRelevanceScore(post, finding) > 0).length >= 3);
         if (validatedSummaries.length === 0) { throw new Error("While posts were found, none formed a clear, common problem."); }
-        const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);// =================== PASTE THIS ENTIRE BLOCK ===================
-
         const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
         const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
+    
+        // --- CHANGE #2: CORRECTED RENDERING LOGIC ---
+        // This loop now makes a block visible *before* populating it, ensuring
+        // that only blocks with actual data are ever shown to the user.
         
-        // Set the global summaries variable for other functions to use
         window._summaries = sortedFindings.map(item => item.summary);
 
-        // Hide all five card blocks initially. This prevents flashes of placeholder content.
-        for (let i = 1; i <= 5; i++) {
-            const block = document.getElementById(`findings-block${i}`);
-            if (block) block.style.display = "none";
-        }
-
-        // RENDER THE FINDINGS: Loop through the data and populate the cards that have data.
         sortedFindings.forEach((findingData, index) => {
             const displayIndex = index + 1;
-            if (displayIndex > 5) return;
+            if (displayIndex > 5) return; // Stop if we have more than 5 findings
 
             const block = document.getElementById(`findings-block${displayIndex}`);
-            const content = document.getElementById(`findings-${displayIndex}`); // This is your feedback-wrapper
-            
-            // In Webflow, give your "Show Sample Posts" button a class of 'sample-posts-button'
-            const btn = block.querySelector('.sample-posts-button'); 
+            const content = document.getElementById(`findings-${displayIndex}`);
+            const btn = block.querySelector('.sample-posts-button');
 
             // Make the card visible since we have data for it
             if (block) {
@@ -1221,9 +1215,12 @@ if (!isUpdate) {
                     if (summary.body.length > 95) {
                         teaserEl.textContent = summary.body.substring(0, 95) + "…";
                         fullEl.textContent = summary.body;
-                        teaserEl.style.display = 'inline'; fullEl.style.display = 'none';
-                        seeMoreBtn.style.display = 'inline-block'; seeMoreBtn.textContent = 'See more';
+                        teaserEl.style.display = 'inline';
+                        fullEl.style.display = 'none';
+                        seeMoreBtn.style.display = 'inline-block';
+                        seeMoreBtn.textContent = 'See more';
                         
+                        // Re-clone button to avoid multiple event listeners on updates
                         const newBtn = seeMoreBtn.cloneNode(true);
                         seeMoreBtn.parentNode.replaceChild(newBtn, seeMoreBtn);
                         newBtn.addEventListener('click', function() {
@@ -1234,7 +1231,8 @@ if (!isUpdate) {
                         });
                     } else {
                         teaserEl.textContent = summary.body;
-                        teaserEl.style.display = 'inline'; fullEl.style.display = 'none';
+                        teaserEl.style.display = 'inline';
+                        fullEl.style.display = 'none';
                         seeMoreBtn.style.display = 'none';
                     }
                 }
@@ -1250,7 +1248,7 @@ if (!isUpdate) {
                         }
                     });
                     for (let i = summary.quotes.length; i < quoteElements.length; i++) {
-                        quoteElements[i].style.display = 'none';
+                        if(quoteElements[i]) quoteElements[i].style.display = 'none';
                     }
                 }
 
@@ -1265,20 +1263,12 @@ if (!isUpdate) {
             }
 
             if (btn) {
-              btn.onclick = function() { showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); };
+              btn.onclick = function() { 
+                showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); 
+              };
             }
         });
-
-        // HIDE UNUSED CARDS: This loop cleans up any cards that didn't get data.
-        for (let i = sortedFindings.length; i < 5; i++) {
-            const displayIndex = i + 1;
-            const unusedBlock = document.getElementById(`findings-block${displayIndex}`);
-            if (unusedBlock) {
-                unusedBlock.style.display = 'none';
-            }
-        }
         
-        // This 'try' block now correctly follows the rendering logic.
         try {
             window._postsForAssignment = filteredItems.slice(0, 75);
             window._usedPostIds = new Set();
@@ -1290,13 +1280,31 @@ if (!isUpdate) {
             }
         } catch (err) {
             console.error("CRITICAL (but isolated): Failed to assign posts to findings.", err);
-            for (let i = 1; i <= 5; i++) { 
-                const redditDiv = document.getElementById(`reddit-div${i}`); 
-                if (redditDiv) { 
-                    redditDiv.innerHTML = `<div style="font-style: italic; color: #999;">Could not load sample posts.</div>`; 
-                } 
+            for (let i = 1; i <= 5; i++) { const redditDiv = document.getElementById(`reddit-div${i}`); if (redditDiv) { redditDiv.innerHTML = `<div style="font-style: italic; color: #999;">Could not load sample posts.</div>`; } }
+        }
+        if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
+            if (resultsWrapper) {
+                resultsWrapper.style.setProperty('display', 'flex', 'important');
+                setTimeout(() => {
+                    if (resultsWrapper) {
+                        resultsWrapper.style.opacity = '1';
+                        if (!isUpdate) {
+                            const topOfResults = resultsWrapper.getBoundingClientRect().top + window.pageYOffset;
+                            window.scrollTo({ top: topOfResults, behavior: 'smooth' });
+                            
+                            const fullHeader = document.getElementById('full-header');
+                            if (fullHeader) {
+                                fullHeader.classList.add('header-hidden');
+                                fullHeader.addEventListener('transitionend', () => {
+                                    fullHeader.style.display = 'none';
+                                }, { once: true });
+                            }
+                        }
+                    }
+                }, 50);
             }
         }
+        setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
         setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
         setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
     } catch (err) {

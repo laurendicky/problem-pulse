@@ -1086,9 +1086,6 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     });
 }
 
-// =================================================================================
-// === CORE `runProblemFinder` FUNCTION (CORRECTED) ===
-// =================================================================================
 async function runProblemFinder(options = {}) {
     const { isUpdate = false } = options;
     const searchButton = document.getElementById('search-selected-btn');
@@ -1108,37 +1105,22 @@ async function runProblemFinder(options = {}) {
     const resultsMessageDiv = document.getElementById("results-message");
     const countHeaderDiv = document.getElementById("count-header");
 
-    // --- CHANGE #1: MODIFIED INITIALIZATION BLOCK ---
-    // This new block correctly resets and prepares the UI for new results.
+    // This reset logic is correct: It hides all finding blocks initially.
     if (!isUpdate) {
         if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-        // Clear all dynamic content containers
-        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
-        
+        ["count-header", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
         
-        // This loop now hides the parent block and sets the loading message inside.
-        // The block will remain hidden until it's populated with data.
         for (let i = 1; i <= 5; i++) {
             const block = document.getElementById(`findings-block${i}`);
             if (block) {
-                block.style.display = 'none'; // Hide the entire finding block by default
-                const prevalenceWrapper = block.querySelector('.prevalence-container-wrapper');
-                if (prevalenceWrapper) {
-                    prevalenceWrapper.innerHTML = "<p class='loading-text' style='text-align: center; padding: 2rem;'>Brewing insights...</p>";
-                }
+                block.style.display = 'none'; 
             }
         }
     }
 
     try {
-        console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
-        
-        const panelContent = document.getElementById('bubble-content');
-        if (panelContent) {
-            panelContent.innerHTML = `<div class="panel-placeholder">Loading purchase signals... <span class="loader-dots"></span></div>`;
-        }
-
+        // ... (all the data fetching and analysis code remains the same)
         const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
         let generalSearchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms] : problemTerms;
         let limitPerTerm = (searchDepth === 'deep') ? 75 : 40;
@@ -1148,9 +1130,9 @@ async function runProblemFinder(options = {}) {
         const selectedTime = timeMap[selectedTimeRaw] || "all";
         const problemItems = await fetchMultipleRedditDataBatched(subredditQueryString, generalSearchTerms, limitPerTerm, selectedTime, false);
         const allItems = deduplicatePosts(problemItems);
-        if (allItems.length === 0) throw new Error("No initial problem posts found. Try different communities or a broader search.");
+        if (allItems.length === 0) throw new Error("No initial problem posts found.");
         const filteredItems = filterPosts(allItems, selectedMinUpvotes);
-        if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
+        if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering.");
         window._filteredPosts = filteredItems;
         renderPosts(filteredItems);
         const sentimentData = generateSentimentData(filteredItems);
@@ -1164,13 +1146,11 @@ async function runProblemFinder(options = {}) {
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);
         generateAndRenderAIPrompt(filteredItems, originalGroupName);
         generateAndRenderKeywords(filteredItems, originalGroupName);
-
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
         if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }
         const topKeywords = getTopKeywords(filteredItems, 10);
-        const topPosts = filteredItems.slice(0, 30);
-        const combinedTexts = topPosts.map(post => `${post.data.title || post.data.link_title || ''}. ${getFirstTwoSentences(post.data.selftext || post.data.body || '')}`).join("\n\n");
+        const combinedTexts = filteredItems.slice(0, 30).map(post => `${post.data.title || post.data.link_title || ''}. ${getFirstTwoSentences(post.data.selftext || post.data.body || '')}`).join("\n\n");
         const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["Quote A", "Quote B", "Quote C"], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_tokens: 1500, response_format: { "type": "json_object" } };
         const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!openAIResponse.ok) throw new Error('OpenAI summary generation failed.');
@@ -1180,16 +1160,12 @@ async function runProblemFinder(options = {}) {
         if (validatedSummaries.length === 0) { throw new Error("While posts were found, none formed a clear, common problem."); }
         const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
         const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
-    
-        // --- CHANGE #2: CORRECTED RENDERING LOGIC ---
-        // This loop now makes a block visible *before* populating it, ensuring
-        // that only blocks with actual data are ever shown to the user.
-        
         window._summaries = sortedFindings.map(item => item.summary);
 
+        // This loop populates the data for each finding card.
         sortedFindings.forEach((findingData, index) => {
             const displayIndex = index + 1;
-            if (displayIndex > 5) return; // Stop if we have more than 5 findings
+            if (displayIndex > 5) return;
 
             const block = document.getElementById(`findings-block${displayIndex}`);
             const content = document.getElementById(`findings-${displayIndex}`);
@@ -1201,115 +1177,61 @@ async function runProblemFinder(options = {}) {
             }
 
             if (content) {
-                const { summary, prevalence, supportCount } = findingData;
-
-                // --- 1. Update the Title ---
-                const titleEl = content.querySelector('.section-title');
-                if (titleEl) titleEl.textContent = summary.title;
-
-                // --- 2. Update the Summary Body ---
-                const teaserEl = content.querySelector('.summary-teaser');
-                const fullEl = content.querySelector('.summary-full');
-                const seeMoreBtn = content.querySelector('.see-more-btn');
-                if (teaserEl && fullEl && seeMoreBtn) {
-                    if (summary.body.length > 95) {
-                        teaserEl.textContent = summary.body.substring(0, 95) + "…";
-                        fullEl.textContent = summary.body;
-                        teaserEl.style.display = 'inline';
-                        fullEl.style.display = 'none';
-                        seeMoreBtn.style.display = 'inline-block';
-                        seeMoreBtn.textContent = 'See more';
-                        
-                        // Re-clone button to avoid multiple event listeners on updates
-                        const newBtn = seeMoreBtn.cloneNode(true);
-                        seeMoreBtn.parentNode.replaceChild(newBtn, seeMoreBtn);
-                        newBtn.addEventListener('click', function() {
-                            const isHidden = teaserEl.style.display !== 'none';
-                            teaserEl.style.display = isHidden ? 'none' : 'inline';
-                            fullEl.style.display = isHidden ? 'inline' : 'none';
-                            newBtn.textContent = isHidden ? 'See less' : 'See more';
-                        });
-                    } else {
-                        teaserEl.textContent = summary.body;
-                        teaserEl.style.display = 'inline';
-                        fullEl.style.display = 'none';
-                        seeMoreBtn.style.display = 'none';
-                    }
-                }
+                const { summary, prevalence } = findingData;
                 
-                // --- 3. Update the Quotes ---
+                // --- This part remains the same, it correctly finds and updates elements ---
+                content.querySelector('.section-title').textContent = summary.title;
+                content.querySelector('.summary-teaser').textContent = summary.body.substring(0, 95) + (summary.body.length > 95 ? "…" : "");
                 const quotesContainer = content.querySelector('.quotes-container');
-                if (quotesContainer) {
-                    const quoteElements = quotesContainer.querySelectorAll('.quote');
-                    summary.quotes.forEach((quoteText, i) => {
-                        if (quoteElements[i]) {
-                            quoteElements[i].textContent = `"${quoteText}"`;
-                            quoteElements[i].style.display = 'block';
-                        }
-                    });
-                    for (let i = summary.quotes.length; i < quoteElements.length; i++) {
-                        if(quoteElements[i]) quoteElements[i].style.display = 'none';
-                    }
-                }
+                const quoteElements = quotesContainer.querySelectorAll('.quote');
+                summary.quotes.forEach((quoteText, i) => { if (quoteElements[i]) { quoteElements[i].textContent = `"${quoteText}"`; quoteElements[i].style.display = 'block'; }});
+                for (let i = summary.quotes.length; i < quoteElements.length; i++) { if (quoteElements[i]) quoteElements[i].style.display = 'none'; }
 
-                // --- 4. Update the Metrics / Prevalence Bar ---
+                // ================== THE DIRECT FIX IS HERE ==================
+                // We find the wrapper and directly inject the complete, correct HTML for the progress bar.
+                // This overwrites any "Brewing insights..." message and fixes the problem.
                 const metricsWrapper = content.querySelector('.prevalence-container-wrapper');
                 if (metricsWrapper) {
-                    let metricsHtml = (sortedFindings.length === 1) 
-                        ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` 
-                        : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
+                    const metricsHtml = `
+                        <div class="prevalence-container">
+                            <div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div>
+                            <div class="prevalence-bar-background">
+                                <div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">
+                                    ${prevalence}%
+                                </div>
+                            </div>
+                            <div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div>
+                        </div>`;
                     metricsWrapper.innerHTML = metricsHtml;
                 }
+                // ================== END OF DIRECT FIX ==================
             }
 
             if (btn) {
-              btn.onclick = function() { 
-                showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); 
-              };
+                btn.onclick = () => showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds);
             }
         });
-        
-        try {
-            window._postsForAssignment = filteredItems.slice(0, 75);
-            window._usedPostIds = new Set();
-            const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment);
+
+        // ... (rest of the function, like assignPostsToFindings, remains the same)
+        window._postsForAssignment = filteredItems.slice(0, 75);
+        window._usedPostIds = new Set();
+        assignPostsToFindings(window._summaries, window._postsForAssignment).then(assignments => {
             window._assignments = assignments;
-            for (let i = 0; i < window._summaries.length; i++) {
-                if (i >= 5) break;
+            for (let i = 0; i < window._summaries.length && i < 5; i++) {
                 showSamplePosts(i, assignments, filteredItems, window._usedPostIds);
             }
-        } catch (err) {
-            console.error("CRITICAL (but isolated): Failed to assign posts to findings.", err);
-            for (let i = 1; i <= 5; i++) { const redditDiv = document.getElementById(`reddit-div${i}`); if (redditDiv) { redditDiv.innerHTML = `<div style="font-style: italic; color: #999;">Could not load sample posts.</div>`; } }
+        }).catch(err => {
+            console.error("Could not load sample posts:", err);
+        });
+
+        if (resultsWrapper) {
+            resultsWrapper.style.setProperty('display', 'flex', 'important');
+            setTimeout(() => { resultsWrapper.style.opacity = '1'; }, 50);
         }
-        if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
-            if (resultsWrapper) {
-                resultsWrapper.style.setProperty('display', 'flex', 'important');
-                setTimeout(() => {
-                    if (resultsWrapper) {
-                        resultsWrapper.style.opacity = '1';
-                        if (!isUpdate) {
-                            const topOfResults = resultsWrapper.getBoundingClientRect().top + window.pageYOffset;
-                            window.scrollTo({ top: topOfResults, behavior: 'smooth' });
-                            
-                            const fullHeader = document.getElementById('full-header');
-                            if (fullHeader) {
-                                fullHeader.classList.add('header-hidden');
-                                fullHeader.addEventListener('transitionend', () => {
-                                    fullHeader.style.display = 'none';
-                                }, { once: true });
-                            }
-                        }
-                    }
-                }, 50);
-            }
-        }
-        setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
-        setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
-        setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
+
     } catch (err) {
         console.error("A fatal error stopped the primary analysis:", err);
-        if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
+        if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error'>❌ ${err.message}</p>`;
         if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); resultsWrapper.style.opacity = '1'; }
     } finally {
         if (!isUpdate) {

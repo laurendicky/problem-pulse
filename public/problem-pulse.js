@@ -1085,13 +1085,8 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
         }
     });
 }
-// =================================================================================
-// === END: Replace this entire function in your script ===
-// =================================================================================
+// ================== PASTE THIS ENTIRE FUNCTION INTO YOUR SCRIPT ==================
 
-// =================================================================================
-// === CORE `runProblemFinder` FUNCTION (CORRECTED) ===
-// =================================================================================
 async function runProblemFinder(options = {}) {
     const { isUpdate = false } = options;
     const searchButton = document.getElementById('search-selected-btn');
@@ -1111,15 +1106,25 @@ async function runProblemFinder(options = {}) {
     const resultsMessageDiv = document.getElementById("results-message");
     const countHeaderDiv = document.getElementById("count-header");
 
+    // --- CORRECTED INITIALIZATION LOGIC ---
     if (!isUpdate) {
-        if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+        if (resultsWrapper) { 
+            resultsWrapper.style.display = 'none'; 
+            resultsWrapper.style.opacity = '0'; 
+        }
+        
+        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { 
+            const el = document.getElementById(id); 
+            if (el) el.innerHTML = ""; 
+        });
         
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
         
+        // This loop safely prepares the cards by hiding them and setting a loading message.
         for (let i = 1; i <= 5; i++) {
             const block = document.getElementById(`findings-block${i}`);
             if (block) {
+                // Hide the entire card until it has data to show. This is a key part of the fix.
                 block.style.display = 'none'; 
                 const prevalenceWrapper = block.querySelector('.prevalence-container-wrapper');
                 if (prevalenceWrapper) {
@@ -1128,6 +1133,7 @@ async function runProblemFinder(options = {}) {
             }
         }
     }
+
     try {
         console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
         
@@ -1178,47 +1184,24 @@ async function runProblemFinder(options = {}) {
         const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
         const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
     
-        // =================== START: CORRECTED RENDERING LOGIC ===================
-
-        // Set the global summaries variable for other functions to use
+        // --- CORRECTED & UNIFIED RENDERING LOGIC ---
+        // This single block replaces the two broken loops from before.
         window._summaries = sortedFindings.map(item => item.summary);
 
-        // --- FIX: Hide all 5 finding cards first ---
-        // This ensures that if we only get 3 findings, cards 4 and 5 stay hidden.
-        for (let i = 1; i <= 5; i++) {
-            const block = document.getElementById(`findings-block${i}`);
-            if (block) block.style.display = "none";
-        }
-
-        // --- Now, loop through the *actual data we have* and render/show only those cards ---
         sortedFindings.forEach((findingData, index) => {
             const displayIndex = index + 1;
-            // Safety check: if we somehow get more than 5 findings, ignore the rest.
             if (displayIndex > 5) return;
 
             const block = document.getElementById(`findings-block${displayIndex}`);
-            const content = document.getElementById(`findings-${displayIndex}`); // This is your feedback-wrapper
-            const btn = block.querySelector('.sample-posts-button');
+            const content = document.getElementById(`findings-${displayIndex}`);
+            
+            if (!block || !content) return; // Failsafe
 
-            // If the HTML elements don't exist, we can't do anything, so skip.
-            if (!block || !content) {
-                console.warn(`Could not find HTML elements for finding #${displayIndex}`);
-                return;
-            }
-
-            // --- FIX: Make THIS specific card visible because we have data for it ---
-            block.style.display = "flex";
-
-            // --- Populate the content of the now-visible card ---
             const { summary, prevalence, supportCount } = findingData;
 
-            // 1. Update the Title
             const titleEl = content.querySelector('.section-title');
-            if (titleEl) {
-                titleEl.textContent = summary.title;
-            }
-
-            // 2. Update the Summary Body with "See more" logic
+            if (titleEl) titleEl.textContent = summary.title;
+            
             const teaserEl = content.querySelector('.summary-teaser');
             const fullEl = content.querySelector('.summary-full');
             const seeMoreBtn = content.querySelector('.see-more-btn');
@@ -1230,8 +1213,6 @@ async function runProblemFinder(options = {}) {
                     fullEl.style.display = 'none';
                     seeMoreBtn.style.display = 'inline-block';
                     seeMoreBtn.textContent = 'See more';
-
-                    // Clone and replace to remove old event listeners
                     const newBtn = seeMoreBtn.cloneNode(true);
                     seeMoreBtn.parentNode.replaceChild(newBtn, seeMoreBtn);
                     newBtn.addEventListener('click', function() {
@@ -1248,7 +1229,6 @@ async function runProblemFinder(options = {}) {
                 }
             }
             
-            // 3. Update the Quotes
             const quotesContainer = content.querySelector('.quotes-container');
             if (quotesContainer) {
                 const quoteElements = quotesContainer.querySelectorAll('.quote');
@@ -1258,31 +1238,30 @@ async function runProblemFinder(options = {}) {
                         quoteElements[i].style.display = 'block';
                     }
                 });
-                // Hide any unused quote elements
                 for (let i = summary.quotes.length; i < quoteElements.length; i++) {
                     quoteElements[i].style.display = 'none';
                 }
             }
 
-            // 4. Update the Metrics / Prevalence Bar (This fixes your specific issue)
             const metricsWrapper = content.querySelector('.prevalence-container-wrapper');
             if (metricsWrapper) {
                 let metricsHtml = (sortedFindings.length === 1) 
                     ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` 
                     : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
-                metricsWrapper.innerHTML = metricsHtml; // Replaces "Brewing insights..."
+                metricsWrapper.innerHTML = metricsHtml;
             }
-
-            // 5. Wire up the "Show Sample Posts" button
+    
+            const btn = block.querySelector('.sample-posts-button');
             if (btn) {
               btn.onclick = function() { 
                 showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); 
               };
             }
+
+            // After populating, make the card visible.
+            block.style.display = "flex";
         });
         
-        // =================== END: CORRECTED RENDERING LOGIC ===================
-
         try {
             window._postsForAssignment = filteredItems.slice(0, 75);
             window._usedPostIds = new Set();
@@ -1332,6 +1311,8 @@ async function runProblemFinder(options = {}) {
         }
     }
 }
+
+// ===================================================================================
 // =================================================================================
 // INITIALIZATION LOGIC (UPDATED)
 // =================================================================================

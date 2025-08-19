@@ -1110,18 +1110,24 @@ async function runProblemFinder(options = {}) {
     const resultsMessageDiv = document.getElementById("results-message");
     const countHeaderDiv = document.getElementById("count-header");
     // REPLACE THE OLD BLOCK WITH THIS NEW ONE
+    // PASTE THIS CORRECTED BLOCK
 if (!isUpdate) {
     if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-    // CORRECTED: "findings-1" through "findings-5" have been REMOVED from this array
+    // This array no longer contains "findings-1" etc.
     ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     
     if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
     
-    // This part is also important. We set a temporary loading message.
+    // This loop safely puts a loading message inside the prevalence wrapper without destroying anything.
     for (let i = 1; i <= 5; i++) {
-        const findingDiv = document.getElementById(`findings-${i}`);
-        if (findingDiv) {
-            findingDiv.innerHTML = "<p class='loading-text' style='text-align: center; padding: 2rem;'>Brewing insights...</p>";
+        const block = document.getElementById(`findings-block${i}`);
+        if (block) {
+            // Hide the block initially until it's ready to be shown
+            block.style.display = 'none'; 
+            const prevalenceWrapper = block.querySelector('.prevalence-container-wrapper');
+            if (prevalenceWrapper) {
+                prevalenceWrapper.innerHTML = "<p class='loading-text' style='text-align: center; padding: 2rem;'>Brewing insights...</p>";
+            }
         }
     }
 }
@@ -1176,62 +1182,100 @@ if (!isUpdate) {
         const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
         window._summaries = sortedFindings.map(item => item.summary);
         for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); const content = document.getElementById(`findings-${i}`); if (block) block.style.display = "none"; if (content) content.innerHTML = ""; }
-        // =================== START: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
-// =================== START: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
-// =================== START: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
-// =================== THIS IS THE CORRECT LOOPING CODE ===================
 
-// =================== PASTE THIS TEMPORARY DEBUGGING CODE ===================
 
 // --- START OF DEBUGGING BLOCK ---
 console.log("--- DEBUGGING FINDINGS ---");
 console.log("Total findings to render:", sortedFindings.length);
 console.log("Full findings object:", sortedFindings);
 // --- END OF DEBUGGING BLOCK ---
+// =================== THIS IS THE FINAL, WORKING RENDERING CODE ===================
 
 sortedFindings.forEach((findingData, index) => {
     const displayIndex = index + 1;
     if (displayIndex > 5) return;
 
-    console.log(`--- DEBUGGING LOOP FOR CARD #${displayIndex} ---`);
-
     const block = document.getElementById(`findings-block${displayIndex}`);
-    console.log(`Searching for #findings-block${displayIndex}. Found:`, block);
+    const content = document.getElementById(`findings-${displayIndex}`); // This is your feedback-wrapper
 
-    const content = document.getElementById(`findings-${displayIndex}`);
-    console.log(`Searching for #findings-${displayIndex}. Found:`, content);
-    
-    const btn = document.getElementById(`button-sample${displayIndex}`);
-    console.log(`Searching for #button-sample${displayIndex}. Found:`, btn);
+    // This finds the button by its class name, which is more reliable.
+    const btn = block.querySelector('.sample-posts-button');
 
     if (block) {
-        block.style.display = "flex";
+        block.style.display = "flex"; // Show the card
     }
 
     if (content) {
-        console.log(`Data for this card:`, findingData.summary);
+        const { summary, prevalence, supportCount } = findingData;
 
+        // --- 1. Update the Title ---
         const titleEl = content.querySelector('.section-title');
-        console.log(`Searching for .section-title inside #findings-${displayIndex}. Found:`, titleEl);
         if (titleEl) {
-            titleEl.textContent = findingData.summary.title;
+            titleEl.textContent = summary.title;
         }
 
+        // --- 2. Update the Summary Body ---
+        const teaserEl = content.querySelector('.summary-teaser');
+        const fullEl = content.querySelector('.summary-full');
+        const seeMoreBtn = content.querySelector('.see-more-btn');
+        if (teaserEl && fullEl && seeMoreBtn) {
+            if (summary.body.length > 95) {
+                teaserEl.textContent = summary.body.substring(0, 95) + "…";
+                fullEl.textContent = summary.body;
+                teaserEl.style.display = 'inline';
+                fullEl.style.display = 'none';
+                seeMoreBtn.style.display = 'inline-block';
+                seeMoreBtn.textContent = 'See more';
+                
+                const newBtn = seeMoreBtn.cloneNode(true);
+                seeMoreBtn.parentNode.replaceChild(newBtn, seeMoreBtn);
+                newBtn.addEventListener('click', function() {
+                    const isHidden = teaserEl.style.display !== 'none';
+                    teaserEl.style.display = isHidden ? 'none' : 'inline';
+                    fullEl.style.display = isHidden ? 'inline' : 'none';
+                    newBtn.textContent = isHidden ? 'See less' : 'See more';
+                });
+            } else {
+                teaserEl.textContent = summary.body;
+                teaserEl.style.display = 'inline';
+                fullEl.style.display = 'none';
+                seeMoreBtn.style.display = 'none';
+            }
+        }
+        
+        // --- 3. Update the Quotes ---
         const quotesContainer = content.querySelector('.quotes-container');
-        console.log(`Searching for .quotes-container inside #findings-${displayIndex}. Found:`, quotesContainer);
         if (quotesContainer) {
             const quoteElements = quotesContainer.querySelectorAll('.quote');
-            console.log(`Found ${quoteElements.length} elements with class .quote.`);
+            summary.quotes.forEach((quoteText, i) => {
+                if (quoteElements[i]) {
+                    quoteElements[i].textContent = `"${quoteText}"`;
+                    quoteElements[i].style.display = 'block';
+                }
+            });
+            for (let i = summary.quotes.length; i < quoteElements.length; i++) {
+                quoteElements[i].style.display = 'none';
+            }
         }
-    } else {
-        console.error(`CRITICAL ERROR: Could not find the content container #findings-${displayIndex}. All updates for this card will fail.`);
+
+        // --- 4. Update the Metrics / Prevalence Bar ---
+        const metricsWrapper = content.querySelector('.prevalence-container-wrapper');
+        if (metricsWrapper) {
+            let metricsHtml = (sortedFindings.length === 1) 
+                ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` 
+                : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
+            metricsWrapper.innerHTML = metricsHtml;
+        }
+    }
+
+    if (btn) {
+      btn.onclick = function() { 
+        showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); 
+      };
     }
 });
-// =================== END: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
 
-// =================== END: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
 
-// =================== END: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
 
         try {
             window._postsForAssignment = filteredItems.slice(0, 75);

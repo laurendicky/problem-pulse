@@ -1168,44 +1168,43 @@ async function runProblemFinder(options = {}) {
         window._summaries = sortedFindings.map(item => item.summary);
         for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); const content = document.getElementById(`findings-${i}`); if (block) block.style.display = "none"; if (content) content.innerHTML = ""; }
         // =================== START: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
+// =================== START: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
 
 sortedFindings.forEach((findingData, index) => {
     const displayIndex = index + 1;
     if (displayIndex > 5) return;
 
+    // We still get the main block for the card
     const block = document.getElementById(`findings-block${displayIndex}`);
-    const content = document.getElementById(`findings-${displayIndex}`); // This is the content wrapper inside the block
     const btn = document.getElementById(`button-sample${displayIndex}`);
 
-    if (block) block.style.display = "flex";
+    if (block) { // We will now work directly with the 'block'
+        block.style.display = "flex";
 
-    if (content) {
         const { summary, prevalence, supportCount } = findingData;
 
         // --- 1. Update the Title ---
-        // Targets the .section-title element and updates its text, preserving your combo class.
-        const titleEl = content.querySelector('.section-title');
+        // THE FIX IS HERE: We now search inside `block`, not `content`.
+        const titleEl = block.querySelector('.section-title');
         if (titleEl) {
             titleEl.textContent = summary.title;
         }
 
         // --- 2. Update the Summary Body with "See more" logic ---
-        const teaserEl = content.querySelector('.summary-teaser');
-        const fullEl = content.querySelector('.summary-full');
-        const seeMoreBtn = content.querySelector('.see-more-btn');
+        // THE FIX IS HERE: Searching inside `block`.
+        const teaserEl = block.querySelector('.summary-teaser');
+        const fullEl = block.querySelector('.summary-full');
+        const seeMoreBtn = block.querySelector('.see-more-btn');
 
         if (teaserEl && fullEl && seeMoreBtn) {
             if (summary.body.length > 95) {
                 teaserEl.textContent = summary.body.substring(0, 95) + "…";
                 fullEl.textContent = summary.body;
-                
-                // Reset to initial state
                 teaserEl.style.display = 'inline';
                 fullEl.style.display = 'none';
                 seeMoreBtn.style.display = 'inline-block';
                 seeMoreBtn.textContent = 'See more';
                 
-                // We need to replace the event listener to avoid duplicates
                 const newBtn = seeMoreBtn.cloneNode(true);
                 seeMoreBtn.parentNode.replaceChild(newBtn, seeMoreBtn);
                 newBtn.addEventListener('click', function() {
@@ -1214,7 +1213,6 @@ sortedFindings.forEach((findingData, index) => {
                     fullEl.style.display = isHidden ? 'inline' : 'none';
                     newBtn.textContent = isHidden ? 'See less' : 'See more';
                 });
-
             } else {
                 teaserEl.textContent = summary.body;
                 teaserEl.style.display = 'inline';
@@ -1224,25 +1222,24 @@ sortedFindings.forEach((findingData, index) => {
         }
         
         // --- 3. Update the Quotes ---
-        // This logic smartly updates, hides, or shows existing quote elements.
-        const quotesContainer = content.querySelector('.quotes-container');
+        // THE FIX IS HERE: Searching inside `block`.
+        const quotesContainer = block.querySelector('.quotes-container');
         if (quotesContainer) {
             const quoteElements = quotesContainer.querySelectorAll('.quote');
             summary.quotes.forEach((quoteText, i) => {
-                if (quoteElements[i]) { // If a quote element exists for this index
+                if (quoteElements[i]) {
                     quoteElements[i].textContent = `"${quoteText}"`;
-                    quoteElements[i].style.display = 'block'; // Ensure it's visible
+                    quoteElements[i].style.display = 'block';
                 }
             });
-            // Hide any extra, unused quote elements
             for (let i = summary.quotes.length; i < quoteElements.length; i++) {
                 quoteElements[i].style.display = 'none';
             }
         }
 
         // --- 4. Update the Metrics / Prevalence Bar ---
-        // This part is still generated with innerHTML, which is fine as it's self-contained.
-        const metricsWrapper = content.querySelector('.prevalence-container-wrapper');
+        // THE FIX IS HERE: Searching inside `block`.
+        const metricsWrapper = block.querySelector('.prevalence-container-wrapper');
         if (metricsWrapper) {
             let metricsHtml = (sortedFindings.length === 1) 
                 ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` 
@@ -1251,8 +1248,14 @@ sortedFindings.forEach((findingData, index) => {
         }
     }
 
-    if (btn) btn.onclick = function() { showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); };
+    if (btn) {
+      btn.onclick = function() { 
+        showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); 
+      };
+    }
 });
+
+// =================== END: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
 
 // =================== END: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
 

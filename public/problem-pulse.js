@@ -1180,8 +1180,105 @@ if (!isUpdate) {
         if (validatedSummaries.length === 0) { throw new Error("While posts were found, none formed a clear, common problem."); }
         const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
         const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
-        window._summaries = sortedFindings.map(item => item.summary);
-        for (let i = 1; i <= 5; i++) { const block = document.getElementById(`findings-block${i}`); const content = document.getElementById(`findings-${i}`); if (block) block.style.display = "none"; if (content) content.innerHTML = ""; }
+    
+        // =================== PASTE THIS FINAL CODE ===================
+
+// Set the global summaries variable
+window._summaries = sortedFindings.map(item => item.summary);
+
+// Hide all cards initially to prevent seeing placeholder content
+for (let i = 1; i <= 5; i++) {
+    const block = document.getElementById(`findings-block${i}`);
+    if (block) block.style.display = "none";
+}
+
+// Now, loop through the data and populate the cards that have data
+sortedFindings.forEach((findingData, index) => {
+    const displayIndex = index + 1;
+    if (displayIndex > 5) return;
+
+    const block = document.getElementById(`findings-block${displayIndex}`);
+    const content = document.getElementById(`findings-${displayIndex}`); // This is your feedback-wrapper
+
+    // In Webflow, give your "Show Sample Posts" button a class of 'sample-posts-button'
+    const btn = block.querySelector('.sample-posts-button'); 
+
+    // Make the card visible since we have data for it
+    if (block) {
+        block.style.display = "flex";
+    }
+
+    if (content) {
+        const { summary, prevalence, supportCount } = findingData;
+
+        // --- 1. Update the Title ---
+        const titleEl = content.querySelector('.section-title');
+        if (titleEl) {
+            titleEl.textContent = summary.title;
+        }
+
+        // --- 2. Update the Summary Body ---
+        const teaserEl = content.querySelector('.summary-teaser');
+        const fullEl = content.querySelector('.summary-full');
+        const seeMoreBtn = content.querySelector('.see-more-btn');
+        if (teaserEl && fullEl && seeMoreBtn) {
+            if (summary.body.length > 95) {
+                teaserEl.textContent = summary.body.substring(0, 95) + "…";
+                fullEl.textContent = summary.body;
+                teaserEl.style.display = 'inline';
+                fullEl.style.display = 'none';
+                seeMoreBtn.style.display = 'inline-block';
+                seeMoreBtn.textContent = 'See more';
+                
+                const newBtn = seeMoreBtn.cloneNode(true);
+                seeMoreBtn.parentNode.replaceChild(newBtn, seeMoreBtn);
+                newBtn.addEventListener('click', function() {
+                    const isHidden = teaserEl.style.display !== 'none';
+                    teaserEl.style.display = isHidden ? 'none' : 'inline';
+                    fullEl.style.display = isHidden ? 'inline' : 'none';
+                    newBtn.textContent = isHidden ? 'See less' : 'See more';
+                });
+            } else {
+                teaserEl.textContent = summary.body;
+                teaserEl.style.display = 'inline';
+                fullEl.style.display = 'none';
+                seeMoreBtn.style.display = 'none';
+            }
+        }
+        
+        // --- 3. Update the Quotes ---
+        const quotesContainer = content.querySelector('.quotes-container');
+        if (quotesContainer) {
+            const quoteElements = quotesContainer.querySelectorAll('.quote');
+            summary.quotes.forEach((quoteText, i) => {
+                if (quoteElements[i]) {
+                    quoteElements[i].textContent = `"${quoteText}"`;
+                    quoteElements[i].style.display = 'block';
+                }
+            });
+            for (let i = summary.quotes.length; i < quoteElements.length; i++) {
+                quoteElements[i].style.display = 'none';
+            }
+        }
+
+        // --- 4. Update the Metrics / Prevalence Bar ---
+        const metricsWrapper = content.querySelector('.prevalence-container-wrapper');
+        if (metricsWrapper) {
+            let metricsHtml = (sortedFindings.length === 1) 
+                ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` 
+                : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
+            metricsWrapper.innerHTML = metricsHtml;
+        }
+    }
+
+    if (btn) {
+      btn.onclick = function() { 
+        showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); 
+      };
+    }
+});
+        
+        
 
 
 // --- START OF DEBUGGING BLOCK ---

@@ -1109,13 +1109,22 @@ async function runProblemFinder(options = {}) {
     const resultsWrapper = document.getElementById('results-wrapper-b');
     const resultsMessageDiv = document.getElementById("results-message");
     const countHeaderDiv = document.getElementById("count-header");
-    if (!isUpdate) {
-        if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-        ["count-header", "filter-header", "findings-1", "findings-2", "findings-3", "findings-4", "findings-5", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
-        const findingDivs = [document.getElementById("findings-1"), document.getElementById("findings-2"), document.getElementById("findings-3"), document.getElementById("findings-4"), document.getElementById("findings-5")];
-        if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
-        findingDivs.forEach(div => { if (div) div.innerHTML = "<p class='loading'>Brewing insights...</p>"; });
+    // REPLACE THE OLD BLOCK WITH THIS NEW ONE
+if (!isUpdate) {
+    if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
+    // CORRECTED: "findings-1" through "findings-5" have been REMOVED from this array
+    ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+    
+    if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
+    
+    // This part is also important. We set a temporary loading message.
+    for (let i = 1; i <= 5; i++) {
+        const findingDiv = document.getElementById(`findings-${i}`);
+        if (findingDiv) {
+            findingDiv.innerHTML = "<p class='loading-text' style='text-align: center; padding: 2rem;'>Brewing insights...</p>";
+        }
     }
+}
     try {
         console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
         
@@ -1170,13 +1179,14 @@ async function runProblemFinder(options = {}) {
         // =================== START: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
 // =================== START: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
 // =================== START: REPLACE THIS BLOCK IN YOUR SCRIPT ===================
+// =================== THIS IS THE CORRECT LOOPING CODE ===================
 
 sortedFindings.forEach((findingData, index) => {
     const displayIndex = index + 1;
     if (displayIndex > 5) return;
 
     const block = document.getElementById(`findings-block${displayIndex}`);
-    // THIS IS THE KEY: We get the specific inner container where your feedback-wrapper lives.
+    // This correctly gets your 'feedback-wrapper' by its ID
     const content = document.getElementById(`findings-${displayIndex}`); 
     const btn = document.getElementById(`button-sample${displayIndex}`);
 
@@ -1184,12 +1194,11 @@ sortedFindings.forEach((findingData, index) => {
         block.style.display = "flex";
     }
 
-    // We check if the inner 'content' div exists before doing anything else.
+    // Now we can safely find elements inside your 'feedback-wrapper'
     if (content) {
         const { summary, prevalence, supportCount } = findingData;
 
         // --- 1. Update the Title ---
-        // It now correctly looks for .section-title INSIDE #findings-1 (etc.)
         const titleEl = content.querySelector('.section-title');
         if (titleEl) {
             titleEl.textContent = summary.title;

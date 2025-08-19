@@ -1111,40 +1111,23 @@ async function runProblemFinder(options = {}) {
     const resultsMessageDiv = document.getElementById("results-message");
     const countHeaderDiv = document.getElementById("count-header");
 
-    // ================== START: CORRECTED INITIALIZATION BLOCK ==================
-    // This new block is non-destructive. It preserves your HTML structure.
     if (!isUpdate) {
-        if (resultsWrapper) { 
-            resultsWrapper.style.display = 'none'; 
-            resultsWrapper.style.opacity = '0'; 
-        }
-        
-        // Clear out all other dashboard panels as before
-        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { 
-            const el = document.getElementById(id); 
-            if (el) el.innerHTML = ""; 
-        });
+        if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
+        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
         
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
         
-        // **THE FIX IS HERE:**
-        // Instead of destroying the findings cards, we hide them and safely
-        // place a loading message ONLY inside the prevalence container.
         for (let i = 1; i <= 5; i++) {
             const block = document.getElementById(`findings-block${i}`);
             if (block) {
-                // Hide the entire card until it has data to show
                 block.style.display = 'none'; 
                 const prevalenceWrapper = block.querySelector('.prevalence-container-wrapper');
-                // This non-destructively sets the loading message for the prevalence section
                 if (prevalenceWrapper) {
                     prevalenceWrapper.innerHTML = "<p class='loading-text' style='text-align: center; padding: 2rem;'>Brewing insights...</p>";
                 }
             }
         }
     }
-    // =================== END: CORRECTED INITIALIZATION BLOCK ===================
-
     try {
         console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
         
@@ -1193,108 +1176,115 @@ async function runProblemFinder(options = {}) {
         const validatedSummaries = summaries.filter(finding => filteredItems.filter(post => calculateRelevanceScore(post, finding) > 0).length >= 3);
         if (validatedSummaries.length === 0) { throw new Error("While posts were found, none formed a clear, common problem."); }
         const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
-                // (This line should already be in your code, just above the block you're replacing)
-                const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
+        const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
     
-                // =================== START: FINAL, CORRECTED RENDERING LOGIC ===================
-        
-                // Set the global summaries variable for other functions to use
-                window._summaries = sortedFindings.map(item => item.summary);
-        
-                // STEP 1: Hide all finding card containers first. This ensures a clean slate.
-                for (let i = 1; i <= 5; i++) {
-                    const block = document.getElementById(`findings-block${i}`);
-                    if (block) block.style.display = "none";
+        // =================== START: CORRECTED RENDERING LOGIC ===================
+
+        // Set the global summaries variable for other functions to use
+        window._summaries = sortedFindings.map(item => item.summary);
+
+        // --- FIX: Hide all 5 finding cards first ---
+        // This ensures that if we only get 3 findings, cards 4 and 5 stay hidden.
+        for (let i = 1; i <= 5; i++) {
+            const block = document.getElementById(`findings-block${i}`);
+            if (block) block.style.display = "none";
+        }
+
+        // --- Now, loop through the *actual data we have* and render/show only those cards ---
+        sortedFindings.forEach((findingData, index) => {
+            const displayIndex = index + 1;
+            // Safety check: if we somehow get more than 5 findings, ignore the rest.
+            if (displayIndex > 5) return;
+
+            const block = document.getElementById(`findings-block${displayIndex}`);
+            const content = document.getElementById(`findings-${displayIndex}`); // This is your feedback-wrapper
+            const btn = block.querySelector('.sample-posts-button');
+
+            // If the HTML elements don't exist, we can't do anything, so skip.
+            if (!block || !content) {
+                console.warn(`Could not find HTML elements for finding #${displayIndex}`);
+                return;
+            }
+
+            // --- FIX: Make THIS specific card visible because we have data for it ---
+            block.style.display = "flex";
+
+            // --- Populate the content of the now-visible card ---
+            const { summary, prevalence, supportCount } = findingData;
+
+            // 1. Update the Title
+            const titleEl = content.querySelector('.section-title');
+            if (titleEl) {
+                titleEl.textContent = summary.title;
+            }
+
+            // 2. Update the Summary Body with "See more" logic
+            const teaserEl = content.querySelector('.summary-teaser');
+            const fullEl = content.querySelector('.summary-full');
+            const seeMoreBtn = content.querySelector('.see-more-btn');
+            if (teaserEl && fullEl && seeMoreBtn) {
+                if (summary.body.length > 95) {
+                    teaserEl.textContent = summary.body.substring(0, 95) + "…";
+                    fullEl.textContent = summary.body;
+                    teaserEl.style.display = 'inline';
+                    fullEl.style.display = 'none';
+                    seeMoreBtn.style.display = 'inline-block';
+                    seeMoreBtn.textContent = 'See more';
+
+                    // Clone and replace to remove old event listeners
+                    const newBtn = seeMoreBtn.cloneNode(true);
+                    seeMoreBtn.parentNode.replaceChild(newBtn, seeMoreBtn);
+                    newBtn.addEventListener('click', function() {
+                        const isHidden = teaserEl.style.display !== 'none';
+                        teaserEl.style.display = isHidden ? 'none' : 'inline';
+                        fullEl.style.display = isHidden ? 'inline' : 'none';
+                        newBtn.textContent = isHidden ? 'See less' : 'See more';
+                    });
+                } else {
+                    teaserEl.textContent = summary.body;
+                    teaserEl.style.display = 'inline';
+                    fullEl.style.display = 'none';
+                    seeMoreBtn.style.display = 'none';
                 }
-        
-                // STEP 2: Loop through the actual findings data. This loop will only run as many times
-                // as there are findings (e.g., 4 times if there are 4 findings).
-                sortedFindings.forEach((findingData, index) => {
-                    const displayIndex = index + 1;
-                    if (displayIndex > 5) return; // Safety check: never try to fill more than 5 cards
-        
-                    const block = document.getElementById(`findings-block${displayIndex}`);
-                    const content = document.getElementById(`findings-${displayIndex}`); // This is your feedback-wrapper
-                    
-                    // If the HTML for the card doesn't exist, skip it
-                    if (!block || !content) return;
-        
-                    const { summary, prevalence, supportCount } = findingData;
-        
-                    // --- Populate the Title ---
-                    const titleEl = content.querySelector('.section-title');
-                    if (titleEl) titleEl.textContent = summary.title;
-                    
-                    // --- Populate the Summary Body ---
-                    const teaserEl = content.querySelector('.summary-teaser');
-                    const fullEl = content.querySelector('.summary-full');
-                    const seeMoreBtn = content.querySelector('.see-more-btn');
-                    if (teaserEl && fullEl && seeMoreBtn) {
-                        if (summary.body.length > 95) {
-                            teaserEl.textContent = summary.body.substring(0, 95) + "…";
-                            fullEl.textContent = summary.body;
-                            teaserEl.style.display = 'inline';
-                            fullEl.style.display = 'none';
-                            seeMoreBtn.style.display = 'inline-block';
-                            seeMoreBtn.textContent = 'See more';
-                            const newBtn = seeMoreBtn.cloneNode(true);
-                            seeMoreBtn.parentNode.replaceChild(newBtn, seeMoreBtn);
-                            newBtn.addEventListener('click', function() {
-                                const isHidden = teaserEl.style.display !== 'none';
-                                teaserEl.style.display = isHidden ? 'none' : 'inline';
-                                fullEl.style.display = isHidden ? 'inline' : 'none';
-                                newBtn.textContent = isHidden ? 'See less' : 'See more';
-                            });
-                        } else {
-                            teaserEl.textContent = summary.body;
-                            teaserEl.style.display = 'inline';
-                            fullEl.style.display = 'none';
-                            seeMoreBtn.style.display = 'none';
-                        }
+            }
+            
+            // 3. Update the Quotes
+            const quotesContainer = content.querySelector('.quotes-container');
+            if (quotesContainer) {
+                const quoteElements = quotesContainer.querySelectorAll('.quote');
+                summary.quotes.forEach((quoteText, i) => {
+                    if (quoteElements[i]) {
+                        quoteElements[i].textContent = `"${quoteText}"`;
+                        quoteElements[i].style.display = 'block';
                     }
-                    
-                    // --- Populate the Quotes ---
-                    const quotesContainer = content.querySelector('.quotes-container');
-                    if (quotesContainer) {
-                        const quoteElements = quotesContainer.querySelectorAll('.quote');
-                        summary.quotes.forEach((quoteText, i) => {
-                            if (quoteElements[i]) {
-                                quoteElements[i].textContent = `"${quoteText}"`;
-                                quoteElements[i].style.display = 'block';
-                            }
-                        });
-                        for (let i = summary.quotes.length; i < quoteElements.length; i++) {
-                            quoteElements[i].style.display = 'none';
-                        }
-                    }
-        
-                    // --- Populate the Metrics / Prevalence Bar (This now works every time) ---
-                    const metricsWrapper = content.querySelector('.prevalence-container-wrapper');
-                    if (metricsWrapper) {
-                        let metricsHtml = (sortedFindings.length === 1) 
-                            ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` 
-                            : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
-                        metricsWrapper.innerHTML = metricsHtml;
-                    }
-        
-                    // --- Add click event to the "Show Samples" button ---
-                    const btn = block.querySelector('.sample-posts-button');
-                    if (btn) {
-                        btn.onclick = function() { 
-                            showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); 
-                        };
-                    }
-        
-                    // STEP 3: Now that the card is fully populated, make it visible.
-                    block.style.display = "flex";
                 });
-                
-                // =================== END: FINAL, CORRECTED RENDERING LOGIC ===================
+                // Hide any unused quote elements
+                for (let i = summary.quotes.length; i < quoteElements.length; i++) {
+                    quoteElements[i].style.display = 'none';
+                }
+            }
+
+            // 4. Update the Metrics / Prevalence Bar (This fixes your specific issue)
+            const metricsWrapper = content.querySelector('.prevalence-container-wrapper');
+            if (metricsWrapper) {
+                let metricsHtml = (sortedFindings.length === 1) 
+                    ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` 
+                    : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
+                metricsWrapper.innerHTML = metricsHtml; // Replaces "Brewing insights..."
+            }
+
+            // 5. Wire up the "Show Sample Posts" button
+            if (btn) {
+              btn.onclick = function() { 
+                showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); 
+              };
+            }
+        });
         
-                // The rest of your function continues here...
-                try {
-                    window._postsForAssignment = filteredItems.slice(0, 75);
-                    // ... and so on
+        // =================== END: CORRECTED RENDERING LOGIC ===================
+
+        try {
+            window._postsForAssignment = filteredItems.slice(0, 75);
             window._usedPostIds = new Set();
             const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment);
             window._assignments = assignments;

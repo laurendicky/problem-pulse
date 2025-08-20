@@ -20,7 +20,43 @@ const positiveWords = new Set(['love', 'amazing', 'awesome', 'beautiful', 'best'
 const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'broken', 'hate', 'challenge', 'confused', 'crazy', 'critical', 'danger', 'desperate', 'disappoint', 'disgusted', 'dreadful', 'fear', 'frustrate', 'furious', 'horrible', 'irritated', 'jealous', 'nightmare', 'outraged', 'pain', 'panic', 'problem', 'rant', 'scared', 'shocked', 'stressful', 'terrible', 'terrified', 'trash', 'alone', 'ashamed', 'bored', 'depressed', 'discouraged', 'dull', 'empty', 'exhausted', 'failure', 'guilty', 'heartbroken', 'hopeless', 'hurt', 'insecure', 'lonely', 'miserable', 'sad', 'sorry', 'tired', 'unhappy', 'upset', 'weak', 'need', 'disadvantage', 'issue', 'flaw']);
 const emotionalIntensityScores = { 'annoy': 3, 'irritated': 3, 'bored': 2, 'issue': 3, 'sad': 4, 'bad': 3, 'confused': 4, 'tired': 3, 'upset': 5, 'unhappy': 5, 'disappoint': 6, 'frustrate': 6, 'stressful': 6, 'awful': 7, 'hate': 8, 'angry': 7, 'broken': 5, 'exhausted': 5, 'pain': 7, 'miserable': 8, 'terrible': 8, 'worst': 9, 'horrible': 8, 'furious': 9, 'outraged': 9, 'dreadful': 8, 'terrified': 10, 'nightmare': 10, 'heartbroken': 9, 'desperate': 8, 'rage': 10, 'problem': 4, 'challenge': 5, 'critical': 6, 'danger': 7, 'fear': 7, 'panic': 8, 'scared': 6, 'shocked': 7, 'trash': 5, 'alone': 4, 'ashamed': 5, 'depressed': 8, 'discouraged': 5, 'dull': 2, 'empty': 6, 'failure': 7, 'guilty': 6, 'hopeless': 8, 'insecure': 5, 'lonely': 6, 'weak': 4, 'need': 5, 'disadvantage': 4, 'flaw': 4 };
 const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
+// ================== PASTE THIS NEW HELPER FUNCTION NEAR THE TOP OF YOUR SCRIPT ==================
 
+async function shortenQuoteAI(quoteText) {
+    // If the quote is already short enough, return it immediately.
+    if (quoteText.length < 63) {
+        return quoteText;
+    }
+
+    const prompt = `Shorten the following user quote to be a maximum of 63 characters. You MUST retain the original core meaning and most impactful words. Use an ellipsis "..." to indicate removed text, even in the middle of the quote if necessary.
+
+Original Quote: "${quoteText}"
+
+Respond with ONLY the shortened quote.`;
+    
+    const openAIParams = {
+        model: "gpt-4o-mini",
+        messages: [
+            { role: "system", content: "You are an expert editor who shortens text concisely." },
+            { role: "user", content: prompt }
+        ],
+        temperature: 0.0,
+        max_tokens: 50, // Max tokens for a short quote
+    };
+
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('API call failed.');
+        
+        const data = await response.json();
+        // Return the AI's shortened text, ensuring it doesn't have extra quotes around it.
+        return data.openaiResponse.replace(/^"|"$/g, ''); 
+    } catch (error) {
+        console.error("Failed to shorten quote:", error);
+        // Fallback: If AI fails, return a simple truncated version.
+        return quoteText.substring(0, 60) + "...";
+    }
+}
 // --- 2. ALL HELPER AND LOGIC FUNCTIONS ---
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
 function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
@@ -1085,7 +1121,8 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
         }
     });
 }
-// ================== PASTE THIS ENTIRE FUNCTION INTO YOUR SCRIPT ==================
+// =================================================================================
+// ================== REPLACE YOUR ENTIRE runProblemFinder FUNCTION WITH THIS ==================
 
 async function runProblemFinder(options = {}) {
     const { isUpdate = false } = options;
@@ -1106,42 +1143,30 @@ async function runProblemFinder(options = {}) {
     const resultsMessageDiv = document.getElementById("results-message");
     const countHeaderDiv = document.getElementById("count-header");
 
-    // --- CORRECTED INITIALIZATION LOGIC ---
     if (!isUpdate) {
-        if (resultsWrapper) { 
-            resultsWrapper.style.display = 'none'; 
-            resultsWrapper.style.opacity = '0'; 
+        if (resultsWrapper) {
+            resultsWrapper.style.display = 'none';
+            resultsWrapper.style.opacity = '0';
         }
-        
-        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { 
-            const el = document.getElementById(id); 
-            if (el) el.innerHTML = ""; 
+        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.innerHTML = "";
         });
-        
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
-        
-        // This loop safely prepares the cards by hiding them and setting a loading message.
+
         for (let i = 1; i <= 5; i++) {
             const block = document.getElementById(`findings-block${i}`);
-            if (block) {
-                // Hide the entire card until it has data to show. This is a key part of the fix.
-                block.style.display = 'none'; 
-                const prevalenceWrapper = block.querySelector('.prevalence-container-wrapper');
-                if (prevalenceWrapper) {
-                    prevalenceWrapper.innerHTML = "<p class='loading-text' style='text-align: center; padding: 2rem;'>Brewing insights...</p>";
-                }
-            }
+            if (block) block.style.display = 'none';
         }
     }
 
     try {
-        console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
-        
+        console.log("--- STARTING ANALYSIS ---");
+
         const panelContent = document.getElementById('bubble-content');
         if (panelContent) {
             panelContent.innerHTML = `<div class="panel-placeholder">Loading purchase signals... <span class="loader-dots"></span></div>`;
         }
-
         const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
         let generalSearchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms] : problemTerms;
         let limitPerTerm = (searchDepth === 'deep') ? 75 : 40;
@@ -1155,6 +1180,7 @@ async function runProblemFinder(options = {}) {
         const filteredItems = filterPosts(allItems, selectedMinUpvotes);
         if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
         window._filteredPosts = filteredItems;
+
         renderPosts(filteredItems);
         const sentimentData = generateSentimentData(filteredItems);
         renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
@@ -1167,9 +1193,9 @@ async function runProblemFinder(options = {}) {
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);
         generateAndRenderAIPrompt(filteredItems, originalGroupName);
         generateAndRenderKeywords(filteredItems, originalGroupName);
-
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
+
         if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }
         const topKeywords = getTopKeywords(filteredItems, 10);
         const topPosts = filteredItems.slice(0, 30);
@@ -1183,85 +1209,84 @@ async function runProblemFinder(options = {}) {
         if (validatedSummaries.length === 0) { throw new Error("While posts were found, none formed a clear, common problem."); }
         const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
         const sortedFindings = validatedSummaries.map((summary, index) => ({ summary, prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100), supportCount: metrics[index].supportCount })).sort((a, b) => b.prevalence - a.prevalence);
-    
-        // --- CORRECTED & UNIFIED RENDERING LOGIC ---
-        // This single block replaces the two broken loops from before.
-        window._summaries = sortedFindings.map(item => item.summary);
 
-        sortedFindings.forEach((findingData, index) => {
+        window._summaries = sortedFindings.map(item => item.summary);
+        
+        // --- MODIFIED RENDERING LOGIC ---
+        // We use a `for...of` loop to handle `async/await` correctly.
+        for (const [index, findingData] of sortedFindings.entries()) {
             const displayIndex = index + 1;
-            if (displayIndex > 5) return;
+            if (displayIndex > 5) continue;
 
             const block = document.getElementById(`findings-block${displayIndex}`);
             const content = document.getElementById(`findings-${displayIndex}`);
-            
-            if (!block || !content) return; // Failsafe
+            if (!block || !content) continue;
 
+            content.innerHTML = `
+                <h3 class="section-title"></h3>
+                <p class="summary-body">
+                    <span class="summary-teaser"></span>
+                    <span class="summary-full" style="display: none;"></span>
+                    <button class="see-more-btn" style="display: none;">See more</button>
+                </p>
+                <div class="quotes-container">
+                    <p class="quote"></p> <p class="quote"></p> <p class="quote"></p>
+                </div>
+                <div class="prevalence-container-wrapper"></div>
+                <div class="reddit-samples-wrapper">
+                    <div class="reddit-samples-container" id="reddit-div${displayIndex}">
+                        <div class="loading-text">Loading sample posts...</div>
+                    </div>
+                </div>
+            `;
+            
             const { summary, prevalence, supportCount } = findingData;
+            content.querySelector('.section-title').textContent = summary.title;
 
-            const titleEl = content.querySelector('.section-title');
-            if (titleEl) titleEl.textContent = summary.title;
-            
             const teaserEl = content.querySelector('.summary-teaser');
             const fullEl = content.querySelector('.summary-full');
             const seeMoreBtn = content.querySelector('.see-more-btn');
-            if (teaserEl && fullEl && seeMoreBtn) {
-                if (summary.body.length > 95) {
-                    teaserEl.textContent = summary.body.substring(0, 95) + "…";
-                    fullEl.textContent = summary.body;
-                    teaserEl.style.display = 'inline';
-                    fullEl.style.display = 'none';
-                    seeMoreBtn.style.display = 'inline-block';
-                    seeMoreBtn.textContent = 'See more';
-                    const newBtn = seeMoreBtn.cloneNode(true);
-                    seeMoreBtn.parentNode.replaceChild(newBtn, seeMoreBtn);
-                    newBtn.addEventListener('click', function() {
-                        const isHidden = teaserEl.style.display !== 'none';
-                        teaserEl.style.display = isHidden ? 'none' : 'inline';
-                        fullEl.style.display = isHidden ? 'inline' : 'none';
-                        newBtn.textContent = isHidden ? 'See less' : 'See more';
-                    });
-                } else {
-                    teaserEl.textContent = summary.body;
-                    teaserEl.style.display = 'inline';
-                    fullEl.style.display = 'none';
-                    seeMoreBtn.style.display = 'none';
-                }
+            if (summary.body.length > 95) {
+                teaserEl.textContent = summary.body.substring(0, 95) + "…";
+                fullEl.textContent = summary.body;
+                seeMoreBtn.style.display = 'inline-block';
+                seeMoreBtn.textContent = 'See more';
+                seeMoreBtn.addEventListener('click', function() {
+                    const isHidden = teaserEl.style.display !== 'none';
+                    teaserEl.style.display = isHidden ? 'none' : 'inline';
+                    fullEl.style.display = isHidden ? 'inline' : 'none';
+                    this.textContent = isHidden ? 'See less' : 'See more';
+                });
+            } else {
+                teaserEl.textContent = summary.body;
             }
             
-            const quotesContainer = content.querySelector('.quotes-container');
-            if (quotesContainer) {
-                const quoteElements = quotesContainer.querySelectorAll('.quote');
-                summary.quotes.forEach((quoteText, i) => {
-                    if (quoteElements[i]) {
-                        quoteElements[i].textContent = `"${quoteText}"`;
-                        quoteElements[i].style.display = 'block';
-                    }
-                });
-                for (let i = summary.quotes.length; i < quoteElements.length; i++) {
-                    quoteElements[i].style.display = 'none';
-                }
+            // --- NEW QUOTE HANDLING LOGIC ---
+            const rawQuotes = summary.quotes.slice(0, 3); // Take top 3 quotes from AI
+            const shorteningPromises = rawQuotes.map(q => shortenQuoteAI(q)); // Create promises to shorten them
+            let finalQuotes = await Promise.all(shorteningPromises); // Wait for all to be shortened
+            
+            // Pad the array with placeholders if there are fewer than 3 quotes
+            while (finalQuotes.length < 3) {
+                finalQuotes.push("...");
             }
+            
+            // Display the final 3 quotes
+            const quoteElements = content.querySelectorAll('.quote');
+            quoteElements.forEach((el, i) => {
+                el.textContent = `"${finalQuotes[i]}"`;
+            });
+            // --- END NEW QUOTE LOGIC ---
 
             const metricsWrapper = content.querySelector('.prevalence-container-wrapper');
-            if (metricsWrapper) {
-                let metricsHtml = (sortedFindings.length === 1) 
-                    ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` 
-                    : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
-                metricsWrapper.innerHTML = metricsHtml;
-            }
-    
-            const btn = block.querySelector('.sample-posts-button');
-            if (btn) {
-              btn.onclick = function() { 
-                showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds); 
-              };
-            }
+            let metricsHtml = (sortedFindings.length === 1) 
+                ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` 
+                : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
+            metricsWrapper.innerHTML = metricsHtml;
 
-            // After populating, make the card visible.
             block.style.display = "flex";
-        });
-        
+        }
+
         try {
             window._postsForAssignment = filteredItems.slice(0, 75);
             window._usedPostIds = new Set();
@@ -1312,7 +1337,6 @@ async function runProblemFinder(options = {}) {
     }
 }
 
-// ===================================================================================
 // =================================================================================
 // INITIALIZATION LOGIC (UPDATED)
 // =================================================================================

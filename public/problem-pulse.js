@@ -801,6 +801,9 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
 // =================================================================================
 // === NEW FUNCTION: AI STRATEGIC PILLARS (GOALS & FEARS) ===
 // =================================================================================
+// =================================================================================
+// === REVISED FUNCTION V3: AI STRATEGIC PILLARS (HEADERS REMOVED) ===
+// =================================================================================
 
 async function generateAndRenderStrategicPillars(posts, audienceContext) {
     const goalsContainer = document.getElementById('goals-pillar');
@@ -815,12 +818,8 @@ async function generateAndRenderStrategicPillars(posts, audienceContext) {
         const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
         const prompt = `You are an expert market psychologist specializing in the "${audienceContext}" community. Based on the following user posts, identify their 3 core "Ultimate Goals" and their 3 "Greatest Fears".
-
-        - **Ultimate Goals:** These are not simple wants, but deep, aspirational end-states. What is the ideal future they are trying to achieve? (e.g., "Achieving financial freedom", "Feeling confident in their own skin", "Building a lasting legacy").
-        - **Greatest Fears:** These are not minor annoyances, but significant anxieties or risks they want to avoid. What is the worst-case scenario they worry about? (e.g., "Wasting their life on the wrong path", "Being scammed by a vendor", "Failing their family").
         
         Respond ONLY with a valid JSON object with two keys: "goals" and "fears", where each key holds an array of 3 short, insightful strings.
-        Example: { "goals": ["Goal 1", "Goal 2", "Goal 3"], "fears": ["Fear 1", "Fear 2", "Fear 3"] }
         
         Posts:\n${topPostsText}`;
 
@@ -843,38 +842,26 @@ async function generateAndRenderStrategicPillars(posts, audienceContext) {
         const parsed = JSON.parse(data.openaiResponse);
         const { goals, fears } = parsed;
 
-        // Render Goals
+        // Render Goals (Header and emoji HTML has been deleted)
         if (goals && goals.length > 0) {
             const goalsList = goals.map(goal => `<li>${goal}</li>`).join('');
-            goalsContainer.innerHTML = `
-                <div class="pillar-header">
-                    <span class="pillar-icon">🎯</span>
-                    <h4 class="pillar-title">Ultimate Goals</h4>
-                </div>
-                <ul class="pillar-list">${goalsList}</ul>
-            `;
+            goalsContainer.innerHTML = `<ul class="pillar-list">${goalsList}</ul>`;
         } else {
-            goalsContainer.innerHTML = `<h4 class="pillar-title">Ultimate Goals</h4><p class="loading-text">Could not identify distinct goals.</p>`;
+            goalsContainer.innerHTML = `<p class="loading-text">Could not identify distinct goals.</p>`;
         }
 
-        // Render Fears
+        // Render Fears (Header and emoji HTML has been deleted)
         if (fears && fears.length > 0) {
             const fearsList = fears.map(fear => `<li>${fear}</li>`).join('');
-            fearsContainer.innerHTML = `
-                <div class="pillar-header">
-                    <span class="pillar-icon">⚠️</span>
-                    <h4 class="pillar-title">Greatest Fears</h4>
-                </div>
-                <ul class="pillar-list">${fearsList}</ul>
-            `;
+            fearsContainer.innerHTML = `<ul class="pillar-list">${fearsList}</ul>`;
         } else {
-            fearsContainer.innerHTML = `<h4 class="pillar-title">Greatest Fears</h4><p class="loading-text">Could not identify distinct fears.</p>`;
+            fearsContainer.innerHTML = `<p class="loading-text">Could not identify distinct fears.</p>`;
         }
 
     } catch (error) {
         console.error("Strategic pillars generation error:", error);
-        goalsContainer.innerHTML = `<h4 class="pillar-title">Ultimate Goals</h4><p class="loading-text" style="color: red;">Analysis failed.</p>`;
-        fearsContainer.innerHTML = `<h4 class="pillar-title">Greatest Fears</h4><p class="loading-text" style="color: red;">Analysis failed.</p>`;
+        goalsContainer.innerHTML = `<p class="loading-text" style="color: red;">Analysis failed.</p>`;
+        fearsContainer.innerHTML = `<p class="loading-text" style="color: red;">Analysis failed.</p>`;
     }
 }
 // =================================================================================

@@ -1364,8 +1364,8 @@ sortedFindings.forEach((findingData, index) => {
                     if (resultsWrapper) {
                         resultsWrapper.style.opacity = '1';
                         if (!isUpdate) {
-                            const topOfResults = resultsWrapper.getBoundingClientRect().top + window.pageYOffset;
-                            window.scrollTo({ top: topOfResults, behavior: 'smooth' });
+                            resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    
                             
                             const fullHeader = document.getElementById('full-header');
                             if (fullHeader) {

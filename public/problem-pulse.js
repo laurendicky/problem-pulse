@@ -701,11 +701,11 @@ function renderHighchartsBubbleChart(signals) {
 // === ENHANCEMENT & POWER PHRASES FUNCTIONS ===
 // =================================================================================
 // =================================================================================
-// === REVISED FUNCTION: AI MINDSET SUMMARY ===
+// === REVISED FUNCTION V2: AI MINDSET SUMMARY WITH DESCRIPTIVE POINTS ===
 // =================================================================================
 
 async function generateAndRenderMindsetSummary(posts, audienceContext) {
-    // --- Find all your target Webflow elements first ---
+    // --- Find all your target Webflow elements ---
     const container = document.getElementById('mindset-summary-container');
     const archetypeHeadingEl = document.getElementById('archetype-heading');
     const archetypeDescEl = document.getElementById('archetype-d');
@@ -715,11 +715,11 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
     // Exit if the required elements aren't on the page
     if (!container || !archetypeHeadingEl || !archetypeDescEl || !characteristicsEl || !rejectsEl) {
         console.error("One or more target mindset elements are missing from the page. Aborting render.");
-        if (container) container.innerHTML = ''; // Clear the container if it exists
+        if (container) container.innerHTML = '';
         return;
     }
 
-    // --- Set a loading state while waiting for the AI ---
+    // --- Set a loading state ---
     archetypeHeadingEl.textContent = 'Analyzing...';
     archetypeDescEl.textContent = '';
     characteristicsEl.innerHTML = '<p class="loading-text">Extracting core values...</p>';
@@ -728,27 +728,33 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
     try {
         const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        // --- 1. Define the new, more detailed prompt ---
-        // This asks the AI for the exact pieces of information you need, without headers.
-        const prompt = `You are a skilled market psychologist specializing in the "${audienceContext}" community. Analyze the following Reddit posts to create a concise and actionable "Audience Mindset" summary.
+        // --- 1. THE NEW PROMPT ---
+        // This prompt now asks for an array of objects, each with a "title" and a "description".
+        const prompt = `You are an expert market psychologist specializing in the "${audienceContext}" community. Analyze the following Reddit posts to create a concise "Audience Mindset" summary.
 
         Respond ONLY with a valid JSON object with the following keys:
         1. "archetype": A short, 2-3 word evocative name for this audience (e.g., "The Pragmatic Dreamer").
-        2. "summary": A 1-2 sentence summary explaining the core tension or motivation of this archetype.
-        3. "values": An array of 3 short strings, each describing a core belief or characteristic.
-        4. "rejects": An array of 2 short strings, each describing something they dislike or are skeptical of.
+        2. "summary": A 1-2 sentence summary explaining the core motivation of this archetype.
+        3. "values": An array of 3 objects. Each object must have two keys: "title" (a short, 3-4 word summary of the value) and "description" (a single sentence explaining the title).
+        4. "rejects": An array of 2 objects. Each object must have two keys: "title" (a short, 3-4 word summary of the rejection) and "description" (a single sentence explaining the title).
+
+        Example for "values" format:
+        "values": [
+            { "title": "Value in Action, Not Theory", "description": "They respect builders, not just talkers, valuing demonstrable progress over ideas." },
+            { "title": "Authenticity is Currency", "description": "They value transparent accounts of failure as much as stories of success." }
+        ]
 
         Posts:
         ${topPostsText}`;
 
         const openAIParams = {
-            model: "gpt-4o", // Using a slightly more powerful model for this nuanced task
+            model: "gpt-4o",
             messages: [
                 { role: "system", content: "You are an expert market psychologist who provides structured analysis of audience mindsets in a strict JSON format." },
                 { role: "user", content: prompt }
             ],
             temperature: 0.3,
-            max_tokens: 500,
+            max_tokens: 600,
             response_format: { "type": "json_object" }
         };
 
@@ -760,21 +766,25 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
         const parsed = JSON.parse(data.openaiResponse);
         const { archetype, summary, values, rejects } = parsed;
 
-        // --- 2. Populate your Webflow elements with the AI's response ---
+        // --- 2. THE NEW RENDERING LOGIC ---
+        // This now populates the elements based on the new "title" and "description" structure.
         archetypeHeadingEl.textContent = archetype;
         archetypeDescEl.textContent = summary;
         
-        // Format the 'values' array into an HTML bulleted list for the 'characteristics' block
         if (values && values.length > 0) {
-            const characteristicsHTML = '<ul>' + values.map(item => `<li>${item}</li>`).join('') + '</ul>';
+            // Create a list item for each object, making the title bold.
+            const characteristicsHTML = '<ul>' + values.map(item => 
+                `<li><strong>${item.title}:</strong> ${item.description}</li>`
+            ).join('') + '</ul>';
             characteristicsEl.innerHTML = characteristicsHTML;
         } else {
              characteristicsEl.innerHTML = '<p>Could not identify key characteristics.</p>';
         }
 
-        // Format the 'rejects' array into an HTML bulleted list
         if (rejects && rejects.length > 0) {
-            const rejectsHTML = '<ul>' + rejects.map(item => `<li>${item}</li>`).join('') + '</ul>';
+            const rejectsHTML = '<ul>' + rejects.map(item => 
+                `<li><strong>${item.title}:</strong> ${item.description}</li>`
+            ).join('') + '</ul>';
             rejectsEl.innerHTML = rejectsHTML;
         } else {
             rejectsEl.innerHTML = '<p>Could not identify dislikes.</p>';
@@ -782,7 +792,6 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
 
     } catch (error) {
         console.error("Mindset summary generation error:", error);
-        // Display an error in the main heading element if something goes wrong
         archetypeHeadingEl.textContent = 'Analysis Failed';
         archetypeDescEl.textContent = 'Could not generate the audience mindset summary. Please try again.';
         characteristicsEl.innerHTML = '';

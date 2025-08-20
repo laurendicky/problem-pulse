@@ -1192,22 +1192,27 @@ const sortedFindings = validatedSummaries.map((summary, index) => ({
 // Process all quotes first to enforce length and count constraints
 sortedFindings.forEach(finding => {
     const summary = finding.summary;
-    let processedQuotes = (summary.quotes || [])
+    
+    // 1. Clean and trim all quotes provided by the AI.
+    const cleanQuotes = (summary.quotes || [])
         .map(q => q.trim())
         .filter(q => q.length > 0)
         .map(q => (q.length > 63 ? q.substring(0, 60) + '...' : q));
 
-    if (processedQuotes.length === 0) {
-        summary.quotes = ["", "", ""]; // Create empty placeholders to be hidden
-    } else {
-        const finalQuotes = processedQuotes.slice(0, 3);
-        while (finalQuotes.length < 3) {
-            finalQuotes.push(finalQuotes[finalQuotes.length - 1]); // Duplicate last quote if needed
-        }
-        summary.quotes = finalQuotes;
-    }
-});
+    // 2. Start our final array with up to the first 3 clean quotes.
+    const finalQuotes = cleanQuotes.slice(0, 3);
 
+    // 3. Determine what to fill the empty spots with. Use the last valid quote, or an empty string if there are none.
+    const fillerQuote = finalQuotes.length > 0 ? finalQuotes[finalQuotes.length - 1] : "";
+    
+    // 4. Fill the array until it has exactly 3 items. This is guaranteed to work.
+    while (finalQuotes.length < 3) {
+        finalQuotes.push(fillerQuote);
+    }
+
+    // 5. Assign the perfectly formatted array back to the summary.
+    summary.quotes = finalQuotes;
+});
 window._summaries = sortedFindings.map(item => item.summary);
 
 for (let i = 1; i <= 5; i++) {

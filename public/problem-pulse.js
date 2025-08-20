@@ -701,28 +701,55 @@ function renderHighchartsBubbleChart(signals) {
 // === ENHANCEMENT & POWER PHRASES FUNCTIONS ===
 // =================================================================================
 // =================================================================================
-// === NEW FUNCTION: AI MINDSET SUMMARY ===
+// === REVISED FUNCTION: AI MINDSET SUMMARY ===
 // =================================================================================
 
 async function generateAndRenderMindsetSummary(posts, audienceContext) {
+    // --- Find all your target Webflow elements first ---
     const container = document.getElementById('mindset-summary-container');
-    if (!container) return;
+    const archetypeHeadingEl = document.getElementById('archetype-heading');
+    const archetypeDescEl = document.getElementById('archetype-d');
+    const characteristicsEl = document.getElementById('characteristics-d');
+    const rejectsEl = document.getElementById('reject-d');
 
-    container.innerHTML = `<h3 class="dashboard-section-title">Audience Mindset & Beliefs</h3><p class="loading-text">Analyzing underlying motivations...</p>`;
+    // Exit if the required elements aren't on the page
+    if (!container || !archetypeHeadingEl || !archetypeDescEl || !characteristicsEl || !rejectsEl) {
+        console.error("One or more target mindset elements are missing from the page. Aborting render.");
+        if (container) container.innerHTML = ''; // Clear the container if it exists
+        return;
+    }
+
+    // --- Set a loading state while waiting for the AI ---
+    archetypeHeadingEl.textContent = 'Analyzing...';
+    archetypeDescEl.textContent = '';
+    characteristicsEl.innerHTML = '<p class="loading-text">Extracting core values...</p>';
+    rejectsEl.innerHTML = '<p class="loading-text">Identifying dislikes...</p>';
 
     try {
         const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        const prompt = `You are a skilled market psychologist and qualitative analyst, specializing in the "${audienceContext}" community. Analyze the following Reddit posts to synthesize a brief, insightful summary of the audience's collective mindset, core beliefs, and primary motivations. Focus on their worldview, what they value most, and their general attitude towards the topics discussed. Provide a 2-3 sentence summary. Be concise and capture the *essence* of their perspective. Do not list problems; instead, describe their underlying attitude.\n\nPosts:\n${topPostsText}`;
+        // --- 1. Define the new, more detailed prompt ---
+        // This asks the AI for the exact pieces of information you need, without headers.
+        const prompt = `You are a skilled market psychologist specializing in the "${audienceContext}" community. Analyze the following Reddit posts to create a concise and actionable "Audience Mindset" summary.
+
+        Respond ONLY with a valid JSON object with the following keys:
+        1. "archetype": A short, 2-3 word evocative name for this audience (e.g., "The Pragmatic Dreamer").
+        2. "summary": A 1-2 sentence summary explaining the core tension or motivation of this archetype.
+        3. "values": An array of 3 short strings, each describing a core belief or characteristic.
+        4. "rejects": An array of 2 short strings, each describing something they dislike or are skeptical of.
+
+        Posts:
+        ${topPostsText}`;
 
         const openAIParams = {
-            model: "gpt-4o-mini",
+            model: "gpt-4o", // Using a slightly more powerful model for this nuanced task
             messages: [
-                { role: "system", content: "You are an expert market psychologist who provides concise summaries of audience mindsets." },
+                { role: "system", content: "You are an expert market psychologist who provides structured analysis of audience mindsets in a strict JSON format." },
                 { role: "user", content: prompt }
             ],
             temperature: 0.3,
-            max_tokens: 250,
+            max_tokens: 500,
+            response_format: { "type": "json_object" }
         };
 
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
@@ -730,19 +757,36 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
         if (!response.ok) throw new Error('Mindset analysis API call failed.');
 
         const data = await response.json();
-        const summaryText = data.openaiResponse;
+        const parsed = JSON.parse(data.openaiResponse);
+        const { archetype, summary, values, rejects } = parsed;
 
-        container.innerHTML = `
-            <h3 class="dashboard-section-title">Audience Mindset & Beliefs</h3>
-            <p class="mindset-summary-text">${summaryText}</p>
-        `;
+        // --- 2. Populate your Webflow elements with the AI's response ---
+        archetypeHeadingEl.textContent = archetype;
+        archetypeDescEl.textContent = summary;
+        
+        // Format the 'values' array into an HTML bulleted list for the 'characteristics' block
+        if (values && values.length > 0) {
+            const characteristicsHTML = '<ul>' + values.map(item => `<li>${item}</li>`).join('') + '</ul>';
+            characteristicsEl.innerHTML = characteristicsHTML;
+        } else {
+             characteristicsEl.innerHTML = '<p>Could not identify key characteristics.</p>';
+        }
+
+        // Format the 'rejects' array into an HTML bulleted list
+        if (rejects && rejects.length > 0) {
+            const rejectsHTML = '<ul>' + rejects.map(item => `<li>${item}</li>`).join('') + '</ul>';
+            rejectsEl.innerHTML = rejectsHTML;
+        } else {
+            rejectsEl.innerHTML = '<p>Could not identify dislikes.</p>';
+        }
 
     } catch (error) {
         console.error("Mindset summary generation error:", error);
-        container.innerHTML = `
-            <h3 class="dashboard-section-title">Audience Mindset & Beliefs</h3>
-            <p class="loading-text" style="color: red;">Could not generate mindset summary.</p>
-        `;
+        // Display an error in the main heading element if something goes wrong
+        archetypeHeadingEl.textContent = 'Analysis Failed';
+        archetypeDescEl.textContent = 'Could not generate the audience mindset summary. Please try again.';
+        characteristicsEl.innerHTML = '';
+        rejectsEl.innerHTML = '';
     }
 }
 // =================================================================================

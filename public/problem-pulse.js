@@ -736,7 +736,7 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
         1. "archetype": A short, 2-3 word evocative name for this audience (e.g., "The Pragmatic Dreamer").
         2. "summary": A 1-2 sentence summary explaining the core motivation of this archetype.
         3. "values": An array of 3 objects. Each object must have two keys: "title" (a short, 3-4 word summary of the value) and "description" (a single sentence explaining the title).
-        4. "rejects": An array of 2 objects. Each object must have two keys: "title" (a short, 3-4 word summary of the rejection) and "description" (a single sentence explaining the title).
+        4. "rejects": An array of 3 objects. Each object must have two keys: "title" (a short, 3-4 word summary of the rejection) and "description" (a single sentence explaining the title).
 
         Example for "values" format:
         "values": [
@@ -801,9 +801,6 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
 // =================================================================================
 // === NEW FUNCTION: AI STRATEGIC PILLARS (GOALS & FEARS) ===
 // =================================================================================
-// =================================================================================
-// === REVISED FUNCTION V3: AI STRATEGIC PILLARS (HEADERS REMOVED) ===
-// =================================================================================
 
 async function generateAndRenderStrategicPillars(posts, audienceContext) {
     const goalsContainer = document.getElementById('goals-pillar');
@@ -817,11 +814,8 @@ async function generateAndRenderStrategicPillars(posts, audienceContext) {
     try {
         const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        const prompt = `You are an expert market psychologist specializing in the "${audienceContext}" community. Based on the following user posts, identify their 3 core "Ultimate Goals" and their 3 "Greatest Fears".
-        
-        Respond ONLY with a valid JSON object with two keys: "goals" and "fears", where each key holds an array of 3 short, insightful strings.
-        
-        Posts:\n${topPostsText}`;
+        // The AI prompt remains the same
+        const prompt = `You are an expert market psychologist specializing in the "${audienceContext}" community. Based on the following user posts, identify their 3 core "Ultimate Goals" and their 3 "Greatest Fears". Respond ONLY with a valid JSON object with two keys: "goals" and "fears", holding an array of 3 short, insightful strings. Posts:\n${topPostsText}`;
 
         const openAIParams = {
             model: "gpt-4o-mini",
@@ -842,18 +836,34 @@ async function generateAndRenderStrategicPillars(posts, audienceContext) {
         const parsed = JSON.parse(data.openaiResponse);
         const { goals, fears } = parsed;
 
-        // Render Goals (Header and emoji HTML has been deleted)
+        // --- NEW RENDERING LOGIC ---
+        // This function now creates a custom structure instead of a <ul>
+        const createCustomListHTML = (items) => {
+            if (!items || items.length === 0) return '';
+            
+            return items.map((item, index) => {
+                const isLastItem = index === items.length - 1;
+                
+                // Create the text element and conditionally add the separator div
+                return `
+                    <div class="pillar-item">
+                        <p class="pillar-item-text">${item}</p>
+                        ${!isLastItem ? '<div class="pillar-separator"></div>' : ''}
+                    </div>
+                `;
+            }).join('');
+        };
+
+        // Render Goals
         if (goals && goals.length > 0) {
-            const goalsList = goals.map(goal => `<li>${goal}</li>`).join('');
-            goalsContainer.innerHTML = `<ul class="pillar-list">${goalsList}</ul>`;
+            goalsContainer.innerHTML = createCustomListHTML(goals);
         } else {
             goalsContainer.innerHTML = `<p class="loading-text">Could not identify distinct goals.</p>`;
         }
 
-        // Render Fears (Header and emoji HTML has been deleted)
+        // Render Fears
         if (fears && fears.length > 0) {
-            const fearsList = fears.map(fear => `<li>${fear}</li>`).join('');
-            fearsContainer.innerHTML = `<ul class="pillar-list">${fearsList}</ul>`;
+            fearsContainer.innerHTML = createCustomListHTML(fears);
         } else {
             fearsContainer.innerHTML = `<p class="loading-text">Could not identify distinct fears.</p>`;
         }

@@ -87,6 +87,7 @@ function parseAIAssignments(aiResponse) { try { aiResponse = aiResponse.replace(
 function filterPosts(posts, minUpvotes = 20) { return posts.filter(post => { const title = (post.data.title || post.data.link_title || '').toLowerCase(); const selftext = post.data.selftext || post.data.body || ''; if (title.includes('[ad]') || title.includes('sponsored') || post.data.upvote_ratio < 0.2 || post.data.ups < minUpvotes || !selftext || selftext.length < 20) return false; const isRamblingOrNoisy = (text) => { if (!text) return false; return /&#x[0-9a-fA-F]+;/g.test(text) || /[^a-zA-Z0-9\s]{5,}/g.test(text) || /(.)\1{6,}/g.test(text); }; return !isRamblingOrNoisy(title) && !isRamblingOrNoisy(selftext); }); }
 function getTopKeywords(posts, topN = 10) { const freqMap = {}; posts.forEach(post => { const cleanedText = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.replace(/<[^>]+>/g, '').replace(/[^a-zA-Z0-9\s.,!?]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); const words = cleanedText.split(/\s+/); words.forEach(word => { if (!stopWords.includes(word) && word.length > 2) { freqMap[word] = (freqMap[word] || 0) + 1; } }); }); return Object.keys(freqMap).sort((a, b) => freqMap[b] - freqMap[a]).slice(0, topN); }
 function getFirstTwoSentences(text) { if (!text) return ''; const sentences = text.match(/[^\.!\?]+[\.!\?]+(?:\s|$)/g); return sentences ? sentences.slice(0, 2).join(' ').trim() : text; }
+
 async function assignPostsToFindings(summaries, posts) {
     const postsForAI = posts.slice(0, 50);
     const prompt = `You are an expert data analyst. Your task is to categorize Reddit posts into the most relevant "Finding" from a provided list.\n\nHere are the ${summaries.length} findings:\n${summaries.map((s, i) => `Finding ${i + 1}: ${s.title}`).join('\n')}\n\nHere are the ${postsForAI.length} Reddit posts:\n${postsForAI.map((p, i) => `Post ${i + 1}: ${(p.data.title || p.data.link_title || '').substring(0, 150)}`).join('\n')}\n\nINSTRUCTIONS: For each post, assign it to the most relevant Finding (from 1 to ${summaries.length}). Respond ONLY with a JSON object with a single key "assignments", which is an array of objects like {"postNumber": 1, "finding": 2}.`;
@@ -103,8 +104,107 @@ async function assignPostsToFindings(summaries, posts) {
 }
 function calculateRelevanceScore(post, finding) { let score = 0; const postTitle = (post.data.title || post.data.link_title || "").toLowerCase(); const postBody = (post.data.selftext || post.data.body || "").toLowerCase(); const findingTitleWords = finding.title.toLowerCase().split(' ').filter(word => word.length > 3 && !stopWords.includes(word)); const findingKeywords = (finding.keywords || []).map(k => k.toLowerCase()); let titleWordMatched = false, keywordMatched = false; for (const word of findingTitleWords) { const regex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'); if (regex.test(postTitle)) { score += 5; titleWordMatched = true; } if (regex.test(postBody)) { score += 2; titleWordMatched = true; } } for (const keyword of findingKeywords) { const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'); if (regex.test(postTitle)) { score += 3; keywordMatched = true; } if (regex.test(postBody)) { score += 1; keywordMatched = true; } } if (titleWordMatched && keywordMatched) { score += 10; } return score; }
 function calculateFindingMetrics(validatedSummaries, filteredPosts) { const metrics = {}; const allProblemPostIds = new Set(); validatedSummaries.forEach((finding, index) => { metrics[index] = { supportCount: 0 }; }); filteredPosts.forEach(post => { let bestFindingIndex = -1; let maxScore = 0; validatedSummaries.forEach((finding, index) => { const score = calculateRelevanceScore(post, finding); if (score > maxScore) { maxScore = score; bestFindingIndex = index; } }); if (bestFindingIndex !== -1 && maxScore > 0) { metrics[bestFindingIndex].supportCount++; allProblemPostIds.add(post.data.id); } }); metrics.totalProblemPosts = allProblemPostIds.size; return metrics; }
-function renderPosts(posts) { const container = document.getElementById("posts-container"); if (!container) { return; } container.innerHTML = posts.map(post => { const content = post.data.selftext || post.data.body || 'No additional content.'; const title = post.data.title || post.data.link_title || 'View Comment Thread'; const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : ''; return ` <div class="insight" style="border:1px solid #ccc; padding:12px; margin-bottom:12px; background:#fafafa; border-radius:8px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1.1rem; color:#007bff; text-decoration:none;"> ${title} </a> <p style="font-size:0.9rem; margin:0.75rem 0; color:#333; line-height:1.5;"> ${content.substring(0, 200) + '...'} </p> <small style="color:#555; font-size:0.8rem;"> r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)} </small> </div> `}).join(''); }
-function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) { if (!assignments) return; const finding = window._summaries[summaryIndex]; if (!finding) return; let relevantPosts = []; const addedPostIds = new Set(); const addPost = (post) => { if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) { relevantPosts.push(post); addedPostIds.add(post.data.id); } }; const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber); assignedPostNumbers.forEach(postNum => { if (postNum - 1 < window._postsForAssignment.length) { addPost(window._postsForAssignment[postNum - 1]); } }); if (relevantPosts.length < 8) { const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id)); const scoredCandidates = candidatePool.map(post => ({ post: post, score: calculateRelevanceScore(post, finding) })).filter(item => item.score >= 4).sort((a, b) => b.score - a.score); for (const candidate of scoredCandidates) { if (relevantPosts.length >= 8) break; addPost(candidate.post); } } let html; if (relevantPosts.length === 0) { html = `<div style="font-style: italic; color: #555;">Could not find any highly relevant Reddit posts for this finding.</div>`; } else { const finalPosts = relevantPosts.slice(0, 8); finalPosts.forEach(post => usedPostIds.add(post.data.id)); html = finalPosts.map(post => { const content = post.data.selftext || post.data.body || 'No content.'; const title = post.data.title || post.data.link_title || 'View Comment'; const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : ''; return ` <div class="insight" style="border:1px solid #ccc; padding:8px; margin-bottom:8px; background:#fafafa; border-radius:4px;"> <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" style="font-weight:bold; font-size:1rem; color:#007bff;">${title}</a> <p style="font-size:0.9rem; margin:0.5rem 0; color:#333;">${content.substring(0, 150) + '...'}</p> <small>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)}</small> </div> `}).join(''); } const container = document.getElementById(`reddit-div${summaryIndex + 1}`); if (container) { container.innerHTML = `<div class="reddit-samples-header" style="font-weight:bold; margin-bottom:6px;">Real Stories from Reddit: "${finding.title}"</div><div class="reddit-samples-posts">${html}</div>`; } }
+
+function renderPosts(posts) {
+    const container = document.getElementById("posts-container");
+    if (!container) {
+        return;
+    }
+    container.innerHTML = posts.map(post => {
+        const content = post.data.selftext || post.data.body || 'No additional content.';
+        const title = post.data.title || post.data.link_title || 'View Comment Thread';
+        const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : '';
+        
+        // All inline styles have been removed and replaced with CSS classes.
+        return `
+            <div class="insight">
+                <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" class="insight-title">
+                    ${title}
+                </a>
+                <p class="insight-content">
+                    ${content.substring(0, 200) + '...'}
+                </p>
+                <small class="insight-meta">
+                    r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)}
+                </small>
+            </div>
+        `;
+    }).join('');
+}
+
+function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
+    if (!assignments) return;
+    const finding = window._summaries[summaryIndex];
+    if (!finding) return;
+
+    let relevantPosts = [];
+    const addedPostIds = new Set();
+
+    const addPost = (post) => {
+        if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) {
+            relevantPosts.push(post);
+            addedPostIds.add(post.data.id);
+        }
+    };
+
+    const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber);
+    assignedPostNumbers.forEach(postNum => {
+        if (postNum - 1 < window._postsForAssignment.length) {
+            addPost(window._postsForAssignment[postNum - 1]);
+        }
+    });
+
+    if (relevantPosts.length < 8) {
+        const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id));
+        const scoredCandidates = candidatePool.map(post => ({
+            post: post,
+            score: calculateRelevanceScore(post, finding)
+        })).filter(item => item.score >= 4).sort((a, b) => b.score - a.score);
+
+        for (const candidate of scoredCandidates) {
+            if (relevantPosts.length >= 8) break;
+            addPost(candidate.post);
+        }
+    }
+
+    let html;
+    if (relevantPosts.length === 0) {
+        // Replaced inline style with a class
+        html = `<div class="no-posts-found">Could not find any highly relevant Reddit posts for this finding.</div>`;
+    } else {
+        const finalPosts = relevantPosts.slice(0, 8);
+        finalPosts.forEach(post => usedPostIds.add(post.data.id));
+        html = finalPosts.map(post => {
+            const content = post.data.selftext || post.data.body || 'No content.';
+            const title = post.data.title || post.data.link_title || 'View Comment';
+            const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : '';
+            
+            // Note: The sample posts use a slightly different class "sample-insight"
+            // to allow for different styling than the main post list.
+            return `
+                <div class="sample-insight">
+                    <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" class="sample-insight-title">
+                        ${title}
+                    </a>
+                    <p class="sample-insight-content">
+                        ${content.substring(0, 150) + '...'}
+                    </p>
+                    <small class="sample-insight-meta">
+                        r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)}
+                    </small>
+                </div>
+            `;
+        }).join('');
+    }
+
+    const container = document.getElementById(`reddit-div${summaryIndex + 1}`);
+    if (container) {
+        container.innerHTML = `
+            <div class="reddit-samples-header">Real Stories from Reddit: "${finding.title}"</div>
+            <div class="reddit-samples-posts">${html}</div>
+        `;
+    }
+}
 
 async function getRelatedSearchTermsAI(audience) {
     const prompt = `Given the target audience "${audience}", generate up to 5 related but distinct search terms or concepts that would help find communities for them. Think about activities, problems, life stages, and related interests. Respond ONLY with a valid JSON object with a single key "terms", which is an array of strings.`;
@@ -171,7 +271,154 @@ async function fetchCommentsForPosts(postIds, batchSize = 5) {
 function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1); return word; }
 async function generateEmotionMapData(posts) { try { const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || p.data.link_title}\nBody: ${(p.data.selftext || p.data.body).substring(0, 1000)}`).join('\n---\n'); const prompt = `You are a world-class market research analyst for '${originalGroupName}'. Analyze the following text to identify the 15 most significant problems, pain points, or key topics.\n\nFor each one, provide:\n1. "problem": A short, descriptive name for the problem (e.g., "Finding Reliable Vendors", "Budgeting Anxiety").\n2. "intensity": A score from 1 (mild) to 10 (severe) of how big a problem this is.\n3. "frequency": A score from 1 (rarely mentioned) to 10 (frequently mentioned) based on its prevalence in the text.\n\nRespond ONLY with a valid JSON object with a single key "problems", which is an array of these objects.\nExample: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequency": 9 }] }`; const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 1500, response_format: { "type": "json_object" } }; const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) { throw new Error(`AI API failed with status: ${response.status}`); } const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const aiProblems = parsed.problems || []; if (aiProblems.length >= 3) { console.log("Successfully used AI analysis for Problem Map."); const chartData = aiProblems.map(item => { if (!item.problem || typeof item.intensity !== 'number' || typeof item.frequency !== 'number') return null; return { x: item.frequency, y: item.intensity, label: item.problem }; }).filter(Boolean); return chartData.sort((a, b) => b.x - a.x); } else { console.warn("AI analysis returned too few problems. Falling back to keyword analysis."); } } catch (error) { console.error("AI analysis for Problem Map failed:", error, "Falling back to reliable keyword-based analysis."); } const emotionFreq = {}; posts.forEach(post => { const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase(); const words = text.replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { const lemma = lemmatize(rawWord); if (emotionalIntensityScores[lemma]) { emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1; } }); }); const chartData = Object.entries(emotionFreq).map(([word, freq]) => ({ x: freq, y: emotionalIntensityScores[word], label: word })); return chartData.sort((a, b) => b.x - a.x).slice(0, 25); }
 
-function renderEmotionMap(data) { const container = document.getElementById('emotion-map-container'); if (!container) return; if (window.myEmotionChart) { window.myEmotionChart.destroy(); } if (data.length < 3) { container.innerHTML = '<h3 class="dashboard-section-title">Problem Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough distinct problems were found to build a map.</p>'; return; } container.innerHTML = `<h3 class="dashboard-section-title">Problem Polarity Map</h3><p id="problem-map-description">Top Right = The most frequent & emotionally intense problems.</p><div id="emotion-map-wrapper"><div id="emotion-map" style="height: 400px; padding: 10px; border-radius: 8px;"><canvas id="emotion-chart-canvas"></canvas></div><button id="chart-zoom-btn" style="display: none;"></button></div>`; const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d'); if (!ctx) return; const maxFreq = Math.max(...data.map(p => p.x)); const allFrequencies = data.map(p => p.x); const minObservedFreq = Math.min(...allFrequencies); const collapsedMinX = 5; const isCollapseFeatureEnabled = minObservedFreq >= collapsedMinX; const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0; window.myEmotionChart = new Chart(ctx, { type: 'scatter', data: { datasets: [{ label: 'Problems/Topics', data: data, backgroundColor: 'rgba(52, 152, 219, 0.9)', borderColor: 'rgba(41, 128, 185, 1)', borderWidth: 1, pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20, pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20, }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { mode: 'nearest', intersect: false, callbacks: { title: function(tooltipItems) { return tooltipItems[0].raw.label; }, label: function(context) { return ''; }, afterBody: function(tooltipItems) { const point = tooltipItems[0].raw; return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`; } }, displayColors: false, titleFont: { size: 14, weight: 'bold' }, bodyFont: { size: 12 }, backgroundColor: '#ff7ce2', titleColor: '#ffffff', bodyColor: '#dddddd', } }, scales: { x: { title: { display: true, text: 'Frequency (1-10)', color: 'white', font: { weight: 'bold' } }, min: initialMinX, max: 10, grid: { color: 'rgba(255, 255, 255, 0.15)' }, ticks: { color: 'white' } }, y: { title: { display: true, text: 'Problem Intensity (1-10)', color: 'white', font: { weight: 'bold' } }, min: 0, max: 10, grid: { color: 'rgba(255, 255, 255, 0.15)' }, ticks: { color: 'white' } } } } }); const zoomButton = document.getElementById('chart-zoom-btn'); if (isCollapseFeatureEnabled) { zoomButton.style.display = 'block'; const updateButtonText = () => { const isCurrentlyCollapsed = window.myEmotionChart.options.scales.x.min !== 0; zoomButton.textContent = isCurrentlyCollapsed ? 'Zoom Out to See Full Range' : 'Zoom In to High-Frequency'; }; zoomButton.addEventListener('click', () => { const chart = window.myEmotionChart; const isCurrentlyCollapsed = chart.options.scales.x.min !== 0; chart.options.scales.x.min = isCurrentlyCollapsed ? 0 : collapsedMinX; chart.update('none'); updateButtonText(); }); updateButtonText(); } }
+function renderEmotionMap(data) {
+    const container = document.getElementById('emotion-map-container');
+    if (!container) return;
+
+    if (window.myEmotionChart) {
+        window.myEmotionChart.destroy();
+    }
+
+    if (data.length < 3) {
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Problem Polarity Map</h3>
+            <p class="chart-placeholder-text">Not enough distinct problems were found to build a map.</p>
+        `;
+        return;
+    }
+
+    // HTML with classes instead of inline styles
+    container.innerHTML = `
+        <h3 class="dashboard-section-title">Problem Polarity Map</h3>
+        <p id="problem-map-description" class="chart-description">Top Right = The most frequent & emotionally intense problems.</p>
+        <div id="emotion-map-wrapper">
+            <div id="emotion-map">
+                <canvas id="emotion-chart-canvas"></canvas>
+            </div>
+            <button id="chart-zoom-btn"></button>
+        </div>
+    `;
+
+    const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d');
+    if (!ctx) return;
+
+    const maxFreq = Math.max(...data.map(p => p.x));
+    const allFrequencies = data.map(p => p.x);
+    const minObservedFreq = Math.min(...allFrequencies);
+    const collapsedMinX = 5;
+    const isCollapseFeatureEnabled = minObservedFreq >= collapsedMinX;
+    const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0;
+
+    window.myEmotionChart = new Chart(ctx, {
+        type: 'scatter',
+        data: {
+            datasets: [{
+                label: 'Problems/Topics',
+                data: data,
+                backgroundColor: 'rgba(52, 152, 219, 0.9)',
+                borderColor: 'rgba(41, 128, 185, 1)',
+                borderWidth: 1,
+                pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20,
+                pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20,
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    mode: 'nearest',
+                    intersect: false,
+                    callbacks: {
+                        title: function(tooltipItems) {
+                            return tooltipItems[0].raw.label;
+                        },
+                        label: function(context) {
+                            return '';
+                        },
+                        afterBody: function(tooltipItems) {
+                            const point = tooltipItems[0].raw;
+                            return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`;
+                        }
+                    },
+                    displayColors: false,
+                    titleFont: {
+                        size: 14,
+                        weight: 'bold'
+                    },
+                    bodyFont: {
+                        size: 12
+                    },
+                    backgroundColor: '#ff7ce2',
+                    titleColor: '#ffffff',
+                    bodyColor: '#dddddd',
+                }
+            },
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Frequency (1-10)',
+                        color: 'white',
+                        font: {
+                            weight: 'bold'
+                        }
+                    },
+                    min: initialMinX,
+                    max: 10,
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.15)'
+                    },
+                    ticks: {
+                        color: 'white'
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'Problem Intensity (1-10)',
+                        color: 'white',
+                        font: {
+                            weight: 'bold'
+                        }
+                    },
+                    min: 0,
+                    max: 10,
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.15)'
+                    },
+                    ticks: {
+                        color: 'white'
+                    }
+                }
+            }
+        }
+    });
+
+    const zoomButton = document.getElementById('chart-zoom-btn');
+    // This style is dynamic based on logic, so it's correct to keep it here.
+    zoomButton.style.display = 'none';
+
+    if (isCollapseFeatureEnabled) {
+        zoomButton.style.display = 'block'; // Or 'inline-block', etc.
+        const updateButtonText = () => {
+            const isCurrentlyCollapsed = window.myEmotionChart.options.scales.x.min !== 0;
+            zoomButton.textContent = isCurrentlyCollapsed ? 'Zoom Out to See Full Range' : 'Zoom In to High-Frequency';
+        };
+
+        zoomButton.addEventListener('click', () => {
+            const chart = window.myEmotionChart;
+            const isCurrentlyCollapsed = chart.options.scales.x.min !== 0;
+            chart.options.scales.x.min = isCurrentlyCollapsed ? 0 : collapsedMinX;
+            chart.update('none');
+            updateButtonText();
+        });
+
+        updateButtonText();
+    }
+}
 
 // =================================================================================
 // === REVISED HYBRID FUNCTION V5: DEFINITIVE UNIQUE POST COUNTING ===
@@ -355,8 +602,63 @@ async function extractAndValidateEntities(posts, nicheContext) {
         return { topBrands: [], topProducts: [] };
     }
 }
-function renderDiscoveryList(containerId, data, title, type) { const container = document.getElementById(containerId); if(!container) return; let listItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">No significant mentions found.</p>'; if (data.length > 0) { listItems = data.map(([name, details], index) => `<li class="discovery-list-item" data-word="${name}" data-type="${type}"><span class="rank">${index + 1}.</span><span class="name">${name}</span><span class="count">${details.count} mentions</span></li>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`; }
-function renderFAQs(faqs) { const container = document.getElementById('faq-container'); if(!container) return; let faqItems = '<p style="font-family: Inter, sans-serif; color: #777; padding: 0 1rem;">Could not generate common questions from the text.</p>'; if (faqs.length > 0) { faqItems = faqs.map((faq) => `<div class="faq-item"><button class="faq-question">${faq}</button><div class="faq-answer"><p><em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em></p></div></div>`).join(''); } container.innerHTML = `<h3 class="dashboard-section-title">Frequently Asked Questions</h3>${faqItems}`; container.querySelectorAll('.faq-question').forEach(button => { button.addEventListener('click', () => { const answer = button.nextElementSibling; button.classList.toggle('active'); if (answer.style.maxHeight) { answer.style.maxHeight = null; answer.style.padding = '0 1.5rem'; } else { answer.style.padding = '1rem 1.5rem'; answer.style.maxHeight = answer.scrollHeight + "px"; } }); }); }
+function renderDiscoveryList(containerId, data, title, type) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    // Replaced inline style with a class
+    let listItems = '<p class="discovery-list-placeholder">No significant mentions found.</p>';
+
+    if (data.length > 0) {
+        listItems = data.map(([name, details], index) => `
+            <li class="discovery-list-item" data-word="${name}" data-type="${type}">
+                <span class="rank">${index + 1}.</span>
+                <span class="name">${name}</span>
+                <span class="count">${details.count} mentions</span>
+            </li>
+        `).join('');
+    }
+
+    container.innerHTML = `
+        <h3 class="dashboard-section-title">${title}</h3>
+        <ul class="discovery-list">${listItems}</ul>
+    `;
+}
+
+
+function renderFAQs(faqs) {
+    const container = document.getElementById('faq-container');
+    if (!container) return;
+
+    // Replaced inline style with a class
+    let faqItems = '<p class="faq-placeholder">Could not generate common questions from the text.</p>';
+
+    if (faqs.length > 0) {
+        faqItems = faqs.map((faq) => `
+            <div class="faq-item">
+                <button class="faq-question">${faq}</button>
+                <div class="faq-answer">
+                    <div class="faq-answer-content">
+                        <em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    container.innerHTML = `
+        <h3 class="dashboard-section-title">Frequently Asked Questions</h3>
+        ${faqItems}
+    `;
+
+    // REFACTORED: JS now only toggles a class. CSS handles all animation.
+    container.querySelectorAll('.faq-question').forEach(button => {
+        button.addEventListener('click', () => {
+            const faqItem = button.closest('.faq-item'); // Get the parent container
+            faqItem.classList.toggle('active');
+        });
+    });
+}
 
 // =================================================================================
 // === SUBREDDIT VALIDATION & DISPLAY FUNCTIONS ===
@@ -364,38 +666,49 @@ function renderFAQs(faqs) { const container = document.getElementById('faq-conta
 async function handleRemoveSubClick(event) {
     const button = event.target.closest('.remove-sub-btn');
     if (!button) return;
+
     const card = button.closest('.subreddit-tag-detailed');
     const destinationList = document.querySelector('#similar-subreddits-container .subreddit-tag-list');
+
     if (card && destinationList) {
         const actionContainer = card.querySelector('.tag-footer-action');
         const subName = button.dataset.subname;
         const subDetailsString = button.dataset.subDetails || '{}';
+
         if (actionContainer && subName) {
             const newButton = document.createElement('button');
             newButton.className = 'add-related-sub-btn';
             newButton.dataset.subname = subName;
             newButton.dataset.subDetails = subDetailsString;
             newButton.textContent = '+ Add to Analysis';
-            newButton.style.cssText = "flex-grow: 1; padding: 8px 12px; border-radius: 6px; border: 1px solid #007bff; background-color: #007bff; color: white; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease;";
+            
+            // REMOVED: The long style.cssText line is no longer needed.
+            // The button's appearance is now handled entirely by the '.add-related-sub-btn' class in your CSS.
+
             actionContainer.replaceChild(newButton, button);
             destinationList.prepend(card);
         }
     }
+
     const subName = button.dataset.subname;
     if (!subName) {
         console.error("Missing subreddit name on the 'Remove' button.");
         return;
     }
+
     const checkbox = document.getElementById(`sub-${subName}`);
     if (checkbox) {
         checkbox.checked = false;
     }
+
     const countHeaderDiv = document.getElementById("count-header");
     if (countHeaderDiv) {
         countHeaderDiv.innerHTML = 'Updating analysis... <span class="loader-dots"></span>';
     }
+
     await runProblemFinder({ isUpdate: true });
 }
+
 async function fetchSubredditDetails(subredditName) {
     const MAX_RETRIES = 2;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -466,42 +779,60 @@ async function fetchAndRankSubreddits(subredditNames) {
     return finalResults;
 }
 function renderSubredditChoicesHTML(subreddits) {
-    const activityColors = { '🔥 Hot': '#f0fff4', '🌤️ Warm': '#fffbeb', '💤 Cool': '#f9fafb' };
-    const activityTextColors = { '🔥 Hot': '#2f855a', '🌤️ Warm': '#b45309', '💤 Cool': '#4b5563' };
-    return subreddits.map(sub => `
-        <div class="subreddit-choice">
-            <input type="checkbox" id="sub-${sub.name}" value="${sub.name}" checked>
-            <label for="sub-${sub.name}">
-                <span class="sub-name">r/${sub.name}</span>
-                <span class="sub-pills">
-                    <span class="pill members-pill">${formatMemberCount(sub.members)}</span>
-                    <span class="pill activity-pill" style="background-color: ${activityColors[sub.activityLabel]}; color: ${activityTextColors[sub.activityLabel]};">${sub.activityLabel}</span>
-                </span>
-            </label>
-        </div>
-    `).join('');
+    // The color logic has been moved to CSS. These objects are no longer needed.
+    return subreddits.map(sub => {
+        // Extract the key word (e.g., "Hot", "Warm", "Cool") from the label.
+        const activityState = sub.activityLabel.split(' ')[1];
+
+        return `
+            <div class="subreddit-choice">
+                <input type="checkbox" id="sub-${sub.name}" value="${sub.name}" checked>
+                <label for="sub-${sub.name}">
+                    <span class="sub-name">r/${sub.name}</span>
+                    <span class="sub-pills">
+                        <span class="pill members-pill">${formatMemberCount(sub.members)}</span>
+                        
+                        <!-- The inline style is replaced with a data-attribute -->
+                        <span class="pill activity-pill" data-activity="${activityState}">
+                            ${sub.activityLabel}
+                        </span>
+                    </span>
+                </label>
+            </div>
+        `;
+    }).join('');
 }
 function displaySubredditChoices(rankedSubreddits) {
     const choicesDiv = document.getElementById('subreddit-choices');
     const loadMoreContainer = document.getElementById('load-more-container');
     if (!choicesDiv || !loadMoreContainer) return;
+
     loadMoreContainer.innerHTML = '';
     _allRankedSubreddits = rankedSubreddits;
+
     if (_allRankedSubreddits.length === 0) {
+        // The class 'loading-text' is already used, which is good.
+        // We will provide a specific style for it in the CSS.
         choicesDiv.innerHTML = '<p class="loading-text">No suitable communities found. Try a different group.</p>';
         return;
     }
+
     const initialToShow = _allRankedSubreddits.slice(0, 8);
     choicesDiv.innerHTML = renderSubredditChoicesHTML(initialToShow);
+
     if (_allRankedSubreddits.length > 8) {
         const loadMoreBtn = document.createElement('button');
         loadMoreBtn.id = 'load-more-subs-btn';
+        loadMoreBtn.className = 'load-more-button'; // Added a class for styling
         loadMoreBtn.textContent = 'Load More Communities';
-        loadMoreBtn.style.cssText = "padding: 8px 20px; border-radius: 50px; border: 1px solid var(--minky-glass-border); background-color: var(--minky-glass-bg-hover); color: var(--minky-text-primary); cursor: pointer; font-weight: 500; font-family: var(--pf-font-family); font-size: 1rem;";
+        
+        // REMOVED: The style.cssText line is now handled by the .load-more-button class in CSS.
+
         loadMoreBtn.onclick = loadMoreSubreddits;
         loadMoreContainer.appendChild(loadMoreBtn);
     }
 }
+
 function loadMoreSubreddits() {
     const choicesDiv = document.getElementById('subreddit-choices');
     const loadMoreBtn = document.getElementById('load-more-subs-btn');
@@ -520,26 +851,76 @@ function loadMoreSubreddits() {
 async function renderIncludedSubreddits(subreddits) {
     const container = document.getElementById('included-subreddits-container');
     if (!container) return;
-    container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list" style="display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch;"><p class="loading-text" style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Loading community details...</p></div>`;
+
+    // The initial loading state now uses CSS classes
+    container.innerHTML = `
+        <h3 class="dashboard-section-title">Analysis Based On</h3>
+        <div class="subreddit-tag-list">
+            <p class="placeholder-text">Loading community details...</p>
+        </div>
+    `;
+
     try {
         const detailPromises = subreddits.map(sub => fetchSubredditDetails(sub));
         const detailsArray = await Promise.all(detailPromises);
         const tagsHTML = detailsArray.map((details, index) => {
             const subName = subreddits[index];
             const detailsString = details ? JSON.stringify(details).replace(/'/g, "&apos;") : "{}";
+
             if (!details) {
-                return `<div class="subreddit-tag-detailed" style="background: #f8f9fa; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: center;"><div class="tag-header" style="font-weight: bold; color: #007bff;">r/${subName}</div><div class="tag-body" style="font-style: italic; color: #6c757d; font-size: 0.9rem; margin-top: 8px;">Details could not be loaded.</div></div>`;
+                // The error card now uses a modifier class for its unique styles
+                return `
+                    <div class="subreddit-tag-detailed subreddit-tag-detailed--error">
+                        <div class="tag-header">r/${subName}</div>
+                        <div class="tag-body">Details could not be loaded.</div>
+                    </div>
+                `;
             }
+
             const description = details.public_description || 'No public description available.';
             const members = formatMemberCount(details.subscribers);
             const [activityEmoji, activityText] = getActivityLabel(details.active_user_count, details.subscribers).split(' ');
-            return `<div class="subreddit-tag-detailed" style="background: #ffffff; border: 1px solid #dee2e6; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: space-between;"><div><div class="tag-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;"><span class="tag-name" style="font-weight: bold; font-size: 1rem; color: #0056b3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">r/${subName}</span><span class="tag-activity" style="font-size: 0.8rem; background: #e9ecef; color: #495057; padding: 3px 8px; border-radius: 12px; flex-shrink: 0; margin-left: 8px;">${activityEmoji} ${activityText}</span></div><p class="tag-description" style="font-size: 0.85rem; color: #495057; margin: 0 0 10px 0; line-height: 1.4; flex-grow: 1;">${description.substring(0, 150)}${description.length > 150 ? '...' : ''}</p><div class="tag-footer" style="font-size: 0.8rem; color: #6c757d; text-align: right;"><span class="tag-members"><strong>${members}</strong> members</span></div></div><div class="tag-footer-action" style="margin-top: 12px; display: flex; gap: 8px;"><button class="remove-sub-btn" data-subname="${subName}" data-sub-details='${detailsString}' style="flex-grow: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid #dc3545; background-color: #f8d7da; color: #721c24; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease;">Remove</button><a href="https://www.reddit.com/r/${subName}" target="_blank" rel="noopener noreferrer" class="view-sub-btn" style="flex-grow: 1; text-decoration: none; padding: 6px 10px; border-radius: 6px; border: 1px solid #6c757d; background-color: #f8f9fa; color: #343a40; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; text-align: center; transition: all 0.2s ease;">View on Reddit</a></div></div>`;
+
+            return `
+                <div class="subreddit-tag-detailed">
+                    <div>
+                        <div class="tag-header">
+                            <span class="tag-name">r/${subName}</span>
+                            <span class="tag-activity">${activityEmoji} ${activityText}</span>
+                        </div>
+                        <p class="tag-description">
+                            ${description.substring(0, 150)}${description.length > 150 ? '...' : ''}
+                        </p>
+                        <div class="tag-footer">
+                            <span class="tag-members"><strong>${members}</strong> members</span>
+                        </div>
+                    </div>
+                    <div class="tag-footer-action">
+                        <button class="remove-sub-btn" data-subname="${subName}" data-sub-details='${detailsString}'>
+                            Remove
+                        </button>
+                        <a href="https://www.reddit.com/r/${subName}" target="_blank" rel="noopener noreferrer" class="view-sub-btn">
+                            View on Reddit
+                        </a>
+                    </div>
+                </div>
+            `;
         }).join('');
-        container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list" style="display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch;">${tagsHTML}</div>`;
+
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Analysis Based On</h3>
+            <div class="subreddit-tag-list">${tagsHTML}</div>
+        `;
     } catch (error) {
         console.error("Error rendering subreddit details:", error);
         const tags = subreddits.map(sub => `<div class="subreddit-tag">r/${sub}</div>`).join('');
-        container.innerHTML = `<h3 class="dashboard-section-title">Analysis Based On</h3><div class="subreddit-tag-list">${tags}<p style="width: 100%; text-align: center; color: #dc3545; font-style: italic; margin-top: 10px;">Could not load community details.</p></div>`;
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Analysis Based On</h3>
+            <div class="subreddit-tag-list">
+                ${tags}
+                <p class="error-message">Could not load community details.</p>
+            </div>
+        `;
     }
 }
 async function findRelatedSubredditsAI(analyzedSubsData, audienceContext) {
@@ -560,15 +941,19 @@ async function findRelatedSubredditsAI(analyzedSubsData, audienceContext) {
 }
 async function handleAddRelatedSubClick(event) {
     if (!event.target.classList.contains('add-related-sub-btn')) return;
+
     const button = event.target;
     const subName = button.dataset.subname;
     const subDetailsJSON = button.dataset.subDetails;
+
     if (!subName || !subDetailsJSON) {
         console.error("Missing subreddit data on the 'Add' button.");
         return;
     }
+
     const card = button.closest('.subreddit-tag-detailed');
     const destinationList = document.querySelector('#included-subreddits-container .subreddit-tag-list');
+
     if (card && destinationList) {
         const actionContainer = card.querySelector('.tag-footer-action');
         if (actionContainer) {
@@ -577,17 +962,25 @@ async function handleAddRelatedSubClick(event) {
             newButton.dataset.subname = subName;
             newButton.dataset.subDetails = subDetailsJSON;
             newButton.textContent = 'Remove';
-            newButton.style.cssText = "flex-grow: 1; padding: 6px 10px; border-radius: 6px; border: 1px solid #dc3545; background-color: #f8d7da; color: #721c24; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease;";
+            
+            // REMOVED: The long style.cssText line is no longer needed.
+            // The button's appearance is now handled entirely by the '.remove-sub-btn' class in your CSS.
+
             actionContainer.replaceChild(newButton, button);
             destinationList.prepend(card);
         }
     }
+
     try {
         const countHeaderDiv = document.getElementById("count-header");
-        if (countHeaderDiv) { countHeaderDiv.innerHTML = 'Adding new audiences... <span class="loader-dots"></span>'; }
+        if (countHeaderDiv) {
+            countHeaderDiv.innerHTML = 'Adding new audiences... <span class="loader-dots"></span>';
+        }
+
         const currentSubTags = document.querySelectorAll('#included-subreddits-container .tag-name');
         const currentSubs = Array.from(currentSubTags).map(tag => tag.textContent.replace('r/', '').trim());
         const newSubList = [...new Set([...currentSubs, subName])];
+
         const choicesDiv = document.getElementById('subreddit-choices');
         let checkbox = document.getElementById(`sub-${subName}`);
         if (!checkbox && choicesDiv) {
@@ -595,9 +988,15 @@ async function handleAddRelatedSubClick(event) {
             const newChoiceHTML = renderSubredditChoicesHTML([subDetails]);
             choicesDiv.insertAdjacentHTML('beforeend', newChoiceHTML);
         }
+
         const allCheckboxes = document.querySelectorAll('#subreddit-choices input[type="checkbox"]');
-        allCheckboxes.forEach(cb => { cb.checked = newSubList.includes(cb.value); });
-        await runProblemFinder({ isUpdate: true });
+        allCheckboxes.forEach(cb => {
+            cb.checked = newSubList.includes(cb.value);
+        });
+
+        await runProblemFinder({
+            isUpdate: true
+        });
     } catch (error) {
         console.error("Failed to add related sub and re-run analysis:", error);
         alert("An error occurred while adding the community. Please try again.");
@@ -606,38 +1005,77 @@ async function handleAddRelatedSubClick(event) {
 async function renderAndHandleRelatedSubreddits(analyzedSubs) {
     const container = document.getElementById('similar-subreddits-container');
     if (!container) return;
-    container.innerHTML = `<h3 class="dashboard-section-title" style="margin-top: 2.5rem; margin-bottom: 1rem;">Related Communities to Explore</h3><div class="subreddit-tag-list" style="display: flex; flex-wrap: wrap; justify-content: center; align-items: stretch;"><p class="loading-text" style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Finding similar communities...</p></div>`;
+
+    // The initial loading state now uses CSS classes
+    container.innerHTML = `
+        <h3 class="dashboard-section-title related-communities-title">Related Communities to Explore</h3>
+        <div class="subreddit-tag-list">
+            <p class="placeholder-text">Finding similar communities...</p>
+        </div>
+    `;
+
     container.removeEventListener('click', handleAddRelatedSubClick);
     container.addEventListener('click', handleAddRelatedSubClick);
+
     try {
         const detailPromises = analyzedSubs.map(sub => fetchSubredditDetails(sub));
         const detailsArray = await Promise.all(detailPromises);
         const validDetails = detailsArray.filter(Boolean).map(d => ({ name: d.display_name, description: d.public_description || '' }));
         if (validDetails.length === 0) throw new Error("Could not get details for source subreddits.");
+
         const relatedSubNames = await findRelatedSubredditsAI(validDetails, originalGroupName);
         const newSubNames = relatedSubNames.filter(name => !analyzedSubs.some(s => s.toLowerCase() === name.toLowerCase()));
+
         if (newSubNames.length === 0) {
-            container.querySelector('.subreddit-tag-list').innerHTML = `<p style="font-style: italic; color: #777; padding: 1rem;">No new related communities were found.</p>`;
+            container.querySelector('.subreddit-tag-list').innerHTML = `<p class="placeholder-text">No new related communities were found.</p>`;
             return;
         }
+
         const rankedRelatedSubs = await fetchAndRankSubreddits(newSubNames);
         if (rankedRelatedSubs.length === 0) {
-            container.querySelector('.subreddit-tag-list').innerHTML = `<p style="font-style: italic; color: #777; padding: 1rem;">No suitable communities found after validation.</p>`;
+            container.querySelector('.subreddit-tag-list').innerHTML = `<p class="placeholder-text">No suitable communities found after validation.</p>`;
             return;
         }
+
         const tagsHTML = rankedRelatedSubs.slice(0, 10).map(sub => {
             const subDetailsString = JSON.stringify(sub).replace(/'/g, "&apos;");
             const members = formatMemberCount(sub.members);
             const [activityEmoji, activityText] = sub.activityLabel.split(' ');
             const description = sub.description.trim() ? sub.description : `A community for discussions and content related to r/${sub.name}.`;
-            return `<div class="subreddit-tag-detailed" style="background: #ffffff; border: 1px solid #e0e0e0; border-radius: 8px; padding: 12px; margin: 8px; width: 280px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); display: flex; flex-direction: column; justify-content: space-between;"><div><div class="tag-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;"><span class="tag-name" style="font-weight: bold; font-size: 1rem; color: #0056b3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">r/${sub.name}</span><span class="tag-activity" style="font-size: 0.8rem; background: #e9ecef; color: #495057; padding: 3px 8px; border-radius: 12px; flex-shrink: 0; margin-left: 8px;">${activityEmoji} ${activityText}</span></div><p class="tag-description" style="font-size: 0.85rem; color: #495057; margin: 0 0 10px 0; line-height: 1.4; flex-grow: 1; word-wrap: break-word;">${description.substring(0, 150)}${description.length > 150 ? '...' : ''}</p><div class="tag-footer" style="font-size: 0.8rem; color: #6c757d; text-align: right; border-top: 1px solid #f1f3f5; padding-top: 8px;"><span class="tag-members"><strong>${members}</strong> members</span></div></div><div class="tag-footer-action" style="margin-top: 12px; display: flex; gap: 8px;"><button class="add-related-sub-btn" data-subname="${sub.name}" data-sub-details='${subDetailsString}' style="flex-grow: 1; padding: 8px 12px; border-radius: 6px; border: 1px solid #007bff; background-color: #007bff; color: white; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; cursor: pointer; transition: all 0.2s ease;">+ Add to Analysis</button><a href="https://www.reddit.com/r/${sub.name}" target="_blank" rel="noopener noreferrer" class="view-sub-btn" style="flex-grow: 1; text-decoration: none; padding: 8px 12px; border-radius: 6px; border: 1px solid #6c757d; background-color: #f8f9fa; color: #343a40; font-weight: 500; font-family: var(--pf-font-family); font-size: 0.9rem; text-align: center; transition: all 0.2s ease;">View on Reddit</a></div></div>`;
+            
+            return `
+                <div class="subreddit-tag-detailed">
+                    <div>
+                        <div class="tag-header">
+                            <span class="tag-name">r/${sub.name}</span>
+                            <span class="tag-activity">${activityEmoji} ${activityText}</span>
+                        </div>
+                        <p class="tag-description">
+                            ${description.substring(0, 150)}${description.length > 150 ? '...' : ''}
+                        </p>
+                        <div class="tag-footer">
+                            <span class="tag-members"><strong>${members}</strong> members</span>
+                        </div>
+                    </div>
+                    <div class="tag-footer-action">
+                        <button class="add-related-sub-btn" data-subname="${sub.name}" data-sub-details='${subDetailsString}'>
+                            + Add to Analysis
+                        </button>
+                        <a href="https://www.reddit.com/r/${sub.name}" target="_blank" rel="noopener noreferrer" class="view-sub-btn">
+                            View on Reddit
+                        </a>
+                    </div>
+                </div>
+            `;
         }).join('');
+
         container.querySelector('.subreddit-tag-list').innerHTML = tagsHTML;
     } catch (error) {
         console.error("Error in renderAndHandleRelatedSubreddits:", error);
-        container.querySelector('.subreddit-tag-list').innerHTML = `<p style="color: #dc3545; font-style: italic; padding: 1rem;">Could not load related community suggestions.</p>`;
+        container.querySelector('.subreddit-tag-list').innerHTML = `<p class="error-message">Could not load related community suggestions.</p>`;
     }
 }
+
 // =================================================================================
 // === ENHANCEMENT & POWER PHRASES FUNCTIONS ===
 // =================================================================================
@@ -895,9 +1333,6 @@ function renderHighchartsBubbleChart(signals) {
 }
 
 // =================================================================================
-// === ENHANCEMENT & POWER PHRASES FUNCTIONS ===
-// =================================================================================
-// =================================================================================
 // === REVISED FUNCTION V2: AI MINDSET SUMMARY WITH DESCRIPTIVE POINTS ===
 // =================================================================================
 
@@ -997,51 +1432,52 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
 }
 // =================================================================================
 // === NEW FUNCTION: AI STRATEGIC PILLARS (GOALS & FEARS) ===
-// =================================================================================
-
+// ================================================================================
 async function generateAndRenderStrategicPillars(posts, audienceContext) {
     const goalsContainer = document.getElementById('goals-pillar');
     const fearsContainer = document.getElementById('fears-pillar');
     if (!goalsContainer || !fearsContainer) return;
 
     // Set initial loading states
-    goalsContainer.innerHTML = `<p class="loading-text">Analyzing goals...</p>`;
-    fearsContainer.innerHTML = `<p class="loading-text">Analyzing fears...</p>`;
+    goalsContainer.innerHTML = `<p class="placeholder-text">Analyzing goals...</p>`;
+    fearsContainer.innerHTML = `<p class="placeholder-text">Analyzing fears...</p>`;
 
     try {
-        const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+        const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}
+\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        // The AI prompt remains the same
         const prompt = `You are an expert market psychologist specializing in the "${audienceContext}" community. Based on the following user posts, identify their 3 core "Ultimate Goals" and their 3 "Greatest Fears". Respond ONLY with a valid JSON object with two keys: "goals" and "fears", holding an array of 3 short, insightful strings. Posts:\n${topPostsText}`;
 
         const openAIParams = {
             model: "gpt-4o-mini",
-            messages: [
-                { role: "system", content: "You are an expert market psychologist providing concise lists of audience goals and fears in strict JSON format." },
-                { role: "user", content: prompt }
-            ],
+            messages: [{
+                role: "system",
+                content: "You are an expert market psychologist providing concise lists of audience goals and fears in strict JSON format."
+            }, {
+                role: "user",
+                content: prompt
+            }],
             temperature: 0.3,
             max_tokens: 400,
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        });
+
         if (!response.ok) throw new Error('Strategic pillars API call failed.');
 
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
         const { goals, fears } = parsed;
 
-        // --- NEW RENDERING LOGIC ---
-        // This function now creates a custom structure instead of a <ul>
         const createCustomListHTML = (items) => {
             if (!items || items.length === 0) return '';
-            
             return items.map((item, index) => {
                 const isLastItem = index === items.length - 1;
-                
-                // Create the text element and conditionally add the separator div
                 return `
                     <div class="pillar-item">
                         <p class="pillar-item-text">${item}</p>
@@ -1055,20 +1491,21 @@ async function generateAndRenderStrategicPillars(posts, audienceContext) {
         if (goals && goals.length > 0) {
             goalsContainer.innerHTML = createCustomListHTML(goals);
         } else {
-            goalsContainer.innerHTML = `<p class="loading-text">Could not identify distinct goals.</p>`;
+            goalsContainer.innerHTML = `<p class="placeholder-text">Could not identify distinct goals.</p>`;
         }
 
         // Render Fears
         if (fears && fears.length > 0) {
             fearsContainer.innerHTML = createCustomListHTML(fears);
         } else {
-            fearsContainer.innerHTML = `<p class="loading-text">Could not identify distinct fears.</p>`;
+            fearsContainer.innerHTML = `<p class="placeholder-text">Could not identify distinct fears.</p>`;
         }
 
     } catch (error) {
         console.error("Strategic pillars generation error:", error);
-        goalsContainer.innerHTML = `<p class="loading-text" style="color: red;">Analysis failed.</p>`;
-        fearsContainer.innerHTML = `<p class="loading-text" style="color: red;">Analysis failed.</p>`;
+        // Replaced inline style with a dedicated error class
+        goalsContainer.innerHTML = `<p class="placeholder-text placeholder-text--error">Analysis failed.</p>`;
+        fearsContainer.innerHTML = `<p class="placeholder-text placeholder-text--error">Analysis failed.</p>`;
     }
 }
 // =================================================================================

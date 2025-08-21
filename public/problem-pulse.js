@@ -120,9 +120,9 @@ function renderEmotionMap(data) { const container = document.getElementById('emo
 
 // =================================================================================
 // === REVISED HYBRID FUNCTION V3: SMARTER PHRASE RANKING & NO QUOTES ===
+// ================================================================================
 // =================================================================================
-// =================================================================================
-// === REVISED HYBRID FUNCTION V4: AGGRESSIVE SCRIPT-FIRST, AI-FILTER METHOD ===
+// === REVISED HYBRID FUNCTION V5: DEFINITIVE UNIQUE POST COUNTING ===
 // =================================================================================
 
 async function generateAndRenderHybridSentiment(posts, audienceContext) {
@@ -138,61 +138,76 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
     positiveContainer.innerHTML = `<h3 class="dashboard-section-title">Positive Words & Phrases</h3><p class="loading-text">Analyzing sentiment...</p>`;
     negativeContainer.innerHTML = `<h3 class="dashboard-section-title">Negative Words & Phrases</h3><p class="loading-text">Analyzing sentiment...</p>`;
 
-    // --- PART 1: Word Counting (for score bar and base words) ---
+    // --- PART 1: Word Counting (Corrected for unique posts) ---
     let positiveCount = 0, negativeCount = 0;
     const wordFreq = { positive: new Map(), negative: new Map() };
+
     posts.forEach(post => {
         const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase();
         const words = text.replace(/[^a-z\s']/g, '').split(/\s+/);
+        
+        const uniqueWordsInPost = { positive: new Set(), negative: new Set() };
+
         words.forEach(rawWord => {
             if (rawWord.length < 3 || stopWords.includes(rawWord)) return;
             const lemma = lemmatize(rawWord);
-            let category = null;
-            if (positiveWords.has(lemma)) { category = 'positive'; positiveCount++; } 
-            else if (negativeWords.has(lemma)) { category = 'negative'; negativeCount++; }
-            if (category) {
-                if (!wordFreq[category].has(lemma)) wordFreq[category].set(lemma, { count: 0, posts: new Set() });
-                const data = wordFreq[category].get(lemma);
-                data.count++; data.posts.add(post);
+            if (positiveWords.has(lemma)) {
+                uniqueWordsInPost.positive.add(lemma);
+            } else if (negativeWords.has(lemma)) {
+                uniqueWordsInPost.negative.add(lemma);
             }
+        });
+
+        uniqueWordsInPost.positive.forEach(word => {
+            if (!wordFreq.positive.has(word)) wordFreq.positive.set(word, new Set());
+            wordFreq.positive.get(word).add(post);
+        });
+        uniqueWordsInPost.negative.forEach(word => {
+            if (!wordFreq.negative.has(word)) wordFreq.negative.set(word, new Set());
+            wordFreq.negative.get(word).add(post);
+        });
+    });
+
+    // Calculate total counts for the score bar based on all occurrences
+    posts.forEach(post => {
+        const words = `${post.data.title || ''} ${post.data.selftext || ''}`.toLowerCase().split(/\s+/);
+        words.forEach(word => {
+            if (positiveWords.has(word)) positiveCount++;
+            if (negativeWords.has(word)) negativeCount++;
         });
     });
     renderSentimentScore(positiveCount, negativeCount);
 
-    // --- PART 2: SCRIPT-FIRST - Programmatically Find All Common Phrases ---
+
+    // --- PART 2: SCRIPT-FIRST - Programmatically Find All Common Phrases (Corrected for unique posts) ---
     const phraseFreq = new Map();
     posts.forEach(post => {
         const text = `${post.data.title || ''} ${post.data.selftext || ''}`.toLowerCase().replace(/[^a-z\s']/g, '');
         const words = text.split(/\s+/).filter(w => w.length > 0);
         const ngrams = [...generateNgrams(words, 2), ...generateNgrams(words, 3), ...generateNgrams(words, 4)];
-        ngrams.forEach(ngram => {
-            if (!phraseFreq.has(ngram)) phraseFreq.set(ngram, { count: 0, posts: new Set() });
-            const data = phraseFreq.get(ngram);
-            data.count++; data.posts.add(post);
+        
+        // ** THE CRITICAL FIX **
+        // Get only the UNIQUE ngrams for this post before counting.
+        const uniqueNgramsInPost = new Set(ngrams);
+
+        uniqueNgramsInPost.forEach(ngram => {
+            if (!phraseFreq.has(ngram)) phraseFreq.set(ngram, new Set());
+            phraseFreq.get(ngram).add(post); // Add the post to the set for this phrase
         });
     });
 
+    // The value is now a Set of posts, so we use its .size property for counting
     const candidatePhrases = Array.from(phraseFreq.entries())
-        .filter(([_, data]) => data.count >= 3) // A phrase must appear at least 3 times
-        .sort((a, b) => b[1].count - a[1].count)
-        .slice(0, 100) // Take the top 100 most common phrases as candidates
+        .filter(([_, postSet]) => postSet.size >= 2) // A phrase must appear in at least 2 unique posts
+        .sort((a, b) => b[1].size - a[1].size)
+        .slice(0, 100)
         .map(item => item[0]);
 
-    // --- PART 3: AI-FILTER - Use AI to Judge the Quality of Common Phrases ---
+    // --- PART 3: AI-FILTER (Unchanged) ---
     let finalPositivePhrases = [], finalNegativePhrases = [];
     if (candidatePhrases.length > 0) {
         try {
-            const prompt = `You are a market research analyst. Below is a list of common phrases from the "${audienceContext}" community. Your task is to filter this list.
-            
-            1.  Identify phrases that express a clear **positive sentiment** (e.g., "love this product", "highly recommend this").
-            2.  Identify phrases that express a clear **negative sentiment** (e.g., "terrible customer service", "such a waste of").
-            3.  **Ignore neutral or irrelevant phrases** (e.g., "on the other hand", "for the first time").
-
-            Respond ONLY with a valid JSON object with two keys: "positive_phrases" and "negative_phrases", holding an array of the relevant strings you selected from the list.
-            
-            Candidate Phrases:
-            ${JSON.stringify(candidatePhrases)}`;
-
+            const prompt = `You are a market research analyst. Below is a list of common phrases from the "${audienceContext}" community. Your task is to filter this list. Identify phrases that express clear **positive sentiment** and **negative sentiment**. Ignore neutral phrases. Respond ONLY with a valid JSON object with two keys: "positive_phrases" and "negative_phrases", holding an array of the relevant strings you selected. Candidate Phrases: ${JSON.stringify(candidatePhrases)}`;
             const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert sentiment filter that only outputs JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 1000, response_format: { "type": "json_object" } };
             const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
             if (response.ok) {
@@ -201,26 +216,26 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
                 finalPositivePhrases = parsed.positive_phrases || [];
                 finalNegativePhrases = parsed.negative_phrases || [];
             }
-        } catch (error) {
-            console.error("AI phrase filtering failed, proceeding with words only.", error);
-        }
+        } catch (error) { console.error("AI phrase filtering failed, proceeding with words only.", error); }
     }
 
-    // --- PART 4: Merge and Render ---
+    // --- PART 4: Merge and Render (Now uses the correct counts) ---
     const renderCloud = (container, title, wordMap, phraseList, colors) => {
-        const topWords = Array.from(wordMap.entries()).sort((a, b) => b[1].count - a[1].count).slice(0, 23);
+        const topWords = Array.from(wordMap.entries())
+            .map(([word, postSet]) => [word, { count: postSet.size, posts: postSet }])
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 23);
         
-        // The phraseList is now the high-quality, AI-filtered list. We just need to get their data.
         const topPhrases = phraseList.map(phrase => {
-            const phraseData = phraseFreq.get(phrase); // Get the original data (count and posts)
-            return [phrase, phraseData];
-        }).filter(item => item[1]); // Ensure data exists
+            const postSet = phraseFreq.get(phrase);
+            return [phrase, { count: postSet.size, posts: postSet }];
+        }).filter(item => item[1]);
 
         const combinedData = [...topWords, ...topPhrases];
         
         const category = title.includes('Positive') ? 'positive' : 'negative';
         window._sentimentData = window._sentimentData || {};
-        window._sentimentData[category] = Object.fromEntries(new Map(combinedData));
+        window._sentimentData[category] = Object.fromEntries(combinedData.map(([key, value]) => [key, value]));
 
         container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3>`;
         const cloudContainer = document.createElement('div'); container.appendChild(cloudContainer);

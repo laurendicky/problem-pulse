@@ -116,7 +116,76 @@ async function generateEmotionMapData(posts) { try { const topPostsText = posts.
 
 function renderEmotionMap(data) { const container = document.getElementById('emotion-map-container'); if (!container) return; if (window.myEmotionChart) { window.myEmotionChart.destroy(); } if (data.length < 3) { container.innerHTML = '<h3 class="dashboard-section-title">Problem Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough distinct problems were found to build a map.</p>'; return; } container.innerHTML = `<h3 class="dashboard-section-title">Problem Polarity Map</h3><p id="problem-map-description">Top Right = The most frequent & emotionally intense problems.</p><div id="emotion-map-wrapper"><div id="emotion-map" style="height: 400px; padding: 10px; border-radius: 8px;"><canvas id="emotion-chart-canvas"></canvas></div><button id="chart-zoom-btn" style="display: none;"></button></div>`; const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d'); if (!ctx) return; const maxFreq = Math.max(...data.map(p => p.x)); const allFrequencies = data.map(p => p.x); const minObservedFreq = Math.min(...allFrequencies); const collapsedMinX = 5; const isCollapseFeatureEnabled = minObservedFreq >= collapsedMinX; const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0; window.myEmotionChart = new Chart(ctx, { type: 'scatter', data: { datasets: [{ label: 'Problems/Topics', data: data, backgroundColor: 'rgba(52, 152, 219, 0.9)', borderColor: 'rgba(41, 128, 185, 1)', borderWidth: 1, pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20, pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20, }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { mode: 'nearest', intersect: false, callbacks: { title: function(tooltipItems) { return tooltipItems[0].raw.label; }, label: function(context) { return ''; }, afterBody: function(tooltipItems) { const point = tooltipItems[0].raw; return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`; } }, displayColors: false, titleFont: { size: 14, weight: 'bold' }, bodyFont: { size: 12 }, backgroundColor: '#ff7ce2', titleColor: '#ffffff', bodyColor: '#dddddd', } }, scales: { x: { title: { display: true, text: 'Frequency (1-10)', color: 'white', font: { weight: 'bold' } }, min: initialMinX, max: 10, grid: { color: 'rgba(255, 255, 255, 0.15)' }, ticks: { color: 'white' } }, y: { title: { display: true, text: 'Problem Intensity (1-10)', color: 'white', font: { weight: 'bold' } }, min: 0, max: 10, grid: { color: 'rgba(255, 255, 255, 0.15)' }, ticks: { color: 'white' } } } } }); const zoomButton = document.getElementById('chart-zoom-btn'); if (isCollapseFeatureEnabled) { zoomButton.style.display = 'block'; const updateButtonText = () => { const isCurrentlyCollapsed = window.myEmotionChart.options.scales.x.min !== 0; zoomButton.textContent = isCurrentlyCollapsed ? 'Zoom Out to See Full Range' : 'Zoom In to High-Frequency'; }; zoomButton.addEventListener('click', () => { const chart = window.myEmotionChart; const isCurrentlyCollapsed = chart.options.scales.x.min !== 0; chart.options.scales.x.min = isCurrentlyCollapsed ? 0 : collapsedMinX; chart.update('none'); updateButtonText(); }); updateButtonText(); } }
 
-function generateSentimentData(posts) { const data = { positive: {}, negative: {} }; let positiveCount = 0; let negativeCount = 0; posts.forEach(post => { const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`; const words = text.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { if (rawWord.length < 3 || stopWords.includes(rawWord)) return; const lemma = lemmatize(rawWord); let category = null; if (positiveWords.has(lemma)) { category = 'positive'; positiveCount++; } else if (negativeWords.has(lemma)) { category = 'negative'; negativeCount++; } if (category) { if (!data[category][lemma]) { data[category][lemma] = { count: 0, posts: new Set() }; } data[category][lemma].count++; data[category][lemma].posts.add(post); } }); }); window._sentimentData = data; return { positive: Object.entries(data.positive).sort((a, b) => b[1].count - a[1].count).slice(0, 30), negative: Object.entries(data.negative).sort((a, b) => b[1].count - a[1].count).slice(0, 30), positiveCount, negativeCount }; }
+// =================================================================================
+// === NEW FUNCTION: SENTIMENT PHRASE EXTRACTION (LISTS ONLY) ===
+// =================================================================================
+
+async function generateAndRenderSentimentPhrases(posts, audienceContext) {
+    const positiveContainer = document.getElementById('positive-phrases-container');
+    const negativeContainer = document.getElementById('negative-phrases-container');
+
+    if (!positiveContainer || !negativeContainer) {
+        console.error("Sentiment phrase containers not found.");
+        return;
+    }
+
+    // Set a loading state
+    positiveContainer.innerHTML = `<p class="loading-text">Extracting phrases...</p>`;
+    negativeContainer.innerHTML = `<p class="loading-text">Extracting phrases...</p>`;
+
+    try {
+        const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+
+        const prompt = `You are a market research analyst specializing in the "${audienceContext}" community. Analyze the following user posts to extract common sentiment phrases.
+
+        Identify two types of phrases:
+        1.  "positive_phrases": Short, impactful phrases used to describe great experiences (e.g., "a total game-changer", "absolute life-saver", "worth every penny").
+        2.  "negative_phrases": Short, impactful phrases used to describe bad experiences or frustrations (e.g., "such a slog", "a complete nightmare", "waste of time").
+
+        Extract up to 7 of the most common or powerful phrases for each category.
+
+        Respond ONLY with a valid JSON object with two keys: "positive_phrases" and "negative_phrases", where each key holds an array of the extracted strings.
+        
+        Posts:\n${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-4o",
+            messages: [
+                { role: "system", content: "You are an expert analyst who extracts insightful customer phrases from text and provides them in a strict JSON format." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.2,
+            max_tokens: 600,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        
+        if (!response.ok) throw new Error('Sentiment phrase analysis API call failed.');
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        const { positive_phrases, negative_phrases } = parsed;
+
+        // Helper function to render just the list
+        const renderList = (phrases, container) => {
+            if (phrases && phrases.length > 0) {
+                container.innerHTML = '<ul>' + phrases.map(phrase => `<li>${phrase}</li>`).join('') + '</ul>';
+            } else {
+                container.innerHTML = `<p style="font-family: Inter, sans-serif; color: #777;">No distinct phrases found.</p>`;
+            }
+        };
+        
+        renderList(positive_phrases, positiveContainer);
+        renderList(negative_phrases, negativeContainer);
+
+    } catch (error) {
+        console.error("Sentiment phrase generation error:", error);
+        positiveContainer.innerHTML = `<p class="loading-text" style="color: red;">Analysis failed.</p>`;
+        negativeContainer.innerHTML = `<p class="loading-text" style="color: red;">Analysis failed.</p>`;
+    }
+}
+
 function renderSentimentCloud(containerId, wordData, colors) { const container = document.getElementById(containerId); if (!container) return; if (wordData.length < 3) { container.innerHTML = `<p style="font-family: sans-serif; color: #777; padding: 1rem; text-align: center;">Not enough distinct terms found.</p>`; return; } const counts = wordData.map(item => item[1].count); const maxCount = Math.max(...counts); const minCount = Math.min(...counts); const minFontSize = 16, maxFontSize = 42; const cloudHTML = wordData.map(([word, data]) => { const fontSize = minFontSize + ((data.count - minCount) / (maxCount - minCount || 1)) * (maxFontSize - minFontSize); const color = colors[Math.floor(Math.random() * colors.length)]; const rotation = Math.random() * 8 - 4; return `<span class="cloud-word" data-word="${word}" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${word}</span>`; }).join(''); container.innerHTML = cloudHTML; }
 function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : "Snippet not available."; const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if(closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
@@ -1136,9 +1205,6 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     });
 }
 // =================================================================================
-// === END: Replace this entire function in your script ===
-// =================================================================================
-// =================================================================================
 // === CORE `runProblemFinder` FUNCTION ===
 // =================================================================================
 async function runProblemFinder(options = {}) {
@@ -1203,10 +1269,18 @@ if (!isUpdate) {
         if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
         window._filteredPosts = filteredItems;
         renderPosts(filteredItems);
-        const sentimentData = generateSentimentData(filteredItems);
-        renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
-        renderSentimentCloud('positive-cloud', sentimentData.positive, positiveColors);
-        renderSentimentCloud('negative-cloud', sentimentData.negative, negativeColors);
+
+        // --- Start of Replacement ---
+
+// 1. Generate counts and render the score bar (from the old logic)
+const sentimentData = generateSentimentData(filteredItems);
+renderSentimentScore(sentimentData.positiveCount, sentimentData.negativeCount);
+
+// 2. Generate and render the insightful phrases (with the new AI function)
+generateAndRenderSentimentPhrases(filteredItems, originalGroupName);
+
+// --- End of Replacement ---
+
         generateEmotionMapData(filteredItems).then(renderEmotionMap);
         renderIncludedSubreddits(selectedSubreddits);
         generateAndRenderPowerPhrases(filteredItems, originalGroupName);

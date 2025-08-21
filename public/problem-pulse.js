@@ -119,6 +119,9 @@ function renderEmotionMap(data) { const container = document.getElementById('emo
 // =================================================================================
 // === REVISED HYBRID FUNCTION V2: WORDS & PHRASES SENTIMENT CLOUD (CORRECTED MERGE LOGIC) ===
 // =================================================================================
+// =================================================================================
+// === REVISED HYBRID FUNCTION V3: SMARTER PHRASE RANKING & NO QUOTES ===
+// =================================================================================
 
 async function generateAndRenderHybridSentiment(posts, audienceContext) {
     const positiveContainer = document.getElementById('positive-cloud');
@@ -161,12 +164,13 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
     // Render the score bar immediately
     renderSentimentScore(positiveCount, negativeCount);
 
-    // --- PART 2: AI Phrase Extraction (Unchanged) ---
+    // --- PART 2: AI Phrase Extraction (Now asks for a larger pool of candidates) ---
     let positive_phrases = [], negative_phrases = [];
     try {
         const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
-        const prompt = `You are a market research analyst for the "${audienceContext}" community. Extract common sentiment phrases. Identify two types: 1. "positive_phrases": Short phrases for great experiences (e.g., "a total game-changer"). 2. "negative_phrases": Short phrases for bad experiences (e.g., "such a slog"). Extract up to 7 of the most common phrases for each category. Respond ONLY with a valid JSON object with keys "positive_phrases" and "negative_phrases", holding an array of strings. Posts:\n${topPostsText}`;
-        const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an expert analyst who extracts insightful customer phrases from text in a strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 600, response_format: { "type": "json_object" } };
+        // MODIFICATION: Asking for up to 15 candidates instead of 7
+        const prompt = `You are a market research analyst for the "${audienceContext}" community. Extract common sentiment phrases. Identify two types: 1. "positive_phrases": Short phrases for great experiences (e.g., "a total game-changer"). 2. "negative_phrases": Short phrases for bad experiences (e.g., "such a slog"). Extract up to 15 of the most common phrases for each category. Respond ONLY with a valid JSON object with keys "positive_phrases" and "negative_phrases", holding an array of strings. Posts:\n${topPostsText}`;
+        const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an expert analyst who extracts insightful customer phrases from text in a strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 800, response_format: { "type": "json_object" } };
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (response.ok) {
             const data = await response.json();
@@ -178,20 +182,24 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
         console.error("AI phrase extraction failed, proceeding with words only.", error);
     }
     
-    // --- PART 3: Correctly Merge and Render ---
+    // --- PART 3: Correctly Merge, Rank, and Render ---
     const renderCloud = (container, title, wordMap, phraseList, colors) => {
         // Get the top words first
         const topWords = Array.from(wordMap.entries())
             .sort((a, b) => b[1].count - a[1].count)
-            .slice(0, 23); // Take top ~23 words
+            .slice(0, 23);
 
-        // Now, process the AI phrases and find their context posts
-        const topPhrases = phraseList.map(phrase => {
+        // MODIFICATION: Find, rank, and then select the best phrases
+        const allRatedPhrases = phraseList.map(phrase => {
             const pattern = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
             const mentioningPosts = posts.filter(post => pattern.test(`${post.data.title || ''} ${post.data.selftext || ''}`));
-            // Return in the same [key, value] format as the words
             return [phrase, { count: mentioningPosts.length, posts: new Set(mentioningPosts) }];
-        }).filter(item => item[1].count > 0); // Only include phrases that were actually found
+        }).filter(item => item[1].count > 0); // Only include phrases that were actually found in the text
+
+        // Sort the AI candidates by their REAL frequency and take the top 7
+        const topPhrases = allRatedPhrases
+            .sort((a, b) => b[1].count - b[1].count)
+            .slice(0, 7);
 
         // Combine the pre-selected lists
         const combinedData = [...topWords, ...topPhrases];
@@ -199,7 +207,6 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
         // Update the global data store for the click-to-see-context functionality
         const category = title.includes('Positive') ? 'positive' : 'negative';
         window._sentimentData = window._sentimentData || {};
-        // Create a new Map from the combined data and convert it to an object
         window._sentimentData[category] = Object.fromEntries(new Map(combinedData));
 
         container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3>`;
@@ -211,7 +218,6 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
             return;
         }
 
-        // The rest of the rendering logic is the same
         const counts = combinedData.map(item => item[1].count);
         const maxCount = Math.max(...counts);
         const minCount = Math.min(...counts);
@@ -221,8 +227,8 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
             const fontSize = minFontSize + ((data.count - minCount) / (maxCount - minCount || 1)) * (maxFontSize - minFontSize);
             const color = colors[Math.floor(Math.random() * colors.length)];
             const rotation = Math.random() * 8 - 4;
-            const displayText = word.includes(' ') ? `"${word}"` : word;
-            return `<span class="cloud-word" data-word="${word}" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${displayText}</span>`;
+            // FIX: The line that added quotes has been removed.
+            return `<span class="cloud-word" data-word="${word}" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${word}</span>`;
         }).join('');
         cloudContainer.innerHTML = cloudHTML;
     };

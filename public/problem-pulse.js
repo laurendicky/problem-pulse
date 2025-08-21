@@ -117,11 +117,7 @@ async function generateEmotionMapData(posts) { try { const topPostsText = posts.
 function renderEmotionMap(data) { const container = document.getElementById('emotion-map-container'); if (!container) return; if (window.myEmotionChart) { window.myEmotionChart.destroy(); } if (data.length < 3) { container.innerHTML = '<h3 class="dashboard-section-title">Problem Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough distinct problems were found to build a map.</p>'; return; } container.innerHTML = `<h3 class="dashboard-section-title">Problem Polarity Map</h3><p id="problem-map-description">Top Right = The most frequent & emotionally intense problems.</p><div id="emotion-map-wrapper"><div id="emotion-map" style="height: 400px; padding: 10px; border-radius: 8px;"><canvas id="emotion-chart-canvas"></canvas></div><button id="chart-zoom-btn" style="display: none;"></button></div>`; const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d'); if (!ctx) return; const maxFreq = Math.max(...data.map(p => p.x)); const allFrequencies = data.map(p => p.x); const minObservedFreq = Math.min(...allFrequencies); const collapsedMinX = 5; const isCollapseFeatureEnabled = minObservedFreq >= collapsedMinX; const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0; window.myEmotionChart = new Chart(ctx, { type: 'scatter', data: { datasets: [{ label: 'Problems/Topics', data: data, backgroundColor: 'rgba(52, 152, 219, 0.9)', borderColor: 'rgba(41, 128, 185, 1)', borderWidth: 1, pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20, pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20, }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { mode: 'nearest', intersect: false, callbacks: { title: function(tooltipItems) { return tooltipItems[0].raw.label; }, label: function(context) { return ''; }, afterBody: function(tooltipItems) { const point = tooltipItems[0].raw; return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`; } }, displayColors: false, titleFont: { size: 14, weight: 'bold' }, bodyFont: { size: 12 }, backgroundColor: '#ff7ce2', titleColor: '#ffffff', bodyColor: '#dddddd', } }, scales: { x: { title: { display: true, text: 'Frequency (1-10)', color: 'white', font: { weight: 'bold' } }, min: initialMinX, max: 10, grid: { color: 'rgba(255, 255, 255, 0.15)' }, ticks: { color: 'white' } }, y: { title: { display: true, text: 'Problem Intensity (1-10)', color: 'white', font: { weight: 'bold' } }, min: 0, max: 10, grid: { color: 'rgba(255, 255, 255, 0.15)' }, ticks: { color: 'white' } } } } }); const zoomButton = document.getElementById('chart-zoom-btn'); if (isCollapseFeatureEnabled) { zoomButton.style.display = 'block'; const updateButtonText = () => { const isCurrentlyCollapsed = window.myEmotionChart.options.scales.x.min !== 0; zoomButton.textContent = isCurrentlyCollapsed ? 'Zoom Out to See Full Range' : 'Zoom In to High-Frequency'; }; zoomButton.addEventListener('click', () => { const chart = window.myEmotionChart; const isCurrentlyCollapsed = chart.options.scales.x.min !== 0; chart.options.scales.x.min = isCurrentlyCollapsed ? 0 : collapsedMinX; chart.update('none'); updateButtonText(); }); updateButtonText(); } }
 
 // =================================================================================
-// === NEW FUNCTION: SENTIMENT PHRASE EXTRACTION (LISTS ONLY) ===
-// =================================================================================
-
-// =================================================================================
-// === NEW HYBRID FUNCTION: WORDS & PHRASES SENTIMENT CLOUD ===
+// === REVISED HYBRID FUNCTION V2: WORDS & PHRASES SENTIMENT CLOUD (CORRECTED MERGE LOGIC) ===
 // =================================================================================
 
 async function generateAndRenderHybridSentiment(posts, audienceContext) {
@@ -137,7 +133,7 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
     positiveContainer.innerHTML = `<h3 class="dashboard-section-title">Positive Words & Phrases</h3><p class="loading-text">Extracting sentiment...</p>`;
     negativeContainer.innerHTML = `<h3 class="dashboard-section-title">Negative Words & Phrases</h3><p class="loading-text">Extracting sentiment...</p>`;
 
-    // --- PART 1: Word Counting (for the score bar and base words) ---
+    // --- PART 1: Word Counting (Unchanged) ---
     let positiveCount = 0;
     let negativeCount = 0;
     const wordFreq = { positive: new Map(), negative: new Map() };
@@ -149,13 +145,8 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
             if (rawWord.length < 3 || stopWords.includes(rawWord)) return;
             const lemma = lemmatize(rawWord);
             let category = null;
-            if (positiveWords.has(lemma)) {
-                category = 'positive';
-                positiveCount++;
-            } else if (negativeWords.has(lemma)) {
-                category = 'negative';
-                negativeCount++;
-            }
+            if (positiveWords.has(lemma)) { category = 'positive'; positiveCount++; } 
+            else if (negativeWords.has(lemma)) { category = 'negative'; negativeCount++; }
             if (category) {
                 if (!wordFreq[category].has(lemma)) {
                     wordFreq[category].set(lemma, { count: 0, posts: new Set() });
@@ -170,7 +161,7 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
     // Render the score bar immediately
     renderSentimentScore(positiveCount, negativeCount);
 
-    // --- PART 2: AI Phrase Extraction ---
+    // --- PART 2: AI Phrase Extraction (Unchanged) ---
     let positive_phrases = [], negative_phrases = [];
     try {
         const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
@@ -187,28 +178,32 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
         console.error("AI phrase extraction failed, proceeding with words only.", error);
     }
     
-    // --- PART 3: Merge Words and Phrases, and Render Clouds ---
+    // --- PART 3: Correctly Merge and Render ---
     const renderCloud = (container, title, wordMap, phraseList, colors) => {
-        // For each AI phrase, find its source posts to enable the click-context feature
-        phraseList.forEach(phrase => {
+        // Get the top words first
+        const topWords = Array.from(wordMap.entries())
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 23); // Take top ~23 words
+
+        // Now, process the AI phrases and find their context posts
+        const topPhrases = phraseList.map(phrase => {
             const pattern = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
             const mentioningPosts = posts.filter(post => pattern.test(`${post.data.title || ''} ${post.data.selftext || ''}`));
-            if (mentioningPosts.length > 0) {
-                wordMap.set(phrase, { count: mentioningPosts.length, posts: new Set(mentioningPosts) });
-            }
-        });
+            // Return in the same [key, value] format as the words
+            return [phrase, { count: mentioningPosts.length, posts: new Set(mentioningPosts) }];
+        }).filter(item => item[1].count > 0); // Only include phrases that were actually found
 
-        // Convert map to array, sort by count, and take the top 30 for display
-        const combinedData = Array.from(wordMap.entries()).sort((a, b) => b[1].count - a[1].count).slice(0, 30);
+        // Combine the pre-selected lists
+        const combinedData = [...topWords, ...topPhrases];
         
-        // Update global data for the click handler
+        // Update the global data store for the click-to-see-context functionality
         const category = title.includes('Positive') ? 'positive' : 'negative';
         window._sentimentData = window._sentimentData || {};
-        window._sentimentData[category] = Object.fromEntries(wordMap);
+        // Create a new Map from the combined data and convert it to an object
+        window._sentimentData[category] = Object.fromEntries(new Map(combinedData));
 
         container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3>`;
         const cloudContainer = document.createElement('div');
-        cloudContainer.className = 'cloud-render-area'; // Add a class for styling if needed
         container.appendChild(cloudContainer);
 
         if (combinedData.length < 3) {
@@ -216,6 +211,7 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
             return;
         }
 
+        // The rest of the rendering logic is the same
         const counts = combinedData.map(item => item[1].count);
         const maxCount = Math.max(...counts);
         const minCount = Math.min(...counts);
@@ -225,7 +221,6 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
             const fontSize = minFontSize + ((data.count - minCount) / (maxCount - minCount || 1)) * (maxFontSize - minFontSize);
             const color = colors[Math.floor(Math.random() * colors.length)];
             const rotation = Math.random() * 8 - 4;
-            // Use quotes for phrases to make them visually distinct
             const displayText = word.includes(' ') ? `"${word}"` : word;
             return `<span class="cloud-word" data-word="${word}" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${displayText}</span>`;
         }).join('');

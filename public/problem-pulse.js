@@ -357,7 +357,6 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
     renderCloud(negativeContainer, 'Negative Words & Phrases', wordFreq.negative, finalNegativePhrases, negativeColors);
 }
 
-}
 
 function renderContextContent(word, posts) {
     const contextBox = document.getElementById('context-box');

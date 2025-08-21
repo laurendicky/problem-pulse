@@ -22,14 +22,56 @@ const emotionalIntensityScores = { 'annoy': 3, 'irritated': 3, 'bored': 2, 'issu
 const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
 
 // --- 2. ALL HELPER AND LOGIC FUNCTIONS ---
+
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
 function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
 async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all', searchInComments = false) { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const payload = { searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after }; if (searchInComments) { payload.includeComments = true; } const response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return []; } return allPosts.slice(0, totalLimit); }
-async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all', searchInComments = false) { const allResults = []; for (let i = 0; i < searchTerms.length; i += 8) { const batchTerms = searchTerms.slice(i, i + 8); const batchPromises = batchTerms.map(term => fetchRedditForTermWithPagination(niche, term, limitPerTerm, timeFilter, searchInComments)); const batchResults = await Promise.all(batchPromises); batchResults.forEach(posts => { if (Array.isArray(posts)) { allResults.push(...posts); } }); if (i + 8 < searchTerms.length) { await new Promise(resolve => setTimeout(resolve, 500)); } } return deduplicatePosts(allResults); }
+async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all', searchInComments = false) { const allResults = []; for (let i = 0; i < searchTerms.length; i += 8) { const batchTerms = searchTerms.slice(i, i + 8); const batchPromises = batchTerms.map(term => fetchRedditForTermWithPagination(niche, term, limitPerTerm, timeFilter, searchInComments)); const batchResults = await Promise.all(batchPromises); batchResults.forEach(posts => { if (Array.isArray(posts)) { allResults.push(...posts); } }); if (i + 8 < searchTerms.length) { await new Promise(resolve => setTimeout(resolve, 500)); } } return deduplicatePosts(allResults); 
 
 // =================================================================================
-// === ADD THIS NEW, AGGRESSIVE DE-DUPLICATION FUNCTION ===
+// === ADD THIS NEW, SMARTER SNIPPET CREATION FUNCTION ===
 // =================================================================================
+
+/**
+ * Creates a context-aware, highlighted snippet of text around a specific phrase.
+ * This is more reliable than the old sentence-based method.
+ * @param {string} fullText - The complete text of the post or comment.
+ * @param {string} phrase - The phrase to find and highlight.
+ * @returns {string} An HTML string of the highlighted snippet.
+ */
+function createContextSnippet(fullText, phrase) {
+    const contextChars = 70; // How many characters to show on each side of the phrase
+    const lowerFullText = fullText.toLowerCase();
+    const lowerPhrase = phrase.toLowerCase();
+
+    // Find the first occurrence of the phrase, case-insensitively
+    const phraseIndex = lowerFullText.indexOf(lowerPhrase);
+
+    if (phraseIndex === -1) {
+        // Fallback: If for some reason the phrase isn't found, just return the start of the text.
+        return fullText.substring(0, 150) + (fullText.length > 150 ? "..." : "");
+    }
+
+    // Calculate the start and end of the snippet window
+    const startIndex = Math.max(0, phraseIndex - contextChars);
+    const endIndex = Math.min(fullText.length, phraseIndex + phrase.length + contextChars);
+
+    // Extract the raw snippet text
+    let snippet = fullText.substring(startIndex, endIndex);
+
+    // Add ellipses to indicate that the snippet is an excerpt
+    if (startIndex > 0) {
+        snippet = "... " + snippet;
+    }
+    if (endIndex < fullText.length) {
+        snippet = snippet + " ...";
+    }
+
+    // Now, highlight all occurrences of the phrase within this snippet
+    // This regex is safer because it runs on a small, controlled string
+    const highlightRegex = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    return snippet.replace(highlightRegex, `<strong>$&</strong>`);
+}
 
 /**
  * Aggressively de-duplicates posts and comments based on their content.
@@ -37,9 +79,6 @@ async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm =
  * @param {Array} items - An array of Reddit post or comment objects.
  * @returns {Array} A new array with content-based duplicates removed.
  */
-// =================================================================================
-// === REPLACE THE OLD FUNCTION WITH THIS NEW, HYPER-AGGRESSIVE VERSION ===
-// =================================================================================
 
 /**
  * Aggressively de-duplicates posts and comments based on a robust content signature.
@@ -86,7 +125,8 @@ function parseAISummary(aiResponse) { try { aiResponse = aiResponse.replace(/```
 function parseAIAssignments(aiResponse) { try { aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim(); const jsonMatch = aiResponse.match(/{[\s\S]*}/); if (!jsonMatch) { throw new Error("No JSON object in AI response."); } const parsed = JSON.parse(jsonMatch[0]); if (!parsed.assignments || !Array.isArray(parsed.assignments)) { throw new Error("AI response lacks an 'assignments' array."); } parsed.assignments.forEach((assignment, idx) => { const missingFields = []; if (typeof assignment.postNumber !== 'number') missingFields.push("postNumber"); if (typeof assignment.finding !== 'number') missingFields.push("finding"); if (missingFields.length > 0) throw new Error(`Assignment ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`); }); return parsed.assignments; } catch (error) { console.error("Parsing Error:", error); console.log("Raw AI Response:", aiResponse); throw new Error("Failed to parse AI response."); } }
 function filterPosts(posts, minUpvotes = 20) { return posts.filter(post => { const title = (post.data.title || post.data.link_title || '').toLowerCase(); const selftext = post.data.selftext || post.data.body || ''; if (title.includes('[ad]') || title.includes('sponsored') || post.data.upvote_ratio < 0.2 || post.data.ups < minUpvotes || !selftext || selftext.length < 20) return false; const isRamblingOrNoisy = (text) => { if (!text) return false; return /&#x[0-9a-fA-F]+;/g.test(text) || /[^a-zA-Z0-9\s]{5,}/g.test(text) || /(.)\1{6,}/g.test(text); }; return !isRamblingOrNoisy(title) && !isRamblingOrNoisy(selftext); }); }
 function getTopKeywords(posts, topN = 10) { const freqMap = {}; posts.forEach(post => { const cleanedText = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.replace(/<[^>]+>/g, '').replace(/[^a-zA-Z0-9\s.,!?]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); const words = cleanedText.split(/\s+/); words.forEach(word => { if (!stopWords.includes(word) && word.length > 2) { freqMap[word] = (freqMap[word] || 0) + 1; } }); }); return Object.keys(freqMap).sort((a, b) => freqMap[b] - freqMap[a]).slice(0, topN); }
-function getFirstTwoSentences(text) { if (!text) return ''; const sentences = text.match(/[^\.!\?]+[\.!\?]+(?:\s|$)/g); return sentences ? sentences.slice(0, 2).join(' ').trim() : text; }
+
+
 async function assignPostsToFindings(summaries, posts) {
     const postsForAI = posts.slice(0, 50);
     const prompt = `You are an expert data analyst. Your task is to categorize Reddit posts into the most relevant "Finding" from a provided list.\n\nHere are the ${summaries.length} findings:\n${summaries.map((s, i) => `Finding ${i + 1}: ${s.title}`).join('\n')}\n\nHere are the ${postsForAI.length} Reddit posts:\n${postsForAI.map((p, i) => `Post ${i + 1}: ${(p.data.title || p.data.link_title || '').substring(0, 150)}`).join('\n')}\n\nINSTRUCTIONS: For each post, assign it to the most relevant Finding (from 1 to ${summaries.length}). Respond ONLY with a JSON object with a single key "assignments", which is an array of objects like {"postNumber": 1, "finding": 2}.`;
@@ -316,8 +356,534 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
     renderCloud(negativeContainer, 'Negative Words & Phrases', wordFreq.negative, finalNegativePhrases, negativeColors);
 }
 
-function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : "Snippet not available."; const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if(closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
-function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
+// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}// REPLACE your old renderContextContent function with this one
+function renderContextContent(word, posts) {
+    const contextBox = document.getElementById('context-box');
+    if (!contextBox) return;
+    
+    const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `;
+    
+    // THE CHANGE IS HERE: We also use the new snippet generator for this panel
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `;
+        return ` <div class="context-snippet"> <p class="context-snippet-text">${textToShow}</p> ${metaHTML} </div> `;
+    }).join('');
+
+    contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    contextBox.style.display = 'block';
+    
+    const closeBtn = document.getElementById('context-close-btn');
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            contextBox.style.display = 'none';
+            contextBox.innerHTML = '';
+        });
+    }
+    contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// REPLACE your old showSlidingPanel function with this one
+function showSlidingPanel(word, posts, category) {
+    const positivePanel = document.getElementById('positive-context-box');
+    const negativePanel = document.getElementById('negative-context-box');
+    const overlay = document.getElementById('context-overlay');
+    if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM."); return; }
+    
+    const targetPanel = category === 'positive' ? positivePanel : negativePanel;
+    const otherPanel = category === 'positive' ? negativePanel : positivePanel;
+    
+    const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`;
+    
+    // THE CHANGE IS HERE: We now use our new, reliable snippet generator
+    const snippetsHTML = posts.slice(0, 10).map(post => {
+        const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`;
+        const textToShow = createContextSnippet(fullText, word); // Using the new function
+        const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`;
+        return `<div class="context-snippet"><p class="context-snippet-text">${textToShow}</p>${metaHTML}</div>`;
+    }).join('');
+
+    targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`;
+    
+    const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); };
+    targetPanel.querySelector('.context-close-btn').onclick = close;
+    overlay.onclick = close;
+    
+    otherPanel.classList.remove('visible');
+    targetPanel.classList.add('visible');
+    overlay.classList.add('visible');
+}
+
+
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title || p.data.link_title || ''}\nContent: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
 async function extractAndValidateEntities(posts, nicheContext) {
     const topPostsText = posts.slice(0, 50).map(p => {

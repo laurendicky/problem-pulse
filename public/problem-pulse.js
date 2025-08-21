@@ -117,6 +117,46 @@ async function generateEmotionMapData(posts) { try { const topPostsText = posts.
 function renderEmotionMap(data) { const container = document.getElementById('emotion-map-container'); if (!container) return; if (window.myEmotionChart) { window.myEmotionChart.destroy(); } if (data.length < 3) { container.innerHTML = '<h3 class="dashboard-section-title">Problem Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough distinct problems were found to build a map.</p>'; return; } container.innerHTML = `<h3 class="dashboard-section-title">Problem Polarity Map</h3><p id="problem-map-description">Top Right = The most frequent & emotionally intense problems.</p><div id="emotion-map-wrapper"><div id="emotion-map" style="height: 400px; padding: 10px; border-radius: 8px;"><canvas id="emotion-chart-canvas"></canvas></div><button id="chart-zoom-btn" style="display: none;"></button></div>`; const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d'); if (!ctx) return; const maxFreq = Math.max(...data.map(p => p.x)); const allFrequencies = data.map(p => p.x); const minObservedFreq = Math.min(...allFrequencies); const collapsedMinX = 5; const isCollapseFeatureEnabled = minObservedFreq >= collapsedMinX; const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0; window.myEmotionChart = new Chart(ctx, { type: 'scatter', data: { datasets: [{ label: 'Problems/Topics', data: data, backgroundColor: 'rgba(52, 152, 219, 0.9)', borderColor: 'rgba(41, 128, 185, 1)', borderWidth: 1, pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20, pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20, }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { mode: 'nearest', intersect: false, callbacks: { title: function(tooltipItems) { return tooltipItems[0].raw.label; }, label: function(context) { return ''; }, afterBody: function(tooltipItems) { const point = tooltipItems[0].raw; return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`; } }, displayColors: false, titleFont: { size: 14, weight: 'bold' }, bodyFont: { size: 12 }, backgroundColor: '#ff7ce2', titleColor: '#ffffff', bodyColor: '#dddddd', } }, scales: { x: { title: { display: true, text: 'Frequency (1-10)', color: 'white', font: { weight: 'bold' } }, min: initialMinX, max: 10, grid: { color: 'rgba(255, 255, 255, 0.15)' }, ticks: { color: 'white' } }, y: { title: { display: true, text: 'Problem Intensity (1-10)', color: 'white', font: { weight: 'bold' } }, min: 0, max: 10, grid: { color: 'rgba(255, 255, 255, 0.15)' }, ticks: { color: 'white' } } } } }); const zoomButton = document.getElementById('chart-zoom-btn'); if (isCollapseFeatureEnabled) { zoomButton.style.display = 'block'; const updateButtonText = () => { const isCurrentlyCollapsed = window.myEmotionChart.options.scales.x.min !== 0; zoomButton.textContent = isCurrentlyCollapsed ? 'Zoom Out to See Full Range' : 'Zoom In to High-Frequency'; }; zoomButton.addEventListener('click', () => { const chart = window.myEmotionChart; const isCurrentlyCollapsed = chart.options.scales.x.min !== 0; chart.options.scales.x.min = isCurrentlyCollapsed ? 0 : collapsedMinX; chart.update('none'); updateButtonText(); }); updateButtonText(); } }
 
 // =================================================================================
+// === ADD THIS FUNCTION BACK INTO YOUR SCRIPT ===
+// =================================================================================
+
+function generateSentimentData(posts) {
+    const data = { positive: {}, negative: {} };
+    let positiveCount = 0;
+    let negativeCount = 0;
+    posts.forEach(post => {
+        const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`;
+        const words = text.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/);
+        words.forEach(rawWord => {
+            if (rawWord.length < 3 || stopWords.includes(rawWord)) return;
+            const lemma = lemmatize(rawWord);
+            let category = null;
+            if (positiveWords.has(lemma)) {
+                category = 'positive';
+                positiveCount++;
+            } else if (negativeWords.has(lemma)) {
+                category = 'negative';
+                negativeCount++;
+            }
+            if (category) {
+                if (!data[category][lemma]) {
+                    data[category][lemma] = { count: 0, posts: new Set() };
+                }
+                data[category][lemma].count++;
+                data[category][lemma].posts.add(post);
+            }
+        });
+    });
+    window._sentimentData = data;
+    return {
+        positive: Object.entries(data.positive).sort((a, b) => b[1].count - a[1].count).slice(0, 30),
+        negative: Object.entries(data.negative).sort((a, b) => b[1].count - a[1].count).slice(0, 30),
+        positiveCount,
+        negativeCount
+    };
+}
+
+// =================================================================================
 // === NEW FUNCTION: SENTIMENT PHRASE EXTRACTION (LISTS ONLY) ===
 // =================================================================================
 
@@ -1225,11 +1265,8 @@ async function runProblemFinder(options = {}) {
     const resultsWrapper = document.getElementById('results-wrapper-b');
     const resultsMessageDiv = document.getElementById("results-message");
     const countHeaderDiv = document.getElementById("count-header");
-    // REPLACE THE OLD BLOCK WITH THIS NEW ONE
-    // PASTE THIS CORRECTED BLOCK
 if (!isUpdate) {
     if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-    // This array no longer contains "findings-1" etc.
     ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
     
     if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";

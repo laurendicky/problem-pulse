@@ -116,11 +116,13 @@ async function generateEmotionMapData(posts) { try { const topPostsText = posts.
 
 function renderEmotionMap(data) { const container = document.getElementById('emotion-map-container'); if (!container) return; if (window.myEmotionChart) { window.myEmotionChart.destroy(); } if (data.length < 3) { container.innerHTML = '<h3 class="dashboard-section-title">Problem Polarity Map</h3><p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough distinct problems were found to build a map.</p>'; return; } container.innerHTML = `<h3 class="dashboard-section-title">Problem Polarity Map</h3><p id="problem-map-description">Top Right = The most frequent & emotionally intense problems.</p><div id="emotion-map-wrapper"><div id="emotion-map" style="height: 400px; padding: 10px; border-radius: 8px;"><canvas id="emotion-chart-canvas"></canvas></div><button id="chart-zoom-btn" style="display: none;"></button></div>`; const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d'); if (!ctx) return; const maxFreq = Math.max(...data.map(p => p.x)); const allFrequencies = data.map(p => p.x); const minObservedFreq = Math.min(...allFrequencies); const collapsedMinX = 5; const isCollapseFeatureEnabled = minObservedFreq >= collapsedMinX; const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0; window.myEmotionChart = new Chart(ctx, { type: 'scatter', data: { datasets: [{ label: 'Problems/Topics', data: data, backgroundColor: 'rgba(52, 152, 219, 0.9)', borderColor: 'rgba(41, 128, 185, 1)', borderWidth: 1, pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20, pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20, }] }, options: { maintainAspectRatio: false, plugins: { legend: { display: false }, tooltip: { mode: 'nearest', intersect: false, callbacks: { title: function(tooltipItems) { return tooltipItems[0].raw.label; }, label: function(context) { return ''; }, afterBody: function(tooltipItems) { const point = tooltipItems[0].raw; return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`; } }, displayColors: false, titleFont: { size: 14, weight: 'bold' }, bodyFont: { size: 12 }, backgroundColor: '#ff7ce2', titleColor: '#ffffff', bodyColor: '#dddddd', } }, scales: { x: { title: { display: true, text: 'Frequency (1-10)', color: 'white', font: { weight: 'bold' } }, min: initialMinX, max: 10, grid: { color: 'rgba(255, 255, 255, 0.15)' }, ticks: { color: 'white' } }, y: { title: { display: true, text: 'Problem Intensity (1-10)', color: 'white', font: { weight: 'bold' } }, min: 0, max: 10, grid: { color: 'rgba(255, 255, 255, 0.15)' }, ticks: { color: 'white' } } } } }); const zoomButton = document.getElementById('chart-zoom-btn'); if (isCollapseFeatureEnabled) { zoomButton.style.display = 'block'; const updateButtonText = () => { const isCurrentlyCollapsed = window.myEmotionChart.options.scales.x.min !== 0; zoomButton.textContent = isCurrentlyCollapsed ? 'Zoom Out to See Full Range' : 'Zoom In to High-Frequency'; }; zoomButton.addEventListener('click', () => { const chart = window.myEmotionChart; const isCurrentlyCollapsed = chart.options.scales.x.min !== 0; chart.options.scales.x.min = isCurrentlyCollapsed ? 0 : collapsedMinX; chart.update('none'); updateButtonText(); }); updateButtonText(); } }
 
-// =================================================================================
-// === REVISED HYBRID FUNCTION V2: WORDS & PHRASES SENTIMENT CLOUD (CORRECTED MERGE LOGIC) ===
-// =================================================================================
+
+
 // =================================================================================
 // === REVISED HYBRID FUNCTION V3: SMARTER PHRASE RANKING & NO QUOTES ===
+// =================================================================================
+// =================================================================================
+// === REVISED HYBRID FUNCTION V4: AGGRESSIVE SCRIPT-FIRST, AI-FILTER METHOD ===
 // =================================================================================
 
 async function generateAndRenderHybridSentiment(posts, audienceContext) {
@@ -133,17 +135,15 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
     }
 
     // Set a loading state
-    positiveContainer.innerHTML = `<h3 class="dashboard-section-title">Positive Words & Phrases</h3><p class="loading-text">Extracting sentiment...</p>`;
-    negativeContainer.innerHTML = `<h3 class="dashboard-section-title">Negative Words & Phrases</h3><p class="loading-text">Extracting sentiment...</p>`;
+    positiveContainer.innerHTML = `<h3 class="dashboard-section-title">Positive Words & Phrases</h3><p class="loading-text">Analyzing sentiment...</p>`;
+    negativeContainer.innerHTML = `<h3 class="dashboard-section-title">Negative Words & Phrases</h3><p class="loading-text">Analyzing sentiment...</p>`;
 
-    // --- PART 1: Word Counting (Unchanged) ---
-    let positiveCount = 0;
-    let negativeCount = 0;
+    // --- PART 1: Word Counting (for score bar and base words) ---
+    let positiveCount = 0, negativeCount = 0;
     const wordFreq = { positive: new Map(), negative: new Map() };
-
     posts.forEach(post => {
-        const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`;
-        const words = text.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/);
+        const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase();
+        const words = text.replace(/[^a-z\s']/g, '').split(/\s+/);
         words.forEach(rawWord => {
             if (rawWord.length < 3 || stopWords.includes(rawWord)) return;
             const lemma = lemmatize(rawWord);
@@ -151,90 +151,98 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
             if (positiveWords.has(lemma)) { category = 'positive'; positiveCount++; } 
             else if (negativeWords.has(lemma)) { category = 'negative'; negativeCount++; }
             if (category) {
-                if (!wordFreq[category].has(lemma)) {
-                    wordFreq[category].set(lemma, { count: 0, posts: new Set() });
-                }
+                if (!wordFreq[category].has(lemma)) wordFreq[category].set(lemma, { count: 0, posts: new Set() });
                 const data = wordFreq[category].get(lemma);
-                data.count++;
-                data.posts.add(post);
+                data.count++; data.posts.add(post);
             }
         });
     });
-
-    // Render the score bar immediately
     renderSentimentScore(positiveCount, negativeCount);
 
-    // --- PART 2: AI Phrase Extraction (Now asks for a larger pool of candidates) ---
-    let positive_phrases = [], negative_phrases = [];
-    try {
-        const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
-        // MODIFICATION: Asking for up to 15 candidates instead of 7
-        const prompt = `You are a market research analyst for the "${audienceContext}" community. Extract common sentiment phrases. Identify two types: 1. "positive_phrases": Short phrases for great experiences (e.g., "a total game-changer"). 2. "negative_phrases": Short phrases for bad experiences (e.g., "such a slog"). Extract up to 15 of the most common phrases for each category. Respond ONLY with a valid JSON object with keys "positive_phrases" and "negative_phrases", holding an array of strings. Posts:\n${topPostsText}`;
-        const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an expert analyst who extracts insightful customer phrases from text in a strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 800, response_format: { "type": "json_object" } };
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        if (response.ok) {
-            const data = await response.json();
-            const parsed = JSON.parse(data.openaiResponse);
-            positive_phrases = parsed.positive_phrases || [];
-            negative_phrases = parsed.negative_phrases || [];
+    // --- PART 2: SCRIPT-FIRST - Programmatically Find All Common Phrases ---
+    const phraseFreq = new Map();
+    posts.forEach(post => {
+        const text = `${post.data.title || ''} ${post.data.selftext || ''}`.toLowerCase().replace(/[^a-z\s']/g, '');
+        const words = text.split(/\s+/).filter(w => w.length > 0);
+        const ngrams = [...generateNgrams(words, 2), ...generateNgrams(words, 3), ...generateNgrams(words, 4)];
+        ngrams.forEach(ngram => {
+            if (!phraseFreq.has(ngram)) phraseFreq.set(ngram, { count: 0, posts: new Set() });
+            const data = phraseFreq.get(ngram);
+            data.count++; data.posts.add(post);
+        });
+    });
+
+    const candidatePhrases = Array.from(phraseFreq.entries())
+        .filter(([_, data]) => data.count >= 3) // A phrase must appear at least 3 times
+        .sort((a, b) => b[1].count - a[1].count)
+        .slice(0, 100) // Take the top 100 most common phrases as candidates
+        .map(item => item[0]);
+
+    // --- PART 3: AI-FILTER - Use AI to Judge the Quality of Common Phrases ---
+    let finalPositivePhrases = [], finalNegativePhrases = [];
+    if (candidatePhrases.length > 0) {
+        try {
+            const prompt = `You are a market research analyst. Below is a list of common phrases from the "${audienceContext}" community. Your task is to filter this list.
+            
+            1.  Identify phrases that express a clear **positive sentiment** (e.g., "love this product", "highly recommend this").
+            2.  Identify phrases that express a clear **negative sentiment** (e.g., "terrible customer service", "such a waste of").
+            3.  **Ignore neutral or irrelevant phrases** (e.g., "on the other hand", "for the first time").
+
+            Respond ONLY with a valid JSON object with two keys: "positive_phrases" and "negative_phrases", holding an array of the relevant strings you selected from the list.
+            
+            Candidate Phrases:
+            ${JSON.stringify(candidatePhrases)}`;
+
+            const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert sentiment filter that only outputs JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 1000, response_format: { "type": "json_object" } };
+            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+            if (response.ok) {
+                const data = await response.json();
+                const parsed = JSON.parse(data.openaiResponse);
+                finalPositivePhrases = parsed.positive_phrases || [];
+                finalNegativePhrases = parsed.negative_phrases || [];
+            }
+        } catch (error) {
+            console.error("AI phrase filtering failed, proceeding with words only.", error);
         }
-    } catch (error) {
-        console.error("AI phrase extraction failed, proceeding with words only.", error);
     }
-    
-    // --- PART 3: Correctly Merge, Rank, and Render ---
+
+    // --- PART 4: Merge and Render ---
     const renderCloud = (container, title, wordMap, phraseList, colors) => {
-        // Get the top words first
-        const topWords = Array.from(wordMap.entries())
-            .sort((a, b) => b[1].count - a[1].count)
-            .slice(0, 23);
+        const topWords = Array.from(wordMap.entries()).sort((a, b) => b[1].count - a[1].count).slice(0, 23);
+        
+        // The phraseList is now the high-quality, AI-filtered list. We just need to get their data.
+        const topPhrases = phraseList.map(phrase => {
+            const phraseData = phraseFreq.get(phrase); // Get the original data (count and posts)
+            return [phrase, phraseData];
+        }).filter(item => item[1]); // Ensure data exists
 
-        // MODIFICATION: Find, rank, and then select the best phrases
-        const allRatedPhrases = phraseList.map(phrase => {
-            const pattern = new RegExp(phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-            const mentioningPosts = posts.filter(post => pattern.test(`${post.data.title || ''} ${post.data.selftext || ''}`));
-            return [phrase, { count: mentioningPosts.length, posts: new Set(mentioningPosts) }];
-        }).filter(item => item[1].count > 0); // Only include phrases that were actually found in the text
-
-        // Sort the AI candidates by their REAL frequency and take the top 7
-        const topPhrases = allRatedPhrases
-            .sort((a, b) => b[1].count - b[1].count)
-            .slice(0, 7);
-
-        // Combine the pre-selected lists
         const combinedData = [...topWords, ...topPhrases];
         
-        // Update the global data store for the click-to-see-context functionality
         const category = title.includes('Positive') ? 'positive' : 'negative';
         window._sentimentData = window._sentimentData || {};
         window._sentimentData[category] = Object.fromEntries(new Map(combinedData));
 
         container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3>`;
-        const cloudContainer = document.createElement('div');
-        container.appendChild(cloudContainer);
-
+        const cloudContainer = document.createElement('div'); container.appendChild(cloudContainer);
         if (combinedData.length < 3) {
-            cloudContainer.innerHTML = `<p style="font-family: sans-serif; color: #777; padding: 1rem; text-align: center;">Not enough distinct terms found.</p>`;
-            return;
+            cloudContainer.innerHTML = `<p style="font-family: sans-serif; color: #777; padding: 1rem; text-align: center;">Not enough distinct terms found.</p>`; return;
         }
 
         const counts = combinedData.map(item => item[1].count);
         const maxCount = Math.max(...counts);
         const minCount = Math.min(...counts);
         const minFontSize = 16, maxFontSize = 42;
-
         const cloudHTML = combinedData.map(([word, data]) => {
             const fontSize = minFontSize + ((data.count - minCount) / (maxCount - minCount || 1)) * (maxFontSize - minFontSize);
             const color = colors[Math.floor(Math.random() * colors.length)];
             const rotation = Math.random() * 8 - 4;
-            // FIX: The line that added quotes has been removed.
             return `<span class="cloud-word" data-word="${word}" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${word}</span>`;
         }).join('');
         cloudContainer.innerHTML = cloudHTML;
     };
 
-    renderCloud(positiveContainer, 'Positive Words & Phrases', wordFreq.positive, positive_phrases, positiveColors);
-    renderCloud(negativeContainer, 'Negative Words & Phrases', wordFreq.negative, negative_phrases, negativeColors);
+    renderCloud(positiveContainer, 'Positive Words & Phrases', wordFreq.positive, finalPositivePhrases, positiveColors);
+    renderCloud(negativeContainer, 'Negative Words & Phrases', wordFreq.negative, finalNegativePhrases, negativeColors);
 }
 
 function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : "Snippet not available."; const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if(closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }

@@ -1117,7 +1117,7 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
         console.error("Error in renderAndHandleRelatedSubreddits:", error);
         container.querySelector('.subreddit-tag-list').innerHTML = `<p class="error-message">Could not load related community suggestions.</p>`;
     }
-
+}
     // =================================================================================
 // === REPLACEMENT FUNCTION: generateAndRenderBrandBrief (V3 with Full Enhancements) ===
 // =================================================================================

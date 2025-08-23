@@ -802,13 +802,23 @@ function formatMemberCount(num) {
     if (num >= 1000) { return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'k'; }
     return num.toLocaleString();
 }
+
+// CORRECT
 function getActivityLabel(activeUsers, totalMembers) {
-    if (!totalMembers || totalMembers === 0 || activeUsers === null || activeUsers === undefined) { return '💤 Cool'; }
+    if (!totalMembers || totalMembers === 0 || activeUsers === null || activeUsers === undefined) {
+        return '💤 Cool';
+    }
     const ratio = activeUsers / totalMembers;
-    if (activeUsers > 5000 || (ratio > 0.01 && totalMembers > 1000)) { return '🔥 Hot'; }
-    if (activeUsers < 10 || (totalMembers > 20000 && activeUsers < 50)) { return '💤 Cool'; }
+    if (activeUsers > 5000 || (ratio > 0.01 && totalMembers > 1000)) {
+        return '🔥 Hot';
+    }
+    if (activeUsers < 10 || (totalMembers > 20000 && activeUsers < 50)) {
+        return '💤 Cool';
+    }
     return '🌤️ Warm';
 }
+
+
 async function fetchAndRankSubreddits(subredditNames) {
     console.log(`AI suggested ${subredditNames.length} subreddits. Validating and ranking in batches...`);
     const BATCH_SIZE = 5;

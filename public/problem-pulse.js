@@ -645,27 +645,27 @@ async function extractAndValidateEntities(posts, nicheContext) {
         return { topBrands: [], topProducts: [] };
     }
 }
+
+// =================================================================================
+// === REPLACEMENT FUNCTION: renderDiscoveryList ===
+// =================================================================================
 function renderDiscoveryList(containerId, data, title, type) {
     const container = document.getElementById(containerId);
     if (!container) return;
-
-    // Replaced inline style with a class
     let listItems = '<p class="discovery-list-placeholder">No significant mentions found.</p>';
-
     if (data.length > 0) {
         listItems = data.map(([name, details], index) => `
             <li class="discovery-list-item" data-word="${name}" data-type="${type}">
-                <span class="rank">${index + 1}.</span>
-                <span class="name">${name}</span>
-                <span class="count">${details.count} mentions</span>
+                <div class="discovery-item-info">
+                    <span class="rank">${index + 1}.</span>
+                    <span class="name">${name}</span>
+                    <span class="count">${details.count} mentions</span>
+                </div>
+                <button class="brief-button">See Brief</button>
             </li>
         `).join('');
     }
-
-    container.innerHTML = `
-        <h3 class="dashboard-section-title">${title}</h3>
-        <ul class="discovery-list">${listItems}</ul>
-    `;
+    container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`;
 }
 
 
@@ -1117,15 +1117,11 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
         console.error("Error in renderAndHandleRelatedSubreddits:", error);
         container.querySelector('.subreddit-tag-list').innerHTML = `<p class="error-message">Could not load related community suggestions.</p>`;
     }
-}
 
+    // =================================================================================
+// === REPLACEMENT FUNCTION: generateAndRenderBrandBrief (V3 with Full Enhancements) ===
 // =================================================================================
-// === ENHANCEMENT & POWER PHRASES FUNCTIONS ===
-// =================================================================================
-// =================================================================================
-// === REPLACEMENT FUNCTION: generateAndRenderBrandBrief (V2 with Trendline) ===
-// =================================================================================
-const briefCache = new Map(); // Cache to store results
+const briefCache = new Map();
 
 async function generateAndRenderBrandBrief(itemName, itemType) {
     const isBrand = itemType === 'brands';
@@ -1151,7 +1147,6 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
 
     if (briefCache.has(itemName)) {
         targetPanel.innerHTML = briefCache.get(itemName);
-        // Re-render chart if it exists
         if (targetPanel.querySelector('#brand-momentum-chart')) {
             const chartData = JSON.parse(targetPanel.querySelector('#brand-momentum-chart-data').textContent);
             renderBrandMomentumChart(chartData);
@@ -1161,28 +1156,35 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
     }
 
     try {
-        const postsForAnalysis = (window._entityData?.[itemType]?.[itemName]?.posts || []).slice(0, 40);
+        const postsForAnalysis = (window._entityData?.[itemType]?.[itemName]?.posts || []).slice(0, 50);
         if (postsForAnalysis.length < 3) throw new Error("Not enough mentions to generate a detailed brief.");
         
-        const topPostsText = postsForAnalysis.map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+        const topPostsText = postsForAnalysis.map(p => `"${p.data.title || ''} - ${p.data.selftext || p.data.body || ''}"`).join('\n');
 
         const prompt = isBrand ? 
-            `You are a market research analyst. Based ONLY on the following user comments about "${itemName}", create a competitive brief. Provide: 1. "use_case": A single sentence describing the primary job people hire this product for. 2. "loves": An array of 3 short bullet points of key strengths or features people praise. 3. "hates": An array of 3 short bullet points of the biggest pain points, complaints, or missing features. Respond ONLY with a valid JSON object with keys "use_case", "loves", and "hates".` : 
-            `You are a market validation analyst. Based ONLY on the following user comments about "${itemName}", create a category analysis. Provide: 1. "job_to_be_done": A single sentence describing the fundamental goal people want to achieve with this type of product. 2. "table_stakes": An array of 3 bullet points describing the absolute must-have features for any product in this category. 3. "disruption_opportunities": An array of 3 bullet points describing common unsolved problems across the entire category. Respond ONLY with a valid JSON object with keys "job_to_be_done", "table_stakes", and "disruption_opportunities".`;
+            `You are an expert market research analyst creating a competitive brief for "${itemName}" based on user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights.
 
-        const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an analyst providing structured JSON output." }, { role: "user", content: `${prompt}\n\nComments:\n${topPostsText}` }], temperature: 0.1, response_format: { "type": "json_object" } };
+            Respond ONLY with a valid JSON object with the following keys:
+            1.  "use_case": A single sentence describing the primary job people hire this product for.
+            2.  "loves": An array of 3 bullet points of key strengths. CRITICAL: Inject real, short user phrases from the text into these points (e.g., "Users rave about its ability to 'ship code fixes in seconds'").
+            3.  "hates": An array of 3 bullet points. CRITICAL: Frame each pain point as an opportunity (e.g., "Endless scrolling UX → ripe for a plugin/UX layer fix.").
+            4.  "verdict": A single, insightful sentence summarizing the brand's position in the market (e.g., "Loved for versatility, but vulnerable on transparency. A sticky but disruptable brand.").`
+            : 
+            `You are a market validation analyst creating a category analysis for "${itemName}" based on user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights.
+
+            Respond ONLY with a valid JSON object with the following keys:
+            1.  "job_to_be_done": A single sentence describing the fundamental goal people want to achieve with this type of product.
+            2.  "table_stakes": An array of 3 bullet points describing the absolute must-have features or benefits for any product in this category.
+            3.  "disruption_opportunities": An array of 3 bullet points describing common frustrations or unsolved problems across the entire category that a new product could solve.`;
+
+        const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an analyst providing structured JSON output." }, { role: "user", content: `${prompt}\n\nUser Comments:\n${topPostsText}` }], temperature: 0.2, response_format: { "type": "json_object" } };
         
         const briefPromise = fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }).then(res => res.json());
-
+        
         const selectedSubreddits = Array.from(document.querySelectorAll('#subreddit-choices input:checked')).map(cb => cb.value);
         const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
 
-        const trendPromise = isBrand ? fetchSentimentTrendData(itemName, subredditQueryString, [
-            { label: '1 Year Ago', value: 'year' },
-            { label: '6 Months Ago', value: '6month' },
-            { label: '3 Months Ago', value: '3month' },
-            { label: 'Last Month', value: 'month' }
-        ]) : Promise.resolve(null); // No trend for generic products
+        const trendPromise = isBrand ? fetchSentimentTrendData(itemName, subredditQueryString) : Promise.resolve(null);
 
         const [briefResult, trendResult] = await Promise.all([briefPromise, trendPromise]);
         
@@ -1190,14 +1192,9 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         
         let htmlContent = '';
         if (isBrand) {
-            const firstPoint = trendResult[0]?.positivePercentage || 0;
-            const lastPoint = trendResult[trendResult.length - 1]?.positivePercentage || 0;
-            const change = lastPoint - firstPoint;
-            const trendText = change > 5 ? "has improved significantly" : change < -5 ? "has declined" : "has remained stable";
-            const insightPrompt = `Write a single, concise sentence explaining a potential reason for the following sentiment trend for the brand "${itemName}". The trend shows that positive sentiment ${trendText} from ${firstPoint}% to ${lastPoint}% recently. Use the following context.\nContext:\n${topPostsText.substring(0, 1500)}`;
-            
-            const insightPromise = fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a concise market analyst." }, { role: "user", content: insightPrompt }], temperature: 0.3, max_tokens: 100 } }) }).then(res => res.json());
-            const insightResult = await insightPromise;
+            const latestSentiment = trendResult[trendResult.length - 1]?.positivePercentage || 0;
+            const trendlineText = `Trendline: Positive sentiment is currently at ${latestSentiment}%.`;
+            const mentionCount = window._entityData?.[itemType]?.[itemName]?.count || 0;
 
             htmlContent = `
                 <div class="brief-content">
@@ -1207,7 +1204,7 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
                         <h4 class="brief-section-title"><span class="brief-section-icon">📈</span>Brand Momentum</h4>
                         <div id="brand-momentum-chart"></div>
                         <script type="application/json" id="brand-momentum-chart-data">${JSON.stringify(trendResult)}</script>
-                        <p class="brief-ai-insight">${insightResult.openaiResponse}</p>
+                        <p class="brief-ai-insight">Based on ${mentionCount} mentions. ${trendlineText}</p>
                     </div>
                     <div class="brief-section">
                         <h4 class="brief-section-title"><span class="brief-section-icon">💡</span>Primary Use Case</h4>
@@ -1221,9 +1218,12 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
                         <h4 class="brief-section-title"><span class="brief-section-icon">🔴</span>Pain Points & Opportunities</h4>
                         <ul class="brief-list hates">${parsed.hates.map(item => `<li>${item}</li>`).join('')}</ul>
                     </div>
+                    <div class="brief-verdict">
+                        <p><strong>🔮 Verdict:</strong> ${parsed.verdict}</p>
+                    </div>
                 </div>`;
         } else { // Generic Product
-            htmlContent = `
+             htmlContent = `
                 <div class="brief-content">
                     <button class="context-close-btn">×</button>
                     <h3 class="brief-header">Category Analysis: ${itemName}</h3>
@@ -1245,7 +1245,7 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         targetPanel.innerHTML = htmlContent;
         briefCache.set(itemName, htmlContent);
         
-        if (isBrand) {
+        if (isBrand && trendResult && trendResult.length > 0) {
             renderBrandMomentumChart(trendResult);
         }
 
@@ -1259,14 +1259,14 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
 }
 
 function renderBrandMomentumChart(data) {
-    if (typeof Highcharts === 'undefined' || !data) return;
+    if (typeof Highcharts === 'undefined' || !data || data.length === 0) return;
 
     Highcharts.chart('brand-momentum-chart', {
         chart: { type: 'line', backgroundColor: 'transparent' },
         title: { text: null },
         credits: { enabled: false },
-        xAxis: { categories: data.map(d => d.period) },
-        yAxis: { title: { text: '% Positive Sentiment' }, min: 0, max: 100 },
+        xAxis: { categories: data.map(d => d.period), labels: { style: { color: '#555' } } },
+        yAxis: { title: { text: '% Positive', style: { color: '#555' } }, min: 0, max: 100, labels: { style: { color: '#555' } } },
         legend: { enabled: false },
         series: [{
             name: '% Positive Sentiment',
@@ -1277,12 +1277,56 @@ function renderBrandMomentumChart(data) {
     });
 }
 
-
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
 // =================================================================================
 // === NEW HIGHCHARTS VISUALIZATION MODULE ===
 // =================================================================================
+// =================================================================================
+// === NEW HELPER FUNCTION: SENTIMENT TREND ANALYSIS ===
+// =================================================================================
+async function fetchSentimentTrendData(brandName, subredditQueryString) {
+    const now = new Date();
+    const timePeriods = [
+        { label: new Date(now.getFullYear(), now.getMonth() - 5, 1).toLocaleString('default', { month: 'short' }), value: '6month' },
+        { label: new Date(now.getFullYear(), now.getMonth() - 3, 1).toLocaleString('default', { month: 'short' }), value: '3month' },
+        { label: new Date(now.getFullYear(), now.getMonth() - 1, 1).toLocaleString('default', { month: 'short' }), value: 'month' },
+        { label: 'This Month', value: 't30d' } // Use a more recent period
+    ];
+    
+    const trendData = [];
+    const fetchPromises = timePeriods.map(period => 
+        fetchMultipleRedditDataBatched(subredditQueryString, [`"${brandName}"`], 50, period.value)
+    );
+
+    const results = await Promise.all(fetchPromises);
+    const monthlyData = {};
+
+    results.forEach((posts, index) => {
+        const periodLabel = timePeriods[index].label;
+        if (!monthlyData[periodLabel]) {
+            monthlyData[periodLabel] = { positive: 0, negative: 0, posts: new Set() };
+        }
+        posts.forEach(post => {
+            if (monthlyData[periodLabel].posts.has(post.data.id)) return;
+            monthlyData[periodLabel].posts.add(post.data.id);
+            const words = `${post.data.title || ''} ${post.data.selftext || ''}`.toLowerCase().split(/\s+/);
+            words.forEach(word => {
+                const lemma = lemmatize(word);
+                if (positiveWords.has(lemma)) monthlyData[periodLabel].positive++;
+                if (negativeWords.has(lemma)) monthlyData[periodLabel].negative++;
+            });
+        });
+    });
+
+    return Object.entries(monthlyData).map(([period, counts]) => {
+        const total = counts.positive + counts.negative;
+        return {
+            period,
+            positivePercentage: total > 0 ? Math.round((counts.positive / total) * 100) : 0
+        };
+    });
+}
 
 async function generateAndRenderConstellation(items) {
     console.log("[Highcharts] Starting full generation process with batching strategy...");
@@ -2229,11 +2273,9 @@ sortedFindings.forEach((findingData, index) => {
 }
 
 // =================================================================================
-// INITIALIZATION LOGIC (UPDATED)
-// =================================================================================
-// =================================================================================
 // === REPLACEMENT FUNCTION: initializeDashboardInteractivity ===
 // =================================================================================
+
 function initializeDashboardInteractivity() {
     document.addEventListener('click', (e) => {
         const backButton = e.target.closest('#results-wrapper-b #back-to-step1-btn');
@@ -2244,7 +2286,7 @@ function initializeDashboardInteractivity() {
 
         if (e.target.closest('#results-wrapper-b')) {
             const cloudWordEl = e.target.closest('.cloud-word');
-            const entityEl = e.target.closest('.discovery-list-item');
+            const briefButtonEl = e.target.closest('.brief-button'); //MODIFIED: Target the button now
             const removeBtnEl = e.target.closest('.remove-sub-btn');
 
             if (cloudWordEl) {
@@ -2252,17 +2294,18 @@ function initializeDashboardInteractivity() {
                 const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
                 const postsData = window._sentimentData?.[category]?.[word]?.posts;
                 if (postsData) { showSlidingPanel(word, Array.from(postsData), category); }
-            } else if (entityEl) {
-                // --- THIS IS THE NEW LOGIC ---
-                const word = entityEl.dataset.word;
-                const type = entityEl.dataset.type;
-                generateAndRenderBrandBrief(word, type); // Call the new function
+            } else if (briefButtonEl) { // MODIFIED: Check for the button
+                const parentItem = briefButtonEl.closest('.discovery-list-item');
+                const word = parentItem.dataset.word;
+                const type = parentItem.dataset.type;
+                generateAndRenderBrandBrief(word, type);
             } else if (removeBtnEl) {
                 handleRemoveSubClick(e);
             }
         }
     });
 }
+
 
 function initializeProblemFinderTool() {
     const style = document.createElement('style');

@@ -21,47 +21,66 @@ const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'bro
 const emotionalIntensityScores = { 'annoy': 3, 'irritated': 3, 'bored': 2, 'issue': 3, 'sad': 4, 'bad': 3, 'confused': 4, 'tired': 3, 'upset': 5, 'unhappy': 5, 'disappoint': 6, 'frustrate': 6, 'stressful': 6, 'awful': 7, 'hate': 8, 'angry': 7, 'broken': 5, 'exhausted': 5, 'pain': 7, 'miserable': 8, 'terrible': 8, 'worst': 9, 'horrible': 8, 'furious': 9, 'outraged': 9, 'dreadful': 8, 'terrified': 10, 'nightmare': 10, 'heartbroken': 9, 'desperate': 8, 'rage': 10, 'problem': 4, 'challenge': 5, 'critical': 6, 'danger': 7, 'fear': 7, 'panic': 8, 'scared': 6, 'shocked': 7, 'trash': 5, 'alone': 4, 'ashamed': 5, 'depressed': 8, 'discouraged': 5, 'dull': 2, 'empty': 6, 'failure': 7, 'guilty': 6, 'hopeless': 8, 'insecure': 5, 'lonely': 6, 'weak': 4, 'need': 5, 'disadvantage': 4, 'flaw': 4 };
 const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
 
-// --- 2. ALL HELPER AND LOGIC FUNCTIONS ---
 
 // =================================================================================
-// === NEW HELPER FUNCTION: SENTIMENT TREND ANALYSIS ===
+// === REPLACEMENT FUNCTION: fetchSentimentTrendData (FIXED LOGIC) ===
 // =================================================================================
-async function fetchSentimentTrendData(brandName, subredditQueryString, timePeriods) {
-    const trendData = [];
-    
-    // Create an array of fetch promises
-    const fetchPromises = timePeriods.map(period => 
-        fetchMultipleRedditDataBatched(subredditQueryString, [`"${brandName}"`], 50, period.value)
-    );
+async function fetchSentimentTrendData(brandName, subredditQueryString) {
+    // 1. Define our time buckets. We will sort posts into these.
+    const now = new Date();
+    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate()).getTime() / 1000;
 
-    const results = await Promise.all(fetchPromises);
+    // We create labels for the last 6 months
+    const timePeriods = Array.from({ length: 6 }, (_, i) => {
+        const date = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
+        return {
+            label: date.toLocaleString('default', { month: 'short' }),
+            startTimestamp: date.getTime() / 1000,
+            positive: 0,
+            negative: 0,
+            totalMentions: 0,
+            positivePercentage: 0
+        };
+    });
 
-    results.forEach((posts, index) => {
-        let positiveMentions = 0;
-        let negativeMentions = 0;
+    try {
+        // 2. Fetch ONE large, de-duplicated dataset for the entire 6-month period.
+        const allPosts = await fetchMultipleRedditDataBatched(subredditQueryString, [brandName], 100, '6month');
         
-        posts.forEach(post => {
-            const text = `${post.data.title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase();
+        // 3. Process each post ONCE and assign it to the correct month's bucket.
+        allPosts.forEach(post => {
+            const postTimestamp = post.data.created_utc;
+            if (postTimestamp < sixMonthsAgo) return; // Ignore posts older than our window
+
+            // Find which month this post belongs to
+            const correctPeriod = timePeriods.find(period => postTimestamp >= period.startTimestamp);
+            if (!correctPeriod) return;
+
+            const text = `${post.data.title || ''} ${post.data.selftext || ''}`.toLowerCase();
             const words = text.split(/\s+/);
+
+            // Tally sentiment for that specific month's bucket
             words.forEach(word => {
                 const lemma = lemmatize(word);
-                if (positiveWords.has(lemma)) positiveMentions++;
-                if (negativeWords.has(lemma)) negativeMentions++;
+                if (positiveWords.has(lemma)) correctPeriod.positive++;
+                if (negativeWords.has(lemma)) correctPeriod.negative++;
             });
         });
 
-        const totalMentions = positiveMentions + negativeMentions;
-        const positivePercentage = totalMentions > 0 ? Math.round((positiveMentions / totalMentions) * 100) : 0;
-        
-        trendData.push({
-            period: timePeriods[index].label,
-            positivePercentage: positivePercentage
+        // 4. Calculate the final percentages for each bucket.
+        timePeriods.forEach(period => {
+            period.totalMentions = period.positive + period.negative;
+            period.positivePercentage = period.totalMentions > 0 ? Math.round((period.positive / period.totalMentions) * 100) : 0;
         });
-    });
 
-    // The Reddit API returns cumulative results (e.g., 'year' includes '6month'),
-    // so we return the data in reverse to show a proper timeline from past to present.
-    return trendData.reverse(); 
+        // 5. Return the data in the correct format for the chart.
+        return timePeriods.map(p => ({ period: p.label, positivePercentage: p.positivePercentage }));
+
+    } catch (error) {
+        console.error("Error fetching or processing sentiment trend data:", error);
+        // Return an empty array on failure so the chart doesn't break
+        return [];
+    }
 }
 
 
@@ -1184,7 +1203,8 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         const selectedSubreddits = Array.from(document.querySelectorAll('#subreddit-choices input:checked')).map(cb => cb.value);
         const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
 
-        const trendPromise = isBrand ? fetchSentimentTrendData(itemName, subredditQueryString) : Promise.resolve(null);
+        const brandSearchTerm = itemName.includes(' ') ? `"${itemName}"` : itemName;
+const trendPromise = isBrand ? fetchSentimentTrendData(brandSearchTerm, subredditQueryString) : Promise.resolve(null);
 
         const [briefResult, trendResult] = await Promise.all([briefPromise, trendPromise]);
         

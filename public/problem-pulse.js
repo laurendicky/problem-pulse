@@ -1137,9 +1137,8 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
         container.querySelector('.subreddit-tag-list').innerHTML = `<p class="error-message">Could not load related community suggestions.</p>`;
     }
 }
-
 // =================================================================================
-// === REPLACEMENT FUNCTION: generateAndRenderBrandBrief (V4 with Hyper-Current Data) ===
+// === REPLACEMENT FUNCTION: generateAndRenderBrandBrief (V5 with Resilient Fetch) ===
 // =================================================================================
 const briefCache = new Map();
 
@@ -1165,7 +1164,7 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
     };
     overlay.onclick = close;
 
-    const cacheKey = `${itemName}-${new Date().toISOString().slice(0, 10)}`; // Daily cache
+    const cacheKey = `${itemName}-${new Date().toISOString().slice(0, 10)}`;
     if (briefCache.has(cacheKey)) {
         targetPanel.innerHTML = briefCache.get(cacheKey);
         if (targetPanel.querySelector('#brand-momentum-chart')) {
@@ -1177,18 +1176,11 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
     }
 
     try {
-        // --- START OF THE FIX ---
-        // 1. DEDICATED, RECENT DATA FETCH
-        // Instead of using old data, we perform a new search focused on the last 30 days.
         const selectedSubreddits = Array.from(document.querySelectorAll('#subreddit-choices input:checked')).map(cb => cb.value);
         const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
         const brandSearchTerm = itemName.includes(' ') ? `"${itemName}"` : itemName;
         
-        // Fetch fresh data from the last month.
         const recentPosts = await fetchMultipleRedditDataBatched(subredditQueryString, [brandSearchTerm], 75, 'month');
-
-        // 2. PRIORITIZE RECENCY
-        // Sort the fetched posts to ensure the absolute newest ones are analyzed first.
         recentPosts.sort((a, b) => b.data.created_utc - a.data.created_utc);
 
         const postsForAnalysis = recentPosts.slice(0, 50);
@@ -1196,33 +1188,34 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         
         const topPostsText = postsForAnalysis.map(p => `"${p.data.title || ''} - ${p.data.selftext || p.data.body || ''}"`).join('\n');
 
-        // 3. ENHANCED AI PROMPT
-        // The prompt now explicitly asks for CURRENT sentiment and RECENT controversies.
         const prompt = isBrand ? 
-            `You are an expert market research analyst creating a competitive brief for "${itemName}" based on the MOST RECENT user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights about its current standing.
-
-            Respond ONLY with a valid JSON object with the following keys:
-            1.  "use_case": A single sentence describing the primary job people hire this product for based on current discussions.
-            2.  "loves": An array of 3 bullet points of key strengths or *currently popular features*. CRITICAL: Inject real, short user phrases from the text.
-            3.  "hates": An array of 3 bullet points on pain points, opportunities, or *recent controversies*. Frame each as an opportunity.
-            4.  "verdict": A single, insightful sentence summarizing the brand's *current position* in the market, considering any recent shifts in opinion.`
+            `You are an expert market research analyst creating a competitive brief for "${itemName}" based on the MOST RECENT user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights about its current standing. Respond ONLY with a valid JSON object with the keys: "use_case", "loves", "hates", "verdict".`
             : 
-            `You are a market validation analyst creating a category analysis for "${itemName}" based on user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights.
-
-            Respond ONLY with a valid JSON object with the following keys:
-            1.  "job_to_be_done": A single sentence describing the fundamental goal people want to achieve with this type of product.
-            2.  "table_stakes": An array of 3 bullet points describing the absolute must-have features or benefits for any product in this category.
-            3.  "disruption_opportunities": An array of 3 bullet points describing common frustrations or unsolved problems across the entire category that a new product could solve.`;
-        // --- END OF THE FIX ---
+            `You are a market validation analyst creating a category analysis for "${itemName}" based on user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights. Respond ONLY with a valid JSON object with the keys: "job_to_be_done", "table_stakes", "disruption_opportunities".`;
 
         const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an analyst providing structured JSON output based on recent data." }, { role: "user", content: `${prompt}\n\nUser Comments:\n${topPostsText}` }], temperature: 0.2, response_format: { "type": "json_object" } };
         
-        const briefPromise = fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }).then(res => res.json());
+        // --- START OF THE FIX ---
+        // This fetch call now includes proper error handling.
+        const briefPromise = fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        }).then(response => {
+            // CRITICAL CHECK: If the server responded with an error (like 500), throw an error.
+            if (!response.ok) {
+                throw new Error(`AI Server Error: Received status ${response.status}`);
+            }
+            // Only if the response is successful, do we proceed to parse it as JSON.
+            return response.json();
+        });
+        // --- END OF THE FIX ---
         
         const trendPromise = isBrand ? fetchSentimentTrendData(brandSearchTerm, subredditQueryString) : Promise.resolve(null);
 
         const [briefResult, trendResult] = await Promise.all([briefPromise, trendPromise]);
         
+        // This line is now safe because the fetch would have thrown an error before reaching here on failure.
         const parsed = JSON.parse(briefResult.openaiResponse);
         
         let htmlContent = '';
@@ -1247,11 +1240,11 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
                     </div>
                     <div class="brief-section">
                         <h4 class="brief-section-title"><span class="brief-section-icon">🟢</span>What People Love Now</h4>
-                        <ul class="brief-list loves">${parsed.loves.map(item => `<li>${item}</li>`).join('')}</ul>
+                        <ul class="brief-list loves">${(parsed.loves || []).map(item => `<li>${item}</li>`).join('')}</ul>
                     </div>
                     <div class="brief-section">
                         <h4 class="brief-section-title"><span class="brief-section-icon">🔴</span>Recent Pain Points & Opportunities</h4>
-                        <ul class="brief-list hates">${parsed.hates.map(item => `<li>${item}</li>`).join('')}</ul>
+                        <ul class="brief-list hates">${(parsed.hates || []).map(item => `<li>${item}</li>`).join('')}</ul>
                     </div>
                     <div class="brief-verdict">
                         <p><strong>🔮 Current Verdict:</strong> ${parsed.verdict}</p>
@@ -1268,11 +1261,11 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
                     </div>
                     <div class="brief-section">
                         <h4 class="brief-section-title"><span class="brief-section-icon">🔵</span>Table Stakes (Must-Haves)</h4>
-                        <ul class="brief-list stakes">${parsed.table_stakes.map(item => `<li>${item}</li>`).join('')}</ul>
+                        <ul class="brief-list stakes">${(parsed.table_stakes || []).map(item => `<li>${item}</li>`).join('')}</ul>
                     </div>
                     <div class="brief-section">
                         <h4 class="brief-section-title"><span class="brief-section-icon">🔴</span>Disruption Opportunities</h4>
-                        <ul class="brief-list hates">${parsed.disruption_opportunities.map(item => `<li>${item}</li>`).join('')}</ul>
+                        <ul class="brief-list hates">${(parsed.disruption_opportunities || []).map(item => `<li>${item}</li>`).join('')}</ul>
                     </div>
                 </div>`;
         }
@@ -1292,6 +1285,7 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         targetPanel.querySelector('.context-close-btn').addEventListener('click', close);
     }
 }
+
 
 function renderBrandMomentumChart(data) {
     if (typeof Highcharts === 'undefined' || !data || data.length === 0) return;
@@ -1314,54 +1308,7 @@ function renderBrandMomentumChart(data) {
 
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
-// =================================================================================
-// === NEW HIGHCHARTS VISUALIZATION MODULE ===
-// =================================================================================
-// =================================================================================
-// === NEW HELPER FUNCTION: SENTIMENT TREND ANALYSIS ===
-// =================================================================================
-async function fetchSentimentTrendData(brandName, subredditQueryString) {
-    const now = new Date();
-    const timePeriods = [
-        { label: new Date(now.getFullYear(), now.getMonth() - 5, 1).toLocaleString('default', { month: 'short' }), value: '6month' },
-        { label: new Date(now.getFullYear(), now.getMonth() - 3, 1).toLocaleString('default', { month: 'short' }), value: '3month' },
-        { label: new Date(now.getFullYear(), now.getMonth() - 1, 1).toLocaleString('default', { month: 'short' }), value: 'month' },
-        { label: 'This Month', value: 't30d' } // Use a more recent period
-    ];
-    
-    const trendData = [];
-    const fetchPromises = timePeriods.map(period => 
-        fetchMultipleRedditDataBatched(subredditQueryString, [`"${brandName}"`], 50, period.value)
-    );
 
-    const results = await Promise.all(fetchPromises);
-    const monthlyData = {};
-
-    results.forEach((posts, index) => {
-        const periodLabel = timePeriods[index].label;
-        if (!monthlyData[periodLabel]) {
-            monthlyData[periodLabel] = { positive: 0, negative: 0, posts: new Set() };
-        }
-        posts.forEach(post => {
-            if (monthlyData[periodLabel].posts.has(post.data.id)) return;
-            monthlyData[periodLabel].posts.add(post.data.id);
-            const words = `${post.data.title || ''} ${post.data.selftext || ''}`.toLowerCase().split(/\s+/);
-            words.forEach(word => {
-                const lemma = lemmatize(word);
-                if (positiveWords.has(lemma)) monthlyData[periodLabel].positive++;
-                if (negativeWords.has(lemma)) monthlyData[periodLabel].negative++;
-            });
-        });
-    });
-
-    return Object.entries(monthlyData).map(([period, counts]) => {
-        const total = counts.positive + counts.negative;
-        return {
-            period,
-            positivePercentage: total > 0 ? Math.round((counts.positive / total) * 100) : 0
-        };
-    });
-}
 
 async function generateAndRenderConstellation(items) {
     console.log("[Highcharts] Starting full generation process with batching strategy...");

@@ -1137,8 +1137,9 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
         container.querySelector('.subreddit-tag-list').innerHTML = `<p class="error-message">Could not load related community suggestions.</p>`;
     }
 }
-    // =================================================================================
-// === REPLACEMENT FUNCTION: generateAndRenderBrandBrief (V3 with Full Enhancements) ===
+
+// =================================================================================
+// === REPLACEMENT FUNCTION: generateAndRenderBrandBrief (V4 with Hyper-Current Data) ===
 // =================================================================================
 const briefCache = new Map();
 
@@ -1154,7 +1155,7 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
     
     document.querySelectorAll('.custom-side-panel.visible').forEach(p => p.classList.remove('visible'));
 
-    targetPanel.innerHTML = '<div class="brief-content"><p class="loading-text">Analyzing... <span class="loader-dots"></span></p></div>';
+    targetPanel.innerHTML = '<div class="brief-content"><p class="loading-text">Fetching and analyzing recent data... <span class="loader-dots"></span></p></div>';
     targetPanel.classList.add('visible');
     overlay.classList.add('visible');
 
@@ -1164,8 +1165,9 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
     };
     overlay.onclick = close;
 
-    if (briefCache.has(itemName)) {
-        targetPanel.innerHTML = briefCache.get(itemName);
+    const cacheKey = `${itemName}-${new Date().toISOString().slice(0, 10)}`; // Daily cache
+    if (briefCache.has(cacheKey)) {
+        targetPanel.innerHTML = briefCache.get(cacheKey);
         if (targetPanel.querySelector('#brand-momentum-chart')) {
             const chartData = JSON.parse(targetPanel.querySelector('#brand-momentum-chart-data').textContent);
             renderBrandMomentumChart(chartData);
@@ -1175,19 +1177,35 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
     }
 
     try {
-        const postsForAnalysis = (window._entityData?.[itemType]?.[itemName]?.posts || []).slice(0, 50);
-        if (postsForAnalysis.length < 3) throw new Error("Not enough mentions to generate a detailed brief.");
+        // --- START OF THE FIX ---
+        // 1. DEDICATED, RECENT DATA FETCH
+        // Instead of using old data, we perform a new search focused on the last 30 days.
+        const selectedSubreddits = Array.from(document.querySelectorAll('#subreddit-choices input:checked')).map(cb => cb.value);
+        const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
+        const brandSearchTerm = itemName.includes(' ') ? `"${itemName}"` : itemName;
+        
+        // Fetch fresh data from the last month.
+        const recentPosts = await fetchMultipleRedditDataBatched(subredditQueryString, [brandSearchTerm], 75, 'month');
+
+        // 2. PRIORITIZE RECENCY
+        // Sort the fetched posts to ensure the absolute newest ones are analyzed first.
+        recentPosts.sort((a, b) => b.data.created_utc - a.data.created_utc);
+
+        const postsForAnalysis = recentPosts.slice(0, 50);
+        if (postsForAnalysis.length < 3) throw new Error("Not enough recent mentions (last 30 days) to generate a detailed brief.");
         
         const topPostsText = postsForAnalysis.map(p => `"${p.data.title || ''} - ${p.data.selftext || p.data.body || ''}"`).join('\n');
 
+        // 3. ENHANCED AI PROMPT
+        // The prompt now explicitly asks for CURRENT sentiment and RECENT controversies.
         const prompt = isBrand ? 
-            `You are an expert market research analyst creating a competitive brief for "${itemName}" based on user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights.
+            `You are an expert market research analyst creating a competitive brief for "${itemName}" based on the MOST RECENT user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights about its current standing.
 
             Respond ONLY with a valid JSON object with the following keys:
-            1.  "use_case": A single sentence describing the primary job people hire this product for.
-            2.  "loves": An array of 3 bullet points of key strengths. CRITICAL: Inject real, short user phrases from the text into these points (e.g., "Users rave about its ability to 'ship code fixes in seconds'").
-            3.  "hates": An array of 3 bullet points. CRITICAL: Frame each pain point as an opportunity (e.g., "Endless scrolling UX → ripe for a plugin/UX layer fix.").
-            4.  "verdict": A single, insightful sentence summarizing the brand's position in the market (e.g., "Loved for versatility, but vulnerable on transparency. A sticky but disruptable brand.").`
+            1.  "use_case": A single sentence describing the primary job people hire this product for based on current discussions.
+            2.  "loves": An array of 3 bullet points of key strengths or *currently popular features*. CRITICAL: Inject real, short user phrases from the text.
+            3.  "hates": An array of 3 bullet points on pain points, opportunities, or *recent controversies*. Frame each as an opportunity.
+            4.  "verdict": A single, insightful sentence summarizing the brand's *current position* in the market, considering any recent shifts in opinion.`
             : 
             `You are a market validation analyst creating a category analysis for "${itemName}" based on user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights.
 
@@ -1195,16 +1213,13 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
             1.  "job_to_be_done": A single sentence describing the fundamental goal people want to achieve with this type of product.
             2.  "table_stakes": An array of 3 bullet points describing the absolute must-have features or benefits for any product in this category.
             3.  "disruption_opportunities": An array of 3 bullet points describing common frustrations or unsolved problems across the entire category that a new product could solve.`;
+        // --- END OF THE FIX ---
 
-        const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an analyst providing structured JSON output." }, { role: "user", content: `${prompt}\n\nUser Comments:\n${topPostsText}` }], temperature: 0.2, response_format: { "type": "json_object" } };
+        const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an analyst providing structured JSON output based on recent data." }, { role: "user", content: `${prompt}\n\nUser Comments:\n${topPostsText}` }], temperature: 0.2, response_format: { "type": "json_object" } };
         
         const briefPromise = fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }).then(res => res.json());
         
-        const selectedSubreddits = Array.from(document.querySelectorAll('#subreddit-choices input:checked')).map(cb => cb.value);
-        const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
-
-        const brandSearchTerm = itemName.includes(' ') ? `"${itemName}"` : itemName;
-const trendPromise = isBrand ? fetchSentimentTrendData(brandSearchTerm, subredditQueryString) : Promise.resolve(null);
+        const trendPromise = isBrand ? fetchSentimentTrendData(brandSearchTerm, subredditQueryString) : Promise.resolve(null);
 
         const [briefResult, trendResult] = await Promise.all([briefPromise, trendPromise]);
         
@@ -1212,9 +1227,9 @@ const trendPromise = isBrand ? fetchSentimentTrendData(brandSearchTerm, subreddi
         
         let htmlContent = '';
         if (isBrand) {
-            const latestSentiment = trendResult[trendResult.length - 1]?.positivePercentage || 0;
+            const latestSentiment = trendResult.length > 0 ? trendResult[trendResult.length - 1]?.positivePercentage : 0;
             const trendlineText = `Trendline: Positive sentiment is currently at ${latestSentiment}%.`;
-            const mentionCount = window._entityData?.[itemType]?.[itemName]?.count || 0;
+            const mentionCount = postsForAnalysis.length;
 
             htmlContent = `
                 <div class="brief-content">
@@ -1224,22 +1239,22 @@ const trendPromise = isBrand ? fetchSentimentTrendData(brandSearchTerm, subreddi
                         <h4 class="brief-section-title"><span class="brief-section-icon">📈</span>Brand Momentum</h4>
                         <div id="brand-momentum-chart"></div>
                         <script type="application/json" id="brand-momentum-chart-data">${JSON.stringify(trendResult)}</script>
-                        <p class="brief-ai-insight">Based on ${mentionCount} mentions. ${trendlineText}</p>
+                        <p class="brief-ai-insight">Based on ${mentionCount} recent mentions. ${trendlineText}</p>
                     </div>
                     <div class="brief-section">
                         <h4 class="brief-section-title"><span class="brief-section-icon">💡</span>Primary Use Case</h4>
                         <p class="brief-text">${parsed.use_case}</p>
                     </div>
                     <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">🟢</span>What People Love</h4>
+                        <h4 class="brief-section-title"><span class="brief-section-icon">🟢</span>What People Love Now</h4>
                         <ul class="brief-list loves">${parsed.loves.map(item => `<li>${item}</li>`).join('')}</ul>
                     </div>
                     <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">🔴</span>Pain Points & Opportunities</h4>
+                        <h4 class="brief-section-title"><span class="brief-section-icon">🔴</span>Recent Pain Points & Opportunities</h4>
                         <ul class="brief-list hates">${parsed.hates.map(item => `<li>${item}</li>`).join('')}</ul>
                     </div>
                     <div class="brief-verdict">
-                        <p><strong>🔮 Verdict:</strong> ${parsed.verdict}</p>
+                        <p><strong>🔮 Current Verdict:</strong> ${parsed.verdict}</p>
                     </div>
                 </div>`;
         } else { // Generic Product
@@ -1263,7 +1278,7 @@ const trendPromise = isBrand ? fetchSentimentTrendData(brandSearchTerm, subreddi
         }
         
         targetPanel.innerHTML = htmlContent;
-        briefCache.set(itemName, htmlContent);
+        briefCache.set(cacheKey, htmlContent);
         
         if (isBrand && trendResult && trendResult.length > 0) {
             renderBrandMomentumChart(trendResult);
@@ -1273,7 +1288,7 @@ const trendPromise = isBrand ? fetchSentimentTrendData(brandSearchTerm, subreddi
 
     } catch (error) {
         console.error(`Failed to generate brief for ${itemName}:`, error);
-        targetPanel.innerHTML = `<div class="brief-content"><button class="context-close-btn">×</button><p class="error-message">Could not generate brief for ${itemName}.</p></div>`;
+        targetPanel.innerHTML = `<div class="brief-content"><button class="context-close-btn">×</button><p class="error-message">Could not generate brief for ${itemName}. <br><small>${error.message}</small></p></div>`;
         targetPanel.querySelector('.context-close-btn').addEventListener('click', close);
     }
 }

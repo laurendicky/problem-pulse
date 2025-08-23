@@ -1,6 +1,4 @@
-// =================================================================================
-// FINAL SCRIPT WITH HIGHCHARTS SPLIT PACKED BUBBLE CHART (WITH CLICK EVENT)
-// =================================================================================
+
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
@@ -1196,7 +1194,7 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         const postsForAnalysis = recentPosts.slice(0, 50);
         if (postsForAnalysis.length < 3) throw new Error("Not enough recent mentions (last 30 days) to generate a detailed brief.");
         
-        const topPostsText = postsForAnalysis.map(p => `"${p.data.title || ''} - ${p.data.selftext || p.data.body || ''}"`).join('\n');
+        const topPostsText = postsForAnalysis.map(p => `"${p.data.title || ''} - ${(p.data.selftext || p.data.body || '').substring(0, 1500)}"`).join('\n');
 
         const prompt = isBrand ? 
             `You are an expert market research analyst creating a competitive brief for "${itemName}" based on the MOST RECENT user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights about its current standing. Respond ONLY with a valid JSON object with the keys: "use_case", "loves", "hates", "verdict".`

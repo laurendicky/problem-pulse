@@ -22,6 +22,49 @@ const emotionalIntensityScores = { 'annoy': 3, 'irritated': 3, 'bored': 2, 'issu
 const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
 
 // --- 2. ALL HELPER AND LOGIC FUNCTIONS ---
+
+// =================================================================================
+// === NEW HELPER FUNCTION: SENTIMENT TREND ANALYSIS ===
+// =================================================================================
+async function fetchSentimentTrendData(brandName, subredditQueryString, timePeriods) {
+    const trendData = [];
+    
+    // Create an array of fetch promises
+    const fetchPromises = timePeriods.map(period => 
+        fetchMultipleRedditDataBatched(subredditQueryString, [`"${brandName}"`], 50, period.value)
+    );
+
+    const results = await Promise.all(fetchPromises);
+
+    results.forEach((posts, index) => {
+        let positiveMentions = 0;
+        let negativeMentions = 0;
+        
+        posts.forEach(post => {
+            const text = `${post.data.title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase();
+            const words = text.split(/\s+/);
+            words.forEach(word => {
+                const lemma = lemmatize(word);
+                if (positiveWords.has(lemma)) positiveMentions++;
+                if (negativeWords.has(lemma)) negativeMentions++;
+            });
+        });
+
+        const totalMentions = positiveMentions + negativeMentions;
+        const positivePercentage = totalMentions > 0 ? Math.round((positiveMentions / totalMentions) * 100) : 0;
+        
+        trendData.push({
+            period: timePeriods[index].label,
+            positivePercentage: positivePercentage
+        });
+    });
+
+    // The Reddit API returns cumulative results (e.g., 'year' includes '6month'),
+    // so we return the data in reverse to show a proper timeline from past to present.
+    return trendData.reverse(); 
+}
+
+
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
 function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
 async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all', searchInComments = false) { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const payload = { searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after }; if (searchInComments) { payload.includeComments = true; } const response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return []; } return allPosts.slice(0, totalLimit); }
@@ -1079,11 +1122,10 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
 // =================================================================================
 // === ENHANCEMENT & POWER PHRASES FUNCTIONS ===
 // =================================================================================
-
 // =================================================================================
-// === NEW FUNCTION: BRANDSCAPE DEEP DIVE PANELS ===
+// === REPLACEMENT FUNCTION: generateAndRenderBrandBrief (V2 with Trendline) ===
 // =================================================================================
-const briefCache = new Map(); // Cache to store results and avoid repeated API calls
+const briefCache = new Map(); // Cache to store results
 
 async function generateAndRenderBrandBrief(itemName, itemType) {
     const isBrand = itemType === 'brands';
@@ -1095,7 +1137,6 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         return;
     }
     
-    // Close any other open panels
     document.querySelectorAll('.custom-side-panel.visible').forEach(p => p.classList.remove('visible'));
 
     targetPanel.innerHTML = '<div class="brief-content"><p class="loading-text">Analyzing... <span class="loader-dots"></span></p></div>';
@@ -1110,6 +1151,11 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
 
     if (briefCache.has(itemName)) {
         targetPanel.innerHTML = briefCache.get(itemName);
+        // Re-render chart if it exists
+        if (targetPanel.querySelector('#brand-momentum-chart')) {
+            const chartData = JSON.parse(targetPanel.querySelector('#brand-momentum-chart-data').textContent);
+            renderBrandMomentumChart(chartData);
+        }
         targetPanel.querySelector('.context-close-btn')?.addEventListener('click', close);
         return;
     }
@@ -1121,33 +1167,48 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         const topPostsText = postsForAnalysis.map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
         const prompt = isBrand ? 
-            // Prompt for Specific Brands
-            `You are a market research analyst. Based ONLY on the following user comments about "${itemName}", create a competitive brief. Provide:
-            1. "use_case": A single sentence describing the primary job people hire this product for.
-            2. "loves": An array of 3 short bullet points of key strengths or features people praise.
-            3. "hates": An array of 3 short bullet points of the biggest pain points, complaints, or missing features.
-            Respond ONLY with a valid JSON object with keys "use_case", "loves", and "hates".`
-            : 
-            // Prompt for Generic Products
-            `You are a market validation analyst. Based ONLY on the following user comments about "${itemName}", create a category analysis. Provide:
-            1. "job_to_be_done": A single sentence describing the fundamental goal people want to achieve with this type of product.
-            2. "table_stakes": An array of 3 bullet points describing the absolute must-have features or benefits for any product in this category.
-            3. "disruption_opportunities": An array of 3 bullet points describing common frustrations or unsolved problems across the entire category that a new product could solve.
-            Respond ONLY with a valid JSON object with keys "job_to_be_done", "table_stakes", and "disruption_opportunities".`;
+            `You are a market research analyst. Based ONLY on the following user comments about "${itemName}", create a competitive brief. Provide: 1. "use_case": A single sentence describing the primary job people hire this product for. 2. "loves": An array of 3 short bullet points of key strengths or features people praise. 3. "hates": An array of 3 short bullet points of the biggest pain points, complaints, or missing features. Respond ONLY with a valid JSON object with keys "use_case", "loves", and "hates".` : 
+            `You are a market validation analyst. Based ONLY on the following user comments about "${itemName}", create a category analysis. Provide: 1. "job_to_be_done": A single sentence describing the fundamental goal people want to achieve with this type of product. 2. "table_stakes": An array of 3 bullet points describing the absolute must-have features for any product in this category. 3. "disruption_opportunities": An array of 3 bullet points describing common unsolved problems across the entire category. Respond ONLY with a valid JSON object with keys "job_to_be_done", "table_stakes", and "disruption_opportunities".`;
 
         const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an analyst providing structured JSON output." }, { role: "user", content: `${prompt}\n\nComments:\n${topPostsText}` }], temperature: 0.1, response_format: { "type": "json_object" } };
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        if (!response.ok) throw new Error('AI brief generation failed.');
         
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
+        const briefPromise = fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }).then(res => res.json());
+
+        const selectedSubreddits = Array.from(document.querySelectorAll('#subreddit-choices input:checked')).map(cb => cb.value);
+        const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
+
+        const trendPromise = isBrand ? fetchSentimentTrendData(itemName, subredditQueryString, [
+            { label: '1 Year Ago', value: 'year' },
+            { label: '6 Months Ago', value: '6month' },
+            { label: '3 Months Ago', value: '3month' },
+            { label: 'Last Month', value: 'month' }
+        ]) : Promise.resolve(null); // No trend for generic products
+
+        const [briefResult, trendResult] = await Promise.all([briefPromise, trendPromise]);
+        
+        const parsed = JSON.parse(briefResult.openaiResponse);
         
         let htmlContent = '';
         if (isBrand) {
+            const firstPoint = trendResult[0]?.positivePercentage || 0;
+            const lastPoint = trendResult[trendResult.length - 1]?.positivePercentage || 0;
+            const change = lastPoint - firstPoint;
+            const trendText = change > 5 ? "has improved significantly" : change < -5 ? "has declined" : "has remained stable";
+            const insightPrompt = `Write a single, concise sentence explaining a potential reason for the following sentiment trend for the brand "${itemName}". The trend shows that positive sentiment ${trendText} from ${firstPoint}% to ${lastPoint}% recently. Use the following context.\nContext:\n${topPostsText.substring(0, 1500)}`;
+            
+            const insightPromise = fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a concise market analyst." }, { role: "user", content: insightPrompt }], temperature: 0.3, max_tokens: 100 } }) }).then(res => res.json());
+            const insightResult = await insightPromise;
+
             htmlContent = `
                 <div class="brief-content">
                     <button class="context-close-btn">×</button>
                     <h3 class="brief-header">Competitive Brief: ${itemName}</h3>
+                    <div class="brief-section">
+                        <h4 class="brief-section-title"><span class="brief-section-icon">📈</span>Brand Momentum</h4>
+                        <div id="brand-momentum-chart"></div>
+                        <script type="application/json" id="brand-momentum-chart-data">${JSON.stringify(trendResult)}</script>
+                        <p class="brief-ai-insight">${insightResult.openaiResponse}</p>
+                    </div>
                     <div class="brief-section">
                         <h4 class="brief-section-title"><span class="brief-section-icon">💡</span>Primary Use Case</h4>
                         <p class="brief-text">${parsed.use_case}</p>
@@ -1161,7 +1222,7 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
                         <ul class="brief-list hates">${parsed.hates.map(item => `<li>${item}</li>`).join('')}</ul>
                     </div>
                 </div>`;
-        } else {
+        } else { // Generic Product
             htmlContent = `
                 <div class="brief-content">
                     <button class="context-close-btn">×</button>
@@ -1182,7 +1243,12 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         }
         
         targetPanel.innerHTML = htmlContent;
-        briefCache.set(itemName, htmlContent); // Cache the result
+        briefCache.set(itemName, htmlContent);
+        
+        if (isBrand) {
+            renderBrandMomentumChart(trendResult);
+        }
+
         targetPanel.querySelector('.context-close-btn').addEventListener('click', close);
 
     } catch (error) {
@@ -1190,6 +1256,25 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         targetPanel.innerHTML = `<div class="brief-content"><button class="context-close-btn">×</button><p class="error-message">Could not generate brief for ${itemName}.</p></div>`;
         targetPanel.querySelector('.context-close-btn').addEventListener('click', close);
     }
+}
+
+function renderBrandMomentumChart(data) {
+    if (typeof Highcharts === 'undefined' || !data) return;
+
+    Highcharts.chart('brand-momentum-chart', {
+        chart: { type: 'line', backgroundColor: 'transparent' },
+        title: { text: null },
+        credits: { enabled: false },
+        xAxis: { categories: data.map(d => d.period) },
+        yAxis: { title: { text: '% Positive Sentiment' }, min: 0, max: 100 },
+        legend: { enabled: false },
+        series: [{
+            name: '% Positive Sentiment',
+            data: data.map(d => d.positivePercentage),
+            color: '#00a5ce'
+        }],
+        tooltip: { pointFormat: '{series.name}: <b>{point.y}%</b>' }
+    });
 }
 
 

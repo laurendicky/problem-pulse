@@ -1080,6 +1080,119 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
 // === ENHANCEMENT & POWER PHRASES FUNCTIONS ===
 // =================================================================================
 
+// =================================================================================
+// === NEW FUNCTION: BRANDSCAPE DEEP DIVE PANELS ===
+// =================================================================================
+const briefCache = new Map(); // Cache to store results and avoid repeated API calls
+
+async function generateAndRenderBrandBrief(itemName, itemType) {
+    const isBrand = itemType === 'brands';
+    const targetPanel = document.getElementById(isBrand ? 'brand-detail-panel' : 'product-detail-panel');
+    const overlay = document.getElementById('brief-overlay');
+
+    if (!targetPanel || !overlay) {
+        console.error("Brandscape detail panels or overlay not found in the DOM.");
+        return;
+    }
+    
+    // Close any other open panels
+    document.querySelectorAll('.custom-side-panel.visible').forEach(p => p.classList.remove('visible'));
+
+    targetPanel.innerHTML = '<div class="brief-content"><p class="loading-text">Analyzing... <span class="loader-dots"></span></p></div>';
+    targetPanel.classList.add('visible');
+    overlay.classList.add('visible');
+
+    const close = () => {
+        targetPanel.classList.remove('visible');
+        overlay.classList.remove('visible');
+    };
+    overlay.onclick = close;
+
+    if (briefCache.has(itemName)) {
+        targetPanel.innerHTML = briefCache.get(itemName);
+        targetPanel.querySelector('.context-close-btn')?.addEventListener('click', close);
+        return;
+    }
+
+    try {
+        const postsForAnalysis = (window._entityData?.[itemType]?.[itemName]?.posts || []).slice(0, 40);
+        if (postsForAnalysis.length < 3) throw new Error("Not enough mentions to generate a detailed brief.");
+        
+        const topPostsText = postsForAnalysis.map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+
+        const prompt = isBrand ? 
+            // Prompt for Specific Brands
+            `You are a market research analyst. Based ONLY on the following user comments about "${itemName}", create a competitive brief. Provide:
+            1. "use_case": A single sentence describing the primary job people hire this product for.
+            2. "loves": An array of 3 short bullet points of key strengths or features people praise.
+            3. "hates": An array of 3 short bullet points of the biggest pain points, complaints, or missing features.
+            Respond ONLY with a valid JSON object with keys "use_case", "loves", and "hates".`
+            : 
+            // Prompt for Generic Products
+            `You are a market validation analyst. Based ONLY on the following user comments about "${itemName}", create a category analysis. Provide:
+            1. "job_to_be_done": A single sentence describing the fundamental goal people want to achieve with this type of product.
+            2. "table_stakes": An array of 3 bullet points describing the absolute must-have features or benefits for any product in this category.
+            3. "disruption_opportunities": An array of 3 bullet points describing common frustrations or unsolved problems across the entire category that a new product could solve.
+            Respond ONLY with a valid JSON object with keys "job_to_be_done", "table_stakes", and "disruption_opportunities".`;
+
+        const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an analyst providing structured JSON output." }, { role: "user", content: `${prompt}\n\nComments:\n${topPostsText}` }], temperature: 0.1, response_format: { "type": "json_object" } };
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('AI brief generation failed.');
+        
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        
+        let htmlContent = '';
+        if (isBrand) {
+            htmlContent = `
+                <div class="brief-content">
+                    <button class="context-close-btn">×</button>
+                    <h3 class="brief-header">Competitive Brief: ${itemName}</h3>
+                    <div class="brief-section">
+                        <h4 class="brief-section-title"><span class="brief-section-icon">💡</span>Primary Use Case</h4>
+                        <p class="brief-text">${parsed.use_case}</p>
+                    </div>
+                    <div class="brief-section">
+                        <h4 class="brief-section-title"><span class="brief-section-icon">🟢</span>What People Love</h4>
+                        <ul class="brief-list loves">${parsed.loves.map(item => `<li>${item}</li>`).join('')}</ul>
+                    </div>
+                    <div class="brief-section">
+                        <h4 class="brief-section-title"><span class="brief-section-icon">🔴</span>Pain Points & Opportunities</h4>
+                        <ul class="brief-list hates">${parsed.hates.map(item => `<li>${item}</li>`).join('')}</ul>
+                    </div>
+                </div>`;
+        } else {
+            htmlContent = `
+                <div class="brief-content">
+                    <button class="context-close-btn">×</button>
+                    <h3 class="brief-header">Category Analysis: ${itemName}</h3>
+                    <div class="brief-section">
+                        <h4 class="brief-section-title"><span class="brief-section-icon">💡</span>Primary Job-to-be-Done</h4>
+                        <p class="brief-text">${parsed.job_to_be_done}</p>
+                    </div>
+                    <div class="brief-section">
+                        <h4 class="brief-section-title"><span class="brief-section-icon">🔵</span>Table Stakes (Must-Haves)</h4>
+                        <ul class="brief-list stakes">${parsed.table_stakes.map(item => `<li>${item}</li>`).join('')}</ul>
+                    </div>
+                    <div class="brief-section">
+                        <h4 class="brief-section-title"><span class="brief-section-icon">🔴</span>Disruption Opportunities</h4>
+                        <ul class="brief-list hates">${parsed.disruption_opportunities.map(item => `<li>${item}</li>`).join('')}</ul>
+                    </div>
+                </div>`;
+        }
+        
+        targetPanel.innerHTML = htmlContent;
+        briefCache.set(itemName, htmlContent); // Cache the result
+        targetPanel.querySelector('.context-close-btn').addEventListener('click', close);
+
+    } catch (error) {
+        console.error(`Failed to generate brief for ${itemName}:`, error);
+        targetPanel.innerHTML = `<div class="brief-content"><button class="context-close-btn">×</button><p class="error-message">Could not generate brief for ${itemName}.</p></div>`;
+        targetPanel.querySelector('.context-close-btn').addEventListener('click', close);
+    }
+}
+
+
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
 // =================================================================================
@@ -1697,7 +1810,9 @@ function generateNgrams(words, n) {
 // =================================================================================
 // === START: Replace this entire function in your script ===
 // =================================================================================
-
+// =================================================================================
+// === REPLACEMENT FUNCTION: generateAndRenderPowerPhrases ===
+// =================================================================================
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;
@@ -1843,6 +1958,7 @@ generateAndRenderHybridSentiment(filteredItems, originalGroupName);
         generateEmotionMapData(filteredItems).then(renderEmotionMap);
         renderIncludedSubreddits(selectedSubreddits);
         generateAndRenderPowerPhrases(filteredItems, originalGroupName);
+
         generateAndRenderMindsetSummary(filteredItems, originalGroupName);
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);
         generateAndRenderAIPrompt(filteredItems, originalGroupName);
@@ -2030,6 +2146,9 @@ sortedFindings.forEach((findingData, index) => {
 // =================================================================================
 // INITIALIZATION LOGIC (UPDATED)
 // =================================================================================
+// =================================================================================
+// === REPLACEMENT FUNCTION: initializeDashboardInteractivity ===
+// =================================================================================
 function initializeDashboardInteractivity() {
     document.addEventListener('click', (e) => {
         const backButton = e.target.closest('#results-wrapper-b #back-to-step1-btn');
@@ -2049,10 +2168,10 @@ function initializeDashboardInteractivity() {
                 const postsData = window._sentimentData?.[category]?.[word]?.posts;
                 if (postsData) { showSlidingPanel(word, Array.from(postsData), category); }
             } else if (entityEl) {
+                // --- THIS IS THE NEW LOGIC ---
                 const word = entityEl.dataset.word;
                 const type = entityEl.dataset.type;
-                const postsData = window._entityData?.[type]?.[word]?.posts;
-                if (postsData) { renderContextContent(word, postsData); }
+                generateAndRenderBrandBrief(word, type); // Call the new function
             } else if (removeBtnEl) {
                 handleRemoveSubClick(e);
             }

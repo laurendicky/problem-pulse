@@ -2023,13 +2023,13 @@ async function generateAndRenderKeywordTree(posts, audienceContext) {
 }
 
 // =================================================================================
-// === NEW FUNCTION 1 of 3: The Main Keyword Feature Manager ===
+// === REPLACEMENT 1 of 2: The Main Keyword Feature Manager (Corrected) ===
 // =================================================================================
 async function generateAndManageKeywordViews(posts, audienceContext) {
     const container = document.getElementById('keyword-opportunities-container');
     if (!container) return;
 
-    // 1. Setup the HTML structure with a view-switcher and containers for both views
+    // (This part is unchanged)
     container.innerHTML = `
         <div class="keyword-header">
             <h3 class="dashboard-section-title">Keyword Opportunities</h3>
@@ -2041,12 +2041,9 @@ async function generateAndManageKeywordViews(posts, audienceContext) {
         <div id="keyword-cards-view" class="keyword-view active">
             <p class="loading-text">Analyzing keywords...</p>
         </div>
-        <div id="keyword-tree-view" class="keyword-view">
-             <!-- Tree will be rendered here -->
-        </div>
+        <div id="keyword-tree-view" class="keyword-view"></div>
     `;
     
-    // Setup event listeners for the switcher
     const cardsBtn = document.getElementById('view-cards-btn');
     const treeBtn = document.getElementById('view-tree-btn');
     const cardsView = document.getElementById('keyword-cards-view');
@@ -2058,7 +2055,6 @@ async function generateAndManageKeywordViews(posts, audienceContext) {
         cardsView.classList.add('active');
         treeView.classList.remove('active');
     });
-
     treeBtn.addEventListener('click', () => {
         treeBtn.classList.add('active');
         cardsBtn.classList.remove('active');
@@ -2067,9 +2063,24 @@ async function generateAndManageKeywordViews(posts, audienceContext) {
     });
 
     try {
-        // 2. Call the AI once to get the single, structured source of truth
         const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
-        const prompt = `You are an expert SEO strategist creating a content plan for the "${audienceContext}" audience. Analyze the following user posts and extract high-value keywords for each stage of the marketing funnel. Then, structure this information into a strategic hierarchy. For each of the 3 intent categories ("Problem-Aware", "Solution-Seeking", "Purchase-Intent"), you must provide: 1. "primary_keyword": A short, 2-3 word theme summarizing the core topic. 2. "secondary_keywords": An array of 2-3 broader keywords. 3. "long_tail_keywords": An array of 2-3 highly specific, long-tail keywords. 4. "content_example": A single, compelling blog post title that targets this cluster. Respond ONLY with a valid JSON object with a single key "keyword_plan". This key should hold an array of 3 objects, one for each intent category.`;
+        
+        // === THIS PROMPT IS THE FIX ===
+        // It now explicitly tells the AI to include the "intent" key in each object.
+        const prompt = `You are an expert SEO strategist creating a content plan for the "${audienceContext}" audience.
+        Analyze the following user posts.
+
+        Respond ONLY with a valid JSON object with a single key "keyword_plan". This key must hold an array of 3 objects.
+        
+        CRITICAL: Each object in the array must represent one of the 3 intent categories ("Problem-Aware", "Solution-Seeking", "Purchase-Intent") and MUST contain the following keys:
+        1. "intent": The name of the intent category (e.g., "Problem-Aware").
+        2. "primary_keyword": A short, 2-3 word theme summarizing the core topic for that intent.
+        3. "secondary_keywords": An array of 2-3 broader keywords.
+        4. "long_tail_keywords": An array of 2-3 highly specific, long-tail keywords.
+        5. "content_example": A single, compelling blog post title that targets this cluster.
+
+        Posts:\n${topPostsText}`;
+
         const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an SEO strategist who outputs a structured keyword hierarchy in a strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 1500, response_format: { "type": "json_object" } };
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         
@@ -2079,7 +2090,6 @@ async function generateAndManageKeywordViews(posts, audienceContext) {
         const parsed = JSON.parse(data.openaiResponse);
         
         if (parsed && parsed.keyword_plan) {
-            // 3. Render BOTH views using the same data
             renderKeywordCards(parsed.keyword_plan);
             renderKeywordTree(parsed.keyword_plan);
         } else {
@@ -2088,12 +2098,11 @@ async function generateAndManageKeywordViews(posts, audienceContext) {
 
     } catch (error) {
         console.error("Keyword feature generation error:", error);
-        container.innerHTML = `<h3 class="dashboard-section-title">Keyword Opportunities</h3><p class="error-message">Could not generate keyword strategy.</p>`;
+        container.innerHTML = `<h3 class="dashboard-section-title">Keyword Opportunities</h3><p class="error-message">Could not generate keyword strategy. Error: ${error.message}</p>`;
     }
 }
-
 // =================================================================================
-// === NEW FUNCTION 2 of 3: The Keyword Card Renderer ===
+// === REPLACEMENT 2 of 2: The Keyword Card Renderer (Corrected) ===
 // =================================================================================
 function renderKeywordCards(keywordPlan) {
     const container = document.getElementById('keyword-cards-view');
@@ -2106,11 +2115,14 @@ function renderKeywordCards(keywordPlan) {
     };
 
     const cardsHTML = keywordPlan.map(plan => {
-        const details = intentDetails[plan.intent] || { icon: '⭐', description: '' };
+        // Use the plan.intent if it exists, otherwise provide a default
+        const intentName = plan.intent || 'Keyword Cluster'; 
+        const details = intentDetails[intentName] || { icon: '⭐', description: '' };
+        
         const allKeywords = [
             `<li><strong>${plan.primary_keyword}</strong> (Primary)</li>`,
-            ...plan.secondary_keywords.map(kw => `<li>${kw}</li>`),
-            ...plan.long_tail_keywords.map(kw => `<li>${kw}</li>`)
+            ...(plan.secondary_keywords || []).map(kw => `<li>${kw}</li>`),
+            ...(plan.long_tail_keywords || []).map(kw => `<li>${kw}</li>`)
         ].join('');
 
         return `
@@ -2118,7 +2130,9 @@ function renderKeywordCards(keywordPlan) {
                 <div class="keyword-cluster-header">
                     <span class="keyword-cluster-icon">${details.icon}</span>
                     <div>
-                        <h4 class="keyword-cluster-title">${plan.intent.replace('-', ' ')}</h4>
+                        {/* === THIS LINE IS NOW SAFE === */}
+                        {/* It uses the safe intentName variable */}
+                        <h4 class="keyword-cluster-title">${intentName.replace('-', ' ')}</h4>
                         <p class="keyword-cluster-description">${details.description}</p>
                     </div>
                 </div>

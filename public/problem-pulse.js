@@ -1,4 +1,6 @@
-
+// =================================================================================
+// FINAL SCRIPT WITH HIGHCHARTS SPLIT PACKED BUBBLE CHART (WITH CLICK EVENT)
+// =================================================================================
 
 // --- 1. GLOBAL VARIABLES & CONSTANTS ---
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
@@ -19,68 +21,110 @@ const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'bro
 const emotionalIntensityScores = { 'annoy': 3, 'irritated': 3, 'bored': 2, 'issue': 3, 'sad': 4, 'bad': 3, 'confused': 4, 'tired': 3, 'upset': 5, 'unhappy': 5, 'disappoint': 6, 'frustrate': 6, 'stressful': 6, 'awful': 7, 'hate': 8, 'angry': 7, 'broken': 5, 'exhausted': 5, 'pain': 7, 'miserable': 8, 'terrible': 8, 'worst': 9, 'horrible': 8, 'furious': 9, 'outraged': 9, 'dreadful': 8, 'terrified': 10, 'nightmare': 10, 'heartbroken': 9, 'desperate': 8, 'rage': 10, 'problem': 4, 'challenge': 5, 'critical': 6, 'danger': 7, 'fear': 7, 'panic': 8, 'scared': 6, 'shocked': 7, 'trash': 5, 'alone': 4, 'ashamed': 5, 'depressed': 8, 'discouraged': 5, 'dull': 2, 'empty': 6, 'failure': 7, 'guilty': 6, 'hopeless': 8, 'insecure': 5, 'lonely': 6, 'weak': 4, 'need': 5, 'disadvantage': 4, 'flaw': 4 };
 const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
 
-
 // =================================================================================
-// === REPLACEMENT FUNCTION: fetchSentimentTrendData (FIXED LOGIC) ===
+// === REPLACEMENT FUNCTION: fetchSentimentTrendData (V2 with AI & Promise.allSettled) ===
 // =================================================================================
 async function fetchSentimentTrendData(brandName, subredditQueryString) {
-    // 1. Define our time buckets. We will sort posts into these.
-    const now = new Date();
-    const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, now.getDate()).getTime() / 1000;
+    const timePeriods = [
+        { label: 'Past 6 Months', value: '6month' },
+        { label: 'Past 3 Months', value: '3month' },
+        { label: 'Last Month', value: 'month' },
+        { label: 'Last 7 Days', value: 'week' }
+    ];
 
-    // We create labels for the last 6 months
-    const timePeriods = Array.from({ length: 6 }, (_, i) => {
-        const date = new Date(now.getFullYear(), now.getMonth() - (5 - i), 1);
-        return {
-            label: date.toLocaleString('default', { month: 'short' }),
-            startTimestamp: date.getTime() / 1000,
-            positive: 0,
-            negative: 0,
-            totalMentions: 0,
-            positivePercentage: 0
-        };
-    });
+    // --- KEY CHANGE 1: Switched to Promise.allSettled ---
+    // This ensures that even if one API call fails, the others can still be processed.
+    const fetchPromises = timePeriods.map(period =>
+        fetchMultipleRedditDataBatched(subredditQueryString, [`"${brandName}"`], 75, period.value) // Increased sample size to 75
+    );
+    const results = await Promise.allSettled(fetchPromises);
 
-    try {
-        // 2. Fetch ONE large, de-duplicated dataset for the entire 6-month period.
-        const allPosts = await fetchMultipleRedditDataBatched(subredditQueryString, [brandName], 100, '6month');
-        
-        // 3. Process each post ONCE and assign it to the correct month's bucket.
-        allPosts.forEach(post => {
-            const postTimestamp = post.data.created_utc;
-            if (postTimestamp < sixMonthsAgo) return; // Ignore posts older than our window
+    const trendData = [];
 
-            // Find which month this post belongs to
-            const correctPeriod = timePeriods.find(period => postTimestamp >= period.startTimestamp);
-            if (!correctPeriod) return;
+    // --- KEY CHANGE 2: Process results sequentially to avoid overwhelming the AI endpoint ---
+    for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        const periodLabel = timePeriods[i].label;
 
-            const text = `${post.data.title || ''} ${post.data.selftext || ''}`.toLowerCase();
-            const words = text.split(/\s+/);
+        // Only process successfully fetched data
+        if (result.status === 'fulfilled' && result.value.length > 0) {
+            const posts = result.value;
+            // Classify sentiment for the fetched posts using our new AI helper
+            const sentimentResults = await classifySentimentWithAI(posts);
 
-            // Tally sentiment for that specific month's bucket
-            words.forEach(word => {
-                const lemma = lemmatize(word);
-                if (positiveWords.has(lemma)) correctPeriod.positive++;
-                if (negativeWords.has(lemma)) correctPeriod.negative++;
+            const positiveMentions = sentimentResults.filter(s => s === 'Positive').length;
+            const negativeMentions = sentimentResults.filter(s => s === 'Negative').length;
+            const totalMentions = positiveMentions + negativeMentions;
+
+            const positivePercentage = totalMentions > 0 ? Math.round((positiveMentions / totalMentions) * 100) : 50; // Default to 50 if no clear sentiment
+
+            trendData.push({
+                period: periodLabel,
+                positivePercentage: positivePercentage
             });
-        });
-
-        // 4. Calculate the final percentages for each bucket.
-        timePeriods.forEach(period => {
-            period.totalMentions = period.positive + period.negative;
-            period.positivePercentage = period.totalMentions > 0 ? Math.round((period.positive / period.totalMentions) * 100) : 0;
-        });
-
-        // 5. Return the data in the correct format for the chart.
-        return timePeriods.map(p => ({ period: p.label, positivePercentage: p.positivePercentage }));
-
-    } catch (error) {
-        console.error("Error fetching or processing sentiment trend data:", error);
-        // Return an empty array on failure so the chart doesn't break
-        return [];
+        } else {
+            // If a fetch failed, you could push a null or default value, or just skip it.
+            // Skipping is cleaner for the chart.
+            console.warn(`Could not fetch data for period: ${periodLabel}`);
+        }
     }
+
+    // The Reddit API returns cumulative results, so we reverse to show a proper timeline.
+    return trendData.reverse();
 }
 
+// =================================================================================
+// === NEW HELPER FUNCTION: classifySentimentWithAI (Add this to your script) ===
+// =================================================================================
+async function classifySentimentWithAI(posts) {
+    const BATCH_SIZE = 25; // Process 25 posts per AI call to stay within token limits
+    let allSentiments = [];
+
+    for (let i = 0; i < posts.length; i += BATCH_SIZE) {
+        const batch = posts.slice(i, i + BATCH_SIZE);
+        const postsForAI = batch.map((p, index) => ({
+            index: index,
+            text: `Title: ${p.data.title || ''}. Body: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
+        }));
+
+        const prompt = `You are a sentiment analysis engine. For each post provided, classify its overall sentiment towards the main subject as "Positive", "Negative", or "Neutral". Respond ONLY with a valid JSON object with a single key "sentiments", which is an array of objects. Each object must have two keys: "post_index" and "sentiment".
+
+        Example Response:
+        { "sentiments": [ {"post_index": 0, "sentiment": "Positive"}, {"post_index": 1, "sentiment": "Negative"} ] }
+
+        Posts to analyze:
+        ${JSON.stringify(postsForAI)}`;
+
+        const openAIParams = {
+            model: "gpt-4o-mini",
+            messages: [{ role: "system", content: "You are a precise JSON-only sentiment classifier." }, { role: "user", content: prompt }],
+            temperature: 0,
+            max_tokens: 1500,
+            response_format: { "type": "json_object" }
+        };
+
+        try {
+            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+            if (response.ok) {
+                const data = await response.json();
+                const parsed = JSON.parse(data.openaiResponse);
+                if (parsed.sentiments && Array.isArray(parsed.sentiments)) {
+                    // Create a temporary map to easily align results with original batch
+                    const sentimentMap = new Map(parsed.sentiments.map(s => [s.post_index, s.sentiment]));
+                    const batchSentiments = postsForAI.map(p => sentimentMap.get(p.index) || 'Neutral');
+                    allSentiments.push(...batchSentiments);
+                }
+            } else {
+                 // If AI fails for a batch, classify all as Neutral to not skew results
+                 allSentiments.push(...Array(batch.length).fill('Neutral'));
+            }
+        } catch (error) {
+            console.error("AI sentiment classification batch failed:", error);
+            allSentiments.push(...Array(batch.length).fill('Neutral'));
+        }
+    }
+    return allSentiments;
+}
 
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
 function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
@@ -800,23 +844,13 @@ function formatMemberCount(num) {
     if (num >= 1000) { return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'k'; }
     return num.toLocaleString();
 }
-
-// CORRECT
 function getActivityLabel(activeUsers, totalMembers) {
-    if (!totalMembers || totalMembers === 0 || activeUsers === null || activeUsers === undefined) {
-        return '💤 Cool';
-    }
+    if (!totalMembers || totalMembers === 0 || activeUsers === null || activeUsers === undefined) { return '💤 Cool'; }
     const ratio = activeUsers / totalMembers;
-    if (activeUsers > 5000 || (ratio > 0.01 && totalMembers > 1000)) {
-        return '🔥 Hot';
-    }
-    if (activeUsers < 10 || (totalMembers > 20000 && activeUsers < 50)) {
-        return '💤 Cool';
-    }
+    if (activeUsers > 5000 || (ratio > 0.01 && totalMembers > 1000)) { return '🔥 Hot'; }
+    if (activeUsers < 10 || (totalMembers > 20000 && activeUsers < 50)) { return '💤 Cool'; }
     return '🌤️ Warm';
 }
-
-
 async function fetchAndRankSubreddits(subredditNames) {
     console.log(`AI suggested ${subredditNames.length} subreddits. Validating and ranking in batches...`);
     const BATCH_SIZE = 5;
@@ -1146,31 +1180,8 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
     }
 }
 
-// --- ADD THIS HELPER FUNCTION ANYWHERE IN YOUR GLOBAL SCOPE ---
-
-/**
- * Calculates the sentiment scores for a given piece of text.
- * @param {string} text The text to analyze.
- * @returns {{positive: number, negative: number, neutral: number}} An object with sentiment counts.
- */
-function calculateSentimentForText(text) {
-    const words = text.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/);
-    let positive = 0;
-    let negative = 0;
-    words.forEach(word => {
-        const lemma = lemmatize(word);
-        if (positiveWords.has(lemma)) positive++;
-        if (negativeWords.has(lemma)) negative++;
-    });
-    // A simple heuristic for neutral: count words that aren't positive or negative.
-    // This is a basic approach; more advanced methods exist but this is sufficient here.
-    const neutral = Math.max(0, words.length - positive - negative);
-    return { positive, negative, neutral };
-}
-
-
 // =================================================================================
-// === REPLACEMENT FUNCTION: generateAndRenderBrandBrief (V6 - Strategic Analysis Engine) ===
+// === REPLACEMENT FUNCTION: generateAndRenderBrandBrief (V4 with Graceful Handling) ===
 // =================================================================================
 const briefCache = new Map();
 
@@ -1183,10 +1194,10 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         console.error("Brandscape detail panels or overlay not found in the DOM.");
         return;
     }
-    
+
     document.querySelectorAll('.custom-side-panel.visible').forEach(p => p.classList.remove('visible'));
 
-    targetPanel.innerHTML = `<div class="brief-content"><p class="loading-text">Running strategic analysis...<br/><small>This may take a moment.</small><span class="loader-dots"></span></p></div>`;
+    targetPanel.innerHTML = '<div class="brief-content"><p class="loading-text">Analyzing... <span class="loader-dots"></span></p></div>';
     targetPanel.classList.add('visible');
     overlay.classList.add('visible');
 
@@ -1196,160 +1207,132 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
     };
     overlay.onclick = close;
 
-    const cacheKey = `${itemName}-${new Date().toISOString().slice(0, 10)}`;
-    if (briefCache.has(cacheKey)) {
-        targetPanel.innerHTML = briefCache.get(cacheKey);
+    if (briefCache.has(itemName)) {
+        targetPanel.innerHTML = briefCache.get(itemName);
+        if (targetPanel.querySelector('#brand-momentum-chart')) {
+            const chartData = JSON.parse(targetPanel.querySelector('#brand-momentum-chart-data').textContent);
+            renderBrandMomentumChart(chartData);
+        }
         targetPanel.querySelector('.context-close-btn')?.addEventListener('click', close);
         return;
     }
-
-    try {
-        // --- STEP 1: PRECISE DATA FETCHING ---
-        const TIME_PERIOD_DAYS = 30;
-        const selectedSubreddits = Array.from(document.querySelectorAll('#subreddit-choices input:checked')).map(cb => cb.value);
-        const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
-        const brandSearchTerm = itemName.includes(' ') ? `"${itemName}"` : itemName;
-        
-        const recentPosts = await fetchMultipleRedditDataBatched(subredditQueryString, [brandSearchTerm], 100, 'month');
-        if (recentPosts.length < 5) throw new Error(`Not enough mentions found for "${itemName}" in the last ${TIME_PERIOD_DAYS} days to generate a reliable brief.`);
-        
-        const postsForAnalysis = recentPosts.slice(0, 75); // Use a larger pool for analysis
-        const rawTextForClustering = postsForAnalysis.map(p => `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n');
-
-        // --- STEP 2: AI-POWERED TOPIC CLUSTERING ---
-        const clusteringPrompt = `You are a data analyst. Analyze the following user comments about "${itemName}". Identify up to 5 distinct, recurring topics of conversation. For each topic, provide a short title and one representative quote that best captures the sentiment. Respond ONLY with a valid JSON object with a single key "topics", which is an array of objects like {"title": "The topic name", "quote": "A real user quote."}.
-
-User Comments:
-${rawTextForClustering}`;
-        
-        const clusteringParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a data analyst that extracts conversation topics into a strict JSON format." }, { role: "user", content: clusteringPrompt }], temperature: 0.1, response_format: { "type": "json_object" } };
-        const clusteringResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: clusteringParams }) });
-        if (!clusteringResponse.ok) throw new Error('AI topic clustering failed.');
-        const clusteringData = await clusteringResponse.json();
-        const aiTopics = JSON.parse(clusteringData.openaiResponse).topics || [];
-
-        // --- STEP 3: PROGRAMMATIC QUANTIFICATION & VALIDATION ---
-        const quantifiedTopics = aiTopics.map(topic => {
-            const topicKeywords = topic.title.toLowerCase().split(' ').filter(w => w.length > 3 && !stopWords.includes(w));
-            const relevantPosts = postsForAnalysis.filter(post => {
-                const postText = `${post.data.title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase();
-                return topicKeywords.some(kw => postText.includes(kw));
-            });
-            
-            if (relevantPosts.length === 0) return null;
-
-            let totalPositive = 0, totalNegative = 0;
-            relevantPosts.forEach(post => {
-                const postText = `${post.data.title || ''} ${post.data.selftext || post.data.body || ''}`;
-                const sentiment = calculateSentimentForText(postText);
-                totalPositive += sentiment.positive;
-                totalNegative += sentiment.negative;
-            });
-
-            const totalSentiment = totalPositive + totalNegative;
-            const positivePercent = totalSentiment > 0 ? Math.round((totalPositive / totalSentiment) * 100) : 0;
-
-            return {
-                ...topic,
-                mentionCount: relevantPosts.length,
-                sentiment: positivePercent, // % positive for this specific topic
-            };
-        }).filter(Boolean); // Remove topics with no found posts
-
-        // Calculate overall sentiment for the header
-        const overallSentiment = { positive: 0, negative: 0, neutral: 0 };
-        postsForAnalysis.forEach(post => {
-            const text = `${post.data.title || ''} ${post.data.selftext || ''}`;
-            const counts = calculateSentimentForText(text);
-            overallSentiment.positive += counts.positive;
-            overallSentiment.negative += counts.negative;
-            overallSentiment.neutral += counts.neutral;
-        });
-        const totalOverallScore = overallSentiment.positive + overallSentiment.negative + overallSentiment.neutral;
-        const overallPositivePercent = totalOverallScore > 0 ? Math.round((overallSentiment.positive / totalOverallScore) * 100) : 0;
-        const overallNegativePercent = totalOverallScore > 0 ? Math.round((overallSentiment.negative / totalOverallScore) * 100) : 0;
-        const overallNeutralPercent = 100 - overallPositivePercent - overallNegativePercent;
-
-        // --- STEP 4: AI-POWERED STRATEGIC SYNTHESIS ---
-        const synthesisPrompt = `You are a senior market research analyst. You have been given verified data about recent online conversations for the brand "${itemName}". Your task is to synthesize this data into a strategic brief.
-
-Here is the verified data:
-- Total Mentions Analyzed: ${postsForAnalysis.length}
-- Overall Sentiment: Positive ${overallPositivePercent}%, Neutral ${overallNeutralPercent}%, Negative ${overallNegativePercent}%
-- Key Conversation Topics:
-${quantifiedTopics.map(t => `- Topic: "${t.title}", Mentions: ${t.mentionCount}, Sentiment: ${t.sentiment}% Positive, Representative Quote: "${t.quote}"`).join('\n')}
-
-Based ONLY on the data provided, generate the brief. Respond ONLY with a valid JSON object with the following keys:
-1. "focus_of_conversation": A 2-sentence summary of what people are talking about most, based on the topic with the highest mention count.
-2. "key_strengths": An array of objects for topics with positive sentiment (>60%). Each object must have "title", "mentions", "sentiment", "analysis", and "quote". The analysis should explain WHY this is a strength.
-3. "top_opportunities": An array of objects for topics with negative sentiment (<40%). Frame these as opportunities. Each object must have "title", "mentions", "sentiment", "analysis", and "quote". The analysis should explain the business opportunity.
-4. "actionable_verdict": A 1-2 sentence strategic summary. Identify the most urgent opportunity and the key strength to amplify.`;
-
-        const synthesisParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market analyst creating a strategic brief from verified data in a strict JSON format." }, { role: "user", content: synthesisPrompt }], temperature: 0.3, response_format: { "type": "json_object" } };
-        const synthesisResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: synthesisParams }) });
-        if (!synthesisResponse.ok) throw new Error('AI strategic synthesis failed.');
-        const synthesisData = await synthesisResponse.json();
-        const brief = JSON.parse(synthesisData.openaiResponse);
-
-        // --- STEP 5: DYNAMIC RENDERING ---
-        const renderTopicList = (items, type) => {
-            if (!items || items.length === 0) {
-                return `<p class="brief-text">No significant ${type === 'strengths' ? 'strengths' : 'opportunities'} identified in the data.</p>`;
-            }
-            return items.map(item => `
-                <div class="brief-topic">
-                    <h5 class="brief-topic-title">${item.title}</h5>
-                    <div class="brief-topic-metrics">
-                        <span class="metric-mentions">${item.mentions} Mentions</span>
-                        <span class="metric-sentiment ${item.sentiment > 60 ? 'positive' : 'negative'}">${item.sentiment}% Positive</span>
-                    </div>
-                    <p class="brief-topic-analysis">${item.analysis}</p>
-                    <blockquote class="brief-topic-quote">“${item.quote}”</blockquote>
-                </div>
-            `).join('');
-        };
-        
-        const sourcesText = selectedSubreddits.map(s => `r/${s}`).join(', ');
-
+    
+    // --- KEY CHANGE: Moved the check outside the try...catch block ---
+    const postsForAnalysis = (window._entityData?.[itemType]?.[itemName]?.posts || []);
+    if (postsForAnalysis.length < 3) {
+        // This is the new, graceful handling for insufficient data.
         const htmlContent = `
             <div class="brief-content">
                 <button class="context-close-btn">×</button>
-                <h3 class="brief-header">${itemName}: ${postsForAnalysis.length} Mentions Analyzed</h3>
-                <p class="brief-subheader"><strong>Sources:</strong> ${sourcesText} (Last ${TIME_PERIOD_DAYS} Days)</p>
-                <div class="brief-sentiment-breakdown">
-                    📈 <strong>Sentiment:</strong>
-                    <span class="sentiment-pill positive">${overallPositivePercent}% Positive</span>
-                    <span class="sentiment-pill neutral">${overallNeutralPercent}% Neutral</span>
-                    <span class="sentiment-pill negative">${overallNegativePercent}% Negative</span>
-                </div>
-
-                <div class="brief-section">
-                    <h4 class="brief-section-title"><span class="brief-section-icon">💡</span>Focus of Recent Conversation</h4>
-                    <p class="brief-text">${brief.focus_of_conversation}</p>
-                </div>
-
-                <div class="brief-section">
-                    <h4 class="brief-section-title"><span class="brief-section-icon">✅</span>Key Strengths to Amplify</h4>
-                    ${renderTopicList(brief.key_strengths, 'strengths')}
-                </div>
-
-                <div class="brief-section">
-                    <h4 class="brief-section-title"><span class="brief-section-icon">🔴</span>Top Pain Points & Opportunities</h4>
-                    ${renderTopicList(brief.top_opportunities, 'opportunities')}
-                </div>
-
-                <div class="brief-verdict">
-                    <p><strong>🔮 Actionable Verdict:</strong> ${brief.actionable_verdict}</p>
-                </div>
+                <h3 class="brief-header">Analysis for: ${itemName}</h3>
+                <p class="error-message" style="text-align: center; padding: 2rem;">
+                    Not enough mentions found (minimum 3 required) to generate a detailed brief.
+                </p>
             </div>`;
-        
         targetPanel.innerHTML = htmlContent;
-        briefCache.set(cacheKey, htmlContent);
+        targetPanel.querySelector('.context-close-btn').addEventListener('click', close);
+        return; // Exit the function early
+    }
+
+    // The rest of the function is now safe to run inside the try...catch
+    try {
+        const top50Posts = postsForAnalysis.slice(0, 50);
+        const topPostsText = top50Posts.map(p => `"${p.data.title || ''} - ${p.data.selftext || p.data.body || ''}"`).join('\n');
+
+        const prompt = isBrand ?
+            `You are an expert market research analyst creating a competitive brief for "${itemName}" based on user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights.
+
+            Respond ONLY with a valid JSON object with the following keys:
+            1.  "use_case": A single sentence describing the primary job people hire this product for.
+            2.  "loves": An array of 3 bullet points of key strengths. CRITICAL: Inject real, short user phrases from the text into these points (e.g., "Users rave about its ability to 'ship code fixes in seconds'").
+            3.  "hates": An array of 3 bullet points. CRITICAL: Frame each pain point as an opportunity (e.g., "Endless scrolling UX → ripe for a plugin/UX layer fix.").
+            4.  "verdict": A single, insightful sentence summarizing the brand's position in the market (e.g., "Loved for versatility, but vulnerable on transparency. A sticky but disruptable brand.").` :
+            `You are a market validation analyst creating a category analysis for "${itemName}" based on user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights.
+
+            Respond ONLY with a valid JSON object with the following keys:
+            1.  "job_to_be_done": A single sentence describing the fundamental goal people want to achieve with this type of product.
+            2.  "table_stakes": An array of 3 bullet points describing the absolute must-have features or benefits for any product in this category.
+            3.  "disruption_opportunities": An array of 3 bullet points describing common frustrations or unsolved problems across the entire category that a new product could solve.`;
+
+        const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an analyst providing structured JSON output." }, { role: "user", content: `${prompt}\n\nUser Comments:\n${topPostsText}` }], temperature: 0.2, response_format: { "type": "json_object" } };
+
+        const briefPromise = fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }).then(res => res.json());
+
+        const selectedSubreddits = Array.from(document.querySelectorAll('#subreddit-choices input:checked')).map(cb => cb.value);
+        const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
+
+        // Using the new, more accurate trend function
+        const trendPromise = isBrand ? fetchSentimentTrendData(itemName, subredditQueryString) : Promise.resolve(null);
+
+        const [briefResult, trendResult] = await Promise.all([briefPromise, trendPromise]);
+
+        const parsed = JSON.parse(briefResult.openaiResponse);
+
+        let htmlContent = '';
+        if (isBrand) {
+            const latestSentiment = trendResult && trendResult.length > 0 ? trendResult[trendResult.length - 1]?.positivePercentage : 0;
+            const trendlineText = latestSentiment ? `Trendline: Positive sentiment is currently at ${latestSentiment}%.` : "Not enough data for a sentiment trend.";
+            const mentionCount = window._entityData?.[itemType]?.[itemName]?.count || 0;
+
+            htmlContent = `
+                <div class="brief-content">
+                    <button class="context-close-btn">×</button>
+                    <h3 class="brief-header">Competitive Brief: ${itemName}</h3>
+                    <div class="brief-section">
+                        <h4 class="brief-section-title"><span class="brief-section-icon">📈</span>Brand Momentum</h4>
+                        <div id="brand-momentum-chart"></div>
+                        <script type="application/json" id="brand-momentum-chart-data">${JSON.stringify(trendResult)}</script>
+                        <p class="brief-ai-insight">Based on ${mentionCount} mentions. ${trendlineText}</p>
+                    </div>
+                    <div class="brief-section">
+                        <h4 class="brief-section-title"><span class="brief-section-icon">💡</span>Primary Use Case</h4>
+                        <p class="brief-text">${parsed.use_case}</p>
+                    </div>
+                    <div class="brief-section">
+                        <h4 class="brief-section-title"><span class="brief-section-icon">🟢</span>What People Love</h4>
+                        <ul class="brief-list loves">${parsed.loves.map(item => `<li>${item}</li>`).join('')}</ul>
+                    </div>
+                    <div class="brief-section">
+                        <h4 class="brief-section-title"><span class="brief-section-icon">🔴</span>Pain Points & Opportunities</h4>
+                        <ul class="brief-list hates">${parsed.hates.map(item => `<li>${item}</li>`).join('')}</ul>
+                    </div>
+                    <div class="brief-verdict">
+                        <p><strong>🔮 Verdict:</strong> ${parsed.verdict}</p>
+                    </div>
+                </div>`;
+        } else { // Generic Product
+            htmlContent = `
+                <div class="brief-content">
+                    <button class="context-close-btn">×</button>
+                    <h3 class="brief-header">Category Analysis: ${itemName}</h3>
+                    <div class="brief-section">
+                        <h4 class="brief-section-title"><span class="brief-section-icon">💡</span>Primary Job-to-be-Done</h4>
+                        <p class="brief-text">${parsed.job_to_be_done}</p>
+                    </div>
+                    <div class="brief-section">
+                        <h4 class="brief-section-title"><span class="brief-section-icon">🔵</span>Table Stakes (Must-Haves)</h4>
+                        <ul class="brief-list stakes">${parsed.table_stakes.map(item => `<li>${item}</li>`).join('')}</ul>
+                    </div>
+                    <div class="brief-section">
+                        <h4 class="brief-section-title"><span class="brief-section-icon">🔴</span>Disruption Opportunities</h4>
+                        <ul class="brief-list hates">${parsed.disruption_opportunities.map(item => `<li>${item}</li>`).join('')}</ul>
+                    </div>
+                </div>`;
+        }
+
+        targetPanel.innerHTML = htmlContent;
+        briefCache.set(itemName, htmlContent);
+
+        if (isBrand && trendResult && trendResult.length > 0) {
+            renderBrandMomentumChart(trendResult);
+        }
+
         targetPanel.querySelector('.context-close-btn').addEventListener('click', close);
 
     } catch (error) {
-        console.error(`Failed to generate strategic brief for ${itemName}:`, error);
-        targetPanel.innerHTML = `<div class="brief-content"><button class="context-close-btn">×</button><p class="error-message">Could not generate brief for ${itemName}. <br><small>${error.message}</small></p></div>`;
+        // This catch block now handles true errors, like a failed AI call.
+        console.error(`Failed to generate brief for ${itemName}:`, error);
+        targetPanel.innerHTML = `<div class="brief-content"><button class="context-close-btn">×</button><p class="error-message">Could not generate brief for ${itemName}.</p></div>`;
         targetPanel.querySelector('.context-close-btn').addEventListener('click', close);
     }
 }
@@ -1376,7 +1359,54 @@ function renderBrandMomentumChart(data) {
 
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
+// =================================================================================
+// === NEW HIGHCHARTS VISUALIZATION MODULE ===
+// =================================================================================
+// =================================================================================
+// === NEW HELPER FUNCTION: SENTIMENT TREND ANALYSIS ===
+// =================================================================================
+async function fetchSentimentTrendData(brandName, subredditQueryString) {
+    const now = new Date();
+    const timePeriods = [
+        { label: new Date(now.getFullYear(), now.getMonth() - 5, 1).toLocaleString('default', { month: 'short' }), value: '6month' },
+        { label: new Date(now.getFullYear(), now.getMonth() - 3, 1).toLocaleString('default', { month: 'short' }), value: '3month' },
+        { label: new Date(now.getFullYear(), now.getMonth() - 1, 1).toLocaleString('default', { month: 'short' }), value: 'month' },
+        { label: 'This Month', value: 't30d' } // Use a more recent period
+    ];
+    
+    const trendData = [];
+    const fetchPromises = timePeriods.map(period => 
+        fetchMultipleRedditDataBatched(subredditQueryString, [`"${brandName}"`], 50, period.value)
+    );
 
+    const results = await Promise.all(fetchPromises);
+    const monthlyData = {};
+
+    results.forEach((posts, index) => {
+        const periodLabel = timePeriods[index].label;
+        if (!monthlyData[periodLabel]) {
+            monthlyData[periodLabel] = { positive: 0, negative: 0, posts: new Set() };
+        }
+        posts.forEach(post => {
+            if (monthlyData[periodLabel].posts.has(post.data.id)) return;
+            monthlyData[periodLabel].posts.add(post.data.id);
+            const words = `${post.data.title || ''} ${post.data.selftext || ''}`.toLowerCase().split(/\s+/);
+            words.forEach(word => {
+                const lemma = lemmatize(word);
+                if (positiveWords.has(lemma)) monthlyData[periodLabel].positive++;
+                if (negativeWords.has(lemma)) monthlyData[periodLabel].negative++;
+            });
+        });
+    });
+
+    return Object.entries(monthlyData).map(([period, counts]) => {
+        const total = counts.positive + counts.negative;
+        return {
+            period,
+            positivePercentage: total > 0 ? Math.round((counts.positive / total) * 100) : 0
+        };
+    });
+}
 
 async function generateAndRenderConstellation(items) {
     console.log("[Highcharts] Starting full generation process with batching strategy...");

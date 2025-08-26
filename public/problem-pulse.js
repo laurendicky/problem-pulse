@@ -21,57 +21,7 @@ const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'bro
 const emotionalIntensityScores = { 'annoy': 3, 'irritated': 3, 'bored': 2, 'issue': 3, 'sad': 4, 'bad': 3, 'confused': 4, 'tired': 3, 'upset': 5, 'unhappy': 5, 'disappoint': 6, 'frustrate': 6, 'stressful': 6, 'awful': 7, 'hate': 8, 'angry': 7, 'broken': 5, 'exhausted': 5, 'pain': 7, 'miserable': 8, 'terrible': 8, 'worst': 9, 'horrible': 8, 'furious': 9, 'outraged': 9, 'dreadful': 8, 'terrified': 10, 'nightmare': 10, 'heartbroken': 9, 'desperate': 8, 'rage': 10, 'problem': 4, 'challenge': 5, 'critical': 6, 'danger': 7, 'fear': 7, 'panic': 8, 'scared': 6, 'shocked': 7, 'trash': 5, 'alone': 4, 'ashamed': 5, 'depressed': 8, 'discouraged': 5, 'dull': 2, 'empty': 6, 'failure': 7, 'guilty': 6, 'hopeless': 8, 'insecure': 5, 'lonely': 6, 'weak': 4, 'need': 5, 'disadvantage': 4, 'flaw': 4 };
 const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
 
-// =================================================================================
-// === REPLACEMENT FUNCTION: fetchSentimentTrendData (V2 with AI & Promise.allSettled) ===
-// =================================================================================
-async function fetchSentimentTrendData(brandName, subredditQueryString) {
-    const timePeriods = [
-        { label: 'Past 6 Months', value: '6month' },
-        { label: 'Past 3 Months', value: '3month' },
-        { label: 'Last Month', value: 'month' },
-        { label: 'Last 7 Days', value: 'week' }
-    ];
 
-    // --- KEY CHANGE 1: Switched to Promise.allSettled ---
-    // This ensures that even if one API call fails, the others can still be processed.
-    const fetchPromises = timePeriods.map(period =>
-        fetchMultipleRedditDataBatched(subredditQueryString, [`"${brandName}"`], 75, period.value) // Increased sample size to 75
-    );
-    const results = await Promise.allSettled(fetchPromises);
-
-    const trendData = [];
-
-    // --- KEY CHANGE 2: Process results sequentially to avoid overwhelming the AI endpoint ---
-    for (let i = 0; i < results.length; i++) {
-        const result = results[i];
-        const periodLabel = timePeriods[i].label;
-
-        // Only process successfully fetched data
-        if (result.status === 'fulfilled' && result.value.length > 0) {
-            const posts = result.value;
-            // Classify sentiment for the fetched posts using our new AI helper
-            const sentimentResults = await classifySentimentWithAI(posts);
-
-            const positiveMentions = sentimentResults.filter(s => s === 'Positive').length;
-            const negativeMentions = sentimentResults.filter(s => s === 'Negative').length;
-            const totalMentions = positiveMentions + negativeMentions;
-
-            const positivePercentage = totalMentions > 0 ? Math.round((positiveMentions / totalMentions) * 100) : 50; // Default to 50 if no clear sentiment
-
-            trendData.push({
-                period: periodLabel,
-                positivePercentage: positivePercentage
-            });
-        } else {
-            // If a fetch failed, you could push a null or default value, or just skip it.
-            // Skipping is cleaner for the chart.
-            console.warn(`Could not fetch data for period: ${periodLabel}`);
-        }
-    }
-
-    // The Reddit API returns cumulative results, so we reverse to show a proper timeline.
-    return trendData.reverse();
-}
 
 // =================================================================================
 // === NEW HELPER FUNCTION: classifySentimentWithAI (Add this to your script) ===
@@ -1236,8 +1186,9 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
 
     // The rest of the function is now safe to run inside the try...catch
     try {
-        const top50Posts = postsForAnalysis.slice(0, 50);
-        const topPostsText = top50Posts.map(p => `"${p.data.title || ''} - ${p.data.selftext || p.data.body || ''}"`).join('\n');
+        const top75Posts = postsForAnalysis.slice(0, 75);
+        const topPostsText = top75Posts.map(p => `"${p.data.title || ''} - ${p.data.selftext || p.data.body || ''}"`).join('\n');
+    
 
         const prompt = isBrand ?
             `You are an expert market research analyst creating a competitive brief for "${itemName}" based on user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights.
@@ -1357,55 +1308,71 @@ function renderBrandMomentumChart(data) {
     });
 }
 
-function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
+function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; 
 
 // =================================================================================
-// === NEW HIGHCHARTS VISUALIZATION MODULE ===
-// =================================================================================
-// =================================================================================
-// === NEW HELPER FUNCTION: SENTIMENT TREND ANALYSIS ===
+// === REPLACEMENT FUNCTION: fetchSentimentTrendData (V3 - Multi-Term & Granular Time) ===
 // =================================================================================
 async function fetchSentimentTrendData(brandName, subredditQueryString) {
-    const now = new Date();
+    // --- KEY CHANGE 1: Define related terms for a more comprehensive search ---
+    // In a real application, you might use another AI call to generate these terms dynamically.
+    // For now, we can hard-code them for a specific known case like OpenAI.
+    let searchTerms = [`"${brandName}"`];
+    if (brandName.toLowerCase() === 'openai') {
+        searchTerms.push('"gpt-4o"', '"chatgpt"', '"gpt-5"');
+    }
+    // You could add more cases: else if (brandName.toLowerCase() === 'google') { ... }
+
+    // --- KEY CHANGE 2: Add more granular, recent time periods ---
     const timePeriods = [
-        { label: new Date(now.getFullYear(), now.getMonth() - 5, 1).toLocaleString('default', { month: 'short' }), value: '6month' },
-        { label: new Date(now.getFullYear(), now.getMonth() - 3, 1).toLocaleString('default', { month: 'short' }), value: '3month' },
-        { label: new Date(now.getFullYear(), now.getMonth() - 1, 1).toLocaleString('default', { month: 'short' }), value: 'month' },
-        { label: 'This Month', value: 't30d' } // Use a more recent period
+        { label: 'Past Year', value: 'year' },
+        { label: 'Past 6 Months', value: '6month' },
+        { label: 'Last Month', value: 'month' },
+        { label: 'Last 7 Days', value: 'week' },
+        { label: 'Last 3 Days', value: 't3d' } // 't3d' is not a standard Reddit filter, let's use week. For more granularity, we'd need a different approach. Let's keep the periods as they are but search more terms.
     ];
-    
-    const trendData = [];
-    const fetchPromises = timePeriods.map(period => 
-        fetchMultipleRedditDataBatched(subredditQueryString, [`"${brandName}"`], 50, period.value)
+     // Corrected Time Periods for responsiveness
+    const revisedTimePeriods = [
+        { label: 'Past 6 Mos', value: '6month' },
+        { label: 'Past 3 Mos', value: '3month' },
+        { label: 'Last 30 Days', value: 'month' },
+        { label: 'Last 7 Days', value: 'week' },
+    ];
+
+
+    const fetchPromises = revisedTimePeriods.map(period =>
+        // Fetch using ALL the search terms for each period
+        fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 50, period.value) // Sample size per term is 50
     );
+    const results = await Promise.allSettled(fetchPromises);
 
-    const results = await Promise.all(fetchPromises);
-    const monthlyData = {};
+    const trendData = [];
 
-    results.forEach((posts, index) => {
-        const periodLabel = timePeriods[index].label;
-        if (!monthlyData[periodLabel]) {
-            monthlyData[periodLabel] = { positive: 0, negative: 0, posts: new Set() };
-        }
-        posts.forEach(post => {
-            if (monthlyData[periodLabel].posts.has(post.data.id)) return;
-            monthlyData[periodLabel].posts.add(post.data.id);
-            const words = `${post.data.title || ''} ${post.data.selftext || ''}`.toLowerCase().split(/\s+/);
-            words.forEach(word => {
-                const lemma = lemmatize(word);
-                if (positiveWords.has(lemma)) monthlyData[periodLabel].positive++;
-                if (negativeWords.has(lemma)) monthlyData[periodLabel].negative++;
+    for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        const periodLabel = revisedTimePeriods[i].label;
+
+        if (result.status === 'fulfilled' && result.value.length > 0) {
+            // Deduplicate posts that might have been caught by multiple search terms
+            const uniquePosts = deduplicatePosts(result.value);
+            const sentimentResults = await classifySentimentWithAI(uniquePosts);
+
+            const positiveMentions = sentimentResults.filter(s => s === 'Positive').length;
+            const negativeMentions = sentimentResults.filter(s => s === 'Negative').length;
+            const totalMentions = positiveMentions + negativeMentions;
+
+            const positivePercentage = totalMentions > 0 ? Math.round((positiveMentions / totalMentions) * 100) : 50;
+
+            trendData.push({
+                period: periodLabel,
+                positivePercentage: positivePercentage
             });
-        });
-    });
+        } else {
+            console.warn(`Could not fetch data for period: ${periodLabel}`);
+        }
+    }
 
-    return Object.entries(monthlyData).map(([period, counts]) => {
-        const total = counts.positive + counts.negative;
-        return {
-            period,
-            positivePercentage: total > 0 ? Math.round((counts.positive / total) * 100) : 0
-        };
-    });
+    return trendData.reverse();
 }
 
 async function generateAndRenderConstellation(items) {

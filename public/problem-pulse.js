@@ -1210,7 +1210,7 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
         const brandSearchTerm = itemName.includes(' ') ? `"${itemName}"` : itemName;
         
-        const recentPosts = await fetchMultipleRedditDataBatched(subredditQuerystring, [brandSearchTerm], 100, 'month');
+        const recentPosts = await fetchMultipleRedditDataBatched(subredditQueryString, [brandSearchTerm], 100, 'month');
         if (recentPosts.length < 5) throw new Error(`Not enough mentions found for "${itemName}" in the last ${TIME_PERIOD_DAYS} days to generate a reliable brief.`);
         
         const postsForAnalysis = recentPosts.slice(0, 75); // Use a larger pool for analysis

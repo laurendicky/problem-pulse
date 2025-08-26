@@ -2104,6 +2104,9 @@ async function generateAndManageKeywordViews(posts, audienceContext) {
 // =================================================================================
 // === REPLACEMENT 2 of 2: The Keyword Card Renderer (Corrected) ===
 // =================================================================================
+// =================================================================================
+// === REPLACEMENT 1 of 2: The Keyword Card Renderer (Corrected) ===
+// =================================================================================
 function renderKeywordCards(keywordPlan) {
     const container = document.getElementById('keyword-cards-view');
     if (!container) return;
@@ -2115,7 +2118,6 @@ function renderKeywordCards(keywordPlan) {
     };
 
     const cardsHTML = keywordPlan.map(plan => {
-        // Use the plan.intent if it exists, otherwise provide a default
         const intentName = plan.intent || 'Keyword Cluster'; 
         const details = intentDetails[intentName] || { icon: '⭐', description: '' };
         
@@ -2130,8 +2132,7 @@ function renderKeywordCards(keywordPlan) {
                 <div class="keyword-cluster-header">
                     <span class="keyword-cluster-icon">${details.icon}</span>
                     <div>
-                        {/* === THIS LINE IS NOW SAFE === */}
-                        {/* It uses the safe intentName variable */}
+                        {/* The incorrect comments have been removed from this line */}
                         <h4 class="keyword-cluster-title">${intentName.replace('-', ' ')}</h4>
                         <p class="keyword-cluster-description">${details.description}</p>
                     </div>
@@ -2147,9 +2148,8 @@ function renderKeywordCards(keywordPlan) {
 
     container.innerHTML = cardsHTML;
 }
-
 // =================================================================================
-// === NEW FUNCTION 3 of 3: The Keyword Tree Renderer ===
+// === REPLACEMENT 2 of 2: The Keyword Tree Renderer (Improved Layout) ===
 // =================================================================================
 function renderKeywordTree(keywordPlan) {
     const container = document.getElementById('keyword-tree-view');
@@ -2173,8 +2173,13 @@ function renderKeywordTree(keywordPlan) {
     });
 
     Highcharts.chart(container, {
-        chart: { inverted: true, backgroundColor: 'transparent', height: '450px' },
-        title: { text: null }, // Title is handled by the main container now
+        chart: {
+            inverted: true,
+            backgroundColor: 'transparent',
+            // 1. Give the chart more vertical space to breathe
+            height: '600px' 
+        },
+        title: { text: null },
         credits: { enabled: false },
         series: [{
             type: 'treegraph',
@@ -2192,10 +2197,51 @@ function renderKeywordTree(keywordPlan) {
                     return html;
                 }
             },
-            dataLabels: { enabled: true, align: 'center', style: { color: 'white', textOutline: 'none', fontWeight: '500', fontSize: '14px' }, pointFormat: '{point.name}', y: 20 },
-            marker: { radius: 6 },
-            levels: [{ level: 1 }, { level: 2, color: '#7cb5ec', dataLabels: { color: '#333' } }, { level: 3 }, { level: 4, color: '#a5a5a5', dataLabels: { style: { fontSize: '12px' }, y: 18 } }],
-            link: { color: '#cccccc', width: 2 }
+            // 2. Give nodes more horizontal space
+            layoutAlgorithm: {
+                linkLength: 120 // Increases space between parent and child
+            },
+            dataLabels: {
+                // Default styles are minimal now, we will define them per level
+                style: {
+                    color: '#333',
+                    textOutline: 'none',
+                    fontWeight: '500',
+                    fontSize: '14px'
+                },
+            },
+            marker: { radius: 7 },
+            // 3. Apply custom styling for each level to prevent overlap
+            levels: [{
+                level: 1, // Root: "SEO Plan"
+                dataLabels: { color: 'white', y: 5 }
+            }, {
+                level: 2, // Intent: "Problem-Aware", etc.
+                dataLabels: {
+                    align: 'left', // Align text to the start of the node
+                    x: 15,         // Push text 15px away from the node
+                    y: 5,
+                    style: { fontWeight: 'bold' }
+                }
+            }, {
+                level: 3, // Primary Keyword
+                color: '#7cb5ec',
+                dataLabels: {
+                    align: 'left',
+                    x: 15,
+                    y: 5
+                }
+            }, {
+                level: 4, // Content Example
+                color: '#a5a5a5',
+                dataLabels: {
+                    align: 'left',
+                    x: 15,
+                    y: 5,
+                    style: { fontSize: '12px', fontStyle: 'italic', color: '#eee' }
+                }
+            }],
+            link: { color: '#555', width: 1.5 }
         }],
     });
 }

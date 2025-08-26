@@ -2101,55 +2101,9 @@ async function generateAndManageKeywordViews(posts, audienceContext) {
         container.innerHTML = `<h3 class="dashboard-section-title">Keyword Opportunities</h3><p class="error-message">Could not generate keyword strategy. Error: ${error.message}</p>`;
     }
 }
-// =================================================================================
-// === REPLACEMENT 2 of 2: The Keyword Card Renderer (Corrected) ===
-// =================================================================================
-// =================================================================================
-// === REPLACEMENT 1 of 2: The Keyword Card Renderer (Corrected) ===
-// =================================================================================
-function renderKeywordCards(keywordPlan) {
-    const container = document.getElementById('keyword-cards-view');
-    if (!container) return;
-    
-    const intentDetails = {
-        'Problem-Aware': { icon: '🤔', description: 'For blog posts & guides' },
-        'Solution-Seeking': { icon: '🔍', description: 'For comparisons & reviews' },
-        'Purchase-Intent': { icon: '💳', description: 'For landing pages & ads' }
-    };
 
-    const cardsHTML = keywordPlan.map(plan => {
-        const intentName = plan.intent || 'Keyword Cluster'; 
-        const details = intentDetails[intentName] || { icon: '⭐', description: '' };
-        
-        const allKeywords = [
-            `<li><strong>${plan.primary_keyword}</strong> (Primary)</li>`,
-            ...(plan.secondary_keywords || []).map(kw => `<li>${kw}</li>`),
-            ...(plan.long_tail_keywords || []).map(kw => `<li>${kw}</li>`)
-        ].join('');
-
-        return `
-            <div class="keyword-cluster">
-                <div class="keyword-cluster-header">
-                    <span class="keyword-cluster-icon">${details.icon}</span>
-                    <div>
-                        {/* The incorrect comments have been removed from this line */}
-                        <h4 class="keyword-cluster-title">${intentName.replace('-', ' ')}</h4>
-                        <p class="keyword-cluster-description">${details.description}</p>
-                    </div>
-                </div>
-                <ul class="keyword-list">${allKeywords}</ul>
-                <div class="content-example">
-                    <strong>Content Idea:</strong>
-                    <p>"${plan.content_example}"</p>
-                </div>
-            </div>
-        `;
-    }).join('');
-
-    container.innerHTML = cardsHTML;
-}
 // =================================================================================
-// === REPLACEMENT 2 of 2: The Keyword Tree Renderer (Improved Layout) ===
+// === REPLACEMENT: The Final, Definitive Keyword Tree Renderer ===
 // =================================================================================
 function renderKeywordTree(keywordPlan) {
     const container = document.getElementById('keyword-tree-view');
@@ -2159,25 +2113,73 @@ function renderKeywordTree(keywordPlan) {
         container.innerHTML = '<p class="error-message">Highcharts library not found. Cannot render tree.</p>';
         return;
     }
-    
-    let chartData = [{ id: 'root', name: 'SEO Plan', color: '#1a237e' }];
-    const intentColors = { 'Problem-Aware': '#3f51b5', 'Solution-Seeking': '#00838f', 'Purchase-Intent': '#ad1457' };
+
+    // 1. DATA STRUCTURE: Rebuild the full multi-level tree for visual depth.
+    let chartData = [{
+        id: 'root',
+        name: 'SEO Plan',
+        color: '#FFFFFF'
+    }];
+    const intentColors = {
+        'Problem-Aware': '#8a2be2',
+        'Solution-Seeking': '#00ced1',
+        'Purchase-Intent': '#ff4500'
+    };
 
     keywordPlan.forEach((plan, index) => {
         const intentId = `intent_${index}`;
         const primaryId = `primary_${index}`;
 
-        chartData.push({ id: intentId, parent: 'root', name: plan.intent, color: intentColors[plan.intent] || '#555' });
-        chartData.push({ id: primaryId, parent: intentId, name: plan.primary_keyword, secondary_keywords: plan.secondary_keywords, long_tail_keywords: plan.long_tail_keywords });
-        chartData.push({ id: `content_${index}`, parent: primaryId, name: `Ex: "${plan.content_example}"`, color: '#757575' });
+        // Level 2: Intent Node
+        chartData.push({
+            id: intentId,
+            parent: 'root',
+            name: plan.intent,
+            color: intentColors[plan.intent] || '#555'
+        });
+
+        // Level 3: Primary Keyword Node (The "Hub")
+        chartData.push({
+            id: primaryId,
+            parent: intentId,
+            name: plan.primary_keyword,
+            // Pass all data for the tooltip
+            _all_data: plan
+        });
+
+        // Level 4: Secondary Keywords (Spokes from the Hub)
+        (plan.secondary_keywords || []).forEach((kw, kw_idx) => {
+            chartData.push({
+                id: `${primaryId}_skw_${kw_idx}`,
+                parent: primaryId,
+                name: kw
+            });
+        });
+
+        // Level 4: Long-Tail Keywords (More Spokes)
+        (plan.long_tail_keywords || []).forEach((kw, kw_idx) => {
+            chartData.push({
+                id: `${primaryId}_ltw_${kw_idx}`,
+                parent: primaryId,
+                name: kw
+            });
+        });
+        
+        // Level 4: Content Example (Final Spoke)
+        chartData.push({
+            id: `${primaryId}_content`,
+            parent: primaryId,
+            name: `Ex: "${plan.content_example}"`
+        });
     });
 
+    // 2. HIGHCHARTS CONFIG: Meticulous styling for a clean, professional look.
     Highcharts.chart(container, {
         chart: {
             inverted: true,
             backgroundColor: 'transparent',
-            // 1. Give the chart more vertical space to breathe
-            height: '600px' 
+            height: '700px', // More vertical space for the larger tree
+            spacing: [50, 40, 50, 40] // [top, right, bottom, left]
         },
         title: { text: null },
         credits: { enabled: false },
@@ -2188,60 +2190,72 @@ function renderKeywordTree(keywordPlan) {
                 useHTML: true,
                 formatter: function() {
                     let point = this.point;
-                    let html = `<b>${point.name}</b>`;
                     if (point.id.includes('primary_')) {
-                        html += '<hr style="margin: 5px 0;">';
-                        if (point.options.secondary_keywords && point.options.secondary_keywords.length > 0) { html += '<b>Secondary:</b><ul>' + point.options.secondary_keywords.map(kw => `<li>${kw}</li>`).join('') + '</ul>'; }
-                        if (point.options.long_tail_keywords && point.options.long_tail_keywords.length > 0) { html += '<b>Long-tail:</b><ul>' + point.options.long_tail_keywords.map(kw => `<li>${kw}</li>`).join('') + '</ul>'; }
+                        const data = point.options._all_data;
+                        let html = `<b>${data.primary_keyword} (Hub)</b><hr style="margin: 5px 0;">`;
+                        html += '<b>Secondary:</b><ul>' + data.secondary_keywords.map(kw => `<li>${kw}</li>`).join('') + '</ul>';
+                        html += '<b>Long-tail:</b><ul>' + data.long_tail_keywords.map(kw => `<li>${kw}</li>`).join('') + '</ul>';
+                        return html;
                     }
-                    return html;
+                    return `<b>${point.name}</b>`;
                 }
             },
-            // 2. Give nodes more horizontal space
-            layoutAlgorithm: {
-                linkLength: 120 // Increases space between parent and child
+            marker: {
+                radius: 6,
+                symbol: 'circle'
             },
             dataLabels: {
-                // Default styles are minimal now, we will define them per level
+                // Default settings for all labels
                 style: {
-                    color: '#333',
+                    color: '#FFFFFF',
                     textOutline: 'none',
                     fontWeight: '500',
                     fontSize: '14px'
                 },
             },
-            marker: { radius: 7 },
-            // 3. Apply custom styling for each level to prevent overlap
+            // Specific styling for each level to prevent ANY overlap
             levels: [{
                 level: 1, // Root: "SEO Plan"
-                dataLabels: { color: 'white', y: 5 }
-            }, {
-                level: 2, // Intent: "Problem-Aware", etc.
                 dataLabels: {
-                    align: 'left', // Align text to the start of the node
-                    x: 15,         // Push text 15px away from the node
+                    align: 'center',
+                    y: -25 // Position label cleanly above the node
+                }
+            }, {
+                level: 2, // Intent Level
+                marker: { radius: 8 },
+                dataLabels: {
+                    align: 'right', // Place label to the LEFT of the node
+                    x: -15,
+                    y: 5
+                }
+            }, {
+                level: 3, // Primary Keyword "Hub"
+                color: '#80d8ff',
+                dataLabels: {
+                    align: 'left', // Place label to the RIGHT of the node
+                    x: 15,
                     y: 5,
                     style: { fontWeight: 'bold' }
                 }
             }, {
-                level: 3, // Primary Keyword
-                color: '#7cb5ec',
-                dataLabels: {
-                    align: 'left',
-                    x: 15,
-                    y: 5
-                }
-            }, {
-                level: 4, // Content Example
-                color: '#a5a5a5',
+                level: 4, // All Leaf Nodes (Keywords & Example)
+                color: '#B0BEC5',
                 dataLabels: {
                     align: 'left',
                     x: 15,
                     y: 5,
-                    style: { fontSize: '12px', fontStyle: 'italic', color: '#eee' }
+                    style: {
+                        fontWeight: 'normal',
+                        fontSize: '13px',
+                        fontStyle: 'italic',
+                        color: 'rgba(255, 255, 255, 0.8)'
+                    }
                 }
             }],
-            link: { color: '#555', width: 1.5 }
+            link: {
+                color: 'rgba(255, 255, 255, 0.4)',
+                width: 1
+            }
         }],
     });
 }

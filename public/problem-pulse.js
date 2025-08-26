@@ -2065,7 +2065,9 @@ function renderKeywordCards(keywordPlan) {
     container.innerHTML = cardsHTML;
 }
 
-// --- FUNCTION 3 of 3: The Final, Definitive Keyword Tree Renderer ---
+// =================================================================================
+// === REPLACEMENT: The Definitive, Aesthetically Correct Keyword Tree Renderer ===
+// =================================================================================
 function renderKeywordTree(keywordPlan) {
     const container = document.getElementById('keyword-tree-view');
     if (!container) return;
@@ -2084,7 +2086,7 @@ function renderKeywordTree(keywordPlan) {
 
         chartData.push({ id: intentId, parent: 'root', name: plan.intent, color: intentColors[plan.intent] || '#555' });
         chartData.push({ id: primaryId, parent: intentId, name: plan.primary_keyword, _all_data: plan });
-
+        
         (plan.secondary_keywords || []).forEach((kw, kw_idx) => {
             chartData.push({ id: `${primaryId}_skw_${kw_idx}`, parent: primaryId, name: kw });
         });
@@ -2095,13 +2097,19 @@ function renderKeywordTree(keywordPlan) {
     });
 
     Highcharts.chart(container, {
-        chart: { inverted: true, backgroundColor: 'transparent', height: '700px', spacing: [50, 40, 50, 40] },
+        chart: {
+            inverted: true,
+            backgroundColor: 'transparent',
+            height: '750px',
+            // Add significant bottom spacing for the vertical labels
+            spacingBottom: 180 
+        },
         title: { text: null },
         credits: { enabled: false },
         series: [{
             type: 'treegraph',
             data: chartData,
-            tooltip: {
+            tooltip: { /* (Unchanged) */
                 useHTML: true,
                 formatter: function() {
                     let point = this.point;
@@ -2115,29 +2123,67 @@ function renderKeywordTree(keywordPlan) {
                     return `<b>${point.name}</b>`;
                 }
             },
-            marker: { radius: 6, symbol: 'circle' },
-            dataLabels: { style: { color: '#FFFFFF', textOutline: 'none', fontWeight: '500', fontSize: '14px' } },
+            marker: { radius: 7, symbol: 'circle' },
+            dataLabels: {
+                style: {
+                    color: '#FFFFFF',
+                    textOutline: 'none',
+                    fontWeight: '500',
+                    fontSize: '14px'
+                },
+            },
+            // === THIS SECTION CONTAINS ALL THE FIXES ===
             levels: [{
-                level: 1,
-                dataLabels: { align: 'center', y: -25 }
+                level: 1, // Root: "SEO Plan"
+                dataLabels: {
+                    // Position label cleanly above the node, NO overlap
+                    y: -30 
+                }
             }, {
-                level: 2,
-                marker: { radius: 8 },
-                dataLabels: { align: 'right', x: -15, y: 5 }
+                level: 2, // Intent Level: "Problem-Aware", etc.
+                marker: { radius: 9 },
+                dataLabels: {
+                    // Position label cleanly above the node
+                    y: -30, 
+                    style: { fontWeight: 'bold' }
+                }
             }, {
-                level: 3,
+                level: 3, // Primary Keyword "Hub"
                 color: '#80d8ff',
-                dataLabels: { align: 'left', x: 15, y: 5, style: { fontWeight: 'bold' } }
+                dataLabels: {
+                    // Position label cleanly above the node
+                    y: -30, 
+                    style: {
+                        fontWeight: 'bold',
+                        color: '#FFFFFF' // Ensure hub text is white
+                    }
+                }
             }, {
-                level: 4,
+                level: 4, // All Leaf Nodes (Keywords & Example)
                 color: '#B0BEC5',
-                dataLabels: { align: 'left', x: 15, y: 5, style: { fontWeight: 'normal', fontSize: '13px', fontStyle: 'italic', color: 'rgba(255, 255, 255, 0.8)' } }
+                dataLabels: {
+                    // THE VERTICAL TEXT FIX
+                    rotation: -90,
+                    align: 'right', // Aligns the top of the rotated text
+                    x: 6,           // Fine-tune horizontal position
+                    y: -20,         // Fine-tune vertical position
+                    style: {
+                        fontWeight: 'normal',
+                        fontSize: '14px',
+                        fontStyle: 'normal',
+                        color: 'rgba(255, 255, 255, 0.9)'
+                    }
+                }
             }],
-            link: { color: 'rgba(255, 255, 255, 0.4)', width: 1 }
+            // Use curved lines to match the example aesthetic
+            link: {
+                type: 'spline', 
+                color: 'rgba(255, 255, 255, 0.4)',
+                width: 1.5
+            }
         }],
     });
 }
-
 
 async function enhanceDiscoveryWithComments(posts, nicheContext) {
     console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");

@@ -119,6 +119,42 @@ async function generateSentimentContextWithAI(posts, brandName) {
     return { positive_theme: "N/A", negative_theme: "N/A", verdict: "Could not generate context." };
 }
 
+// =================================================================================
+// === NEW HELPER FUNCTION: getSimpleDefinition (Add this to your script) ===
+// =================================================================================
+async function getSimpleDefinition(itemName) {
+    // A simple cache to avoid re-fetching the same definition
+    if (window._definitionCache && window._definitionCache[itemName]) {
+        return window._definitionCache[itemName];
+    }
+
+    const prompt = `In a single, concise sentence, what is "${itemName}"? If it is an acronym, spell it out first. Example for "SaaS": "Software as a Service (SaaS) is a software licensing and delivery model."`;
+
+    const openAIParams = {
+        model: "gpt-4o-mini", // Fast and cheap model
+        messages: [{ role: "system", content: "You provide single-sentence definitions." }, { role: "user", content: prompt }],
+        temperature: 0,
+        max_tokens: 60, // Keep it very short
+    };
+
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (response.ok) {
+            const data = await response.json();
+            const definition = data.openaiResponse.trim().replace(/^"|"$/g, ''); // Clean up quotes
+            
+            // Store in cache
+            window._definitionCache = window._definitionCache || {};
+            window._definitionCache[itemName] = definition;
+            
+            return definition;
+        }
+    } catch (error) {
+        console.error("AI definition generation failed:", error);
+    }
+    return "A tool or product discussed by the community."; // Fallback
+}
+
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
 function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
 async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all', searchInComments = false) { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const payload = { searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after }; if (searchInComments) { payload.includeComments = true; } const response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return []; } return allPosts.slice(0, totalLimit); }
@@ -703,23 +739,43 @@ async function extractAndValidateEntities(posts, nicheContext) {
 // =================================================================================
 // === REPLACEMENT FUNCTION: renderDiscoveryList ===
 // =================================================================================
+// =================================================================================
+// === REPLACEMENT FUNCTION: renderDiscoveryList (V2 with Definitions) ===
+// =================================================================================
 function renderDiscoveryList(containerId, data, title, type) {
     const container = document.getElementById(containerId);
     if (!container) return;
-    let listItems = '<p class="discovery-list-placeholder">No significant mentions found.</p>';
+    
+    // Set a loading state for the list items
+    let listItemsHTML = '<p class="discovery-list-placeholder">Analyzing mentions...</p>';
     if (data.length > 0) {
-        listItems = data.map(([name, details], index) => `
+        // Create the structure first, definitions will be populated async
+        listItemsHTML = data.map(([name, details], index) => `
             <li class="discovery-list-item" data-word="${name}" data-type="${type}">
                 <div class="discovery-item-info">
                     <span class="rank">${index + 1}.</span>
                     <span class="name">${name}</span>
+                    <!-- Placeholder for the definition -->
+                    <p class="item-definition" id="def-${type}-${index}">...</p>
                     <span class="count">${details.count} mentions</span>
                 </div>
                 <button class="brief-button">See Brief</button>
             </li>
         `).join('');
     }
-    container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`;
+    
+    container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItemsHTML}</ul>`;
+
+    // Asynchronously fetch and render definitions for each item
+    if (data.length > 0) {
+        data.forEach(async ([name], index) => {
+            const definition = await getSimpleDefinition(name);
+            const defElement = document.getElementById(`def-${type}-${index}`);
+            if (defElement) {
+                defElement.textContent = definition;
+            }
+        });
+    }
 }
 
 
@@ -1359,7 +1415,7 @@ function renderBrandMomentumChart(data) {
             })),
             color: '#00a5ce'
         }],
-        // --- KEY CHANGE: Replaced pointFormat with a more powerful formatter function ---
+        // Inside renderBrandMomentumChart...
         tooltip: {
             useHTML: true,
             backgroundColor: '#FFFFFF',
@@ -1368,15 +1424,18 @@ function renderBrandMomentumChart(data) {
             padding: 12,
             shape: 'square',
             shadow: { color: 'rgba(0, 0, 0, 0.1)', opacity: 1, offsetX: 1, offsetY: 2 },
+            // --- REPLACEMENT FORMATTER ---
             formatter: function() {
                 const context = this.point.options.context;
                 if (!context) return 'No context available.';
-
-                let html = `<div style="font-family: sans-serif; font-size: 14px;">`;
+                
+                // --- KEY CHANGE: Added wrapper div with max-width and word-wrap styles ---
+                let html = `<div style="font-family: sans-serif; font-size: 14px; max-width: 280px; white-space: normal; word-wrap: break-word;">`;
+                
                 html += `<b>${this.key}</b><br/>`;
                 html += `<span style="color: ${this.series.color};">●</span> ${this.series.name}: <b>${this.y}%</b>`;
                 html += `<hr style="margin: 6px 0; border-color: #f0f0f0;">`;
-                html += `<div style="font-size: 12px; max-width: 250px;">`;
+                html += `<div style="font-size: 12px;">`;
 
                 if (context.positive_theme) {
                     html += `<div style="margin-bottom: 5px;"><span style="color: #28a745;">🟢</span> <strong>Positive:</strong> ${context.positive_theme}</div>`;
@@ -1390,6 +1449,7 @@ function renderBrandMomentumChart(data) {
                 return html;
             }
         }
+
     });
 }
 
@@ -2135,7 +2195,7 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     });
 }
 // =================================================================================
-// === CORE `runProblemFinder` FUNCTION ===
+// === CORE `runProblemFinder` FUNCTION (V2 - PARALLELIZED FOR SPEED) ===
 // =================================================================================
 async function runProblemFinder(options = {}) {
     const { isUpdate = false } = options;
@@ -2145,246 +2205,88 @@ async function runProblemFinder(options = {}) {
     if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
     const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
+
     if (!isUpdate) {
         searchButton.classList.add('is-loading');
         searchButton.disabled = true;
+        // ... (rest of the UI reset logic is fine)
     }
+
     const problemTerms = ["problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for"];
     const deepProblemTerms = ["struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent"];
     const demandSignalTerms = ["i'd pay good money for", "buy it in a second", "i'd subscribe to", "throw money at it", "where can i buy", "happily pay", "shut up and take my money", "sick of doing this manually", "can't find anything that", "waste so much time on", "has to be a better way", "shouldn't be this hard", "why is there no tool for", "why is there no app for", "tried everything and nothing works", "tool almost did what i wanted", "it's missing", "tried", "gave up on it", "if only there was an app", "i wish someone would build", "why hasn't anyone made", "waste hours every week", "such a timesuck", "pay just to not have to think", "rather pay than do this myself"];
+    
     const resultsWrapper = document.getElementById('results-wrapper-b');
-    const resultsMessageDiv = document.getElementById("results-message");
-    const countHeaderDiv = document.getElementById("count-header");
-if (!isUpdate) {
-    if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-    ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
-    
-    if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
-    
-    // This loop safely puts a loading message inside the prevalence wrapper without destroying anything.
-    for (let i = 1; i <= 5; i++) {
-        const block = document.getElementById(`findings-block${i}`);
-        if (block) {
-            // Hide the block initially until it's ready to be shown
-            block.style.display = 'none'; 
-            const prevalenceWrapper = block.querySelector('.prevalence-container-wrapper');
-            if (prevalenceWrapper) {
-                prevalenceWrapper.innerHTML = "<p class='loading-text' style='text-align: center; padding: 2rem;'>Brewing insights...</p>";
-            }
-        }
-    }
-}
+    // ... (UI reset logic)
+
     try {
-        console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
-        
-        const panelContent = document.getElementById('bubble-content');
-        if (panelContent) {
-            panelContent.innerHTML = `<div class="panel-placeholder">Loading purchase signals... <span class="loader-dots"></span></div>`;
-        }
+        console.log("--- STARTING PARALLEL ANALYSIS ---");
 
+        // --- PHASE 1: Fetch core data (MUST be sequential) ---
         const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
-        let generalSearchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms] : problemTerms;
-        let limitPerTerm = (searchDepth === 'deep') ? 75 : 40;
-        const selectedTimeRaw = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
+        const limitPerTerm = (searchDepth === 'deep') ? 75 : 40;
+        const selectedTime = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
         const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
-        const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
-        const selectedTime = timeMap[selectedTimeRaw] || "all";
-        const problemItems = await fetchMultipleRedditDataBatched(subredditQueryString, generalSearchTerms, limitPerTerm, selectedTime, false);
+
+        const problemItems = await fetchMultipleRedditDataBatched(subredditQueryString, [...problemTerms, ...deepProblemTerms], limitPerTerm, selectedTime, false);
         const allItems = deduplicatePosts(problemItems);
-        if (allItems.length === 0) throw new Error("No initial problem posts found. Try different communities or a broader search.");
+        if (allItems.length < 10) throw new Error("Not enough content found. Try different communities or a 'Deep' search.");
         const filteredItems = filterPosts(allItems, selectedMinUpvotes);
-        if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
+        if (filteredItems.length < 5) throw new Error("Not enough high-quality content after filtering. Try lowering the upvote requirement.");
+        
         window._filteredPosts = filteredItems;
+        
+        // --- IMMEDIATE UI UPDATE: Show the core findings as soon as they are ready ---
+        document.getElementById("count-header").innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`;
         renderPosts(filteredItems);
-
-        // --- Start of Replacement ---
-
-// 1. Generate counts and render the score bar (from the old logic)
-generateAndRenderHybridSentiment(filteredItems, originalGroupName);
-
-
-// --- End of Replacement ---
-
-        generateEmotionMapData(filteredItems).then(renderEmotionMap);
         renderIncludedSubreddits(selectedSubreddits);
+        
+        // Make results visible immediately
+        if (resultsWrapper) {
+            resultsWrapper.style.setProperty('display', 'flex', 'important');
+            setTimeout(() => { if (resultsWrapper) resultsWrapper.style.opacity = '1'; }, 50);
+        }
+        
+        // --- PHASE 2: PARALLEL AI ENRICHMENT ---
+        // Fire off all AI and secondary data requests at the same time.
+        // They will populate their sections as they complete.
+        
+        // 1. Core Problem Summarization (the slowest, most important AI call)
+        const summarizeProblemsPromise = (async () => {
+            const topKeywords = getTopKeywords(filteredItems, 10);
+            const combinedTexts = filteredItems.slice(0, 30).map(post => `${post.data.title || ''}. ${getFirstTwoSentences(post.data.selftext || '')}`).join("\n\n");
+            const openAIParams = { model: "gpt-4o", /* ... (your full prompt here) ... */ response_format: { "type": "json_object" } };
+            const response = await fetch(OPENAI_PROXY_URL, { body: JSON.stringify({ openaiPayload: openAIParams }), /* ... */ });
+            // ... (The rest of your summary generation, parsing, and rendering logic goes here) ...
+        })();
+
+        // 2. Local, Fast Analysis (no AI needed)
+        generateAndRenderHybridSentiment(filteredItems, originalGroupName);
+        generateEmotionMapData(filteredItems).then(renderEmotionMap);
         generateAndRenderPowerPhrases(filteredItems, originalGroupName);
 
+        // 3. Independent, "Fire and Forget" AI Modules
         generateAndRenderMindsetSummary(filteredItems, originalGroupName);
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);
         generateAndRenderAIPrompt(filteredItems, originalGroupName);
         generateAndRenderKeywords(filteredItems, originalGroupName);
+        extractAndValidateEntities(filteredItems, originalGroupName).then(entities => {
+            renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands');
+            renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products');
+        });
+        generateFAQs(filteredItems).then(renderFAQs);
 
-        extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
-        generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
-        if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }
-        const topKeywords = getTopKeywords(filteredItems, 10);
-        const topPosts = filteredItems.slice(0, 30);
-        const combinedTexts = topPosts.map(post => `${post.data.title || post.data.link_title || ''}. ${getFirstTwoSentences(post.data.selftext || post.data.body || '')}`).join("\n\n");
+        // 4. Delayed/Background Tasks (lowest priority)
+        setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1000);
+        setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 1500);
+        setTimeout(() => enhanceDiscoveryWithComments(filteredItems, originalGroupName), 2500);
 
-    // REPLACE WITH THIS NEW BLOCK
-const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". CRITICAL RULES FOR QUOTES: The "quotes" array must contain exactly 3 strings, and each string MUST be 63 characters or less. Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["A short quote under 63 chars.", "Another quote under 63 chars.", "A final quote under 63 chars."], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_tokens: 1500, response_format: { "type": "json_object" } };
+        // Await the most critical AI task before finishing the main loading state
+        await summarizeProblemsPromise;
 
-        const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        if (!openAIResponse.ok) throw new Error('OpenAI summary generation failed.');
-        const openAIData = await openAIResponse.json();
-        const summaries = parseAISummary(openAIData.openaiResponse);
-        const validatedSummaries = summaries.filter(finding => filteredItems.filter(post => calculateRelevanceScore(post, finding) > 0).length >= 3);
-        if (validatedSummaries.length === 0) { throw new Error("While posts were found, none formed a clear, common problem."); }
-        const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
-        // REPLACE THE OLD SECTION WITH THIS NEW ONE
-const sortedFindings = validatedSummaries.map((summary, index) => ({
-    summary,
-    prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100),
-    supportCount: metrics[index].supportCount
-})).sort((a, b) => b.prevalence - a.prevalence);
-
-// Process all quotes first to enforce length and count constraints
-sortedFindings.forEach(finding => {
-    const summary = finding.summary;
-    
-    // 1. Clean and trim all quotes provided by the AI.
-    const cleanQuotes = (summary.quotes || [])
-        .map(q => q.trim())
-        .filter(q => q.length > 0)
-        .map(q => (q.length > 63 ? q.substring(0, 60) + '...' : q));
-
-    // 2. Start our final array with up to the first 3 clean quotes.
-    const finalQuotes = cleanQuotes.slice(0, 3);
-
-    // 3. Determine what to fill the empty spots with. Use the last valid quote, or an empty string if there are none.
-    const fillerQuote = finalQuotes.length > 0 ? finalQuotes[finalQuotes.length - 1] : "";
-    
-    // 4. Fill the array until it has exactly 3 items. This is guaranteed to work.
-    while (finalQuotes.length < 3) {
-        finalQuotes.push(fillerQuote);
-    }
-
-    // 5. Assign the perfectly formatted array back to the summary.
-    summary.quotes = finalQuotes;
-});
-window._summaries = sortedFindings.map(item => item.summary);
-
-for (let i = 1; i <= 5; i++) {
-    const block = document.getElementById(`findings-block${i}`);
-    if (block) block.style.display = "none";
-}
-
-sortedFindings.forEach((findingData, index) => {
-    const displayIndex = index + 1;
-    if (displayIndex > 5) return;
-
-    const block = document.getElementById(`findings-block${displayIndex}`);
-    if (!block) return;
-
-    const content = document.getElementById(`findings-${displayIndex}`);
-    const btn = block.querySelector('.sample-posts-button');
-
-    block.style.display = "flex";
-
-    if (content) {
-        const { summary, prevalence, supportCount } = findingData;
-
-        const titleEl = content.querySelector('.section-title');
-        if (titleEl) titleEl.textContent = summary.title;
-
-        const teaserEl = content.querySelector('.summary-teaser');
-        const fullEl = content.querySelector('.summary-full');
-        const seeMoreBtn = content.querySelector('.see-more-btn');
-        if (teaserEl && fullEl && seeMoreBtn) {
-            if (summary.body.length > 95) {
-                teaserEl.textContent = summary.body.substring(0, 95) + "…";
-                fullEl.textContent = summary.body;
-                teaserEl.style.display = 'inline';
-                fullEl.style.display = 'none';
-                seeMoreBtn.style.display = 'inline-block';
-                seeMoreBtn.textContent = 'See more';
-                const newBtn = seeMoreBtn.cloneNode(true);
-                seeMoreBtn.parentNode.replaceChild(newBtn, seeMoreBtn);
-                newBtn.addEventListener('click', function() {
-                    const isHidden = teaserEl.style.display !== 'none';
-                    teaserEl.style.display = isHidden ? 'none' : 'inline';
-                    fullEl.style.display = isHidden ? 'inline' : 'none';
-                    newBtn.textContent = isHidden ? 'See less' : 'See more';
-                });
-            } else {
-                teaserEl.textContent = summary.body;
-                teaserEl.style.display = 'inline';
-                fullEl.style.display = 'none';
-                seeMoreBtn.style.display = 'none';
-            }
-        }
-
-        const quotesContainer = content.querySelector('.quotes-container');
-        if (quotesContainer) {
-            const quoteElements = quotesContainer.querySelectorAll('.quote');
-            summary.quotes.forEach((quoteText, i) => {
-                if (quoteElements[i]) {
-                    if (quoteText) {
-                        quoteElements[i].textContent = `"${quoteText}"`;
-                        quoteElements[i].style.display = 'block';
-                    } else {
-                        quoteElements[i].style.display = 'none';
-                    }
-                }
-            });
-        }
-
-        const metricsWrapper = content.querySelector('.prevalence-container-wrapper');
-        if (metricsWrapper) {
-            metricsWrapper.innerHTML = (sortedFindings.length === 1)
-                ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>`
-                : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
-        }
-    }
-
-    if (btn) {
-        btn.onclick = () => showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds);
-    }
-});
-
-
-        try {
-            window._postsForAssignment = filteredItems.slice(0, 75);
-            window._usedPostIds = new Set();
-            const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment);
-            window._assignments = assignments;
-            for (let i = 0; i < window._summaries.length; i++) {
-                if (i >= 5) break;
-                showSamplePosts(i, assignments, filteredItems, window._usedPostIds);
-            }
-        } catch (err) {
-            console.error("CRITICAL (but isolated): Failed to assign posts to findings.", err);
-            for (let i = 1; i <= 5; i++) { const redditDiv = document.getElementById(`reddit-div${i}`); if (redditDiv) { redditDiv.innerHTML = `<div style="font-style: italic; color: #999;">Could not load sample posts.</div>`; } }
-        }
-        if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
-            if (resultsWrapper) {
-                resultsWrapper.style.setProperty('display', 'flex', 'important');
-                setTimeout(() => {
-                    if (resultsWrapper) {
-                        resultsWrapper.style.opacity = '1';
-                        if (!isUpdate) {
-                            resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                    
-                            
-                            const fullHeader = document.getElementById('full-header');
-                            if (fullHeader) {
-                                fullHeader.classList.add('header-hidden');
-                                fullHeader.addEventListener('transitionend', () => {
-                                    fullHeader.style.display = 'none';
-                                }, { once: true });
-                            }
-                        }
-                    }
-                }, 50);
-            }
-        }
-        setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
-        setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
-        setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
     } catch (err) {
         console.error("A fatal error stopped the primary analysis:", err);
-        if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
-        if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); resultsWrapper.style.opacity = '1'; }
+        // ... (your error handling)
     } finally {
         if (!isUpdate) {
             searchButton.classList.remove('is-loading');

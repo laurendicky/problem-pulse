@@ -75,6 +75,49 @@ async function classifySentimentWithAI(posts) {
     }
     return allSentiments;
 }
+// =================================================================================
+// === NEW HELPER FUNCTION: generateSentimentContextWithAI (Add this to your script) ===
+// =================================================================================
+async function generateSentimentContextWithAI(posts, brandName) {
+    // Take a representative sample of up to 25 posts for the summary
+    const samplePosts = posts.slice(0, 25);
+    if (samplePosts.length === 0) {
+        return { positive_theme: "", negative_theme: "", verdict: "No discussion found for this period." };
+    }
+
+    const postsForAI = samplePosts.map(p => `"${(p.data.title || '')} - ${(p.data.selftext || p.data.body || '').substring(0, 250)}"`).join('\n');
+
+    const prompt = `You are a market research analyst. Below is a sample of user comments about "${brandName}".
+    Your task is to provide a brief, insightful summary of the discussion.
+
+    Respond ONLY with a valid JSON object with three keys:
+    1.  "positive_theme": A single, short sentence describing the main reason for positive sentiment. If none, return "".
+    2.  "negative_theme": A single, short sentence describing the main reason for negative sentiment. If none, return "".
+    3.  "verdict": A single concluding sentence that explains the overall sentiment balance.
+
+    User Comments:
+    ${postsForAI}`;
+
+    const openAIParams = {
+        model: "gpt-4o-mini",
+        messages: [{ role: "system", content: "You are a concise market analyst outputting only JSON." }, { role: "user", content: prompt }],
+        temperature: 0.1,
+        max_tokens: 300,
+        response_format: { "type": "json_object" }
+    };
+
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (response.ok) {
+            const data = await response.json();
+            return JSON.parse(data.openaiResponse);
+        }
+    } catch (error) {
+        console.error("AI context generation failed:", error);
+    }
+    // Return a default object on failure
+    return { positive_theme: "N/A", negative_theme: "N/A", verdict: "Could not generate context." };
+}
 
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
 function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
@@ -1288,9 +1331,18 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
     }
 }
 
-
+// =================================================================================
+// === REPLACEMENT FUNCTION: renderBrandMomentumChart (V2 - With Contextual Tooltip) ===
+// =================================================================================
 function renderBrandMomentumChart(data) {
-    if (typeof Highcharts === 'undefined' || !data || data.length === 0) return;
+    if (typeof Highcharts === 'undefined' || !data || data.length === 0) {
+        // Display a message if no data is available
+        const chartContainer = document.getElementById('brand-momentum-chart');
+        if (chartContainer) {
+            chartContainer.innerHTML = '<p class="chart-placeholder-text">Not enough data to generate a momentum chart.</p>';
+        }
+        return;
+    }
 
     Highcharts.chart('brand-momentum-chart', {
         chart: { type: 'line', backgroundColor: 'transparent' },
@@ -1301,37 +1353,57 @@ function renderBrandMomentumChart(data) {
         legend: { enabled: false },
         series: [{
             name: '% Positive Sentiment',
-            data: data.map(d => d.positivePercentage),
+            data: data.map(d => ({
+                y: d.positivePercentage,
+                context: d.context // Pass context to each point
+            })),
             color: '#00a5ce'
         }],
-        tooltip: { pointFormat: '{series.name}: <b>{point.y}%</b>' }
+        // --- KEY CHANGE: Replaced pointFormat with a more powerful formatter function ---
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#FFFFFF',
+            borderColor: '#E0E0E0',
+            borderWidth: 1,
+            padding: 12,
+            shape: 'square',
+            shadow: { color: 'rgba(0, 0, 0, 0.1)', opacity: 1, offsetX: 1, offsetY: 2 },
+            formatter: function() {
+                const context = this.point.options.context;
+                if (!context) return 'No context available.';
+
+                let html = `<div style="font-family: sans-serif; font-size: 14px;">`;
+                html += `<b>${this.key}</b><br/>`;
+                html += `<span style="color: ${this.series.color};">●</span> ${this.series.name}: <b>${this.y}%</b>`;
+                html += `<hr style="margin: 6px 0; border-color: #f0f0f0;">`;
+                html += `<div style="font-size: 12px; max-width: 250px;">`;
+
+                if (context.positive_theme) {
+                    html += `<div style="margin-bottom: 5px;"><span style="color: #28a745;">🟢</span> <strong>Positive:</strong> ${context.positive_theme}</div>`;
+                }
+                if (context.negative_theme) {
+                    html += `<div style="margin-bottom: 5px;"><span style="color: #dc3545;">🔴</span> <strong>Critical:</strong> ${context.negative_theme}</div>`;
+                }
+                html += `<div style="margin-top: 8px; font-style: italic;"><strong>Verdict:</strong> ${context.verdict}</div>`;
+
+                html += `</div></div>`;
+                return html;
+            }
+        }
     });
 }
 
 function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
 // =================================================================================
-// === REPLACEMENT FUNCTION: fetchSentimentTrendData (V3 - Multi-Term & Granular Time) ===
+// === REPLACEMENT FUNCTION: fetchSentimentTrendData (V4 - With Context & Corrected Axis) ===
 // =================================================================================
 async function fetchSentimentTrendData(brandName, subredditQueryString) {
-    // --- KEY CHANGE 1: Define related terms for a more comprehensive search ---
-    // In a real application, you might use another AI call to generate these terms dynamically.
-    // For now, we can hard-code them for a specific known case like OpenAI.
     let searchTerms = [`"${brandName}"`];
     if (brandName.toLowerCase() === 'openai') {
         searchTerms.push('"gpt-4o"', '"chatgpt"', '"gpt-5"');
     }
-    // You could add more cases: else if (brandName.toLowerCase() === 'google') { ... }
 
-    // --- KEY CHANGE 2: Add more granular, recent time periods ---
-    const timePeriods = [
-        { label: 'Past Year', value: 'year' },
-        { label: 'Past 6 Months', value: '6month' },
-        { label: 'Last Month', value: 'month' },
-        { label: 'Last 7 Days', value: 'week' },
-        { label: 'Last 3 Days', value: 't3d' } // 't3d' is not a standard Reddit filter, let's use week. For more granularity, we'd need a different approach. Let's keep the periods as they are but search more terms.
-    ];
-     // Corrected Time Periods for responsiveness
     const revisedTimePeriods = [
         { label: 'Past 6 Mos', value: '6month' },
         { label: 'Past 3 Mos', value: '3month' },
@@ -1339,10 +1411,8 @@ async function fetchSentimentTrendData(brandName, subredditQueryString) {
         { label: 'Last 7 Days', value: 'week' },
     ];
 
-
     const fetchPromises = revisedTimePeriods.map(period =>
-        // Fetch using ALL the search terms for each period
-        fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 50, period.value) // Sample size per term is 50
+        fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 50, period.value)
     );
     const results = await Promise.allSettled(fetchPromises);
 
@@ -1353,26 +1423,30 @@ async function fetchSentimentTrendData(brandName, subredditQueryString) {
         const periodLabel = revisedTimePeriods[i].label;
 
         if (result.status === 'fulfilled' && result.value.length > 0) {
-            // Deduplicate posts that might have been caught by multiple search terms
             const uniquePosts = deduplicatePosts(result.value);
             const sentimentResults = await classifySentimentWithAI(uniquePosts);
+            
+            // --- KEY CHANGE 1: Generate context for this time period ---
+            const contextSummary = await generateSentimentContextWithAI(uniquePosts, brandName);
 
             const positiveMentions = sentimentResults.filter(s => s === 'Positive').length;
             const negativeMentions = sentimentResults.filter(s => s === 'Negative').length;
             const totalMentions = positiveMentions + negativeMentions;
-
             const positivePercentage = totalMentions > 0 ? Math.round((positiveMentions / totalMentions) * 100) : 50;
 
             trendData.push({
                 period: periodLabel,
-                positivePercentage: positivePercentage
+                positivePercentage: positivePercentage,
+                context: contextSummary // Attach the context to the data point
             });
         } else {
             console.warn(`Could not fetch data for period: ${periodLabel}`);
         }
     }
 
-    return trendData.reverse();
+    // --- KEY CHANGE 2: REMOVED .reverse() TO FIX X-AXIS ORDER ---
+    // The data is now naturally ordered from oldest to newest.
+    return trendData;
 }
 
 async function generateAndRenderConstellation(items) {

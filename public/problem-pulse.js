@@ -2067,6 +2067,9 @@ function renderKeywordCards(keywordPlan) {
 // =================================================================================
 // === REPLACEMENT: The Final, STABLE, and Aesthetically Correct Tree Renderer ===
 // =================================================================================
+// =================================================================================
+// === REPLACEMENT: The Definitive, Aesthetically Correct Keyword Tree Renderer (V3) ===
+// =================================================================================
 function renderKeywordTree(keywordPlan) {
     const container = document.getElementById('keyword-tree-view');
     if (!container) return;
@@ -2076,31 +2079,67 @@ function renderKeywordTree(keywordPlan) {
         return;
     }
 
-    let chartData = [{ id: 'root', name: 'SEO Plan', color: '#FFFFFF' }];
-    const intentColors = { 'Problem-Aware': '#8a2be2', 'Solution-Seeking': '#00ced1', 'Purchase-Intent': '#ff4500' };
+    // 1. A NEW DATA STRUCTURE to match your screenshot's design precisely.
+    // Level 2 is now a decorative node, and Level 3 is the main topic.
+    let chartData = [{
+        id: 'root',
+        name: 'SEO Plan',
+        color: '#FFFFFF'
+    }];
+    const intentColors = {
+        'Problem-Aware': '#ab47bc',  // Purple
+        'Solution-Seeking': '#26c6da', // Cyan
+        'Purchase-Intent': '#ef5350'  // Red
+    };
+    const primaryNodeColor = '#4fc3f7'; // Light Blue
+    const leafNodeColor = '#9e9e9e'; // Grey
 
     keywordPlan.forEach((plan, index) => {
         const intentId = `intent_${index}`;
         const primaryId = `primary_${index}`;
 
-        chartData.push({ id: intentId, parent: 'root', name: plan.intent, color: intentColors[plan.intent] || '#555' });
-        chartData.push({ id: primaryId, parent: intentId, name: plan.primary_keyword, _all_data: plan });
+        // Level 2: Decorative Intent Node (Shows '...' as in your screenshot)
+        chartData.push({
+            id: intentId,
+            parent: 'root',
+            name: '...', // The literal "..." from your design
+            color: intentColors[plan.intent] || '#555'
+        });
 
-        (plan.secondary_keywords || []).forEach((kw, kw_idx) => {
-            chartData.push({ id: `${primaryId}_skw_${kw_idx}`, parent: primaryId, name: kw });
+        // Level 3: Primary Keyword Node (The main text label)
+        chartData.push({
+            id: primaryId,
+            parent: intentId,
+            name: plan.primary_keyword,
+            color: primaryNodeColor,
+            // Pass all data for the tooltip
+            _all_data: plan
         });
-        (plan.long_tail_keywords || []).forEach((kw, kw_idx) => {
-            chartData.push({ id: `${primaryId}_ltw_${kw_idx}`, parent: primaryId, name: kw });
+        
+        // Level 4: All Leaf Nodes (Secondary, Long-tail, and Example)
+        const leafKeywords = [
+            ...(plan.secondary_keywords || []),
+            ...(plan.long_tail_keywords || []),
+            `Ex: "${plan.content_example}"`
+        ];
+        
+        leafKeywords.forEach((kw, kw_idx) => {
+            chartData.push({
+                id: `${primaryId}_leaf_${kw_idx}`,
+                parent: primaryId,
+                name: kw,
+                color: leafNodeColor
+            });
         });
-        chartData.push({ id: `${primaryId}_content`, parent: primaryId, name: `Ex: "${plan.content_example}"` });
     });
 
+    // 2. HIGHCHARTS CONFIG: Meticulously styled to match your screenshot.
     Highcharts.chart(container, {
         chart: {
             inverted: true,
             backgroundColor: 'transparent',
-            height: '750px',
-            spacingBottom: 180
+            height: '800px',
+            spacingBottom: 200 // More space for vertical labels
         },
         title: { text: null },
         credits: { enabled: false },
@@ -2121,48 +2160,53 @@ function renderKeywordTree(keywordPlan) {
                     return `<b>${point.name}</b>`;
                 }
             },
-            marker: { radius: 7, symbol: 'circle' },
+            marker: { radius: 8, symbol: 'circle' },
             dataLabels: {
                 style: {
                     color: '#FFFFFF',
                     textOutline: 'none',
-                    fontWeight: '500',
-                    fontSize: '14px'
+                    fontWeight: 'normal',
+                    fontSize: '16px'
                 },
             },
             levels: [{
                 level: 1, // Root: "SEO Plan"
-                dataLabels: { y: -30 }
+                dataLabels: { y: -35, style: { fontSize: '18px', fontWeight: 'bold' } }
             }, {
-                level: 2, // Intent Level: "Problem-Aware", etc.
-                marker: { radius: 9 },
-                dataLabels: { y: -30, style: { fontWeight: 'bold' } }
+                level: 2, // Decorative "..." Node
+                marker: { radius: 10 },
+                dataLabels: {
+                    y: 35, // Position "..." below the node
+                    style: { fontSize: '24px', fontWeight: 'bold' }
+                }
             }, {
                 level: 3, // Primary Keyword "Hub"
-                color: '#80d8ff',
-                dataLabels: { y: -30, style: { fontWeight: 'bold' } }
+                marker: { radius: 10 },
+                dataLabels: {
+                    y: 40, // Position "AI Challenges", etc. below the node
+                    style: { fontSize: '18px', fontWeight: 'bold' }
+                }
             }, {
-                level: 4, // All Leaf Nodes (Keywords & Example)
-                color: '#B0BEC5',
+                level: 4, // All Leaf Nodes
+                marker: { radius: 7 },
                 dataLabels: {
                     rotation: -90,
                     align: 'right',
-                    x: 6,
-                    y: -20,
+                    x: 8,
+                    y: -25,
                     style: {
-                        fontWeight: 'normal',
                         fontSize: '14px',
-                        fontStyle: 'normal',
-                        color: 'rgba(255, 255, 255, 0.9)'
+                        color: 'rgba(255, 255, 255, 0.85)'
                     }
                 }
             }],
-            // === THIS IS THE FIX ===
-            // The incompatible 'spline' type has been removed.
-            // We now use default straight lines, which are guaranteed to work.
             link: {
-                color: 'rgba(255, 255, 255, 0.4)',
-                width: 1
+                // Use thin, curved lines for the top level, straight for the rest
+                // This requires a custom function to achieve the mixed effect.
+                // For stability, we will use one clean type.
+                type: 'line', // Sticking to the most stable link type
+                color: 'rgba(255, 255, 255, 0.3)',
+                width: 1.5
             }
         }],
     });

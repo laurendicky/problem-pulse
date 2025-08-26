@@ -1958,78 +1958,15 @@ Your writing should adopt the following characteristics:
     }
 }
 
-
-
 // =================================================================================
-// === NEW REPLACEMENT FUNCTION: Generate & Render Keyword Tree ===
+// === PASTE THIS ENTIRE 3-FUNCTION BLOCK INTO YOUR CODE ===
 // =================================================================================
 
-async function generateAndRenderKeywordTree(posts, audienceContext) {
-    const container = document.getElementById('keyword-tree');
-    if (!container) return;
-
-    container.innerHTML = `<h3 class="dashboard-section-title">Keyword Opportunities</h3><p class="loading-text">Building strategic keyword tree...</p>`;
-
-    try {
-        const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
-
-        const prompt = `You are an expert SEO strategist creating a content plan for the "${audienceContext}" audience.
-        Analyze the following user posts and extract high-value keywords for each stage of the marketing funnel.
-        Then, structure this information into a strategic hierarchy.
-
-        For each of the 3 intent categories ("Problem-Aware", "Solution-Seeking", "Purchase-Intent"), you must provide:
-        1. "primary_keyword": A short, 2-3 word theme summarizing the core topic for that intent.
-        2. "secondary_keywords": An array of 2-3 broader keywords related to the primary theme.
-        3. "long_tail_keywords": An array of 2-3 highly specific, long-tail keywords.
-        4. "content_example": A single, compelling blog post title that targets this keyword cluster.
-
-        Respond ONLY with a valid JSON object with a single key "keyword_plan". This key should hold an array of 3 objects, one for each intent category, following the structure described above.
-
-        Posts:\n${topPostsText}`;
-
-        const openAIParams = {
-            model: "gpt-4o", // Using a more powerful model is recommended for this complex task
-            messages: [
-                { role: "system", content: "You are an SEO strategist who outputs a structured keyword hierarchy in a strict JSON format." },
-                { role: "user", content: prompt }
-            ],
-            temperature: 0.2,
-            max_tokens: 1500,
-            response_format: { "type": "json_object" }
-        };
-
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        
-        if (!response.ok) throw new Error('Keyword tree analysis API call failed.');
-
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
-        
-        if (parsed && parsed.keyword_plan) {
-            // The container's title will be part of the chart itself, so clear the container
-            container.innerHTML = ''; 
-            renderKeywordTree(parsed);
-        } else {
-             throw new Error('AI response for keyword tree was invalid.');
-        }
-
-    } catch (error) {
-        console.error("Keyword tree generation error:", error);
-        container.innerHTML = `
-            <h3 class="dashboard-section-title">Keyword Opportunities</h3>
-            <p class="error-message">Could not generate the keyword strategy tree.</p>
-        `;
-    }
-}
-
-// =================================================================================
-// === REPLACEMENT 1 of 2: The Main Keyword Feature Manager (Corrected) ===
-// =================================================================================
+// --- FUNCTION 1 of 3: The Main Keyword Feature Manager ---
 async function generateAndManageKeywordViews(posts, audienceContext) {
     const container = document.getElementById('keyword-opportunities-container');
     if (!container) return;
 
-    // (This part is unchanged)
     container.innerHTML = `
         <div class="keyword-header">
             <h3 class="dashboard-section-title">Keyword Opportunities</h3>
@@ -2064,23 +2001,7 @@ async function generateAndManageKeywordViews(posts, audienceContext) {
 
     try {
         const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
-        
-        // === THIS PROMPT IS THE FIX ===
-        // It now explicitly tells the AI to include the "intent" key in each object.
-        const prompt = `You are an expert SEO strategist creating a content plan for the "${audienceContext}" audience.
-        Analyze the following user posts.
-
-        Respond ONLY with a valid JSON object with a single key "keyword_plan". This key must hold an array of 3 objects.
-        
-        CRITICAL: Each object in the array must represent one of the 3 intent categories ("Problem-Aware", "Solution-Seeking", "Purchase-Intent") and MUST contain the following keys:
-        1. "intent": The name of the intent category (e.g., "Problem-Aware").
-        2. "primary_keyword": A short, 2-3 word theme summarizing the core topic for that intent.
-        3. "secondary_keywords": An array of 2-3 broader keywords.
-        4. "long_tail_keywords": An array of 2-3 highly specific, long-tail keywords.
-        5. "content_example": A single, compelling blog post title that targets this cluster.
-
-        Posts:\n${topPostsText}`;
-
+        const prompt = `You are an expert SEO strategist creating a content plan for the "${audienceContext}" audience. Analyze the following user posts. Respond ONLY with a valid JSON object with a single key "keyword_plan". This key must hold an array of 3 objects. CRITICAL: Each object must represent one of the 3 intent categories ("Problem-Aware", "Solution-Seeking", "Purchase-Intent") and MUST contain the following keys: 1. "intent": The name of the intent category. 2. "primary_keyword": A short, 2-3 word theme. 3. "secondary_keywords": An array of 2-3 broader keywords. 4. "long_tail_keywords": An array of 2-3 highly specific, long-tail keywords. 5. "content_example": A single, compelling blog post title.`;
         const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an SEO strategist who outputs a structured keyword hierarchy in a strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 1500, response_format: { "type": "json_object" } };
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         
@@ -2090,8 +2011,8 @@ async function generateAndManageKeywordViews(posts, audienceContext) {
         const parsed = JSON.parse(data.openaiResponse);
         
         if (parsed && parsed.keyword_plan) {
-            renderKeywordCards(parsed.keyword_plan);
-            renderKeywordTree(parsed.keyword_plan);
+            renderKeywordCards(parsed.keyword_plan); // This function must exist
+            renderKeywordTree(parsed.keyword_plan);   // This function must also exist
         } else {
              throw new Error('AI response for keywords was invalid.');
         }
@@ -2102,9 +2023,49 @@ async function generateAndManageKeywordViews(posts, audienceContext) {
     }
 }
 
-// =================================================================================
-// === REPLACEMENT: The Final, Definitive Keyword Tree Renderer ===
-// =================================================================================
+// --- FUNCTION 2 of 3: The Keyword Card Renderer ---
+function renderKeywordCards(keywordPlan) {
+    const container = document.getElementById('keyword-cards-view');
+    if (!container) return;
+    
+    const intentDetails = {
+        'Problem-Aware': { icon: '🤔', description: 'For blog posts & guides' },
+        'Solution-Seeking': { icon: '🔍', description: 'For comparisons & reviews' },
+        'Purchase-Intent': { icon: '💳', description: 'For landing pages & ads' }
+    };
+
+    const cardsHTML = keywordPlan.map(plan => {
+        const intentName = plan.intent || 'Keyword Cluster'; 
+        const details = intentDetails[intentName] || { icon: '⭐', description: '' };
+        
+        const allKeywords = [
+            `<li><strong>${plan.primary_keyword}</strong> (Primary)</li>`,
+            ...(plan.secondary_keywords || []).map(kw => `<li>${kw}</li>`),
+            ...(plan.long_tail_keywords || []).map(kw => `<li>${kw}</li>`)
+        ].join('');
+
+        return `
+            <div class="keyword-cluster">
+                <div class="keyword-cluster-header">
+                    <span class="keyword-cluster-icon">${details.icon}</span>
+                    <div>
+                        <h4 class="keyword-cluster-title">${intentName.replace('-', ' ')}</h4>
+                        <p class="keyword-cluster-description">${details.description}</p>
+                    </div>
+                </div>
+                <ul class="keyword-list">${allKeywords}</ul>
+                <div class="content-example">
+                    <strong>Content Idea:</strong>
+                    <p>"${plan.content_example}"</p>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    container.innerHTML = cardsHTML;
+}
+
+// --- FUNCTION 3 of 3: The Final, Definitive Keyword Tree Renderer ---
 function renderKeywordTree(keywordPlan) {
     const container = document.getElementById('keyword-tree-view');
     if (!container) return;
@@ -2114,73 +2075,27 @@ function renderKeywordTree(keywordPlan) {
         return;
     }
 
-    // 1. DATA STRUCTURE: Rebuild the full multi-level tree for visual depth.
-    let chartData = [{
-        id: 'root',
-        name: 'SEO Plan',
-        color: '#FFFFFF'
-    }];
-    const intentColors = {
-        'Problem-Aware': '#8a2be2',
-        'Solution-Seeking': '#00ced1',
-        'Purchase-Intent': '#ff4500'
-    };
+    let chartData = [{ id: 'root', name: 'SEO Plan', color: '#FFFFFF' }];
+    const intentColors = { 'Problem-Aware': '#8a2be2', 'Solution-Seeking': '#00ced1', 'Purchase-Intent': '#ff4500' };
 
     keywordPlan.forEach((plan, index) => {
         const intentId = `intent_${index}`;
         const primaryId = `primary_${index}`;
 
-        // Level 2: Intent Node
-        chartData.push({
-            id: intentId,
-            parent: 'root',
-            name: plan.intent,
-            color: intentColors[plan.intent] || '#555'
-        });
+        chartData.push({ id: intentId, parent: 'root', name: plan.intent, color: intentColors[plan.intent] || '#555' });
+        chartData.push({ id: primaryId, parent: intentId, name: plan.primary_keyword, _all_data: plan });
 
-        // Level 3: Primary Keyword Node (The "Hub")
-        chartData.push({
-            id: primaryId,
-            parent: intentId,
-            name: plan.primary_keyword,
-            // Pass all data for the tooltip
-            _all_data: plan
-        });
-
-        // Level 4: Secondary Keywords (Spokes from the Hub)
         (plan.secondary_keywords || []).forEach((kw, kw_idx) => {
-            chartData.push({
-                id: `${primaryId}_skw_${kw_idx}`,
-                parent: primaryId,
-                name: kw
-            });
+            chartData.push({ id: `${primaryId}_skw_${kw_idx}`, parent: primaryId, name: kw });
         });
-
-        // Level 4: Long-Tail Keywords (More Spokes)
         (plan.long_tail_keywords || []).forEach((kw, kw_idx) => {
-            chartData.push({
-                id: `${primaryId}_ltw_${kw_idx}`,
-                parent: primaryId,
-                name: kw
-            });
+            chartData.push({ id: `${primaryId}_ltw_${kw_idx}`, parent: primaryId, name: kw });
         });
-        
-        // Level 4: Content Example (Final Spoke)
-        chartData.push({
-            id: `${primaryId}_content`,
-            parent: primaryId,
-            name: `Ex: "${plan.content_example}"`
-        });
+        chartData.push({ id: `${primaryId}_content`, parent: primaryId, name: `Ex: "${plan.content_example}"` });
     });
 
-    // 2. HIGHCHARTS CONFIG: Meticulous styling for a clean, professional look.
     Highcharts.chart(container, {
-        chart: {
-            inverted: true,
-            backgroundColor: 'transparent',
-            height: '700px', // More vertical space for the larger tree
-            spacing: [50, 40, 50, 40] // [top, right, bottom, left]
-        },
+        chart: { inverted: true, backgroundColor: 'transparent', height: '700px', spacing: [50, 40, 50, 40] },
         title: { text: null },
         credits: { enabled: false },
         series: [{
@@ -2200,62 +2115,25 @@ function renderKeywordTree(keywordPlan) {
                     return `<b>${point.name}</b>`;
                 }
             },
-            marker: {
-                radius: 6,
-                symbol: 'circle'
-            },
-            dataLabels: {
-                // Default settings for all labels
-                style: {
-                    color: '#FFFFFF',
-                    textOutline: 'none',
-                    fontWeight: '500',
-                    fontSize: '14px'
-                },
-            },
-            // Specific styling for each level to prevent ANY overlap
+            marker: { radius: 6, symbol: 'circle' },
+            dataLabels: { style: { color: '#FFFFFF', textOutline: 'none', fontWeight: '500', fontSize: '14px' } },
             levels: [{
-                level: 1, // Root: "SEO Plan"
-                dataLabels: {
-                    align: 'center',
-                    y: -25 // Position label cleanly above the node
-                }
+                level: 1,
+                dataLabels: { align: 'center', y: -25 }
             }, {
-                level: 2, // Intent Level
+                level: 2,
                 marker: { radius: 8 },
-                dataLabels: {
-                    align: 'right', // Place label to the LEFT of the node
-                    x: -15,
-                    y: 5
-                }
+                dataLabels: { align: 'right', x: -15, y: 5 }
             }, {
-                level: 3, // Primary Keyword "Hub"
+                level: 3,
                 color: '#80d8ff',
-                dataLabels: {
-                    align: 'left', // Place label to the RIGHT of the node
-                    x: 15,
-                    y: 5,
-                    style: { fontWeight: 'bold' }
-                }
+                dataLabels: { align: 'left', x: 15, y: 5, style: { fontWeight: 'bold' } }
             }, {
-                level: 4, // All Leaf Nodes (Keywords & Example)
+                level: 4,
                 color: '#B0BEC5',
-                dataLabels: {
-                    align: 'left',
-                    x: 15,
-                    y: 5,
-                    style: {
-                        fontWeight: 'normal',
-                        fontSize: '13px',
-                        fontStyle: 'italic',
-                        color: 'rgba(255, 255, 255, 0.8)'
-                    }
-                }
+                dataLabels: { align: 'left', x: 15, y: 5, style: { fontWeight: 'normal', fontSize: '13px', fontStyle: 'italic', color: 'rgba(255, 255, 255, 0.8)' } }
             }],
-            link: {
-                color: 'rgba(255, 255, 255, 0.4)',
-                width: 1
-            }
+            link: { color: 'rgba(255, 255, 255, 0.4)', width: 1 }
         }],
     });
 }

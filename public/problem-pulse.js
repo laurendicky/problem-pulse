@@ -2064,9 +2064,8 @@ function renderKeywordCards(keywordPlan) {
 
     container.innerHTML = cardsHTML;
 }
-
 // =================================================================================
-// === REPLACEMENT: The Definitive, Aesthetically Correct Keyword Tree Renderer ===
+// === REPLACEMENT: The Final, STABLE, and Aesthetically Correct Tree Renderer ===
 // =================================================================================
 function renderKeywordTree(keywordPlan) {
     const container = document.getElementById('keyword-tree-view');
@@ -2086,7 +2085,7 @@ function renderKeywordTree(keywordPlan) {
 
         chartData.push({ id: intentId, parent: 'root', name: plan.intent, color: intentColors[plan.intent] || '#555' });
         chartData.push({ id: primaryId, parent: intentId, name: plan.primary_keyword, _all_data: plan });
-        
+
         (plan.secondary_keywords || []).forEach((kw, kw_idx) => {
             chartData.push({ id: `${primaryId}_skw_${kw_idx}`, parent: primaryId, name: kw });
         });
@@ -2101,8 +2100,7 @@ function renderKeywordTree(keywordPlan) {
             inverted: true,
             backgroundColor: 'transparent',
             height: '750px',
-            // Add significant bottom spacing for the vertical labels
-            spacingBottom: 180 
+            spacingBottom: 180
         },
         title: { text: null },
         credits: { enabled: false },
@@ -2132,41 +2130,25 @@ function renderKeywordTree(keywordPlan) {
                     fontSize: '14px'
                 },
             },
-            // === THIS SECTION CONTAINS ALL THE FIXES ===
             levels: [{
                 level: 1, // Root: "SEO Plan"
-                dataLabels: {
-                    // Position label cleanly above the node, NO overlap
-                    y: -30 
-                }
+                dataLabels: { y: -30 }
             }, {
                 level: 2, // Intent Level: "Problem-Aware", etc.
                 marker: { radius: 9 },
-                dataLabels: {
-                    // Position label cleanly above the node
-                    y: -30, 
-                    style: { fontWeight: 'bold' }
-                }
+                dataLabels: { y: -30, style: { fontWeight: 'bold' } }
             }, {
                 level: 3, // Primary Keyword "Hub"
                 color: '#80d8ff',
-                dataLabels: {
-                    // Position label cleanly above the node
-                    y: -30, 
-                    style: {
-                        fontWeight: 'bold',
-                        color: '#FFFFFF' // Ensure hub text is white
-                    }
-                }
+                dataLabels: { y: -30, style: { fontWeight: 'bold' } }
             }, {
                 level: 4, // All Leaf Nodes (Keywords & Example)
                 color: '#B0BEC5',
                 dataLabels: {
-                    // THE VERTICAL TEXT FIX
                     rotation: -90,
-                    align: 'right', // Aligns the top of the rotated text
-                    x: 6,           // Fine-tune horizontal position
-                    y: -20,         // Fine-tune vertical position
+                    align: 'right',
+                    x: 6,
+                    y: -20,
                     style: {
                         fontWeight: 'normal',
                         fontSize: '14px',
@@ -2175,11 +2157,12 @@ function renderKeywordTree(keywordPlan) {
                     }
                 }
             }],
-            // Use curved lines to match the example aesthetic
+            // === THIS IS THE FIX ===
+            // The incompatible 'spline' type has been removed.
+            // We now use default straight lines, which are guaranteed to work.
             link: {
-                type: 'spline', 
                 color: 'rgba(255, 255, 255, 0.4)',
-                width: 1.5
+                width: 1
             }
         }],
     });

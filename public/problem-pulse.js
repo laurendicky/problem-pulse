@@ -1145,8 +1145,32 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
         container.querySelector('.subreddit-tag-list').innerHTML = `<p class="error-message">Could not load related community suggestions.</p>`;
     }
 }
+
+// --- ADD THIS HELPER FUNCTION ANYWHERE IN YOUR GLOBAL SCOPE ---
+
+/**
+ * Calculates the sentiment scores for a given piece of text.
+ * @param {string} text The text to analyze.
+ * @returns {{positive: number, negative: number, neutral: number}} An object with sentiment counts.
+ */
+function calculateSentimentForText(text) {
+    const words = text.toLowerCase().replace(/[^a-z\s']/g, '').split(/\s+/);
+    let positive = 0;
+    let negative = 0;
+    words.forEach(word => {
+        const lemma = lemmatize(word);
+        if (positiveWords.has(lemma)) positive++;
+        if (negativeWords.has(lemma)) negative++;
+    });
+    // A simple heuristic for neutral: count words that aren't positive or negative.
+    // This is a basic approach; more advanced methods exist but this is sufficient here.
+    const neutral = Math.max(0, words.length - positive - negative);
+    return { positive, negative, neutral };
+}
+
+
 // =================================================================================
-// === REPLACEMENT FUNCTION: generateAndRenderBrandBrief (V5 with Resilient Fetch) ===
+// === REPLACEMENT FUNCTION: generateAndRenderBrandBrief (V6 - Strategic Analysis Engine) ===
 // =================================================================================
 const briefCache = new Map();
 
@@ -1162,7 +1186,7 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
     
     document.querySelectorAll('.custom-side-panel.visible').forEach(p => p.classList.remove('visible'));
 
-    targetPanel.innerHTML = '<div class="brief-content"><p class="loading-text">Fetching and analyzing recent data... <span class="loader-dots"></span></p></div>';
+    targetPanel.innerHTML = `<div class="brief-content"><p class="loading-text">Running strategic analysis...<br/><small>This may take a moment.</small><span class="loader-dots"></span></p></div>`;
     targetPanel.classList.add('visible');
     overlay.classList.add('visible');
 
@@ -1175,120 +1199,156 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
     const cacheKey = `${itemName}-${new Date().toISOString().slice(0, 10)}`;
     if (briefCache.has(cacheKey)) {
         targetPanel.innerHTML = briefCache.get(cacheKey);
-        if (targetPanel.querySelector('#brand-momentum-chart')) {
-            const chartData = JSON.parse(targetPanel.querySelector('#brand-momentum-chart-data').textContent);
-            renderBrandMomentumChart(chartData);
-        }
         targetPanel.querySelector('.context-close-btn')?.addEventListener('click', close);
         return;
     }
 
     try {
+        // --- STEP 1: PRECISE DATA FETCHING ---
+        const TIME_PERIOD_DAYS = 30;
         const selectedSubreddits = Array.from(document.querySelectorAll('#subreddit-choices input:checked')).map(cb => cb.value);
         const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
         const brandSearchTerm = itemName.includes(' ') ? `"${itemName}"` : itemName;
         
-        const recentPosts = await fetchMultipleRedditDataBatched(subredditQueryString, [brandSearchTerm], 75, 'month');
-        recentPosts.sort((a, b) => b.data.created_utc - a.data.created_utc);
-
-        const postsForAnalysis = recentPosts.slice(0, 50);
-        if (postsForAnalysis.length < 3) throw new Error("Not enough recent mentions (last 30 days) to generate a detailed brief.");
+        const recentPosts = await fetchMultipleRedditDataBatched(subredditQuerystring, [brandSearchTerm], 100, 'month');
+        if (recentPosts.length < 5) throw new Error(`Not enough mentions found for "${itemName}" in the last ${TIME_PERIOD_DAYS} days to generate a reliable brief.`);
         
-        const topPostsText = postsForAnalysis.map(p => `"${p.data.title || ''} - ${(p.data.selftext || p.data.body || '').substring(0, 1500)}"`).join('\n');
+        const postsForAnalysis = recentPosts.slice(0, 75); // Use a larger pool for analysis
+        const rawTextForClustering = postsForAnalysis.map(p => `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n');
 
-        const prompt = isBrand ? 
-            `You are an expert market research analyst creating a competitive brief for "${itemName}" based on the MOST RECENT user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights about its current standing. Respond ONLY with a valid JSON object with the keys: "use_case", "loves", "hates", "verdict".`
-            : 
-            `You are a market validation analyst creating a category analysis for "${itemName}" based on user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights. Respond ONLY with a valid JSON object with the keys: "job_to_be_done", "table_stakes", "disruption_opportunities".`;
+        // --- STEP 2: AI-POWERED TOPIC CLUSTERING ---
+        const clusteringPrompt = `You are a data analyst. Analyze the following user comments about "${itemName}". Identify up to 5 distinct, recurring topics of conversation. For each topic, provide a short title and one representative quote that best captures the sentiment. Respond ONLY with a valid JSON object with a single key "topics", which is an array of objects like {"title": "The topic name", "quote": "A real user quote."}.
 
-        const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an analyst providing structured JSON output based on recent data." }, { role: "user", content: `${prompt}\n\nUser Comments:\n${topPostsText}` }], temperature: 0.2, response_format: { "type": "json_object" } };
+User Comments:
+${rawTextForClustering}`;
         
-        // --- START OF THE FIX ---
-        // This fetch call now includes proper error handling.
-        const briefPromise = fetch(OPENAI_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: openAIParams })
-        }).then(response => {
-            // CRITICAL CHECK: If the server responded with an error (like 500), throw an error.
-            if (!response.ok) {
-                throw new Error(`AI Server Error: Received status ${response.status}`);
-            }
-            // Only if the response is successful, do we proceed to parse it as JSON.
-            return response.json();
+        const clusteringParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a data analyst that extracts conversation topics into a strict JSON format." }, { role: "user", content: clusteringPrompt }], temperature: 0.1, response_format: { "type": "json_object" } };
+        const clusteringResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: clusteringParams }) });
+        if (!clusteringResponse.ok) throw new Error('AI topic clustering failed.');
+        const clusteringData = await clusteringResponse.json();
+        const aiTopics = JSON.parse(clusteringData.openaiResponse).topics || [];
+
+        // --- STEP 3: PROGRAMMATIC QUANTIFICATION & VALIDATION ---
+        const quantifiedTopics = aiTopics.map(topic => {
+            const topicKeywords = topic.title.toLowerCase().split(' ').filter(w => w.length > 3 && !stopWords.includes(w));
+            const relevantPosts = postsForAnalysis.filter(post => {
+                const postText = `${post.data.title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase();
+                return topicKeywords.some(kw => postText.includes(kw));
+            });
+            
+            if (relevantPosts.length === 0) return null;
+
+            let totalPositive = 0, totalNegative = 0;
+            relevantPosts.forEach(post => {
+                const postText = `${post.data.title || ''} ${post.data.selftext || post.data.body || ''}`;
+                const sentiment = calculateSentimentForText(postText);
+                totalPositive += sentiment.positive;
+                totalNegative += sentiment.negative;
+            });
+
+            const totalSentiment = totalPositive + totalNegative;
+            const positivePercent = totalSentiment > 0 ? Math.round((totalPositive / totalSentiment) * 100) : 0;
+
+            return {
+                ...topic,
+                mentionCount: relevantPosts.length,
+                sentiment: positivePercent, // % positive for this specific topic
+            };
+        }).filter(Boolean); // Remove topics with no found posts
+
+        // Calculate overall sentiment for the header
+        const overallSentiment = { positive: 0, negative: 0, neutral: 0 };
+        postsForAnalysis.forEach(post => {
+            const text = `${post.data.title || ''} ${post.data.selftext || ''}`;
+            const counts = calculateSentimentForText(text);
+            overallSentiment.positive += counts.positive;
+            overallSentiment.negative += counts.negative;
+            overallSentiment.neutral += counts.neutral;
         });
-        // --- END OF THE FIX ---
-        
-        const trendPromise = isBrand ? fetchSentimentTrendData(brandSearchTerm, subredditQueryString) : Promise.resolve(null);
+        const totalOverallScore = overallSentiment.positive + overallSentiment.negative + overallSentiment.neutral;
+        const overallPositivePercent = totalOverallScore > 0 ? Math.round((overallSentiment.positive / totalOverallScore) * 100) : 0;
+        const overallNegativePercent = totalOverallScore > 0 ? Math.round((overallSentiment.negative / totalOverallScore) * 100) : 0;
+        const overallNeutralPercent = 100 - overallPositivePercent - overallNegativePercent;
 
-        const [briefResult, trendResult] = await Promise.all([briefPromise, trendPromise]);
-        
-        // This line is now safe because the fetch would have thrown an error before reaching here on failure.
-        const parsed = JSON.parse(briefResult.openaiResponse);
-        
-        let htmlContent = '';
-        if (isBrand) {
-            const latestSentiment = trendResult.length > 0 ? trendResult[trendResult.length - 1]?.positivePercentage : 0;
-            const trendlineText = `Trendline: Positive sentiment is currently at ${latestSentiment}%.`;
-            const mentionCount = postsForAnalysis.length;
+        // --- STEP 4: AI-POWERED STRATEGIC SYNTHESIS ---
+        const synthesisPrompt = `You are a senior market research analyst. You have been given verified data about recent online conversations for the brand "${itemName}". Your task is to synthesize this data into a strategic brief.
 
-            htmlContent = `
-                <div class="brief-content">
-                    <button class="context-close-btn">×</button>
-                    <h3 class="brief-header">Competitive Brief: ${itemName}</h3>
-                    <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">📈</span>Brand Momentum</h4>
-                        <div id="brand-momentum-chart"></div>
-                        <script type="application/json" id="brand-momentum-chart-data">${JSON.stringify(trendResult)}</script>
-                        <p class="brief-ai-insight">Based on ${mentionCount} recent mentions. ${trendlineText}</p>
+Here is the verified data:
+- Total Mentions Analyzed: ${postsForAnalysis.length}
+- Overall Sentiment: Positive ${overallPositivePercent}%, Neutral ${overallNeutralPercent}%, Negative ${overallNegativePercent}%
+- Key Conversation Topics:
+${quantifiedTopics.map(t => `- Topic: "${t.title}", Mentions: ${t.mentionCount}, Sentiment: ${t.sentiment}% Positive, Representative Quote: "${t.quote}"`).join('\n')}
+
+Based ONLY on the data provided, generate the brief. Respond ONLY with a valid JSON object with the following keys:
+1. "focus_of_conversation": A 2-sentence summary of what people are talking about most, based on the topic with the highest mention count.
+2. "key_strengths": An array of objects for topics with positive sentiment (>60%). Each object must have "title", "mentions", "sentiment", "analysis", and "quote". The analysis should explain WHY this is a strength.
+3. "top_opportunities": An array of objects for topics with negative sentiment (<40%). Frame these as opportunities. Each object must have "title", "mentions", "sentiment", "analysis", and "quote". The analysis should explain the business opportunity.
+4. "actionable_verdict": A 1-2 sentence strategic summary. Identify the most urgent opportunity and the key strength to amplify.`;
+
+        const synthesisParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market analyst creating a strategic brief from verified data in a strict JSON format." }, { role: "user", content: synthesisPrompt }], temperature: 0.3, response_format: { "type": "json_object" } };
+        const synthesisResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: synthesisParams }) });
+        if (!synthesisResponse.ok) throw new Error('AI strategic synthesis failed.');
+        const synthesisData = await synthesisResponse.json();
+        const brief = JSON.parse(synthesisData.openaiResponse);
+
+        // --- STEP 5: DYNAMIC RENDERING ---
+        const renderTopicList = (items, type) => {
+            if (!items || items.length === 0) {
+                return `<p class="brief-text">No significant ${type === 'strengths' ? 'strengths' : 'opportunities'} identified in the data.</p>`;
+            }
+            return items.map(item => `
+                <div class="brief-topic">
+                    <h5 class="brief-topic-title">${item.title}</h5>
+                    <div class="brief-topic-metrics">
+                        <span class="metric-mentions">${item.mentions} Mentions</span>
+                        <span class="metric-sentiment ${item.sentiment > 60 ? 'positive' : 'negative'}">${item.sentiment}% Positive</span>
                     </div>
-                    <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">💡</span>Primary Use Case</h4>
-                        <p class="brief-text">${parsed.use_case}</p>
-                    </div>
-                    <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">🟢</span>What People Love Now</h4>
-                        <ul class="brief-list loves">${(parsed.loves || []).map(item => `<li>${item}</li>`).join('')}</ul>
-                    </div>
-                    <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">🔴</span>Recent Pain Points & Opportunities</h4>
-                        <ul class="brief-list hates">${(parsed.hates || []).map(item => `<li>${item}</li>`).join('')}</ul>
-                    </div>
-                    <div class="brief-verdict">
-                        <p><strong>🔮 Current Verdict:</strong> ${parsed.verdict}</p>
-                    </div>
-                </div>`;
-        } else { // Generic Product
-             htmlContent = `
-                <div class="brief-content">
-                    <button class="context-close-btn">×</button>
-                    <h3 class="brief-header">Category Analysis: ${itemName}</h3>
-                    <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">💡</span>Primary Job-to-be-Done</h4>
-                        <p class="brief-text">${parsed.job_to_be_done}</p>
-                    </div>
-                    <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">🔵</span>Table Stakes (Must-Haves)</h4>
-                        <ul class="brief-list stakes">${(parsed.table_stakes || []).map(item => `<li>${item}</li>`).join('')}</ul>
-                    </div>
-                    <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">🔴</span>Disruption Opportunities</h4>
-                        <ul class="brief-list hates">${(parsed.disruption_opportunities || []).map(item => `<li>${item}</li>`).join('')}</ul>
-                    </div>
-                </div>`;
-        }
+                    <p class="brief-topic-analysis">${item.analysis}</p>
+                    <blockquote class="brief-topic-quote">“${item.quote}”</blockquote>
+                </div>
+            `).join('');
+        };
+        
+        const sourcesText = selectedSubreddits.map(s => `r/${s}`).join(', ');
+
+        const htmlContent = `
+            <div class="brief-content">
+                <button class="context-close-btn">×</button>
+                <h3 class="brief-header">${itemName}: ${postsForAnalysis.length} Mentions Analyzed</h3>
+                <p class="brief-subheader"><strong>Sources:</strong> ${sourcesText} (Last ${TIME_PERIOD_DAYS} Days)</p>
+                <div class="brief-sentiment-breakdown">
+                    📈 <strong>Sentiment:</strong>
+                    <span class="sentiment-pill positive">${overallPositivePercent}% Positive</span>
+                    <span class="sentiment-pill neutral">${overallNeutralPercent}% Neutral</span>
+                    <span class="sentiment-pill negative">${overallNegativePercent}% Negative</span>
+                </div>
+
+                <div class="brief-section">
+                    <h4 class="brief-section-title"><span class="brief-section-icon">💡</span>Focus of Recent Conversation</h4>
+                    <p class="brief-text">${brief.focus_of_conversation}</p>
+                </div>
+
+                <div class="brief-section">
+                    <h4 class="brief-section-title"><span class="brief-section-icon">✅</span>Key Strengths to Amplify</h4>
+                    ${renderTopicList(brief.key_strengths, 'strengths')}
+                </div>
+
+                <div class="brief-section">
+                    <h4 class="brief-section-title"><span class="brief-section-icon">🔴</span>Top Pain Points & Opportunities</h4>
+                    ${renderTopicList(brief.top_opportunities, 'opportunities')}
+                </div>
+
+                <div class="brief-verdict">
+                    <p><strong>🔮 Actionable Verdict:</strong> ${brief.actionable_verdict}</p>
+                </div>
+            </div>`;
         
         targetPanel.innerHTML = htmlContent;
         briefCache.set(cacheKey, htmlContent);
-        
-        if (isBrand && trendResult && trendResult.length > 0) {
-            renderBrandMomentumChart(trendResult);
-        }
-
         targetPanel.querySelector('.context-close-btn').addEventListener('click', close);
 
     } catch (error) {
-        console.error(`Failed to generate brief for ${itemName}:`, error);
+        console.error(`Failed to generate strategic brief for ${itemName}:`, error);
         targetPanel.innerHTML = `<div class="brief-content"><button class="context-close-btn">×</button><p class="error-message">Could not generate brief for ${itemName}. <br><small>${error.message}</small></p></div>`;
         targetPanel.querySelector('.context-close-btn').addEventListener('click', close);
     }

@@ -1276,7 +1276,9 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
 
                     <div class="brief-section">
                         <h4 class="brief-section-title"><span class="brief-section-icon">📈</span>Brand Momentum</h4>
-                        <div id="brand-momentum-chart"></div>
+                          <div id="brand-momentum-chart" style="overflow: visible;"></div>
+
+
                         <script type="application/json" id="brand-momentum-chart-data">${JSON.stringify(trendResult)}</script>
                         <p class="brief-ai-insight">Based on ${mentionCount} mentions. ${trendlineText}</p>
                     </div>
@@ -1955,83 +1957,236 @@ Your writing should adopt the following characteristics:
         `;
     }
 }
+
+
+
 // =================================================================================
-// === NEW FUNCTION: AI KEYWORD OPPORTUNITIES ===
+// === NEW REPLACEMENT FUNCTION: Generate & Render Keyword Tree ===
 // =================================================================================
 
-async function generateAndRenderKeywords(posts, audienceContext) {
-    const container = document.getElementById('keyword-opportunities-container');
+async function generateAndRenderKeywordTree(posts, audienceContext) {
+    const container = document.getElementById('keyword-tree');
     if (!container) return;
 
-    container.innerHTML = `<h3 class="dashboard-section-title">Keyword Opportunities</h3><p class="loading-text">Extracting high-intent keywords...</p>`;
+    container.innerHTML = `<h3 class="dashboard-section-title">Keyword Opportunities</h3><p class="loading-text">Building strategic keyword tree...</p>`;
 
     try {
         const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        const prompt = `You are an expert SEO strategist specializing in identifying user intent from raw text for the "${audienceContext}" audience.
-        Analyze the following user posts and extract up to 15 high-value keywords and phrases. Categorize them into three distinct groups based on user intent:
+        const prompt = `You are an expert SEO strategist creating a content plan for the "${audienceContext}" audience.
+        Analyze the following user posts and extract high-value keywords for each stage of the marketing funnel.
+        Then, structure this information into a strategic hierarchy.
 
-        1.  "problem_aware": Keywords used by people who know they have a problem but are seeking information or understanding. (e.g., "how to fix...", "why is my...", "is it normal...")
-        2.  "solution_seeking": Keywords used by people actively looking for and comparing types of solutions. (e.g., "best software for...", "alternatives to...", "[product category] reviews")
-        3.  "purchase_intent": Keywords used by people close to making a purchase, often including brand names or commercial terms. (e.g., "[Brand A] vs [Brand B]", "[Product] pricing", "is [Brand] worth it")
+        For each of the 3 intent categories ("Problem-Aware", "Solution-Seeking", "Purchase-Intent"), you must provide:
+        1. "primary_keyword": A short, 2-3 word theme summarizing the core topic for that intent.
+        2. "secondary_keywords": An array of 2-3 broader keywords related to the primary theme.
+        3. "long_tail_keywords": An array of 2-3 highly specific, long-tail keywords.
+        4. "content_example": A single, compelling blog post title that targets this keyword cluster.
 
-        Respond ONLY with a valid JSON object with three keys: "problem_aware", "solution_seeking", and "purchase_intent", each holding an array of up to 5 relevant keyword strings.
+        Respond ONLY with a valid JSON object with a single key "keyword_plan". This key should hold an array of 3 objects, one for each intent category, following the structure described above.
 
         Posts:\n${topPostsText}`;
 
         const openAIParams = {
-            model: "gpt-4o-mini",
+            model: "gpt-4o", // Using a more powerful model is recommended for this complex task
             messages: [
-                { role: "system", content: "You are an SEO strategist who outputs structured JSON with keyword categories." },
+                { role: "system", content: "You are an SEO strategist who outputs a structured keyword hierarchy in a strict JSON format." },
                 { role: "user", content: prompt }
             ],
-            temperature: 0.1,
-            max_tokens: 600,
+            temperature: 0.2,
+            max_tokens: 1500,
             response_format: { "type": "json_object" }
         };
 
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        
+        if (!response.ok) throw new Error('Keyword tree analysis API call failed.');
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        
+        if (parsed && parsed.keyword_plan) {
+            // The container's title will be part of the chart itself, so clear the container
+            container.innerHTML = ''; 
+            renderKeywordTree(parsed);
+        } else {
+             throw new Error('AI response for keyword tree was invalid.');
+        }
+
+    } catch (error) {
+        console.error("Keyword tree generation error:", error);
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Keyword Opportunities</h3>
+            <p class="error-message">Could not generate the keyword strategy tree.</p>
+        `;
+    }
+}
+
+// =================================================================================
+// === NEW FUNCTION 1 of 3: The Main Keyword Feature Manager ===
+// =================================================================================
+async function generateAndManageKeywordViews(posts, audienceContext) {
+    const container = document.getElementById('keyword-opportunities-container');
+    if (!container) return;
+
+    // 1. Setup the HTML structure with a view-switcher and containers for both views
+    container.innerHTML = `
+        <div class="keyword-header">
+            <h3 class="dashboard-section-title">Keyword Opportunities</h3>
+            <div class="view-switcher">
+                <button id="view-cards-btn" class="view-btn active">Cards</button>
+                <button id="view-tree-btn" class="view-btn">Tree</button>
+            </div>
+        </div>
+        <div id="keyword-cards-view" class="keyword-view active">
+            <p class="loading-text">Analyzing keywords...</p>
+        </div>
+        <div id="keyword-tree-view" class="keyword-view">
+             <!-- Tree will be rendered here -->
+        </div>
+    `;
+    
+    // Setup event listeners for the switcher
+    const cardsBtn = document.getElementById('view-cards-btn');
+    const treeBtn = document.getElementById('view-tree-btn');
+    const cardsView = document.getElementById('keyword-cards-view');
+    const treeView = document.getElementById('keyword-tree-view');
+
+    cardsBtn.addEventListener('click', () => {
+        cardsBtn.classList.add('active');
+        treeBtn.classList.remove('active');
+        cardsView.classList.add('active');
+        treeView.classList.remove('active');
+    });
+
+    treeBtn.addEventListener('click', () => {
+        treeBtn.classList.add('active');
+        cardsBtn.classList.remove('active');
+        treeView.classList.add('active');
+        cardsView.classList.remove('active');
+    });
+
+    try {
+        // 2. Call the AI once to get the single, structured source of truth
+        const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+        const prompt = `You are an expert SEO strategist creating a content plan for the "${audienceContext}" audience. Analyze the following user posts and extract high-value keywords for each stage of the marketing funnel. Then, structure this information into a strategic hierarchy. For each of the 3 intent categories ("Problem-Aware", "Solution-Seeking", "Purchase-Intent"), you must provide: 1. "primary_keyword": A short, 2-3 word theme summarizing the core topic. 2. "secondary_keywords": An array of 2-3 broader keywords. 3. "long_tail_keywords": An array of 2-3 highly specific, long-tail keywords. 4. "content_example": A single, compelling blog post title that targets this cluster. Respond ONLY with a valid JSON object with a single key "keyword_plan". This key should hold an array of 3 objects, one for each intent category.`;
+        const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an SEO strategist who outputs a structured keyword hierarchy in a strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 1500, response_format: { "type": "json_object" } };
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         
         if (!response.ok) throw new Error('Keyword analysis API call failed.');
 
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
-        const { problem_aware, solution_seeking, purchase_intent } = parsed;
         
-        const renderCluster = (title, icon, description, keywords) => {
-            if (!keywords || keywords.length === 0) return '';
-            const keywordList = keywords.map(kw => `<li>${kw}</li>`).join('');
-            return `
-                <div class="keyword-cluster">
-                    <div class="keyword-cluster-header">
-                        <span class="keyword-cluster-icon">${icon}</span>
-                        <div>
-                            <h4 class="keyword-cluster-title">${title}</h4>
-                            <p class="keyword-cluster-description">${description}</p>
-                        </div>
-                    </div>
-                    <ul class="keyword-list">${keywordList}</ul>
-                </div>
-            `;
-        };
-        
-        container.innerHTML = `
-            <h3 class="dashboard-section-title">Keyword Opportunities</h3>
-            <div class="keyword-clusters-grid">
-                ${renderCluster('Problem-Aware', '🤔', 'For blog posts & guides', problem_aware)}
-                ${renderCluster('Solution-Seeking', '🔍', 'For comparisons & reviews', solution_seeking)}
-                ${renderCluster('Purchase-Intent', '💳', 'For landing pages & ads', purchase_intent)}
-            </div>
-        `;
+        if (parsed && parsed.keyword_plan) {
+            // 3. Render BOTH views using the same data
+            renderKeywordCards(parsed.keyword_plan);
+            renderKeywordTree(parsed.keyword_plan);
+        } else {
+             throw new Error('AI response for keywords was invalid.');
+        }
 
     } catch (error) {
-        console.error("Keyword generation error:", error);
-        container.innerHTML = `
-            <h3 class="dashboard-section-title">Keyword Opportunities</h3>
-            <p class="loading-text" style="color: red;">Could not generate keyword opportunities.</p>
-        `;
+        console.error("Keyword feature generation error:", error);
+        container.innerHTML = `<h3 class="dashboard-section-title">Keyword Opportunities</h3><p class="error-message">Could not generate keyword strategy.</p>`;
     }
 }
+
+// =================================================================================
+// === NEW FUNCTION 2 of 3: The Keyword Card Renderer ===
+// =================================================================================
+function renderKeywordCards(keywordPlan) {
+    const container = document.getElementById('keyword-cards-view');
+    if (!container) return;
+    
+    const intentDetails = {
+        'Problem-Aware': { icon: '🤔', description: 'For blog posts & guides' },
+        'Solution-Seeking': { icon: '🔍', description: 'For comparisons & reviews' },
+        'Purchase-Intent': { icon: '💳', description: 'For landing pages & ads' }
+    };
+
+    const cardsHTML = keywordPlan.map(plan => {
+        const details = intentDetails[plan.intent] || { icon: '⭐', description: '' };
+        const allKeywords = [
+            `<li><strong>${plan.primary_keyword}</strong> (Primary)</li>`,
+            ...plan.secondary_keywords.map(kw => `<li>${kw}</li>`),
+            ...plan.long_tail_keywords.map(kw => `<li>${kw}</li>`)
+        ].join('');
+
+        return `
+            <div class="keyword-cluster">
+                <div class="keyword-cluster-header">
+                    <span class="keyword-cluster-icon">${details.icon}</span>
+                    <div>
+                        <h4 class="keyword-cluster-title">${plan.intent.replace('-', ' ')}</h4>
+                        <p class="keyword-cluster-description">${details.description}</p>
+                    </div>
+                </div>
+                <ul class="keyword-list">${allKeywords}</ul>
+                <div class="content-example">
+                    <strong>Content Idea:</strong>
+                    <p>"${plan.content_example}"</p>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    container.innerHTML = cardsHTML;
+}
+
+// =================================================================================
+// === NEW FUNCTION 3 of 3: The Keyword Tree Renderer ===
+// =================================================================================
+function renderKeywordTree(keywordPlan) {
+    const container = document.getElementById('keyword-tree-view');
+    if (!container) return;
+
+    if (typeof Highcharts === 'undefined') {
+        container.innerHTML = '<p class="error-message">Highcharts library not found. Cannot render tree.</p>';
+        return;
+    }
+    
+    let chartData = [{ id: 'root', name: 'SEO Plan', color: '#1a237e' }];
+    const intentColors = { 'Problem-Aware': '#3f51b5', 'Solution-Seeking': '#00838f', 'Purchase-Intent': '#ad1457' };
+
+    keywordPlan.forEach((plan, index) => {
+        const intentId = `intent_${index}`;
+        const primaryId = `primary_${index}`;
+
+        chartData.push({ id: intentId, parent: 'root', name: plan.intent, color: intentColors[plan.intent] || '#555' });
+        chartData.push({ id: primaryId, parent: intentId, name: plan.primary_keyword, secondary_keywords: plan.secondary_keywords, long_tail_keywords: plan.long_tail_keywords });
+        chartData.push({ id: `content_${index}`, parent: primaryId, name: `Ex: "${plan.content_example}"`, color: '#757575' });
+    });
+
+    Highcharts.chart(container, {
+        chart: { inverted: true, backgroundColor: 'transparent', height: '450px' },
+        title: { text: null }, // Title is handled by the main container now
+        credits: { enabled: false },
+        series: [{
+            type: 'treegraph',
+            data: chartData,
+            tooltip: {
+                useHTML: true,
+                formatter: function() {
+                    let point = this.point;
+                    let html = `<b>${point.name}</b>`;
+                    if (point.id.includes('primary_')) {
+                        html += '<hr style="margin: 5px 0;">';
+                        if (point.options.secondary_keywords && point.options.secondary_keywords.length > 0) { html += '<b>Secondary:</b><ul>' + point.options.secondary_keywords.map(kw => `<li>${kw}</li>`).join('') + '</ul>'; }
+                        if (point.options.long_tail_keywords && point.options.long_tail_keywords.length > 0) { html += '<b>Long-tail:</b><ul>' + point.options.long_tail_keywords.map(kw => `<li>${kw}</li>`).join('') + '</ul>'; }
+                    }
+                    return html;
+                }
+            },
+            dataLabels: { enabled: true, align: 'center', style: { color: 'white', textOutline: 'none', fontWeight: '500', fontSize: '14px' }, pointFormat: '{point.name}', y: 20 },
+            marker: { radius: 6 },
+            levels: [{ level: 1 }, { level: 2, color: '#7cb5ec', dataLabels: { color: '#333' } }, { level: 3 }, { level: 4, color: '#a5a5a5', dataLabels: { style: { fontSize: '12px' }, y: 18 } }],
+            link: { color: '#cccccc', width: 2 }
+        }],
+    });
+}
+
+
 async function enhanceDiscoveryWithComments(posts, nicheContext) {
     console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
     const brandContainer = document.getElementById('top-brands-container');
@@ -2223,7 +2378,7 @@ generateAndRenderHybridSentiment(filteredItems, originalGroupName);
         generateAndRenderMindsetSummary(filteredItems, originalGroupName);
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);
         generateAndRenderAIPrompt(filteredItems, originalGroupName);
-        generateAndRenderKeywords(filteredItems, originalGroupName);
+        generateAndManageKeywordViews(filteredItems, originalGroupName);
 
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));

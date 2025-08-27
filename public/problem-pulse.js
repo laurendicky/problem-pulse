@@ -1276,9 +1276,7 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
 
                     <div class="brief-section">
                         <h4 class="brief-section-title"><span class="brief-section-icon">📈</span>Brand Momentum</h4>
-                          <div id="brand-momentum-chart" style="overflow: visible;"></div>
-
-
+                        <div id="brand-momentum-chart"></div>
                         <script type="application/json" id="brand-momentum-chart-data">${JSON.stringify(trendResult)}</script>
                         <p class="brief-ai-insight">Based on ${mentionCount} mentions. ${trendlineText}</p>
                     </div>
@@ -1957,230 +1955,207 @@ Your writing should adopt the following characteristics:
         `;
     }
 }
-
 // =================================================================================
-// === PASTE THIS ENTIRE 3-FUNCTION BLOCK INTO YOUR CODE ===
+// === NEW FUNCTION: AI KEYWORD OPPORTUNITIES ===
 // =================================================================================
 
-// --- FUNCTION 1 of 3: The Main Keyword Feature Manager ---
-async function generateAndManageKeywordViews(posts, audienceContext) {
+async function generateAndRenderKeywords(posts, audienceContext) {
     const container = document.getElementById('keyword-opportunities-container');
     if (!container) return;
 
-    container.innerHTML = `
-        <div class="keyword-header">
-            <h3 class="dashboard-section-title">Keyword Opportunities</h3>
-            <div class="view-switcher">
-                <button id="view-cards-btn" class="view-btn active">Cards</button>
-                <button id="view-tree-btn" class="view-btn">Tree</button>
-            </div>
-        </div>
-        <div id="keyword-cards-view" class="keyword-view active">
-            <p class="loading-text">Analyzing keywords...</p>
-        </div>
-        <div id="keyword-tree-view" class="keyword-view"></div>
-    `;
-    
-    const cardsBtn = document.getElementById('view-cards-btn');
-    const treeBtn = document.getElementById('view-tree-btn');
-    const cardsView = document.getElementById('keyword-cards-view');
-    const treeView = document.getElementById('keyword-tree-view');
-
-    cardsBtn.addEventListener('click', () => {
-        cardsBtn.classList.add('active');
-        treeBtn.classList.remove('active');
-        cardsView.classList.add('active');
-        treeView.classList.remove('active');
-    });
-    treeBtn.addEventListener('click', () => {
-        treeBtn.classList.add('active');
-        cardsBtn.classList.remove('active');
-        treeView.classList.add('active');
-        cardsView.classList.remove('active');
-    });
+    container.innerHTML = `<h3 class="dashboard-section-title">Keyword Opportunities</h3><p class="loading-text">Extracting high-intent keywords...</p>`;
 
     try {
         const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
-        const prompt = `You are an expert SEO strategist creating a content plan for the "${audienceContext}" audience. Analyze the following user posts. Respond ONLY with a valid JSON object with a single key "keyword_plan". This key must hold an array of 3 objects. CRITICAL: Each object must represent one of the 3 intent categories ("Problem-Aware", "Solution-Seeking", "Purchase-Intent") and MUST contain the following keys: 1. "intent": The name of the intent category. 2. "primary_keyword": A short, 2-3 word theme. 3. "secondary_keywords": An array of 2-3 broader keywords. 4. "long_tail_keywords": An array of 2-3 highly specific, long-tail keywords. 5. "content_example": A single, compelling blog post title.`;
-        const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an SEO strategist who outputs a structured keyword hierarchy in a strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 1500, response_format: { "type": "json_object" } };
+
+        const prompt = `You are an expert SEO strategist specializing in identifying user intent from raw text for the "${audienceContext}" audience.
+        Analyze the following user posts and extract up to 15 high-value keywords and phrases. Categorize them into three distinct groups based on user intent:
+
+        1.  "problem_aware": Keywords used by people who know they have a problem but are seeking information or understanding. (e.g., "how to fix...", "why is my...", "is it normal...")
+        2.  "solution_seeking": Keywords used by people actively looking for and comparing types of solutions. (e.g., "best software for...", "alternatives to...", "[product category] reviews")
+        3.  "purchase_intent": Keywords used by people close to making a purchase, often including brand names or commercial terms. (e.g., "[Brand A] vs [Brand B]", "[Product] pricing", "is [Brand] worth it")
+
+        Respond ONLY with a valid JSON object with three keys: "problem_aware", "solution_seeking", and "purchase_intent", each holding an array of up to 5 relevant keyword strings.
+
+        Posts:\n${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You are an SEO strategist who outputs structured JSON with keyword categories." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.1,
+            max_tokens: 600,
+            response_format: { "type": "json_object" }
+        };
+
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         
         if (!response.ok) throw new Error('Keyword analysis API call failed.');
 
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
+        const { problem_aware, solution_seeking, purchase_intent } = parsed;
         
-        if (parsed && parsed.keyword_plan) {
-            renderKeywordCards(parsed.keyword_plan); // This function must exist
-            renderKeywordSunburst(parsed.keyword_plan);
-
-        } else {
-             throw new Error('AI response for keywords was invalid.');
-        }
-
-    } catch (error) {
-        console.error("Keyword feature generation error:", error);
-        container.innerHTML = `<h3 class="dashboard-section-title">Keyword Opportunities</h3><p class="error-message">Could not generate keyword strategy. Error: ${error.message}</p>`;
-    }
-}
-
-// --- FUNCTION 2 of 3: The Keyword Card Renderer ---
-function renderKeywordCards(keywordPlan) {
-    const container = document.getElementById('keyword-cards-view');
-    if (!container) return;
-    
-    const intentDetails = {
-        'Problem-Aware': { icon: '🤔', description: 'For blog posts & guides' },
-        'Solution-Seeking': { icon: '🔍', description: 'For comparisons & reviews' },
-        'Purchase-Intent': { icon: '💳', description: 'For landing pages & ads' }
-    };
-
-    const cardsHTML = keywordPlan.map(plan => {
-        const intentName = plan.intent || 'Keyword Cluster'; 
-        const details = intentDetails[intentName] || { icon: '⭐', description: '' };
-        
-        const allKeywords = [
-            `<li><strong>${plan.primary_keyword}</strong> (Primary)</li>`,
-            ...(plan.secondary_keywords || []).map(kw => `<li>${kw}</li>`),
-            ...(plan.long_tail_keywords || []).map(kw => `<li>${kw}</li>`)
-        ].join('');
-
-        return `
-            <div class="keyword-cluster">
-                <div class="keyword-cluster-header">
-                    <span class="keyword-cluster-icon">${details.icon}</span>
-                    <div>
-                        <h4 class="keyword-cluster-title">${intentName.replace('-', ' ')}</h4>
-                        <p class="keyword-cluster-description">${details.description}</p>
+        const renderCluster = (title, icon, description, keywords) => {
+            if (!keywords || keywords.length === 0) return '';
+            const keywordList = keywords.map(kw => `<li>${kw}</li>`).join('');
+            return `
+                <div class="keyword-cluster">
+                    <div class="keyword-cluster-header">
+                        <span class="keyword-cluster-icon">${icon}</span>
+                        <div>
+                            <h4 class="keyword-cluster-title">${title}</h4>
+                            <p class="keyword-cluster-description">${description}</p>
+                        </div>
                     </div>
+                    <ul class="keyword-list">${keywordList}</ul>
                 </div>
-                <ul class="keyword-list">${allKeywords}</ul>
-                <div class="content-example">
-                    <strong>Content Idea:</strong>
-                    <p>"${plan.content_example}"</p>
-                </div>
+            `;
+        };
+        
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Keyword Opportunities</h3>
+            <div class="keyword-clusters-grid">
+                ${renderCluster('Problem-Aware', '🤔', 'For blog posts & guides', problem_aware)}
+                ${renderCluster('Solution-Seeking', '🔍', 'For comparisons & reviews', solution_seeking)}
+                ${renderCluster('Purchase-Intent', '💳', 'For landing pages & ads', purchase_intent)}
             </div>
         `;
-    }).join('');
 
-    container.innerHTML = cardsHTML;
+    } catch (error) {
+        console.error("Keyword generation error:", error);
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Keyword Opportunities</h3>
+            <p class="loading-text" style="color: red;">Could not generate keyword opportunities.</p>
+        `;
+    }
 }
-// =================================================================================
-// === NEW FUNCTION: The Visually Striking Sunburst Chart Renderer ===
-// =================================================================================
-function renderKeywordSunburst(keywordPlan) {
-    const container = document.getElementById('keyword-tree-view');
-    if (!container) return;
 
-    if (typeof Highcharts === 'undefined') {
-        container.innerHTML = '<p class="error-message">Highcharts library not found. Cannot render chart.</p>';
+// =================================================================================
+// === NEW FUNCTION: SEO PLAN SUNBURST CHART ===
+// =================================================================================
+
+async function generateAndRenderSeoSunburst(posts, audienceContext) {
+    const container = document.getElementById('keyword-sunburst');
+    if (!container) {
+        console.error('Sunburst container div "keyword-sunburst" not found.');
         return;
     }
-    
-    // --- STEP 1: Transform Data for Sunburst ---
-    let chartData = [{
-        id: 'root',
-        parent: '',
-        name: 'SEO Plan'
-    }];
-    
-    const intentColors = {
-        'Problem-Aware': '#8a2be2',
-        'Solution-Seeking': '#00ced1',
-        'Purchase-Intent': '#ff4500'
-    };
 
-    keywordPlan.forEach(plan => {
-        const intentId = plan.intent;
-        const primaryId = `${intentId}_${plan.primary_keyword}`;
+    container.innerHTML = '<p class="loading-text">Building visual SEO plan...</p>';
 
-        // Level 2: Intent Category
-        chartData.push({
-            id: intentId,
-            parent: 'root',
-            name: plan.intent,
-            color: intentColors[plan.intent] || '#333'
-        });
+    try {
+        const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        // Level 3: Primary Keyword Hub
-        chartData.push({
-            id: primaryId,
-            parent: intentId,
-            name: plan.primary_keyword,
-            value: 5 // Give it a value to make it a larger segment
-        });
+        // 1. AI Call to extract and structure keywords into a hierarchical plan
+        const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Analyze the following user posts.
+        FIRST, extract up to 15 high-value keywords and categorize them by intent (Problem-Aware, Solution-Seeking, Purchase-Intent).
+        SECOND, structure those keywords into a hierarchy: select ONE primary keyword for each intent, then assign the rest as secondary or long-tail keywords under it.
+        THIRD, create one example blog title for each long-tail keyword.
 
-        // Level 4: Leaf Nodes (Keywords & Content Idea)
-        (plan.secondary_keywords || []).forEach(kw => {
-            chartData.push({ parent: primaryId, name: kw, value: 1 });
-        });
-        (plan.long_tail_keywords || []).forEach(kw => {
-            chartData.push({ parent: primaryId, name: kw, value: 1 });
-        });
-        chartData.push({
-            parent: primaryId,
-            name: `Idea: "${plan.content_example}"`,
-            value: 1
-        });
-    });
+        Respond ONLY with a valid JSON object in this exact structure:
+        {
+          "problem_aware": { "primary": "...", "secondary": ["...", "..."], "long_tail": { "long-tail keyword": "Example Blog Title 1" } },
+          "solution_seeking": { "primary": "...", "secondary": ["...", "..."], "long_tail": { "another keyword": "Example Blog Title 2" } },
+          "purchase_intent": { "primary": "...", "secondary": ["...", "..."], "long_tail": { "final keyword": "Example Blog Title 3" } }
+        }
 
-    // --- STEP 2: Configure and Render the Chart ---
-    Highcharts.chart(container, {
-        chart: {
-            backgroundColor: 'transparent',
-            height: '100%' // Use full available height
-        },
-        title: { text: null },
-        credits: { enabled: false },
-        series: [{
-            type: 'sunburst',
-            data: chartData,
-            allowDrillToNode: true, // Awesome UX: Click to zoom!
-            cursor: 'pointer',
-            dataLabels: {
-                format: '{point.name}',
-                filter: {
-                    property: 'innerRadius',
-                    operator: '>',
-                    value: 16 // Only show labels on larger segments to avoid clutter
+        Posts to analyze:
+        ${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-4o",
+            messages: [{ role: "system", content: "You are an SEO strategist that outputs structured JSON plans." }, { role: "user", content: prompt }],
+            temperature: 0.1,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('AI SEO plan generation failed.');
+
+        const aiResult = await response.json();
+        const seoPlan = JSON.parse(aiResult.openaiResponse);
+
+        // 2. Transform the AI response into a flat array for Highcharts
+        const sunburstData = [{
+            id: 'root', parent: '', name: 'SEO Plan'
+        }, {
+            id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF'
+        }, {
+            id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF'
+        }, {
+            id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8'
+        }];
+
+        const processIntent = (intentKey, intentId, plan) => {
+            if (!plan || !plan.primary) return;
+            const primaryId = `${intentId}_primary`;
+            sunburstData.push({ id: primaryId, parent: intentId, name: plan.primary, value: 5 });
+
+            (plan.secondary || []).forEach((kw, i) => {
+                sunburstData.push({ id: `${primaryId}_sec_${i}`, parent: primaryId, name: kw, value: 2 });
+            });
+            
+            Object.entries(plan.long_tail || {}).forEach(([kw, content], i) => {
+                const longTailId = `${primaryId}_lt_${i}`;
+                sunburstData.push({ id: longTailId, parent: primaryId, name: kw, value: 1 });
+                sunburstData.push({ id: `${longTailId}_content`, parent: longTailId, name: content, value: 1, extra: { type: 'Content Example' } });
+            });
+        };
+
+        processIntent('problem_aware', 'pa', seoPlan.problem_aware);
+        processIntent('solution_seeking', 'ss', seoPlan.solution_seeking);
+        processIntent('purchase_intent', 'pi', seoPlan.purchase_intent);
+
+        // 3. Render the Highcharts Sunburst Chart
+        Highcharts.chart(container, {
+            chart: { type: 'sunburst', height: '600px' },
+            title: { text: 'Visual SEO Plan', align: 'left' },
+            credits: { enabled: false },
+            series: [{
+                type: 'sunburst',
+                data: sunburstData,
+                allowDrillToNode: true,
+                cursor: 'pointer',
+                dataLabels: {
+                    format: '{point.name}',
+                    filter: { property: 'innerArcLength', operator: '>', value: 16 },
+                    style: { textOverflow: 'ellipsis' }
                 },
-                rotationMode: 'circular', // Makes text follow the curve
-                style: {
-                    color: '#FFFFFF',
-                    textOutline: 'none',
-                    fontSize: '14px',
-                    fontWeight: '500'
+                levels: [{
+                    level: 1, levelIsConstant: false,
+                    dataLabels: { filter: { property: 'outerArcLength', operator: '>', value: 64 } }
+                }, { level: 2, colorByPoint: true },
+                   { level: 3, colorVariation: { key: 'brightness', to: -0.25 } },
+                   { level: 4, colorVariation: { key: 'brightness', to: 0.45 } },
+                   { level: 5, colorVariation: { key: 'brightness', to: 0.65 } }]
+            }],
+            tooltip: {
+                useHTML: true, headerFormat: '',
+                pointFormatter: function() {
+                    let levelName = 'Root';
+                    if (this.level === 2) levelName = 'Intent';
+                    if (this.level === 3) levelName = 'Primary Keyword';
+                    if (this.level === 4) levelName = 'Secondary/Long-tail';
+                    if (this.level === 5) levelName = this.options.extra?.type || 'Content Example';
+                    return `<div><b>${this.name}</b><br/><span style="color:#888;">Level: ${levelName}</span></div>`;
                 }
             },
-            levels: [{
-                level: 2, // Intent Ring
-                levelSize: { value: 25, unit: '%' },
-                dataLabels: {
-                    style: { fontSize: '16px', fontWeight: 'bold' }
-                }
-            }, {
-                level: 3, // Primary Keyword Ring
-                levelSize: { value: 20, unit: '%' },
-                colorVariation: { key: 'brightness', to: 0.15 }, // Lighter shade of parent
-                dataLabels: {
-                    style: { fontSize: '15px', fontWeight: 'bold' }
-                }
-            }, {
-                level: 4, // Leaf Ring
-                levelSize: { value: 15, unit: '%' },
-                colorVariation: { key: 'brightness', to: 0.3 }, // Even lighter shade
-                dataLabels: {
-                    style: { fontSize: '13px', fontWeight: 'normal' }
-                }
-            }]
-        }],
-        tooltip: {
-            headerFormat: '',
-            pointFormat: '<b>{point.name}</b>'
-        }
-    });
-}
+            exporting: { enabled: true },
+            accessibility: { enabled: true, point: { valueDescriptionFormat: '{point.name}, level {point.level}.' } },
+            responsive: { rules: [{
+                condition: { maxWidth: 600 },
+                chartOptions: { series: [{ dataLabels: { filter: { property: 'innerArcLength', operator: '>', value: 30 } } }] }
+            }] }
+        });
 
+    } catch (error) {
+        console.error("Failed to generate or render SEO Sunburst chart:", error);
+        container.innerHTML = `<p class="error-message">Could not generate the visual SEO plan.</p>`;
+    }
+}
 
 async function enhanceDiscoveryWithComments(posts, nicheContext) {
     console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
@@ -2373,8 +2348,8 @@ generateAndRenderHybridSentiment(filteredItems, originalGroupName);
         generateAndRenderMindsetSummary(filteredItems, originalGroupName);
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);
         generateAndRenderAIPrompt(filteredItems, originalGroupName);
-        generateAndManageKeywordViews(filteredItems, originalGroupName);
-
+        generateAndRenderKeywords(filteredItems, originalGroupName);
+        generateAndRenderSeoSunburst(filteredItems, originalGroupName);
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
         if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }

@@ -2032,10 +2032,6 @@ async function generateAndRenderKeywords(posts, audienceContext) {
         `;
     }
 }
-
-// =================================================================================
-// === OPTIMISED FUNCTION: SEO SUNBURST WITH CORRECT HIERARCHY & TOOLTIPS V7 ===
-// =================================================================================
 async function generateAndRenderSeoSunburst(posts, audienceContext) {
     const container = document.getElementById('keyword-sunburst');
     if (!container) {
@@ -2046,15 +2042,18 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
     container.innerHTML = '<p class="loading-text">Building data-driven SEO plan...</p>';
 
     try {
-        const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+        const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.
+selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        // *** CHANGE 1: The AI prompt is updated to match the new node count rules. ***
-        const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Create a comprehensive, multi-level SEO plan based on the provided text.
+        // ADJUSTMENT 1: The prompt is updated to match your exact node count requirements.
+        const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Create a 
+comprehensive, multi-level SEO plan based on the provided text.
 
         Structure your response as a single, valid JSON object.
 
-        For each of the three intents (problem_aware, solution_seeking, purchase_intent), provide an array of 2-5 primary keywords.
-
+        Your structure must follow these rules precisely:
+        - The root object must have three keys: "problem_aware", "solution_seeking", and "purchase_intent".
+        - For each of these three intents, provide an array of 2-5 "primary_keywords".
         - For EACH primary keyword, provide an array of 2-4 "secondary_keywords".
         - For EACH secondary keyword, provide an array of 2-3 "long_tail_keywords".
         - For EACH long-tail keyword, provide an array of 1-2 "content_examples".
@@ -2065,7 +2064,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
 
         Each "content_examples" item should be an object with a single key: "title".
 
-        Example JSON Structure:
+        Example JSON Structure Snippet:
         {
           "problem_aware": [
             {
@@ -2076,7 +2075,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                   "long_tail_keywords": [
                     {
                       "keyword": "long-tail keyword A1a", "searchVolume": 300,
-                      "content_examples": [ { "title": "Example Blog Title 1" } ]
+                      "content_examples": [ { "title": "Example Blog Title 1" }, { "title": "Example Blog Title 2" } ]
                     }
                   ]
                 }
@@ -2088,18 +2087,20 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
 
         const openAIParams = {
             model: "gpt-4o",
-            messages: [{ role: "system", content: "You are a JSON-only SEO strategist." }, { role: "user", content: prompt }],
+            messages: [{ role: "system", content: "You are a JSON-only SEO strategist." }, { role: "user", content: 
+prompt }],
             temperature: 0.2,
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/
+json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('AI SEO plan generation failed.');
 
         const aiResult = await response.json();
         const seoPlan = JSON.parse(aiResult.openaiResponse);
 
-        // Data transformation logic remains the same - it's robust enough for the new structure.
+        // This data transformation logic correctly handles the new structure.
         const sunburstData = [{
             id: 'root', parent: '', name: 'SEO Plan'
         }, {
@@ -2115,15 +2116,18 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
             // Level 3: Primary Keywords
             intentData.forEach((primary, i) => {
                 const primaryId = `${intentId}_p_${i}`;
-                sunburstData.push({ id: primaryId, parent: intentId, name: primary.keyword, value: primary.searchVolume, extra: { ...primary, intentName } });
+                sunburstData.push({ id: primaryId, parent: intentId, name: primary.keyword, value: primary.
+searchVolume, extra: { ...primary, intentName } });
                 // Level 4: Secondary Keywords
                 (primary.secondary_keywords || []).forEach((secondary, j) => {
                     const secondaryId = `${primaryId}_s_${j}`;
-                    sunburstData.push({ id: secondaryId, parent: primaryId, name: secondary.keyword, value: secondary.searchVolume, extra: { ...secondary, intentName } });
+                    sunburstData.push({ id: secondaryId, parent: primaryId, name: secondary.keyword, value: 
+secondary.searchVolume, extra: { ...secondary, intentName } });
                     // Level 5: Long-tail Keywords
                     (secondary.long_tail_keywords || []).forEach((longtail, k) => {
                         const longtailId = `${secondaryId}_l_${k}`;
-                        sunburstData.push({ id: longtailId, parent: secondaryId, name: longtail.keyword, value: longtail.searchVolume, extra: { ...longtail, intentName } });
+                        sunburstData.push({ id: longtailId, parent: secondaryId, name: longtail.keyword, value: 
+longtail.searchVolume, extra: { ...longtail, intentName } });
                         // Level 6: Content Examples
                         (longtail.content_examples || []).forEach((content, l) => {
                             const value = longtail.searchVolume / (longtail.content_examples.length || 1);
@@ -2145,7 +2149,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         processIntent('pi', 'Purchase-Intent', seoPlan.purchase_intent);
 
         // =========================================================================
-        // === HIGHCHARTS CONFIGURATION ============================================
+        // === HIGHCHARTS CONFIGURATION WITH ADJUSTED TOOLTIP AND CORRECT LABELS ===
         // =========================================================================
         Highcharts.chart(container, {
             chart: { type: 'sunburst', height: '600px', backgroundColor: null },
@@ -2166,11 +2170,14 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                 levels: [{
                     level: 1,
                     levelIsConstant: false,
-                    dataLabels: { enabled: true, filter: { property: 'value', operator: '>', value: -1 }, style: { fontSize: '1.1em', fontWeight: 'bold' } }
-                }, { level: 2, colorByPoint: true }, { level: 3, colorVariation: { key: 'brightness', to: -0.25 } }, { level: 4, colorVariation: { key: 'brightness', to: 0.25 } }, { level: 5, colorVariation: { key: 'brightness', to: -0.45 } }, { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }]
+                    dataLabels: { enabled: true, filter: { property: 'value', operator: '>', value: -1 }, style: { 
+fontSize: '1.1em', fontWeight: 'bold' } }
+                }, { level: 2, colorByPoint: true }, { level: 3, colorVariation: { key: 'brightness', to: -0.25 } }, 
+{ level: 4, colorVariation: { key: 'brightness', to: 0.25 } }, { level: 5, colorVariation: { key: 
+'brightness', to: -0.45 } }, { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }]
             }],
 
-            // Tooltip logic is updated with the minimum width requirement.
+            // ADJUSTMENT 2: Tooltip updated to meet all formatting and width rules.
             tooltip: {
                 useHTML: true,
                 headerFormat: '',
@@ -2178,6 +2185,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                     const point = this;
                     const extra = point.options.extra || {};
 
+                    // The level map contains the exact labels you requested.
                     const levelNameMap = {
                         1: 'SEO Plan',
                         2: 'Intent bucket',
@@ -2189,8 +2197,9 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                     const levelName = levelNameMap[point.level];
                     const intentName = extra.intentName || (point.level === 2 ? point.name : null);
 
-                    // *** CHANGE 2: Enforce a minimum width of 250px on the tooltip container. ***
-                    let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
+                    // The style attribute now includes `min-width: 250px`.
+                    let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: 
+normal; word-wrap: break-word;">`;
 
                     // Rule: Name: [node name]
                     html += `<b>Name:</b> ${point.name}<br/>`;
@@ -2206,7 +2215,8 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                     }
 
                     // Rule: Search volume: [if available]
-                    if (extra.searchVolume !== undefined) {
+                    // This now correctly shows volume for levels 3, 4, and 5.
+                    if (extra.searchVolume !== undefined && point.level >=3 && point.level <= 5) {
                         html += `<b>Search volume:</b> ${extra.searchVolume.toLocaleString()}<br/>`;
                     }
 
@@ -2222,48 +2232,6 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         container.innerHTML = `<p class="error-message">Could not generate the visual SEO plan.</p>`;
     }
 }
-async function enhanceDiscoveryWithComments(posts, nicheContext) {
-    console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
-    const brandContainer = document.getElementById('top-brands-container');
-    if (!brandContainer) return;
-    const statusMessageEl = document.createElement('div');
-    statusMessageEl.id = 'discovery-status-message';
-    statusMessageEl.style.cssText = "font-family: Inter, sans-serif; color: #555; padding: 0.5rem 1rem 1rem 1rem; font-style: italic; text-align: center;";
-    statusMessageEl.innerHTML = 'Analyzing comments for more insights... <span class="loader-dots"></span>';
-    brandContainer.before(statusMessageEl);
-    try {
-        const postIdsToFetch = posts.slice(0, 75).map(p => p.data.id);
-        const comments = await fetchCommentsForPosts(postIdsToFetch);
-        const allItemsForAnalysis = [...posts, ...comments];
-        const enhancedEntities = await extractAndValidateEntities(allItemsForAnalysis, nicheContext);
-        renderDiscoveryList('top-brands-container', enhancedEntities.topBrands, 'Top Brands & Specific Products', 'brands');
-        renderDiscoveryList('top-products-container', enhancedEntities.topProducts, 'Top Generic Products', 'products');
-    } catch (error) {
-        console.error("Failed to enhance discovery lists with comments:", error);
-        const statusMsg = document.getElementById('discovery-status-message');
-        if (statusMsg) { statusMsg.style.color = 'red'; statusMsg.textContent = 'Could not load additional data from comments.'; }
-    } finally {
-        const statusMsg = document.getElementById('discovery-status-message');
-        if (statusMsg) { statusMsg.remove(); }
-    }
-}
-function generateNgrams(words, n) {
-    const ngrams = [];
-    if (n > words.length) return ngrams;
-    for (let i = 0; i <= words.length - n; i++) {
-        const ngram = words.slice(i, i + n);
-        if (!stopWords.includes(ngram[0]) && !stopWords.includes(ngram[n - 1])) {
-            ngrams.push(ngram.join(' '));
-        }
-    }
-    return ngrams;
-}
-// =================================================================================
-// === START: Replace this entire function in your script ===
-// =================================================================================
-// =================================================================================
-// === REPLACEMENT FUNCTION: generateAndRenderPowerPhrases ===
-// =================================================================================
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;

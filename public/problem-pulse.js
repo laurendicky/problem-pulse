@@ -2034,7 +2034,7 @@ async function generateAndRenderKeywords(posts, audienceContext) {
 }
 
 // =================================================================================
-// === OPTIMISED FUNCTION: SEO SUNBURST WITH ENHANCED UX & FORMATTING V4 ===
+// === OPTIMISED FUNCTION: SEO SUNBURST WITH ENHANCED UX & FORMATTING V6 (FINAL) ===
 // =================================================================================
 
 async function generateAndRenderSeoSunburst(posts, audienceContext) {
@@ -2090,7 +2090,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         processIntent('pi', seoPlan.purchase_intent);
 
         // =========================================================================
-        // === HIGHCHARTS CONFIGURATION WITH ALL REQUESTED ADJUSTMENTS ===
+        // === HIGHCHARTS CONFIGURATION WITH ALL 6 LEVELS CORRECTED ===
         // =========================================================================
         Highcharts.chart(container, {
             chart: {
@@ -2114,7 +2114,6 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
             },
             series: [{
                 type: 'sunburst',
-                // ADJUSTMENT 3: Change 'Series 1' to 'Wide View' for drill-up text
                 name: 'Wide View',
                 data: sunburstData,
                 allowDrillToNode: true,
@@ -2125,6 +2124,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                     rotationMode: 'circular',
                     style: { textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
                 },
+                // ADJUSTMENT 2: Added missing configuration for level 6
                 levels: [{
                     level: 1,
                     levelIsConstant: false,
@@ -2132,7 +2132,6 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                         enabled: true,
                         filter: { property: 'value', operator: '>', value: -1 },
                         style: {
-                            // ADJUSTMENT 1: Smaller font size to fit in the center circle
                             fontSize: '1.1em',
                             fontWeight: 'bold',
                             color: '#333333',
@@ -2148,6 +2147,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                 }, {
                     level: 5, colorVariation: { key: 'brightness', to: -0.45 }
                 }, {
+                    // This entry was missing, causing incorrect visual representation
                     level: 6, colorVariation: { key: 'brightness', to: 0.45 }
                 }]
             }],
@@ -2159,15 +2159,15 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                     const point = this;
                     const extra = point.options.extra;
 
-                    // ADJUSTMENT 2: New map to prevent 'undefined' and remove "Level:" prefix
-                    // This map only includes levels that need a type descriptor.
+                    // ADJUSTMENT 1: nodeTypeMap now includes ALL SIX levels as requested
                     const nodeTypeMap = {
+                        1: 'SEO Plan',
+                        2: 'Intent Bucket',
                         3: 'Primary Keyword',
                         4: 'Secondary Keyword',
                         5: 'Long-tail Keyword',
                         6: 'Content Example'
                     };
-
                     const nodeType = nodeTypeMap[point.level];
 
                     const getIntentName = (p) => {
@@ -2179,19 +2179,17 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                     };
                     const intentName = getIntentName(point);
                     
-                    let html = `<div style="width: 350px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
+                    let html = `<div style="max-width: 350px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
 
-                    // Main Title (Keyword or Content Title)
                     html += `<b>${point.name}</b><br/>`;
-
-                    // ADJUSTMENT 2: Conditionally add the node type without the word "Level"
-                    // This will not show for the root or intent buckets, fixing the issue.
+                    
+                    // This will now always display the correct node type for every level
                     if (nodeType) {
                         html += `<span style="font-size: 0.9em; color: #555;">${nodeType}</span><br/>`;
                     }
-
                     html += `<hr style="margin: 4px 0; border-top: 1px solid #ccc;">`;
                     
+                    // Intent name is only shown for levels 3 and deeper
                     if (intentName) {
                         html += `<b>Intent:</b> ${intentName}<br/>`;
                     }

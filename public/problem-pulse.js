@@ -2096,75 +2096,85 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         const seoPlan = JSON.parse(aiResult.openaiResponse);
 
         // Data transformation logic remains the same - it's robust enough for the new structure.
+        // In generateAndRenderSeoSunburst...
 
-        const sunburstData = [{
-            id: 'root', parent: '', name: 'SEO Plan', 
-            extra: { levelName: 'SEO Plan' } // <-- ADD THIS
-        }, {
-            id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF',
-            extra: { levelName: 'Intent bucket' } // <-- ADD THIS
-        }, {
-            id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF',
-            extra: { levelName: 'Intent bucket' } // <-- ADD THIS
-        }, {
-            id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8',
-            extra: { levelName: 'Intent bucket' } // <-- ADD THIS
-        }];
+// =========================================================================
+// === STEP 1: CORRECTED DATA GENERATION ===================================
+// =========================================================================
 
-        const processIntent = (intentId, intentName, intentData) => {
-            if (!intentData || !Array.isArray(intentData)) return;
-            
-            // Level 3: Primary Keywords
-            intentData.forEach((primary, i) => {
-                const primaryId = `${intentId}_p_${i}`;
-                // CHANGE: Removed the 'value' property from this parent node.
+// Data transformation logic
+const sunburstData = [{
+    id: 'root', parent: '', name: 'SEO Plan',
+    levelName: 'SEO Plan' // <-- FLATTENED PROPERTY
+}, {
+    id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF',
+    levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
+}, {
+    id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF',
+    levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
+}, {
+    id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8',
+    levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
+}];
+
+const processIntent = (intentId, intentName, intentData) => {
+    if (!intentData || !Array.isArray(intentData)) return;
+    
+    // Level 3: Primary Keywords
+    intentData.forEach((primary, i) => {
+        const primaryId = `${intentId}_p_${i}`;
+        sunburstData.push({ 
+            id: primaryId, 
+            parent: intentId, 
+            name: primary.keyword, 
+            // NO 'extra' OBJECT. Properties are added directly.
+            intentName: intentName,
+            levelName: 'Primary keyword',
+            searchVolume: primary.searchVolume
+        });
+
+        // Level 4: Secondary Keywords
+        (primary.secondary_keywords || []).forEach((secondary, j) => {
+            const secondaryId = `${primaryId}_s_${j}`;
+            sunburstData.push({ 
+                id: secondaryId, 
+                parent: primaryId, 
+                name: secondary.keyword, 
+                intentName: intentName,
+                levelName: 'Secondary keyword',
+                searchVolume: secondary.searchVolume
+            });
+
+            // Level 5: Long-tail Keywords
+            (secondary.long_tail_keywords || []).forEach((longtail, k) => {
+                const longtailId = `${secondaryId}_l_${k}`;
                 sunburstData.push({ 
-                    id: primaryId, 
-                    parent: intentId, 
-                    name: primary.keyword, 
-                 extra: { ...primary, intentName, levelName: 'Primary keyword' } // <-- ADD levelName
+                    id: longtailId, 
+                    parent: secondaryId, 
+                    name: longtail.keyword, 
+                    intentName: intentName,
+                    levelName: 'Long-tail keyword',
+                    searchVolume: longtail.searchVolume
                 });
 
-                // Level 4: Secondary Keywords
-                (primary.secondary_keywords || []).forEach((secondary, j) => {
-                    const secondaryId = `${primaryId}_s_${j}`;
-                    // CHANGE: Removed the 'value' property from this parent node.
-                    sunburstData.push({ 
-                        id: secondaryId, 
-                        parent: primaryId, 
-                        name: secondary.keyword, 
-                        extra: { ...secondary, intentName, levelName: 'Secondary keyword' } // <-- ADD levelName
-                    });
-
-                    // Level 5: Long-tail Keywords
-                    (secondary.long_tail_keywords || []).forEach((longtail, k) => {
-                        const longtailId = `${secondaryId}_l_${k}`;
-                        // CHANGE: Removed the 'value' property from this parent node.
-                        sunburstData.push({ 
-                            id: longtailId, 
-                            parent: secondaryId, 
-                            name: longtail.keyword, 
-                            extra: { ...longtail, intentName, levelName: 'Long-tail keyword' } // <-- ADD levelName
-                        });
-
-                        // Level 6: Content Examples (The "Leaf" Nodes)
-                        // NO CHANGE HERE: This logic is correct because these are the final nodes.
-                        // Their values will be summed up to create the size of their parents.
-                        (longtail.content_examples || []).forEach((content, l) => {
-                            // This logic correctly distributes the long-tail's search volume among its content ideas.
-                            const value = longtail.searchVolume / (longtail.content_examples.length || 1);
-                            sunburstData.push({
-                                id: `${longtailId}_c_${l}`,
-                                parent: longtailId,
-                                name: content.title,
-                                value: Math.max(value, 1), // This is the ONLY level that should have a 'value'
-                                extra: { ...content, intentName, searchVolume: longtail.searchVolume, levelName: 'Content example' }
-                            });
-                        });
+                // Level 6: Content Examples
+                (longtail.content_examples || []).forEach((content, l) => {
+                    const value = longtail.searchVolume / (longtail.content_examples.length || 1);
+                    sunburstData.push({
+                        id: `${longtailId}_c_${l}`,
+                        parent: longtailId,
+                        name: content.title,
+                        value: Math.max(value, 1),
+                        intentName: intentName,
+                        levelName: 'Content example',
+                        searchVolume: longtail.searchVolume // Storing the parent's volume
                     });
                 });
             });
-        };
+        });
+    });
+};
+
 
         processIntent('pa', 'Problem-Aware', seoPlan.problem_aware);
         processIntent('ss', 'Solution-Seeking', seoPlan.solution_seeking);
@@ -2210,58 +2220,44 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                 }, { level: 2, colorByPoint: true }, { level: 3, colorVariation: { key: 'brightness', to: -0.25 } }, { level: 4, colorVariation: { key: 'brightness', to: 0.25 } }, { level: 5, colorVariation: { key: 'brightness', to: -0.45 } }, { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }]
             }],
 
-                        // =========================================================================
-            // === THE CORRECT & FINAL TOOLTIP FIX ===================================
-            // =========================================================================
-            tooltip: {
-                useHTML: true,
-                headerFormat: '',
-                pointFormatter: function() {
-                    const point = this; // The point being hovered over
-                    
-                    // --- Get custom data from the 'extra' object we created ---
-                    const customData = point.options.extra || {};
-                    const searchVolume = customData.searchVolume;
-                    const intentName = customData.intentName; // Much simpler than the while loop!
+            // In the Highcharts.chart configuration...
 
-                    // --- Level Name Logic (This part is correct) ---
-                    const levelNameMap = {
-                        1: 'SEO Plan',
-                        2: 'Intent bucket',
-                        3: 'Primary keyword',
-                        4: 'Secondary keyword',
-                        5: 'Long-tail keyword',
-                        6: 'Content example / blog title / LP'
-                    };
-                    const levelName = levelNameMap[point.level];
-                    
-                    // --- Build the HTML Output ---
-                    let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
+// =========================================================================
+// === STEP 2: FINAL, SIMPLIFIED TOOLTIP ===================================
+// =========================================================================
+tooltip: {
+    useHTML: true,
+    headerFormat: '',
+    pointFormatter: function() {
+        const point = this; // The point object being hovered over
+        
+        // --- Build the HTML Output ---
+        // Access custom properties directly from the point object. No '.options' or '.extra'.
+        let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
 
-                    // 1. Add the Name (Always present)
-                    html += `<b>Name:</b> ${point.name}<br/>`;
+        // 1. Add the Name (Built-in property)
+        html += `<b>Name:</b> ${point.name}<br/>`;
 
-                    // 2. Add the Level Title
-                    if (levelName) {
-                        html += `<b>Level:</b> ${levelName}<br/>`;
-                    }
-                    
-                    // 3. Add the Intent (if it exists in our custom data)
-                    if (intentName) {
-                        html += `<b>Intent:</b> ${intentName}<br/>`;
-                    }
+        // 2. Add the Level (Our custom property, now directly on the point)
+        if (point.levelName) {
+            html += `<b>Level:</b> ${point.levelName}<br/>`;
+        }
+        
+        // 3. Add the Intent (Our custom property)
+        if (point.intentName) {
+            html += `<b>Intent:</b> ${point.intentName}<br/>`;
+        }
 
-                    // 4. ***FIX: Add the Search Volume (if it exists)***
-                    // We check 'undefined' because a search volume of 0 is valid.
-                    if (searchVolume !== undefined) {
-                        html += `<b>Search volume:</b> ${searchVolume.toLocaleString()}<br/>`;
-                    }
+        // 4. Add the Search Volume (Our custom property)
+        // Check for 'undefined' because a search volume of 0 is valid.
+        if (point.searchVolume !== undefined) {
+            html += `<b>Search volume:</b> ${point.searchVolume.toLocaleString()}<br/>`;
+        }
 
-                    html += `</div>`;
-                    return html;
-                }
-            },
-
+        html += `</div>`;
+        return html;
+    }
+},
 
 
             exporting: { enabled: true },

@@ -2033,7 +2033,7 @@ async function generateAndRenderKeywords(posts, audienceContext) {
     }
 }
 // =================================================================================
-// === UPGRADED FUNCTION: SEO SUNBURST V3 (ENHANCED UX & FORMATTING) ===
+// === OPTIMISED FUNCTION: SEO SUNBURST WITH ENHANCED UX & FORMATTING V3 ===
 // =================================================================================
 
 async function generateAndRenderSeoSunburst(posts, audienceContext) {
@@ -2048,35 +2048,22 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
     try {
         const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Analyze the provided posts to create a full SEO plan.
+        const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Analyze the provided posts to create a full SEO plan. Structure your response as a valid JSON object. For each of the three intents (problem_aware, solution_seeking, purchase_intent), provide a primary keyword and its related keywords. CRITICAL: For each keyword (primary, secondary, and long_tail), you MUST provide: "keyword", "searchVolume", "difficulty", and "contentFormat". For each long_tail keyword, also provide an "exampleTitle". JSON Structure: { "problem_aware": { "primary": { ... }, "secondary": [ ... ], "long_tail": [ ... ] }, ... }`;
 
-        Structure your response as a valid JSON object. For each of the three intents (problem_aware, solution_seeking, purchase_intent), provide a primary keyword and its related keywords.
+        const openAIParams = {
+            model: "gpt-4o",
+            messages: [{ role: "system", content: "You are an SEO strategist that outputs structured JSON with keyword metrics." }, { role: "user", content: prompt }],
+            temperature: 0.1,
+            response_format: { "type": "json_object" }
+        };
 
-        CRITICAL: For each keyword (primary, secondary, and long_tail), you MUST provide:
-        - "keyword": The keyword phrase itself.
-        - "searchVolume": A realistic monthly search volume estimate (e.g., 1200).
-        - "difficulty": An SEO difficulty score from 0-100 (e.g., 35).
-        - "contentFormat": The ideal content type to rank (e.g., "How-to Guide", "Comparison Review", "Listicle").
-
-        For each long_tail keyword, also provide an "exampleTitle".
-
-        JSON Structure:
-        {
-          "problem_aware": {
-            "primary": { "keyword": "...", "searchVolume": ..., "difficulty": ..., "contentFormat": "..." },
-            "secondary": [ { "keyword": "...", "searchVolume": ..., "difficulty": ..., "contentFormat": "..." } ],
-            "long_tail": [ { "keyword": "...", "searchVolume": ..., "difficulty": ..., "contentFormat": "...", "exampleTitle": "..." } ]
-          },
-          "solution_seeking": { /* ... */ }, "purchase_intent": { /* ... */ }
-        }`;
-
-        const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an SEO strategist that outputs structured JSON with keyword metrics." }, { role: "user", content: prompt }], temperature: 0.1, response_format: { "type": "json_object" } };
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('AI SEO plan generation failed.');
 
         const aiResult = await response.json();
         const seoPlan = JSON.parse(aiResult.openaiResponse);
 
+        // --- Data Transformation (no changes needed here) ---
         const sunburstData = [{
             id: 'root', parent: '', name: 'SEO Plan'
         }, {
@@ -2086,43 +2073,47 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         }, {
             id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8'
         }];
-
         const processIntent = (intentId, plan) => {
             if (!plan || !plan.primary) return;
             const { primary, secondary, long_tail } = plan;
             const primaryId = `${intentId}_primary`;
-            sunburstData.push({ id: primaryId, parent: intentId, name: primary.keyword, value: primary.searchVolume, extra: { ...primary, levelName: 'Primary Keyword' } });
-
+            sunburstData.push({ id: primaryId, parent: intentId, name: primary.keyword, value: primary.searchVolume, extra: primary });
             (secondary || []).forEach((kw, i) => {
-                sunburstData.push({ id: `${primaryId}_sec_${i}`, parent: primaryId, name: kw.keyword, value: kw.searchVolume, extra: { ...kw, levelName: 'Secondary Keyword' } });
+                sunburstData.push({ id: `${primaryId}_sec_${i}`, parent: primaryId, name: kw.keyword, value: kw.searchVolume, extra: kw });
             });
-            
             (long_tail || []).forEach((kw, i) => {
                 const longTailId = `${primaryId}_lt_${i}`;
-                sunburstData.push({ id: longTailId, parent: primaryId, name: kw.keyword, value: kw.searchVolume, extra: { ...kw, levelName: 'Long-tail Keyword' } });
-                sunburstData.push({ id: `${longTailId}_content`, parent: longTailId, name: kw.exampleTitle, value: kw.searchVolume, extra: { ...kw, levelName: 'Content Example' } });
+                sunburstData.push({ id: longTailId, parent: primaryId, name: kw.keyword, value: kw.searchVolume, extra: kw });
+                sunburstData.push({ id: `${longTailId}_content`, parent: longTailId, name: kw.exampleTitle, value: kw.searchVolume, extra: { ...kw, isContentExample: true } });
             });
         };
-
         processIntent('pa', seoPlan.problem_aware);
         processIntent('ss', seoPlan.solution_seeking);
         processIntent('pi', seoPlan.purchase_intent);
-        
-        // --- ALL CHANGES ARE IN THIS HIGHCHARTS CONFIGURATION ---
+
+
+        // =========================================================================
+        // === HIGHCHARTS CONFIGURATION WITH ALL REQUESTED OPTIMISATIONS ===
+        // =========================================================================
         Highcharts.chart(container, {
-            // CHANGE 1: Transparent background
+            // OPTIMISATION 1: Transparent background
             chart: {
                 type: 'sunburst',
                 height: '600px',
-                backgroundColor: 'transparent'
+                backgroundColor: null // Makes the chart background transparent
             },
-            title: { text: 'Visual SEO Plan', align: 'left' },
-            credits: { enabled: false },
-            // CHANGE 2: Add loading animation
+            title: {
+                text: 'Visual SEO Plan',
+                align: 'left'
+            },
+            credits: {
+                enabled: false
+            },
+            // OPTIMISATION 3: Smooth loading animation
             plotOptions: {
                 sunburst: {
                     animation: {
-                        duration: 1000
+                        duration: 1000 // 1-second smooth fade/draw-in animation
                     }
                 }
             },
@@ -2131,78 +2122,131 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                 data: sunburstData,
                 allowDrillToNode: true,
                 cursor: 'pointer',
+                // OPTIMISATION 5: Better label formatting to avoid overflow
                 dataLabels: {
                     format: '{point.name}',
-                    filter: { property: 'innerArcLength', operator: '>', value: 16 },
-                    style: { textOverflow: 'ellipsis' }
+                    // Filter hides labels for very small slices to improve readability
+                    filter: {
+                        property: 'innerArcLength',
+                        operator: '>',
+                        value: 20
+                    },
+                    rotationMode: 'circular', // Best mode for sunburst readability
+                    style: {
+                        textOverflow: 'ellipsis', // Fallback for long text
+                        whiteSpace: 'nowrap' // Prevents ugly default wrapping
+                    }
                 },
+                // OPTIMISATION 2 & 5: Configure levels for center label and consistent look
                 levels: [{
-                    // CHANGE 3: Ensure 'SEO Plan' text is visible in the center
                     level: 1,
+                    levelIsConstant: false,
+                    // Configuration for the root node "SEO Plan"
                     dataLabels: {
-                        enabled: true,
+                        enabled: true, // Ensure it's always enabled
+                        // Always show this label, regardless of size
+                        filter: {
+                            property: 'value',
+                            operator: '>',
+                            value: -1
+                        },
                         style: {
-                            fontSize: '16px',
+                            fontSize: '1.8em',
                             fontWeight: 'bold',
                             color: '#333333',
-                            textOutline: 'none'
+                            textOverflow: 'none' // Disable ellipsis for the center label
                         }
                     }
                 }, {
                     level: 2,
-                    colorByPoint: true,
-                    dataLabels: { style: { fontSize: '14px', fontWeight: 'bold' } }
+                    colorByPoint: true
                 }, {
                     level: 3,
                     colorVariation: { key: 'brightness', to: -0.25 }
                 }, {
                     level: 4,
-                    colorVariation: { key: 'brightness', to: 0.45 }
+                    colorVariation: { key: 'brightness', to: 0.25 }
                 }, {
                     level: 5,
-                    colorVariation: { key: 'brightness', to: 0.65 }
+                    colorVariation: { key: 'brightness', to: -0.45 }
+                }, {
+                    level: 6,
+                    colorVariation: { key: 'brightness', to: 0.45 }
                 }]
             }],
-            // CHANGE 4 & 5: Fully redesigned tooltip for clarity and text wrapping
-            tooltip: {
-                useHTML: true,
-                headerFormat: '',
-                pointFormatter: function() {
-                    const extra = this.options.extra;
-                    const name = this.name;
-                    
-                    // Define level names based on the data hierarchy
-                    const levelNames = { 1: 'SEO Plan', 2: 'Intent', 3: 'Primary Keyword', 4: 'Secondary / Long-tail', 5: 'Content Example' };
-                    let levelName = levelNames[this.level] || 'Item';
-                    
-                    // Override with more specific name if available
-                    if (extra && extra.levelName) {
-                        levelName = extra.levelName;
-                    }
-                    
-                    // Main container with styles to ensure text wrapping
-                    let html = `<div style="font-family: sans-serif; font-size: 14px; max-width: 300px; white-space: normal; word-break: break-word;">`;
-                    html += `<b>${name}</b><br/>`;
-                    html += `<span style="color: #888;">${levelName}</span>`;
 
-                    if (extra) {
-                        html += `<hr style="margin: 4px 0; border-color: #f0f0f0;">`;
-                        if (extra.searchVolume !== undefined) {
-                            html += `<span>📈 Volume: <b>${extra.searchVolume.toLocaleString()}</b>/mo</span><br/>`;
+            // OPTIMISATION 4: Advanced Tooltip with wrapping and custom level names
+            tooltip: {
+                useHTML: true, // Required for custom styling and wrapping
+                headerFormat: '',
+                // Custom function to generate tooltip content
+                pointFormatter: function() {
+                    const point = this; // Easier to reference
+                    const extra = point.options.extra;
+
+                    // Map hierarchy levels to custom, readable names
+                    const levelNameMap = {
+                        1: 'SEO Plan',
+                        2: 'Intent bucket',
+                        3: 'Primary keyword',
+                        4: 'Secondary keyword',
+                        5: 'Long-tail keyword',
+                        6: 'Content example'
+                    };
+
+                    const levelName = levelNameMap[point.level] || `Level ${point.level}`;
+
+                    // Function to find the parent "Intent" name (e.g., "Problem-Aware")
+                    const getIntentName = (p) => {
+                        let current = p;
+                        while (current && current.level > 2) {
+                            current = point.series.chart.get(current.parent);
                         }
-                        if (extra.difficulty !== undefined) {
-                            html += `<span>🧗‍♀️ Difficulty: <b>${extra.difficulty}/100</b></span><br/>`;
-                        }
-                        if (extra.contentFormat) {
-                            html += `<span>📝 Format: <b>${extra.contentFormat}</b></span>`;
-                        }
+                        // Only return if the found parent is an intent bucket
+                        return (current && current.level === 2) ? current.name : null;
+                    };
+
+                    const intentName = getIntentName(point);
+                    
+                    // --- Build the HTML for the tooltip ---
+                    // Style ensures wrapping inside the box
+                    let html = `<div style="max-width: 300px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
+
+                    // Main Title (Keyword or Content Title)
+                    html += `<b>${point.name}</b><br/>`;
+                    html += `<hr style="margin: 4px 0; border-top: 1px solid #ccc;">`;
+
+                    // Level Name
+                    html += `<b>Level:</b> ${levelName}<br/>`;
+
+                    // Intent Name (if applicable)
+                    if (intentName) {
+                        html += `<b>Intent:</b> ${intentName}<br/>`;
                     }
+
+                    // Search Volume (if available)
+                    if (extra && extra.searchVolume !== undefined) {
+                        html += `<b>Search volume:</b> ${extra.searchVolume.toLocaleString()}<br/>`;
+                    }
+                    
+                    // Include other metrics if they exist
+                    if (extra && extra.difficulty !== undefined) {
+                        html += `<b>Difficulty:</b> ${extra.difficulty}/100<br/>`;
+                    }
+
                     html += `</div>`;
                     return html;
                 }
             },
-            exporting: { enabled: true },
-            accessibility: { enabled: true, point: { valueDescriptionFormat: '{point.name}, level {point.level}.' } },
+            exporting: {
+                enabled: true
+            },
+            accessibility: {
+                enabled: true,
+                point: {
+                    valueDescriptionFormat: '{point.name}, level {point.level}.'
+                }
+            },
         });
 
     } catch (error) {

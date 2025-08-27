@@ -2012,7 +2012,8 @@ async function generateAndManageKeywordViews(posts, audienceContext) {
         
         if (parsed && parsed.keyword_plan) {
             renderKeywordCards(parsed.keyword_plan); // This function must exist
-            renderKeywordTree(parsed.keyword_plan);   // This function must also exist
+            renderKeywordSunburst(parsed.keyword_plan);
+
         } else {
              throw new Error('AI response for keywords was invalid.');
         }
@@ -2064,131 +2065,119 @@ function renderKeywordCards(keywordPlan) {
 
     container.innerHTML = cardsHTML;
 }
-
 // =================================================================================
-// === REPLACEMENT: The Final Tree Renderer with Curved Lines & Improved UX ===
+// === NEW FUNCTION: The Visually Striking Sunburst Chart Renderer ===
 // =================================================================================
-function renderKeywordTree(keywordPlan) {
+function renderKeywordSunburst(keywordPlan) {
     const container = document.getElementById('keyword-tree-view');
     if (!container) return;
 
     if (typeof Highcharts === 'undefined') {
-        container.innerHTML = '<p class="error-message">Highcharts library not found. Cannot render tree.</p>';
+        container.innerHTML = '<p class="error-message">Highcharts library not found. Cannot render chart.</p>';
         return;
     }
-
-    // --- STEP 1: Build the Data Structure ---
-    let chartData = [{ id: 'root', name: 'SEO Plan', color: '#FFFFFF' }];
+    
+    // --- STEP 1: Transform Data for Sunburst ---
+    let chartData = [{
+        id: 'root',
+        parent: '',
+        name: 'SEO Plan'
+    }];
+    
     const intentColors = {
-        'Problem-Aware': '#8a2be2',    // Purple for awareness
-        'Solution-Seeking': '#00ced1', // Teal for searching
-        'Purchase-Intent': '#ff4500'   // Orange/Red for action
+        'Problem-Aware': '#8a2be2',
+        'Solution-Seeking': '#00ced1',
+        'Purchase-Intent': '#ff4500'
     };
 
-    keywordPlan.forEach((plan, index) => {
-        const intentId = `intent_${index}`;
-        const primaryId = `primary_${index}`;
+    keywordPlan.forEach(plan => {
+        const intentId = plan.intent;
+        const primaryId = `${intentId}_${plan.primary_keyword}`;
 
         // Level 2: Intent Category
         chartData.push({
             id: intentId,
             parent: 'root',
             name: plan.intent,
-            color: intentColors[plan.intent] || '#555'
+            color: intentColors[plan.intent] || '#333'
         });
 
-        // Level 3: Primary Keyword "Hub"
+        // Level 3: Primary Keyword Hub
         chartData.push({
             id: primaryId,
             parent: intentId,
             name: plan.primary_keyword,
-            _all_data: plan // Store all related data here for the tooltip
+            value: 5 // Give it a value to make it a larger segment
         });
-        
-        // Level 4: Leaf nodes
-        (plan.secondary_keywords || []).forEach((kw, kw_idx) => {
-            chartData.push({ id: `${primaryId}_skw_${kw_idx}`, parent: primaryId, name: kw });
+
+        // Level 4: Leaf Nodes (Keywords & Content Idea)
+        (plan.secondary_keywords || []).forEach(kw => {
+            chartData.push({ parent: primaryId, name: kw, value: 1 });
         });
-        (plan.long_tail_keywords || []).forEach((kw, kw_idx) => {
-            chartData.push({ id: `${primaryId}_ltw_${kw_idx}`, parent: primaryId, name: kw });
+        (plan.long_tail_keywords || []).forEach(kw => {
+            chartData.push({ parent: primaryId, name: kw, value: 1 });
         });
         chartData.push({
-            id: `${primaryId}_content`,
             parent: primaryId,
-            name: `Ex: "${plan.content_example}"`
+            name: `Idea: "${plan.content_example}"`,
+            value: 1
         });
     });
 
-    // --- STEP 2: Configure and Render the Highcharts Chart ---
+    // --- STEP 2: Configure and Render the Chart ---
     Highcharts.chart(container, {
         chart: {
-            inverted: true,
             backgroundColor: 'transparent',
-            height: '750px',
-            spacingBottom: 180 // Ensure space for rotated labels
+            height: '100%' // Use full available height
         },
         title: { text: null },
         credits: { enabled: false },
         series: [{
-            type: 'treegraph',
+            type: 'sunburst',
             data: chartData,
-            tooltip: { // Rich tooltip for a better UX
-                useHTML: true,
-                formatter: function() {
-                    let point = this.point;
-                    if (point.id.includes('primary_')) {
-                        const data = point.options._all_data;
-                        let html = `<b style="font-size: 1.1em;">${data.primary_keyword} (Hub)</b><hr style="margin: 5px 0;">`;
-                        html += '<b>Secondary:</b><ul>' + data.secondary_keywords.map(kw => `<li>${kw}</li>`).join('') + '</ul>';
-                        html += '<b>Long-tail:</b><ul>' + data.long_tail_keywords.map(kw => `<li>${kw}</li>`).join('') + '</ul>';
-                        return html;
-                    }
-                    return `<b>${point.name}</b>`;
-                }
-            },
-            marker: { radius: 7, symbol: 'circle' },
+            allowDrillToNode: true, // Awesome UX: Click to zoom!
+            cursor: 'pointer',
             dataLabels: {
+                format: '{point.name}',
+                filter: {
+                    property: 'innerRadius',
+                    operator: '>',
+                    value: 16 // Only show labels on larger segments to avoid clutter
+                },
+                rotationMode: 'circular', // Makes text follow the curve
                 style: {
                     color: '#FFFFFF',
                     textOutline: 'none',
-                    fontWeight: '500',
-                    fontSize: '14px'
-                },
+                    fontSize: '14px',
+                    fontWeight: '500'
+                }
             },
             levels: [{
-                level: 1, // Root: "SEO Plan"
-                dataLabels: { y: -30 }
-            }, {
-                level: 2, // Intent Level
-                marker: { radius: 9 },
-                dataLabels: { y: -30, style: { fontWeight: 'bold' } }
-            }, {
-                level: 3, // Primary Keyword "Hub"
-                color: '#80d8ff',
-                dataLabels: { y: -30, style: { fontWeight: 'bold' } }
-            }, {
-                level: 4, // All Leaf Nodes
-                color: '#B0BEC5',
+                level: 2, // Intent Ring
+                levelSize: { value: 25, unit: '%' },
                 dataLabels: {
-                    rotation: -90, // Prevents labels from overlapping
-                    align: 'right',
-                    x: 6,
-                    y: -20,
-                    style: {
-                        fontWeight: 'normal',
-                        fontSize: '14px',
-                        color: 'rgba(255, 255, 255, 0.9)'
-                    }
+                    style: { fontSize: '16px', fontWeight: 'bold' }
                 }
-            }],
-            // === THE KEY TO CURVED LINES ===
-            // By NOT specifying link.type, we allow Highcharts to use its default,
-            // superior layout algorithm which produces the smooth, curved splines.
-            link: {
-                color: 'rgba(255, 255, 255, 0.4)',
-                width: 1
-            }
+            }, {
+                level: 3, // Primary Keyword Ring
+                levelSize: { value: 20, unit: '%' },
+                colorVariation: { key: 'brightness', to: 0.15 }, // Lighter shade of parent
+                dataLabels: {
+                    style: { fontSize: '15px', fontWeight: 'bold' }
+                }
+            }, {
+                level: 4, // Leaf Ring
+                levelSize: { value: 15, unit: '%' },
+                colorVariation: { key: 'brightness', to: 0.3 }, // Even lighter shade
+                dataLabels: {
+                    style: { fontSize: '13px', fontWeight: 'normal' }
+                }
+            }]
         }],
+        tooltip: {
+            headerFormat: '',
+            pointFormat: '<b>{point.name}</b>'
+        }
     });
 }
 

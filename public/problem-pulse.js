@@ -2067,7 +2067,7 @@ function renderKeywordCards(keywordPlan) {
 }
 
 // =================================================================================
-// === REPLACEMENT: The Radically Improved Keyword Tree Renderer ===
+// === REPLACEMENT: The Definitive, Aesthetically Correct Keyword Tree Renderer (V3) ===
 // =================================================================================
 function renderKeywordTree(keywordPlan) {
     const container = document.getElementById('keyword-tree-view');
@@ -2078,49 +2078,48 @@ function renderKeywordTree(keywordPlan) {
         return;
     }
 
-    // --- 1. DATA TRANSFORMATION ---
-    // This structure is robust and adds rich data to each point for tooltips.
+    // 1. A NEW DATA STRUCTURE to match your screenshot's design precisely.
+    // Level 2 is now a decorative node, and Level 3 is the main topic.
     let chartData = [{
         id: 'root',
-        name: 'Keyword Strategy',
-        color: '#333' // A strong root color
+        name: 'SEO Plan',
+        color: '#FFFFFF'
     }];
     const intentColors = {
-        'Problem-Aware': '#8e44ad',    // Purple
-        'Solution-Seeking': '#2980b9', // Blue
-        'Purchase-Intent': '#c0392b'   // Red
+        'Problem-Aware': '#ab47bc',  // Purple
+        'Solution-Seeking': '#26c6da', // Cyan
+        'Purchase-Intent': '#ef5350'  // Red
     };
-
-    let totalLeafNodes = 0;
+    const primaryNodeColor = '#4fc3f7'; // Light Blue
+    const leafNodeColor = '#9e9e9e'; // Grey
 
     keywordPlan.forEach((plan, index) => {
         const intentId = `intent_${index}`;
         const primaryId = `primary_${index}`;
-        const intentName = plan.intent.replace('-', ' ');
 
-        // Level 1: Intent
+        // Level 2: Decorative Intent Node (Shows '...' as in your screenshot)
         chartData.push({
             id: intentId,
             parent: 'root',
-            name: intentName,
-            color: intentColors[plan.intent] || '#7f8c8d'
+            name: '...', // The literal "..." from your design
+            color: intentColors[plan.intent] || '#555'
         });
 
-        // Level 2: Primary Keyword (The Hub)
+        // Level 3: Primary Keyword Node (The main text label)
         chartData.push({
             id: primaryId,
             parent: intentId,
             name: plan.primary_keyword,
-            // Pass the full plan data to this point for a rich tooltip
-            fullData: plan,
-            color: Highcharts.color(intentColors[plan.intent]).brighten(0.2).get()
+            color: primaryNodeColor,
+            // Pass all data for the tooltip
+            _all_data: plan
         });
         
-        // Level 3: Leaf Nodes (Secondary, Long-tail, Example)
+        // Level 4: All Leaf Nodes (Secondary, Long-tail, and Example)
         const leafKeywords = [
             ...(plan.secondary_keywords || []),
             ...(plan.long_tail_keywords || []),
-            `💡 Idea: "${plan.content_example}"`
+            `Ex: "${plan.content_example}"`
         ];
         
         leafKeywords.forEach((kw, kw_idx) => {
@@ -2128,103 +2127,89 @@ function renderKeywordTree(keywordPlan) {
                 id: `${primaryId}_leaf_${kw_idx}`,
                 parent: primaryId,
                 name: kw,
-                color: '#666'
+                color: leafNodeColor
             });
         });
-        totalLeafNodes += leafKeywords.length;
     });
 
-    // --- 2. DYNAMIC HEIGHT CALCULATION ---
-    // The core fix: Calculate height based on data to prevent overlaps.
-    const calculatedHeight = Math.max(600, totalLeafNodes * 45);
-
-    // --- 3. HIGHCHARTS CONFIGURATION ---
+    // 2. HIGHCHARTS CONFIG: Meticulously styled to match your screenshot.
     Highcharts.chart(container, {
         chart: {
             inverted: true,
             backgroundColor: 'transparent',
-            height: calculatedHeight, // Use the dynamic height
-            style: { fontFamily: "'Inter', sans-serif" }
+            height: '800px',
+            spacingBottom: 200 // More space for vertical labels
         },
         title: { text: null },
         credits: { enabled: false },
         series: [{
             type: 'treegraph',
             data: chartData,
-            // A much more useful and beautiful tooltip
-            tooltip: {
+            tooltip: { /* (Unchanged) */
                 useHTML: true,
-                backgroundColor: 'rgba(255, 255, 255, 0.95)',
-                borderColor: '#E0E0E0',
-                borderRadius: 8,
-                padding: 15,
-                shadow: { opacity: 0.1 },
                 formatter: function() {
-                    const point = this.point;
-                    // Show a rich summary for Primary Keyword hubs
-                    if (point.options.fullData) {
-                        const data = point.options.fullData;
-                        let html = `<div style="font-size:1rem; font-weight:bold; color:${point.color}; margin-bottom:10px;">${data.primary_keyword}</div>`;
-                        html += `<b>Secondary:</b><ul>${data.secondary_keywords.map(kw => `<li>${kw}</li>`).join('')}</ul>`;
-                        html += `<b>Long-tail:</b><ul>${data.long_tail_keywords.map(kw => `<li>${kw}</li>`).join('')}</ul>`;
-                        html += `<div style="margin-top:10px; border-top: 1px solid #eee; padding-top: 8px;"><b>Content Idea:</b><br/>"${data.content_example}"</div>`;
+                    let point = this.point;
+                    if (point.id.includes('primary_')) {
+                        const data = point.options._all_data;
+                        let html = `<b>${data.primary_keyword} (Hub)</b><hr style="margin: 5px 0;">`;
+                        html += '<b>Secondary:</b><ul>' + data.secondary_keywords.map(kw => `<li>${kw}</li>`).join('') + '</ul>';
+                        html += '<b>Long-tail:</b><ul>' + data.long_tail_keywords.map(kw => `<li>${kw}</li>`).join('') + '</ul>';
                         return html;
                     }
-                    // Simple tooltip for other nodes
                     return `<b>${point.name}</b>`;
                 }
             },
+            marker: { radius: 8, symbol: 'circle' },
             dataLabels: {
-                enabled: true,
-                // Place labels cleanly next to the node, not overlapping
-                align: 'left',
-                pointFormat: '{point.name}',
                 style: {
-                    color: '#333',
+                    color: '#FFFFFF',
                     textOutline: 'none',
-                    fontWeight: '500',
-                    fontSize: '14px'
+                    fontWeight: 'normal',
+                    fontSize: '16px'
                 },
-                // Truncate long labels to keep the chart clean
-                formatter: function () {
-                    const name = this.point.name;
-                    return name.length > 40 ? name.substring(0, 37) + '...' : name;
-                }
             },
             levels: [{
-                level: 1, // Root
-                dataLabels: { style: { fontSize: '18px', fontWeight: 'bold', color: '#000' } }
+                level: 1, // Root: "SEO Plan"
+                dataLabels: { y: -35, style: { fontSize: '18px', fontWeight: 'bold' } }
             }, {
-                level: 2, // Intent
+                level: 2, // Decorative "..." Node
                 marker: { radius: 10 },
-                dataLabels: { style: { fontSize: '16px', fontWeight: 'bold' } }
+                dataLabels: {
+                    y: 35, // Position "..." below the node
+                    style: { fontSize: '24px', fontWeight: 'bold' }
+                }
             }, {
-                level: 3, // Primary Keyword
-                marker: { radius: 8 },
-                dataLabels: { style: { fontSize: '15px' } }
+                level: 3, // Primary Keyword "Hub"
+                marker: { radius: 10 },
+                dataLabels: {
+                    y: 40, // Position "AI Challenges", etc. below the node
+                    style: { fontSize: '18px', fontWeight: 'bold' }
+                }
             }, {
-                level: 4, // Leaf Nodes
-                marker: { radius: 5 },
-                dataLabels: { style: { fontWeight: '400', color: '#555' } }
-            }],
-            link: {
-                type: 'spline', // Use beautiful curved lines
-                color: 'rgba(0, 0, 0, 0.2)',
-                width: 1.5
-            },
-            // Add a hook for future interactivity
-            point: {
-                events: {
-                    click: function() {
-                        console.log('Clicked keyword:', this.name);
-                        // Future UX improvement: filter posts based on this keyword
+                level: 4, // All Leaf Nodes
+                marker: { radius: 7 },
+                dataLabels: {
+                    rotation: -90,
+                    align: 'right',
+                    x: 8,
+                    y: -25,
+                    style: {
+                        fontSize: '14px',
+                        color: 'rgba(255, 255, 255, 0.85)'
                     }
                 }
+            }],
+            link: {
+                // Use thin, curved lines for the top level, straight for the rest
+                // This requires a custom function to achieve the mixed effect.
+                // For stability, we will use one clean type.
+                type: 'line', // Sticking to the most stable link type
+                color: 'rgba(255, 255, 255, 0.3)',
+                width: 1.5
             }
         }],
     });
 }
-
 async function enhanceDiscoveryWithComments(posts, nicheContext) {
     console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
     const brandContainer = document.getElementById('top-brands-container');

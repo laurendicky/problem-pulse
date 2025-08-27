@@ -2032,9 +2032,8 @@ async function generateAndRenderKeywords(posts, audienceContext) {
         `;
     }
 }
-
 // =================================================================================
-// === UPGRADED FUNCTION: SEO SUNBURST WITH METRICS V2 ===
+// === UPGRADED FUNCTION: SEO SUNBURST V3 (ENHANCED UX & FORMATTING) ===
 // =================================================================================
 
 async function generateAndRenderSeoSunburst(posts, audienceContext) {
@@ -2049,7 +2048,6 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
     try {
         const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        // 1. UPGRADED AI Prompt to include metrics
         const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Analyze the provided posts to create a full SEO plan.
 
         Structure your response as a valid JSON object. For each of the three intents (problem_aware, solution_seeking, purchase_intent), provide a primary keyword and its related keywords.
@@ -2069,23 +2067,16 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
             "secondary": [ { "keyword": "...", "searchVolume": ..., "difficulty": ..., "contentFormat": "..." } ],
             "long_tail": [ { "keyword": "...", "searchVolume": ..., "difficulty": ..., "contentFormat": "...", "exampleTitle": "..." } ]
           },
-          // ... repeat for solution_seeking and purchase_intent
+          "solution_seeking": { /* ... */ }, "purchase_intent": { /* ... */ }
         }`;
 
-        const openAIParams = {
-            model: "gpt-4o",
-            messages: [{ role: "system", content: "You are an SEO strategist that outputs structured JSON with keyword metrics." }, { role: "user", content: prompt }],
-            temperature: 0.1,
-            response_format: { "type": "json_object" }
-        };
-
+        const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an SEO strategist that outputs structured JSON with keyword metrics." }, { role: "user", content: prompt }], temperature: 0.1, response_format: { "type": "json_object" } };
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('AI SEO plan generation failed.');
 
         const aiResult = await response.json();
         const seoPlan = JSON.parse(aiResult.openaiResponse);
 
-        // 2. Transform the new data structure for Highcharts
         const sunburstData = [{
             id: 'root', parent: '', name: 'SEO Plan'
         }, {
@@ -2098,34 +2089,43 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
 
         const processIntent = (intentId, plan) => {
             if (!plan || !plan.primary) return;
-            
             const { primary, secondary, long_tail } = plan;
             const primaryId = `${intentId}_primary`;
-
-            // Add nodes with all the new data attached to the 'extra' object
-            sunburstData.push({ id: primaryId, parent: intentId, name: primary.keyword, value: primary.searchVolume, extra: primary });
+            sunburstData.push({ id: primaryId, parent: intentId, name: primary.keyword, value: primary.searchVolume, extra: { ...primary, levelName: 'Primary Keyword' } });
 
             (secondary || []).forEach((kw, i) => {
-                sunburstData.push({ id: `${primaryId}_sec_${i}`, parent: primaryId, name: kw.keyword, value: kw.searchVolume, extra: kw });
+                sunburstData.push({ id: `${primaryId}_sec_${i}`, parent: primaryId, name: kw.keyword, value: kw.searchVolume, extra: { ...kw, levelName: 'Secondary Keyword' } });
             });
             
             (long_tail || []).forEach((kw, i) => {
                 const longTailId = `${primaryId}_lt_${i}`;
-                sunburstData.push({ id: longTailId, parent: primaryId, name: kw.keyword, value: kw.searchVolume, extra: kw });
-                // Content Example (leaf node)
-                sunburstData.push({ id: `${longTailId}_content`, parent: longTailId, name: kw.exampleTitle, value: kw.searchVolume, extra: { ...kw, type: 'Content Example' } });
+                sunburstData.push({ id: longTailId, parent: primaryId, name: kw.keyword, value: kw.searchVolume, extra: { ...kw, levelName: 'Long-tail Keyword' } });
+                sunburstData.push({ id: `${longTailId}_content`, parent: longTailId, name: kw.exampleTitle, value: kw.searchVolume, extra: { ...kw, levelName: 'Content Example' } });
             });
         };
 
         processIntent('pa', seoPlan.problem_aware);
         processIntent('ss', seoPlan.solution_seeking);
         processIntent('pi', seoPlan.purchase_intent);
-
-        // 3. Render Highcharts with an UPGRADED Tooltip
+        
+        // --- ALL CHANGES ARE IN THIS HIGHCHARTS CONFIGURATION ---
         Highcharts.chart(container, {
-            chart: { type: 'sunburst', height: '600px' },
+            // CHANGE 1: Transparent background
+            chart: {
+                type: 'sunburst',
+                height: '600px',
+                backgroundColor: 'transparent'
+            },
             title: { text: 'Visual SEO Plan', align: 'left' },
             credits: { enabled: false },
+            // CHANGE 2: Add loading animation
+            plotOptions: {
+                sunburst: {
+                    animation: {
+                        duration: 1000
+                    }
+                }
+            },
             series: [{
                 type: 'sunburst',
                 data: sunburstData,
@@ -2136,32 +2136,66 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                     filter: { property: 'innerArcLength', operator: '>', value: 16 },
                     style: { textOverflow: 'ellipsis' }
                 },
-                levels: [{ level: 1, levelIsConstant: false }, { level: 2, colorByPoint: true }, { level: 3 }, { level: 4 }, { level: 5 }]
+                levels: [{
+                    // CHANGE 3: Ensure 'SEO Plan' text is visible in the center
+                    level: 1,
+                    dataLabels: {
+                        enabled: true,
+                        style: {
+                            fontSize: '16px',
+                            fontWeight: 'bold',
+                            color: '#333333',
+                            textOutline: 'none'
+                        }
+                    }
+                }, {
+                    level: 2,
+                    colorByPoint: true,
+                    dataLabels: { style: { fontSize: '14px', fontWeight: 'bold' } }
+                }, {
+                    level: 3,
+                    colorVariation: { key: 'brightness', to: -0.25 }
+                }, {
+                    level: 4,
+                    colorVariation: { key: 'brightness', to: 0.45 }
+                }, {
+                    level: 5,
+                    colorVariation: { key: 'brightness', to: 0.65 }
+                }]
             }],
-            // --- THIS IS THE KEY UPGRADE ---
+            // CHANGE 4 & 5: Fully redesigned tooltip for clarity and text wrapping
             tooltip: {
                 useHTML: true,
                 headerFormat: '',
                 pointFormatter: function() {
-                    if (!this.options.extra) {
-                         return `<b>${this.name}</b>`; // Fallback for root/intent nodes
-                    }
-                    const { keyword, searchVolume, difficulty, contentFormat, type } = this.options.extra;
+                    const extra = this.options.extra;
                     const name = this.name;
-                    const levelName = type ? type : 'Keyword';
-
-                    let html = `<div style="font-family: sans-serif; font-size: 14px; max-width: 300px;">`;
-                    html += `<b>${name}</b><br/>`;
-                    html += `<hr style="margin: 4px 0; border-color: #f0f0f0;">`;
                     
-                    if (searchVolume !== undefined) {
-                      html += `<span>📈 Volume: <b>${searchVolume.toLocaleString()}</b>/mo</span><br/>`;
+                    // Define level names based on the data hierarchy
+                    const levelNames = { 1: 'SEO Plan', 2: 'Intent', 3: 'Primary Keyword', 4: 'Secondary / Long-tail', 5: 'Content Example' };
+                    let levelName = levelNames[this.level] || 'Item';
+                    
+                    // Override with more specific name if available
+                    if (extra && extra.levelName) {
+                        levelName = extra.levelName;
                     }
-                    if (difficulty !== undefined) {
-                      html += `<span>🧗‍♀️ Difficulty: <b>${difficulty}/100</b></span><br/>`;
-                    }
-                    if (contentFormat) {
-                      html += `<span>📝 Format: <b>${contentFormat}</b></span>`;
+                    
+                    // Main container with styles to ensure text wrapping
+                    let html = `<div style="font-family: sans-serif; font-size: 14px; max-width: 300px; white-space: normal; word-break: break-word;">`;
+                    html += `<b>${name}</b><br/>`;
+                    html += `<span style="color: #888;">${levelName}</span>`;
+
+                    if (extra) {
+                        html += `<hr style="margin: 4px 0; border-color: #f0f0f0;">`;
+                        if (extra.searchVolume !== undefined) {
+                            html += `<span>📈 Volume: <b>${extra.searchVolume.toLocaleString()}</b>/mo</span><br/>`;
+                        }
+                        if (extra.difficulty !== undefined) {
+                            html += `<span>🧗‍♀️ Difficulty: <b>${extra.difficulty}/100</b></span><br/>`;
+                        }
+                        if (extra.contentFormat) {
+                            html += `<span>📝 Format: <b>${extra.contentFormat}</b></span>`;
+                        }
                     }
                     html += `</div>`;
                     return html;
@@ -2176,7 +2210,6 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         container.innerHTML = `<p class="error-message">Could not generate the visual SEO plan.</p>`;
     }
 }
-
 async function enhanceDiscoveryWithComments(posts, nicheContext) {
     console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
     const brandContainer = document.getElementById('top-brands-container');

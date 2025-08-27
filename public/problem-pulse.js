@@ -1958,85 +1958,10 @@ Your writing should adopt the following characteristics:
 // =================================================================================
 // === NEW FUNCTION: AI KEYWORD OPPORTUNITIES ===
 // =================================================================================
-
-async function generateAndRenderKeywords(posts, audienceContext) {
-    const container = document.getElementById('keyword-opportunities-container');
-    if (!container) return;
-
-    container.innerHTML = `<h3 class="dashboard-section-title">Keyword Opportunities</h3><p class="loading-text">Extracting high-intent keywords...</p>`;
-
-    try {
-        const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
-
-        const prompt = `You are an expert SEO strategist specializing in identifying user intent from raw text for the "${audienceContext}" audience.
-        Analyze the following user posts and extract up to 15 high-value keywords and phrases. Categorize them into three distinct groups based on user intent:
-
-        1.  "problem_aware": Keywords used by people who know they have a problem but are seeking information or understanding. (e.g., "how to fix...", "why is my...", "is it normal...")
-        2.  "solution_seeking": Keywords used by people actively looking for and comparing types of solutions. (e.g., "best software for...", "alternatives to...", "[product category] reviews")
-        3.  "purchase_intent": Keywords used by people close to making a purchase, often including brand names or commercial terms. (e.g., "[Brand A] vs [Brand B]", "[Product] pricing", "is [Brand] worth it")
-
-        Respond ONLY with a valid JSON object with three keys: "problem_aware", "solution_seeking", and "purchase_intent", each holding an array of up to 5 relevant keyword strings.
-
-        Posts:\n${topPostsText}`;
-
-        const openAIParams = {
-            model: "gpt-4o-mini",
-            messages: [
-                { role: "system", content: "You are an SEO strategist who outputs structured JSON with keyword categories." },
-                { role: "user", content: prompt }
-            ],
-            temperature: 0.1,
-            max_tokens: 600,
-            response_format: { "type": "json_object" }
-        };
-
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        
-        if (!response.ok) throw new Error('Keyword analysis API call failed.');
-
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
-        const { problem_aware, solution_seeking, purchase_intent } = parsed;
-        
-        const renderCluster = (title, icon, description, keywords) => {
-            if (!keywords || keywords.length === 0) return '';
-            const keywordList = keywords.map(kw => `<li>${kw}</li>`).join('');
-            return `
-                <div class="keyword-cluster">
-                    <div class="keyword-cluster-header">
-                        <span class="keyword-cluster-icon">${icon}</span>
-                        <div>
-                            <h4 class="keyword-cluster-title">${title}</h4>
-                            <p class="keyword-cluster-description">${description}</p>
-                        </div>
-                    </div>
-                    <ul class="keyword-list">${keywordList}</ul>
-                </div>
-            `;
-        };
-        
-        container.innerHTML = `
-            <h3 class="dashboard-section-title">Keyword Opportunities</h3>
-            <div class="keyword-clusters-grid">
-                ${renderCluster('Problem-Aware', '🤔', 'For blog posts & guides', problem_aware)}
-                ${renderCluster('Solution-Seeking', '🔍', 'For comparisons & reviews', solution_seeking)}
-                ${renderCluster('Purchase-Intent', '💳', 'For landing pages & ads', purchase_intent)}
-            </div>
-        `;
-
-    } catch (error) {
-        console.error("Keyword generation error:", error);
-        container.innerHTML = `
-            <h3 class="dashboard-section-title">Keyword Opportunities</h3>
-            <p class="loading-text" style="color: red;">Could not generate keyword opportunities.</p>
-        `;
-    }
-}
 async function generateAndRenderSeoSunburst(posts, audienceContext) {
     const container = document.getElementById('keyword-sunburst');
     if (!container) {
-        console.error('Sunburst container div "keyword-sunburst" not found.');
-        return;
+        return; // Exit if container not found
     }
 
     container.innerHTML = '<p class="loading-text">Building data-driven SEO plan...</p>';
@@ -2044,7 +1969,6 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
     try {
         const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        // *** CHANGE 1: The AI prompt is updated to match the new node count rules. ***
         const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Create a comprehensive, multi-level SEO plan based on the provided text.
 
         Structure your response as a single, valid JSON object.
@@ -2095,94 +2019,113 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         const aiResult = await response.json();
         const seoPlan = JSON.parse(aiResult.openaiResponse);
 
-        // Data transformation logic remains the same - it's robust enough for the new structure.
-        // In generateAndRenderSeoSunburst...
+        // Data transformation logic
+        const sunburstData = [{
+            id: 'root', parent: '', name: 'SEO Plan', levelName: 'SEO Plan'
+        }, {
+            id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF', levelName: 'Intent bucket'
+        }, {
+            id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF', levelName: 'Intent bucket'
+        }, {
+            id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8', levelName: 'Intent bucket'
+        }];
 
-// =========================================================================
-// === STEP 1: CORRECTED DATA GENERATION ===================================
-// =========================================================================
-
-// Data transformation logic
-const sunburstData = [{
-    id: 'root', parent: '', name: 'SEO Plan',
-    levelName: 'SEO Plan' // <-- FLATTENED PROPERTY
-}, {
-    id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF',
-    levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
-}, {
-    id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF',
-    levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
-}, {
-    id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8',
-    levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
-}];
-
-const processIntent = (intentId, intentName, intentData) => {
-    if (!intentData || !Array.isArray(intentData)) return;
-    
-    // Level 3: Primary Keywords
-    intentData.forEach((primary, i) => {
-        const primaryId = `${intentId}_p_${i}`;
-        sunburstData.push({ 
-            id: primaryId, 
-            parent: intentId, 
-            name: primary.keyword, 
-            // NO 'extra' OBJECT. Properties are added directly.
-            intentName: intentName,
-            levelName: 'Primary keyword',
-            searchVolume: primary.searchVolume
-        });
-
-        // Level 4: Secondary Keywords
-        (primary.secondary_keywords || []).forEach((secondary, j) => {
-            const secondaryId = `${primaryId}_s_${j}`;
-            sunburstData.push({ 
-                id: secondaryId, 
-                parent: primaryId, 
-                name: secondary.keyword, 
-                intentName: intentName,
-                levelName: 'Secondary keyword',
-                searchVolume: secondary.searchVolume
-            });
-
-            // Level 5: Long-tail Keywords
-            (secondary.long_tail_keywords || []).forEach((longtail, k) => {
-                const longtailId = `${secondaryId}_l_${k}`;
+        const processIntent = (intentId, intentName, intentData) => {
+            if (!intentData || !Array.isArray(intentData)) return;
+            
+            intentData.forEach((primary, i) => {
+                const primaryId = `${intentId}_p_${i}`;
                 sunburstData.push({ 
-                    id: longtailId, 
-                    parent: secondaryId, 
-                    name: longtail.keyword, 
-                    intentName: intentName,
-                    levelName: 'Long-tail keyword',
-                    searchVolume: longtail.searchVolume
+                    id: primaryId, parent: intentId, name: primary.keyword, 
+                    intentName: intentName, levelName: 'Primary keyword', searchVolume: primary.searchVolume
                 });
 
-                // Level 6: Content Examples
-                (longtail.content_examples || []).forEach((content, l) => {
-                    const value = longtail.searchVolume / (longtail.content_examples.length || 1);
-                    sunburstData.push({
-                        id: `${longtailId}_c_${l}`,
-                        parent: longtailId,
-                        name: content.title,
-                        value: Math.max(value, 1),
-                        intentName: intentName,
-                        levelName: 'Content example',
-                        searchVolume: longtail.searchVolume // Storing the parent's volume
+                (primary.secondary_keywords || []).forEach((secondary, j) => {
+                    const secondaryId = `${primaryId}_s_${j}`;
+                    sunburstData.push({ 
+                        id: secondaryId, parent: primaryId, name: secondary.keyword, 
+                        intentName: intentName, levelName: 'Secondary keyword', searchVolume: secondary.searchVolume
+                    });
+
+                    (secondary.long_tail_keywords || []).forEach((longtail, k) => {
+                        const longtailId = `${secondaryId}_l_${k}`;
+                        sunburstData.push({ 
+                            id: longtailId, parent: secondaryId, name: longtail.keyword, 
+                            intentName: intentName, levelName: 'Long-tail keyword', searchVolume: longtail.searchVolume
+                        });
+
+                        (longtail.content_examples || []).forEach((content, l) => {
+                            const value = longtail.searchVolume / (longtail.content_examples.length || 1);
+                            sunburstData.push({
+                                id: `${longtailId}_c_${l}`, parent: longtailId, name: content.title,
+                                value: Math.max(value, 1), intentName: intentName, levelName: 'Content example',
+                                searchVolume: longtail.searchVolume
+                            });
+                        });
                     });
                 });
             });
-        });
-    });
-};
+        };
 
         processIntent('pa', 'Problem-Aware', seoPlan.problem_aware);
         processIntent('ss', 'Solution-Seeking', seoPlan.solution_seeking);
         processIntent('pi', 'Purchase-Intent', seoPlan.purchase_intent);
 
 
+        // =========================================================================
+        // === NEW: LOGIC TO CREATE LIGHT -> DARK GRADIENTS ========================
+        // =========================================================================
+        const nodeMap = new Map(sunburstData.map(d => [d.id, d]));
+
+        const getPointInfo = (id) => {
+            let level = 0;
+            let baseColor = '#808080'; // Fallback color
+            let currentNode = nodeMap.get(id);
+
+            // Traverse up the tree to find depth (level) and the base color from the intent bucket
+            while (currentNode && currentNode.parent !== undefined) {
+                level++;
+                const parentNode = nodeMap.get(currentNode.parent);
+                if (parentNode && parentNode.color && typeof parentNode.color === 'string') {
+                    baseColor = parentNode.color;
+                }
+                currentNode = parentNode;
+            }
+            return { level, baseColor };
+        };
+
+        // Define how much to brighten/darken the gradient stops for each level
+        const levelModifiers = {
+            3: [0.15, -0.1],  // Primary keyword
+            4: [0.0, -0.25],  // Secondary keyword
+            5: [-0.15, -0.4], // Long-tail keyword
+            6: [-0.3, -0.55]  // Content example
+        };
+
+        sunburstData.forEach(point => {
+            if (point.id === 'root') return;
+
+            const { level, baseColor } = getPointInfo(point.id);
+            const modifiers = levelModifiers[level];
+
+            if (modifiers && Highcharts.color) { // Ensure Highcharts is loaded
+                const lighterStop = Highcharts.color(baseColor).brighten(modifiers[0]).get('rgba');
+                const darkerStop = Highcharts.color(baseColor).brighten(modifiers[1]).get('rgba');
+
+                // Apply a radial gradient to each slice
+                point.color = {
+                    radialGradient: { cx: 0.5, cy: 0.5, r: 0.7 },
+                    stops: [
+                        [0, lighterStop], // Inner color (lighter)
+                        [1, darkerStop]   // Outer color (darker)
+                    ]
+                };
+            }
+        });
+
 
         // =========================================================================
-        // === HIGHCHARTS CONFIGURATION (FINAL MODERN STYLING) =====================
+        // === UPDATED HIGHCHARTS CONFIGURATION ====================================
         // =========================================================================
         Highcharts.chart(container, {
             chart: { type: 'sunburst', height: '600px', backgroundColor: null },
@@ -2197,54 +2140,294 @@ const processIntent = (intentId, intentName, intentData) => {
                 allowDrillToNode: true,
                 cursor: 'pointer',
                 
-                // This creates the subtle angular separation between slices
+                // ✅ CHANGE: Subtle white border creates margin between segments
                 borderColor: '#FFFFFF',
                 borderWidth: 0.5,
 
-                // This removes the text labels for a clean, icon-like appearance
+                // ✅ CHANGE: Font weight for data labels set to 400
                 dataLabels: {
-                    enabled: false
+                    enabled: false,
+                    style: {
+                        fontWeight: '400'
+                    }
                 },
                 
-                // --- THIS IS THE KEY CHANGE FOR RADIAL SPACING ---
-                // We now define a fixed pixel height for each ring.
-                // The space between them is created automatically.
+                // ✅ CHANGE: Color gradients are now handled by the logic above.
+                // The `colorVariation` properties have been removed.
                 levels: [{
                     level: 1,
                     levelIsConstant: false,
-                    // --- NEW: Create a 20px "hole" in the center ---
-                    levelSize: {
-                        value: 20,
-                        unit: 'pixels'
-                    }
+                    levelSize: { value: 20, unit: 'pixels' }
                 }, {
                     level: 2, // Intent bucket
                     colorByPoint: true,
-                    // --- NEW: Set a fixed height for this ring ---
-                    levelSize: {
-                        value: 45,
-                        unit: 'pixels'
-                    }
+                    levelSize: { value: 45, unit: 'pixels' }
                 }, {
                     level: 3, // Primary keywords
-                    colorVariation: { key: 'brightness', to: -0.1 },
                     levelSize: { value: 45, unit: 'pixels' }
                 }, {
                     level: 4, // Secondary keywords
-                    colorVariation: { key: 'brightness', to: -0.25 },
                     levelSize: { value: 45, unit: 'pixels' }
                 }, {
                     level: 5, // Long-tail keywords
-                    colorVariation: { key: 'brightness', to: -0.4 },
                     levelSize: { value: 45, unit: 'pixels' }
                 }, {
                     level: 6, // Content examples
-                    colorVariation: { key: 'brightness', to: -0.55 },
                     levelSize: { value: 45, unit: 'pixels' }
                 }]
             }],
 
-            // --- Your perfectly working tooltip configuration (NO CHANGES NEEDED) ---
+            // Tooltip configuration remains unchanged
+            tooltip: {
+                useHTML: true,
+                headerFormat: '',
+                pointFormatter: function() {
+                    const point = this;
+                    let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
+                    html += `<b>Name:</b> ${point.name}<br/>`;
+                    if (point.levelName) {
+                        html += `<b>Level:</b> ${point.levelName}<br/>`;
+                    }
+                    if (point.intentName) {
+                        html += `<b>Intent:</b> ${point.intentName}<br/>`;
+                    }
+                    if (point.searchVolume !== undefined) {
+                        html += `<b>Search volume:</b> ${point.searchVolume.toLocaleString()}<br/>`;
+                    }
+                    html += `</div>`;
+                    return html;
+                }
+            },
+
+            exporting: { enabled: true },
+            accessibility: { enabled: true },
+        });
+    } catch (error) {
+        console.error("Failed to generate or render SEO Sunburst chart:", error);
+        container.innerHTML = `<p class="error-message">Could not generate the visual SEO plan.</p>`;
+    }
+}
+        console.error('Sunburst container div "keyword-sunburst" not found.');
+        return;async function generateAndRenderSeoSunburst(posts, audienceContext) {
+    const container = document.getElementById('keyword-sunburst');
+    if (!container) {
+        return; // Exit if container not found
+    }
+
+    container.innerHTML = '<p class="loading-text">Building data-driven SEO plan...</p>';
+
+    try {
+        const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+
+        const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Create a comprehensive, multi-level SEO plan based on the provided text.
+
+        Structure your response as a single, valid JSON object.
+
+        For each of the three intents (problem_aware, solution_seeking, purchase_intent), provide an array of 2-5 primary keywords.
+
+        - For EACH primary keyword, provide an array of 2-4 "secondary_keywords".
+        - For EACH secondary keyword, provide an array of 2-3 "long_tail_keywords".
+        - For EACH long-tail keyword, provide an array of 1-2 "content_examples".
+
+        CRITICAL: Every keyword object (primary, secondary, long_tail) MUST contain:
+        - "keyword": The keyword phrase.
+        - "searchVolume": A realistic monthly search volume (integer).
+
+        Each "content_examples" item should be an object with a single key: "title".
+
+        Example JSON Structure:
+        {
+          "problem_aware": [
+            {
+              "keyword": "primary keyword A", "searchVolume": 5000,
+              "secondary_keywords": [
+                {
+                  "keyword": "secondary keyword A1", "searchVolume": 1200,
+                  "long_tail_keywords": [
+                    {
+                      "keyword": "long-tail keyword A1a", "searchVolume": 300,
+                      "content_examples": [ { "title": "Example Blog Title 1" } ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "solution_seeking": [ ... ], "purchase_intent": [ ... ]
+        }`;
+
+        const openAIParams = {
+            model: "gpt-4o",
+            messages: [{ role: "system", content: "You are a JSON-only SEO strategist." }, { role: "user", content: prompt }],
+            temperature: 0.2,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('AI SEO plan generation failed.');
+
+        const aiResult = await response.json();
+        const seoPlan = JSON.parse(aiResult.openaiResponse);
+
+        // Data transformation logic
+        const sunburstData = [{
+            id: 'root', parent: '', name: 'SEO Plan', levelName: 'SEO Plan'
+        }, {
+            id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF', levelName: 'Intent bucket'
+        }, {
+            id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF', levelName: 'Intent bucket'
+        }, {
+            id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8', levelName: 'Intent bucket'
+        }];
+
+        const processIntent = (intentId, intentName, intentData) => {
+            if (!intentData || !Array.isArray(intentData)) return;
+            
+            intentData.forEach((primary, i) => {
+                const primaryId = `${intentId}_p_${i}`;
+                sunburstData.push({ 
+                    id: primaryId, parent: intentId, name: primary.keyword, 
+                    intentName: intentName, levelName: 'Primary keyword', searchVolume: primary.searchVolume
+                });
+
+                (primary.secondary_keywords || []).forEach((secondary, j) => {
+                    const secondaryId = `${primaryId}_s_${j}`;
+                    sunburstData.push({ 
+                        id: secondaryId, parent: primaryId, name: secondary.keyword, 
+                        intentName: intentName, levelName: 'Secondary keyword', searchVolume: secondary.searchVolume
+                    });
+
+                    (secondary.long_tail_keywords || []).forEach((longtail, k) => {
+                        const longtailId = `${secondaryId}_l_${k}`;
+                        sunburstData.push({ 
+                            id: longtailId, parent: secondaryId, name: longtail.keyword, 
+                            intentName: intentName, levelName: 'Long-tail keyword', searchVolume: longtail.searchVolume
+                        });
+
+                        (longtail.content_examples || []).forEach((content, l) => {
+                            const value = longtail.searchVolume / (longtail.content_examples.length || 1);
+                            sunburstData.push({
+                                id: `${longtailId}_c_${l}`, parent: longtailId, name: content.title,
+                                value: Math.max(value, 1), intentName: intentName, levelName: 'Content example',
+                                searchVolume: longtail.searchVolume
+                            });
+                        });
+                    });
+                });
+            });
+        };
+
+        processIntent('pa', 'Problem-Aware', seoPlan.problem_aware);
+        processIntent('ss', 'Solution-Seeking', seoPlan.solution_seeking);
+        processIntent('pi', 'Purchase-Intent', seoPlan.purchase_intent);
+
+
+        // =========================================================================
+        // === NEW: LOGIC TO CREATE LIGHT -> DARK GRADIENTS ========================
+        // =========================================================================
+        const nodeMap = new Map(sunburstData.map(d => [d.id, d]));
+
+        const getPointInfo = (id) => {
+            let level = 0;
+            let baseColor = '#808080'; // Fallback color
+            let currentNode = nodeMap.get(id);
+
+            // Traverse up the tree to find depth (level) and the base color from the intent bucket
+            while (currentNode && currentNode.parent !== undefined) {
+                level++;
+                const parentNode = nodeMap.get(currentNode.parent);
+                if (parentNode && parentNode.color && typeof parentNode.color === 'string') {
+                    baseColor = parentNode.color;
+                }
+                currentNode = parentNode;
+            }
+            return { level, baseColor };
+        };
+
+        // Define how much to brighten/darken the gradient stops for each level
+        const levelModifiers = {
+            3: [0.15, -0.1],  // Primary keyword
+            4: [0.0, -0.25],  // Secondary keyword
+            5: [-0.15, -0.4], // Long-tail keyword
+            6: [-0.3, -0.55]  // Content example
+        };
+
+        sunburstData.forEach(point => {
+            if (point.id === 'root') return;
+
+            const { level, baseColor } = getPointInfo(point.id);
+            const modifiers = levelModifiers[level];
+
+            if (modifiers && Highcharts.color) { // Ensure Highcharts is loaded
+                const lighterStop = Highcharts.color(baseColor).brighten(modifiers[0]).get('rgba');
+                const darkerStop = Highcharts.color(baseColor).brighten(modifiers[1]).get('rgba');
+
+                // Apply a radial gradient to each slice
+                point.color = {
+                    radialGradient: { cx: 0.5, cy: 0.5, r: 0.7 },
+                    stops: [
+                        [0, lighterStop], // Inner color (lighter)
+                        [1, darkerStop]   // Outer color (darker)
+                    ]
+                };
+            }
+        });
+
+
+        // =========================================================================
+        // === UPDATED HIGHCHARTS CONFIGURATION ====================================
+        // =========================================================================
+        Highcharts.chart(container, {
+            chart: { type: 'sunburst', height: '600px', backgroundColor: null },
+            title: { text: 'Visual SEO Plan', align: 'left' },
+            credits: { enabled: false },
+            plotOptions: { sunburst: { animation: { duration: 1000 } } },
+            
+            series: [{
+                type: 'sunburst',
+                name: 'Wide View',
+                data: sunburstData,
+                allowDrillToNode: true,
+                cursor: 'pointer',
+                
+                // ✅ CHANGE: Subtle white border creates margin between segments
+                borderColor: '#FFFFFF',
+                borderWidth: 0.5,
+
+                // ✅ CHANGE: Font weight for data labels set to 400
+                dataLabels: {
+                    enabled: false,
+                    style: {
+                        fontWeight: '400'
+                    }
+                },
+                
+                // ✅ CHANGE: Color gradients are now handled by the logic above.
+                // The `colorVariation` properties have been removed.
+                levels: [{
+                    level: 1,
+                    levelIsConstant: false,
+                    levelSize: { value: 20, unit: 'pixels' }
+                }, {
+                    level: 2, // Intent bucket
+                    colorByPoint: true,
+                    levelSize: { value: 45, unit: 'pixels' }
+                }, {
+                    level: 3, // Primary keywords
+                    levelSize: { value: 45, unit: 'pixels' }
+                }, {
+                    level: 4, // Secondary keywords
+                    levelSize: { value: 45, unit: 'pixels' }
+                }, {
+                    level: 5, // Long-tail keywords
+                    levelSize: { value: 45, unit: 'pixels' }
+                }, {
+                    level: 6, // Content examples
+                    levelSize: { value: 45, unit: 'pixels' }
+                }]
+            }],
+
+            // Tooltip configuration remains unchanged
             tooltip: {
                 useHTML: true,
                 headerFormat: '',

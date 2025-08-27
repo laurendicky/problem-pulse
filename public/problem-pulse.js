@@ -2199,7 +2199,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                         // *** CHANGE 2: Ensure the Level 1 override also has white text ***
                         style: { 
                             fontSize: '1.1em', 
-                            fontWeight: 'bold',
+                            fontWeight: 'normal',
                             color: '#FFFFFF',      // <-- Added color
                             textOutline: 'none'   // <-- Added for consistency
                         } 
@@ -2207,18 +2207,16 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                 }, { level: 2, colorByPoint: true }, { level: 3, colorVariation: { key: 'brightness', to: -0.25 } }, { level: 4, colorVariation: { key: 'brightness', to: 0.25 } }, { level: 5, colorVariation: { key: 'brightness', to: -0.45 } }, { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }]
             }],
 
-                           // =========================================================================
-            // === DEFINITIVE TOOLTIP FIX ============================================
+                        // =========================================================================
+            // === THE CORRECT & FINAL TOOLTIP FIX ===================================
             // =========================================================================
             tooltip: {
                 useHTML: true,
                 headerFormat: '',
                 pointFormatter: function() {
-                    const point = this;
-                    // The chart object is available via this.series.chart
-                    const chart = this.series.chart;
+                    const point = this; // The point being hovered over
 
-                    // --- LEVEL NAME LOGIC (This was already working correctly) ---
+                    // --- Level Name Logic (This part is correct) ---
                     const levelNameMap = {
                         1: 'SEO Plan',
                         2: 'Intent bucket',
@@ -2229,20 +2227,22 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                     };
                     const levelName = levelNameMap[point.level];
 
-                    // --- NEW & ROBUST INTENT NAME LOGIC ---
-                    // This logic walks UP the chart from the current point to find its Level 2 parent.
+                    // --- NEW, GUARANTEED Intent Name Logic ---
+                    // We start at the current point and walk up the tree using the
+                    // '.parentPoint' property until we find the Level 2 node.
                     let intentName = null;
                     let currentNode = point;
-                    while (currentNode && currentNode.level > 1) {
+                    
+                    while (currentNode) {
                         if (currentNode.level === 2) {
-                            intentName = currentNode.name; // We found the 'Intent bucket' node
-                            break;
+                            intentName = currentNode.name;
+                            break; // We found the intent bucket, so we can stop.
                         }
-                        // Move up to the parent node using the chart's 'get' method
-                        currentNode = chart.get(currentNode.parent);
+                        // Move up to the direct parent object.
+                        currentNode = currentNode.parentPoint;
                     }
                     
-                    // --- BUILD THE HTML ---
+                    // --- Build the HTML Output ---
                     let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
 
                     // 1. Add the Name
@@ -2253,7 +2253,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                         html += `<b>Level:</b> ${levelName}<br/>`;
                     }
                     
-                    // 3. Add the Intent (found by traversing up the tree)
+                    // 3. Add the Intent (found by walking up the tree)
                     if (intentName) {
                         html += `<b>Intent:</b> ${intentName}<br/>`;
                     }
@@ -2262,9 +2262,6 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                     return html;
                 }
             },
-
-
-
 
 
 

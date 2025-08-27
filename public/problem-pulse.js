@@ -1020,6 +1020,7 @@ async function renderIncludedSubreddits(subreddits) {
         `;
     }
 }
+
 async function findRelatedSubredditsAI(analyzedSubsData, audienceContext) {
     const subNames = analyzedSubsData.map(d => d.name).join(', ');
     const prompt = `You are a Reddit discovery expert. A user is analyzing communities for the audience "${audienceContext}", including: ${subNames}. Your task is to suggest up to 20 NEW, related subreddits that explore NICHE or ADJACENT topics. Think outside the box. For example, if the user is analyzing 'weddingplanning', suggest 'bridezillas', 'weddingdress', 'honeymoons', or 'UKweddings' instead of just another general wedding sub. CRITICAL: Do NOT include any of the original subreddits in your suggestions: ${subNames}. Provide your response ONLY as a JSON object with a single key "subreddits", containing an array of subreddit names (without "r/").`;
@@ -2064,11 +2065,9 @@ function renderKeywordCards(keywordPlan) {
 
     container.innerHTML = cardsHTML;
 }
+
 // =================================================================================
-// === REPLACEMENT: The Final, STABLE, and Aesthetically Correct Tree Renderer ===
-// =================================================================================
-// =================================================================================
-// === REPLACEMENT: The Definitive, Aesthetically Correct Keyword Tree Renderer (V3) ===
+// === REPLACEMENT: The Radically Improved Keyword Tree Renderer ===
 // =================================================================================
 function renderKeywordTree(keywordPlan) {
     const container = document.getElementById('keyword-tree-view');
@@ -2079,48 +2078,49 @@ function renderKeywordTree(keywordPlan) {
         return;
     }
 
-    // 1. A NEW DATA STRUCTURE to match your screenshot's design precisely.
-    // Level 2 is now a decorative node, and Level 3 is the main topic.
+    // --- 1. DATA TRANSFORMATION ---
+    // This structure is robust and adds rich data to each point for tooltips.
     let chartData = [{
         id: 'root',
-        name: 'SEO Plan',
-        color: '#FFFFFF'
+        name: 'Keyword Strategy',
+        color: '#333' // A strong root color
     }];
     const intentColors = {
-        'Problem-Aware': '#ab47bc',  // Purple
-        'Solution-Seeking': '#26c6da', // Cyan
-        'Purchase-Intent': '#ef5350'  // Red
+        'Problem-Aware': '#8e44ad',    // Purple
+        'Solution-Seeking': '#2980b9', // Blue
+        'Purchase-Intent': '#c0392b'   // Red
     };
-    const primaryNodeColor = '#4fc3f7'; // Light Blue
-    const leafNodeColor = '#9e9e9e'; // Grey
+
+    let totalLeafNodes = 0;
 
     keywordPlan.forEach((plan, index) => {
         const intentId = `intent_${index}`;
         const primaryId = `primary_${index}`;
+        const intentName = plan.intent.replace('-', ' ');
 
-        // Level 2: Decorative Intent Node (Shows '...' as in your screenshot)
+        // Level 1: Intent
         chartData.push({
             id: intentId,
             parent: 'root',
-            name: '...', // The literal "..." from your design
-            color: intentColors[plan.intent] || '#555'
+            name: intentName,
+            color: intentColors[plan.intent] || '#7f8c8d'
         });
 
-        // Level 3: Primary Keyword Node (The main text label)
+        // Level 2: Primary Keyword (The Hub)
         chartData.push({
             id: primaryId,
             parent: intentId,
             name: plan.primary_keyword,
-            color: primaryNodeColor,
-            // Pass all data for the tooltip
-            _all_data: plan
+            // Pass the full plan data to this point for a rich tooltip
+            fullData: plan,
+            color: Highcharts.color(intentColors[plan.intent]).brighten(0.2).get()
         });
         
-        // Level 4: All Leaf Nodes (Secondary, Long-tail, and Example)
+        // Level 3: Leaf Nodes (Secondary, Long-tail, Example)
         const leafKeywords = [
             ...(plan.secondary_keywords || []),
             ...(plan.long_tail_keywords || []),
-            `Ex: "${plan.content_example}"`
+            `💡 Idea: "${plan.content_example}"`
         ];
         
         leafKeywords.forEach((kw, kw_idx) => {
@@ -2128,85 +2128,98 @@ function renderKeywordTree(keywordPlan) {
                 id: `${primaryId}_leaf_${kw_idx}`,
                 parent: primaryId,
                 name: kw,
-                color: leafNodeColor
+                color: '#666'
             });
         });
+        totalLeafNodes += leafKeywords.length;
     });
 
-    // 2. HIGHCHARTS CONFIG: Meticulously styled to match your screenshot.
+    // --- 2. DYNAMIC HEIGHT CALCULATION ---
+    // The core fix: Calculate height based on data to prevent overlaps.
+    const calculatedHeight = Math.max(600, totalLeafNodes * 45);
+
+    // --- 3. HIGHCHARTS CONFIGURATION ---
     Highcharts.chart(container, {
         chart: {
             inverted: true,
             backgroundColor: 'transparent',
-            height: '800px',
-            spacingBottom: 200 // More space for vertical labels
+            height: calculatedHeight, // Use the dynamic height
+            style: { fontFamily: "'Inter', sans-serif" }
         },
         title: { text: null },
         credits: { enabled: false },
         series: [{
             type: 'treegraph',
             data: chartData,
-            tooltip: { /* (Unchanged) */
+            // A much more useful and beautiful tooltip
+            tooltip: {
                 useHTML: true,
+                backgroundColor: 'rgba(255, 255, 255, 0.95)',
+                borderColor: '#E0E0E0',
+                borderRadius: 8,
+                padding: 15,
+                shadow: { opacity: 0.1 },
                 formatter: function() {
-                    let point = this.point;
-                    if (point.id.includes('primary_')) {
-                        const data = point.options._all_data;
-                        let html = `<b>${data.primary_keyword} (Hub)</b><hr style="margin: 5px 0;">`;
-                        html += '<b>Secondary:</b><ul>' + data.secondary_keywords.map(kw => `<li>${kw}</li>`).join('') + '</ul>';
-                        html += '<b>Long-tail:</b><ul>' + data.long_tail_keywords.map(kw => `<li>${kw}</li>`).join('') + '</ul>';
+                    const point = this.point;
+                    // Show a rich summary for Primary Keyword hubs
+                    if (point.options.fullData) {
+                        const data = point.options.fullData;
+                        let html = `<div style="font-size:1rem; font-weight:bold; color:${point.color}; margin-bottom:10px;">${data.primary_keyword}</div>`;
+                        html += `<b>Secondary:</b><ul>${data.secondary_keywords.map(kw => `<li>${kw}</li>`).join('')}</ul>`;
+                        html += `<b>Long-tail:</b><ul>${data.long_tail_keywords.map(kw => `<li>${kw}</li>`).join('')}</ul>`;
+                        html += `<div style="margin-top:10px; border-top: 1px solid #eee; padding-top: 8px;"><b>Content Idea:</b><br/>"${data.content_example}"</div>`;
                         return html;
                     }
+                    // Simple tooltip for other nodes
                     return `<b>${point.name}</b>`;
                 }
             },
-            marker: { radius: 8, symbol: 'circle' },
             dataLabels: {
+                enabled: true,
+                // Place labels cleanly next to the node, not overlapping
+                align: 'left',
+                pointFormat: '{point.name}',
                 style: {
-                    color: '#FFFFFF',
+                    color: '#333',
                     textOutline: 'none',
-                    fontWeight: 'normal',
-                    fontSize: '16px'
+                    fontWeight: '500',
+                    fontSize: '14px'
                 },
+                // Truncate long labels to keep the chart clean
+                formatter: function () {
+                    const name = this.point.name;
+                    return name.length > 40 ? name.substring(0, 37) + '...' : name;
+                }
             },
             levels: [{
-                level: 1, // Root: "SEO Plan"
-                dataLabels: { y: -35, style: { fontSize: '18px', fontWeight: 'bold' } }
+                level: 1, // Root
+                dataLabels: { style: { fontSize: '18px', fontWeight: 'bold', color: '#000' } }
             }, {
-                level: 2, // Decorative "..." Node
+                level: 2, // Intent
                 marker: { radius: 10 },
-                dataLabels: {
-                    y: 35, // Position "..." below the node
-                    style: { fontSize: '24px', fontWeight: 'bold' }
-                }
+                dataLabels: { style: { fontSize: '16px', fontWeight: 'bold' } }
             }, {
-                level: 3, // Primary Keyword "Hub"
-                marker: { radius: 10 },
-                dataLabels: {
-                    y: 40, // Position "AI Challenges", etc. below the node
-                    style: { fontSize: '18px', fontWeight: 'bold' }
-                }
+                level: 3, // Primary Keyword
+                marker: { radius: 8 },
+                dataLabels: { style: { fontSize: '15px' } }
             }, {
-                level: 4, // All Leaf Nodes
-                marker: { radius: 7 },
-                dataLabels: {
-                    rotation: -90,
-                    align: 'right',
-                    x: 8,
-                    y: -25,
-                    style: {
-                        fontSize: '14px',
-                        color: 'rgba(255, 255, 255, 0.85)'
-                    }
-                }
+                level: 4, // Leaf Nodes
+                marker: { radius: 5 },
+                dataLabels: { style: { fontWeight: '400', color: '#555' } }
             }],
             link: {
-                // Use thin, curved lines for the top level, straight for the rest
-                // This requires a custom function to achieve the mixed effect.
-                // For stability, we will use one clean type.
-                type: 'line', // Sticking to the most stable link type
-                color: 'rgba(255, 255, 255, 0.3)',
+                type: 'spline', // Use beautiful curved lines
+                color: 'rgba(0, 0, 0, 0.2)',
                 width: 1.5
+            },
+            // Add a hook for future interactivity
+            point: {
+                events: {
+                    click: function() {
+                        console.log('Clicked keyword:', this.name);
+                        // Future UX improvement: filter posts based on this keyword
+                    }
+                }
             }
         }],
     });

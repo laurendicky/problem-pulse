@@ -2166,9 +2166,8 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         processIntent('pa', 'Problem-Aware', seoPlan.problem_aware);
         processIntent('ss', 'Solution-Seeking', seoPlan.solution_seeking);
         processIntent('pi', 'Purchase-Intent', seoPlan.purchase_intent);
-
         // =========================================================================
-        // === HIGHCHARTS CONFIGURATION ============================================
+        // === HIGHCHARTS CONFIGURATION (UPDATED) ==================================
         // =========================================================================
         Highcharts.chart(container, {
             chart: { type: 'sunburst', height: '600px', backgroundColor: null },
@@ -2184,16 +2183,33 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                 dataLabels: {
                     format: '{point.name}',
                     filter: { property: 'innerArcLength', operator: '>', value: 20 },
-                    rotationMode: 'circular'
+                    rotationMode: 'circular',
+                    // *** CHANGE 1: Set the default data label color to white ***
+                    style: {
+                        color: '#FFFFFF',
+                        textOutline: 'none' // Also removes the default Highcharts outline for better readability
+                    }
                 },
                 levels: [{
                     level: 1,
                     levelIsConstant: false,
-                    dataLabels: { enabled: true, filter: { property: 'value', operator: '>', value: -1 }, style: { fontSize: '1.1em', fontWeight: 'bold' } }
+                    dataLabels: { 
+                        enabled: true, 
+                        filter: { property: 'value', operator: '>', value: -1 }, 
+                        // *** CHANGE 2: Ensure the Level 1 override also has white text ***
+                        style: { 
+                            fontSize: '1.1em', 
+                            fontWeight: 'bold',
+                            color: '#FFFFFF',      // <-- Added color
+                            textOutline: 'none'   // <-- Added for consistency
+                        } 
+                    }
                 }, { level: 2, colorByPoint: true }, { level: 3, colorVariation: { key: 'brightness', to: -0.25 } }, { level: 4, colorVariation: { key: 'brightness', to: 0.25 } }, { level: 5, colorVariation: { key: 'brightness', to: -0.45 } }, { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }]
             }],
 
-            // Tooltip logic is updated with the minimum width requirement.
+                        // =========================================================================
+            // === CORRECTED TOOLTIP CONFIGURATION ===================================
+            // =========================================================================
             tooltip: {
                 useHTML: true,
                 headerFormat: '',
@@ -2209,34 +2225,34 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                         5: 'Long-tail keyword',
                         6: 'Content example / blog title / LP'
                     };
+                    
+                    // This logic correctly finds the level and intent for any node
                     const levelName = levelNameMap[point.level];
                     const intentName = extra.intentName || (point.level === 2 ? point.name : null);
 
-                    // *** CHANGE 2: Enforce a minimum width of 250px on the tooltip container. ***
                     let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
 
-                    // Rule: Name: [node name]
+                    // 1. Add the Name (Always present)
                     html += `<b>Name:</b> ${point.name}<br/>`;
 
-                    // Rule: Level: [exact level label]
+                    // 2. Add the Level Title (Always present)
                     if (levelName) {
                         html += `<b>Level:</b> ${levelName}<br/>`;
                     }
-
-                    // Rule: Intent: [name] (if applicable)
+                    
+                    // 3. Add the Intent (Present for every level except the root)
                     if (point.level > 1 && intentName) {
                         html += `<b>Intent:</b> ${intentName}<br/>`;
                     }
-
-                    // Rule: Search volume: [if available]
-                    if (extra.searchVolume !== undefined) {
-                        html += `<b>Search volume:</b> ${extra.searchVolume.toLocaleString()}<br/>`;
-                    }
+                    
+                    // NOTE: Search Volume has been completely removed as requested.
 
                     html += `</div>`;
                     return html;
                 }
             },
+
+
             exporting: { enabled: true },
             accessibility: { enabled: true },
         });

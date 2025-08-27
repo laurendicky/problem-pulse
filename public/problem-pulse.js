@@ -2207,61 +2207,57 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                 }, { level: 2, colorByPoint: true }, { level: 3, colorVariation: { key: 'brightness', to: -0.25 } }, { level: 4, colorVariation: { key: 'brightness', to: 0.25 } }, { level: 5, colorVariation: { key: 'brightness', to: -0.45 } }, { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }]
             }],
 
-                        // =========================================================================
-            // === THE CORRECT & FINAL TOOLTIP FIX ===================================
-            // =========================================================================
-            tooltip: {
-                useHTML: true,
-                headerFormat: '',
-                pointFormatter: function() {
-                    const point = this; // The point being hovered over
-
-                    // --- Level Name Logic (This part is correct) ---
-                    const levelNameMap = {
-                        1: 'SEO Plan',
-                        2: 'Intent bucket',
-                        3: 'Primary keyword',
-                        4: 'Secondary keyword',
-                        5: 'Long-tail keyword',
-                        6: 'Content example / blog title / LP'
-                    };
-                    const levelName = levelNameMap[point.level];
-
-                    // --- NEW, GUARANTEED Intent Name Logic ---
-                    // We start at the current point and walk up the tree using the
-                    // '.parentPoint' property until we find the Level 2 node.
-                    let intentName = null;
-                    let currentNode = point;
-                    
-                    while (currentNode) {
-                        if (currentNode.level === 2) {
-                            intentName = currentNode.name;
-                            break; // We found the intent bucket, so we can stop.
-                        }
-                        // Move up to the direct parent object.
-                        currentNode = currentNode.parentPoint;
-                    }
-                    
-                    // --- Build the HTML Output ---
-                    let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
-
-                    // 1. Add the Name
-                    html += `<b>Name:</b> ${point.name}<br/>`;
-
-                    // 2. Add the Level Title
-                    if (levelName) {
-                        html += `<b>Level:</b> ${levelName}<br/>`;
-                    }
-                    
-                    // 3. Add the Intent (found by walking up the tree)
-                    if (intentName) {
-                        html += `<b>Intent:</b> ${intentName}<br/>`;
-                    }
-
-                    html += `</div>`;
-                    return html;
-                }
-            },
+             n            // =========================================================================
+             // === THE CORRECT & FINAL TOOLTIP FIX ===================================
+             // =========================================================================
+             tooltip: {
+                 useHTML: true,
+                 headerFormat: '',
+                 pointFormatter: function() {
+                     const point = this; // The point being hovered over
+                     
+                     // --- Get custom data from the 'extra' object we created ---
+                     const customData = point.options.extra || {};
+                     const searchVolume = customData.searchVolume;
+                     const intentName = customData.intentName; // Much simpler than the while loop!
+ 
+                     // --- Level Name Logic (This part is correct) ---
+                     const levelNameMap = {
+                         1: 'SEO Plan',
+                         2: 'Intent bucket',
+                         3: 'Primary keyword',
+                         4: 'Secondary keyword',
+                         5: 'Long-tail keyword',
+                         6: 'Content example / blog title / LP'
+                     };
+                     const levelName = levelNameMap[point.level];
+                     
+                     // --- Build the HTML Output ---
+                     let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
+ 
+                     // 1. Add the Name (Always present)
+                     html += `<b>Name:</b> ${point.name}<br/>`;
+ 
+                     // 2. Add the Level Title
+                     if (levelName) {
+                         html += `<b>Level:</b> ${levelName}<br/>`;
+                     }
+                     
+                     // 3. Add the Intent (if it exists in our custom data)
+                     if (intentName) {
+                         html += `<b>Intent:</b> ${intentName}<br/>`;
+                     }
+ 
+                     // 4. ***FIX: Add the Search Volume (if it exists)***
+                     // We check 'undefined' because a search volume of 0 is valid.
+                     if (searchVolume !== undefined) {
+                         html += `<b>Search volume:</b> ${searchVolume.toLocaleString()}<br/>`;
+                     }
+ 
+                     html += `</div>`;
+                     return html;
+                 }
+             },
 
 
 

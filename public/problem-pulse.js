@@ -1020,7 +1020,6 @@ async function renderIncludedSubreddits(subreddits) {
         `;
     }
 }
-
 async function findRelatedSubredditsAI(analyzedSubsData, audienceContext) {
     const subNames = analyzedSubsData.map(d => d.name).join(', ');
     const prompt = `You are a Reddit discovery expert. A user is analyzing communities for the audience "${audienceContext}", including: ${subNames}. Your task is to suggest up to 20 NEW, related subreddits that explore NICHE or ADJACENT topics. Think outside the box. For example, if the user is analyzing 'weddingplanning', suggest 'bridezillas', 'weddingdress', 'honeymoons', or 'UKweddings' instead of just another general wedding sub. CRITICAL: Do NOT include any of the original subreddits in your suggestions: ${subNames}. Provide your response ONLY as a JSON object with a single key "subreddits", containing an array of subreddit names (without "r/").`;
@@ -2067,7 +2066,7 @@ function renderKeywordCards(keywordPlan) {
 }
 
 // =================================================================================
-// === REPLACEMENT: The Definitive, Aesthetically Correct Keyword Tree Renderer (V3) ===
+// === REPLACEMENT: The Final Tree Renderer with Curved Lines & Improved UX ===
 // =================================================================================
 function renderKeywordTree(keywordPlan) {
     const container = document.getElementById('keyword-tree-view');
@@ -2078,80 +2077,68 @@ function renderKeywordTree(keywordPlan) {
         return;
     }
 
-    // 1. A NEW DATA STRUCTURE to match your screenshot's design precisely.
-    // Level 2 is now a decorative node, and Level 3 is the main topic.
-    let chartData = [{
-        id: 'root',
-        name: 'SEO Plan',
-        color: '#FFFFFF'
-    }];
+    // --- STEP 1: Build the Data Structure ---
+    let chartData = [{ id: 'root', name: 'SEO Plan', color: '#FFFFFF' }];
     const intentColors = {
-        'Problem-Aware': '#ab47bc',  // Purple
-        'Solution-Seeking': '#26c6da', // Cyan
-        'Purchase-Intent': '#ef5350'  // Red
+        'Problem-Aware': '#8a2be2',    // Purple for awareness
+        'Solution-Seeking': '#00ced1', // Teal for searching
+        'Purchase-Intent': '#ff4500'   // Orange/Red for action
     };
-    const primaryNodeColor = '#4fc3f7'; // Light Blue
-    const leafNodeColor = '#9e9e9e'; // Grey
 
     keywordPlan.forEach((plan, index) => {
         const intentId = `intent_${index}`;
         const primaryId = `primary_${index}`;
 
-        // Level 2: Decorative Intent Node (Shows '...' as in your screenshot)
+        // Level 2: Intent Category
         chartData.push({
             id: intentId,
             parent: 'root',
-            name: '...', // The literal "..." from your design
+            name: plan.intent,
             color: intentColors[plan.intent] || '#555'
         });
 
-        // Level 3: Primary Keyword Node (The main text label)
+        // Level 3: Primary Keyword "Hub"
         chartData.push({
             id: primaryId,
             parent: intentId,
             name: plan.primary_keyword,
-            color: primaryNodeColor,
-            // Pass all data for the tooltip
-            _all_data: plan
+            _all_data: plan // Store all related data here for the tooltip
         });
         
-        // Level 4: All Leaf Nodes (Secondary, Long-tail, and Example)
-        const leafKeywords = [
-            ...(plan.secondary_keywords || []),
-            ...(plan.long_tail_keywords || []),
-            `Ex: "${plan.content_example}"`
-        ];
-        
-        leafKeywords.forEach((kw, kw_idx) => {
-            chartData.push({
-                id: `${primaryId}_leaf_${kw_idx}`,
-                parent: primaryId,
-                name: kw,
-                color: leafNodeColor
-            });
+        // Level 4: Leaf nodes
+        (plan.secondary_keywords || []).forEach((kw, kw_idx) => {
+            chartData.push({ id: `${primaryId}_skw_${kw_idx}`, parent: primaryId, name: kw });
+        });
+        (plan.long_tail_keywords || []).forEach((kw, kw_idx) => {
+            chartData.push({ id: `${primaryId}_ltw_${kw_idx}`, parent: primaryId, name: kw });
+        });
+        chartData.push({
+            id: `${primaryId}_content`,
+            parent: primaryId,
+            name: `Ex: "${plan.content_example}"`
         });
     });
 
-    // 2. HIGHCHARTS CONFIG: Meticulously styled to match your screenshot.
+    // --- STEP 2: Configure and Render the Highcharts Chart ---
     Highcharts.chart(container, {
         chart: {
             inverted: true,
             backgroundColor: 'transparent',
-            height: '800px',
-            spacingBottom: 200 // More space for vertical labels
+            height: '750px',
+            spacingBottom: 180 // Ensure space for rotated labels
         },
         title: { text: null },
         credits: { enabled: false },
         series: [{
             type: 'treegraph',
             data: chartData,
-            tooltip: { /* (Unchanged) */
+            tooltip: { // Rich tooltip for a better UX
                 useHTML: true,
                 formatter: function() {
                     let point = this.point;
                     if (point.id.includes('primary_')) {
                         const data = point.options._all_data;
-                        let html = `<b>${data.primary_keyword} (Hub)</b><hr style="margin: 5px 0;">`;
+                        let html = `<b style="font-size: 1.1em;">${data.primary_keyword} (Hub)</b><hr style="margin: 5px 0;">`;
                         html += '<b>Secondary:</b><ul>' + data.secondary_keywords.map(kw => `<li>${kw}</li>`).join('') + '</ul>';
                         html += '<b>Long-tail:</b><ul>' + data.long_tail_keywords.map(kw => `<li>${kw}</li>`).join('') + '</ul>';
                         return html;
@@ -2159,57 +2146,53 @@ function renderKeywordTree(keywordPlan) {
                     return `<b>${point.name}</b>`;
                 }
             },
-            marker: { radius: 8, symbol: 'circle' },
+            marker: { radius: 7, symbol: 'circle' },
             dataLabels: {
                 style: {
                     color: '#FFFFFF',
                     textOutline: 'none',
-                    fontWeight: 'normal',
-                    fontSize: '16px'
+                    fontWeight: '500',
+                    fontSize: '14px'
                 },
             },
             levels: [{
                 level: 1, // Root: "SEO Plan"
-                dataLabels: { y: -35, style: { fontSize: '18px', fontWeight: 'bold' } }
+                dataLabels: { y: -30 }
             }, {
-                level: 2, // Decorative "..." Node
-                marker: { radius: 10 },
-                dataLabels: {
-                    y: 35, // Position "..." below the node
-                    style: { fontSize: '24px', fontWeight: 'bold' }
-                }
+                level: 2, // Intent Level
+                marker: { radius: 9 },
+                dataLabels: { y: -30, style: { fontWeight: 'bold' } }
             }, {
                 level: 3, // Primary Keyword "Hub"
-                marker: { radius: 10 },
-                dataLabels: {
-                    y: 40, // Position "AI Challenges", etc. below the node
-                    style: { fontSize: '18px', fontWeight: 'bold' }
-                }
+                color: '#80d8ff',
+                dataLabels: { y: -30, style: { fontWeight: 'bold' } }
             }, {
                 level: 4, // All Leaf Nodes
-                marker: { radius: 7 },
+                color: '#B0BEC5',
                 dataLabels: {
-                    rotation: -90,
+                    rotation: -90, // Prevents labels from overlapping
                     align: 'right',
-                    x: 8,
-                    y: -25,
+                    x: 6,
+                    y: -20,
                     style: {
+                        fontWeight: 'normal',
                         fontSize: '14px',
-                        color: 'rgba(255, 255, 255, 0.85)'
+                        color: 'rgba(255, 255, 255, 0.9)'
                     }
                 }
             }],
+            // === THE KEY TO CURVED LINES ===
+            // By NOT specifying link.type, we allow Highcharts to use its default,
+            // superior layout algorithm which produces the smooth, curved splines.
             link: {
-                // Use thin, curved lines for the top level, straight for the rest
-                // This requires a custom function to achieve the mixed effect.
-                // For stability, we will use one clean type.
-                type: 'line', // Sticking to the most stable link type
-                color: 'rgba(255, 255, 255, 0.3)',
-                width: 1.5
+                color: 'rgba(255, 255, 255, 0.4)',
+                width: 1
             }
         }],
     });
 }
+
+
 async function enhanceDiscoveryWithComments(posts, nicheContext) {
     console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
     const brandContainer = document.getElementById('top-brands-container');

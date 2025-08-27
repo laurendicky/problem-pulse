@@ -2207,16 +2207,18 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                 }, { level: 2, colorByPoint: true }, { level: 3, colorVariation: { key: 'brightness', to: -0.25 } }, { level: 4, colorVariation: { key: 'brightness', to: 0.25 } }, { level: 5, colorVariation: { key: 'brightness', to: -0.45 } }, { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }]
             }],
 
-                        // =========================================================================
-            // === CORRECTED TOOLTIP CONFIGURATION ===================================
+                           // =========================================================================
+            // === DEFINITIVE TOOLTIP FIX ============================================
             // =========================================================================
             tooltip: {
                 useHTML: true,
                 headerFormat: '',
                 pointFormatter: function() {
                     const point = this;
-                    const extra = point.options.extra || {};
+                    // The chart object is available via this.series.chart
+                    const chart = this.series.chart;
 
+                    // --- LEVEL NAME LOGIC (This was already working correctly) ---
                     const levelNameMap = {
                         1: 'SEO Plan',
                         2: 'Intent bucket',
@@ -2225,32 +2227,45 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                         5: 'Long-tail keyword',
                         6: 'Content example / blog title / LP'
                     };
-                    
-                    // This logic correctly finds the level and intent for any node
                     const levelName = levelNameMap[point.level];
-                    const intentName = extra.intentName || (point.level === 2 ? point.name : null);
 
+                    // --- NEW & ROBUST INTENT NAME LOGIC ---
+                    // This logic walks UP the chart from the current point to find its Level 2 parent.
+                    let intentName = null;
+                    let currentNode = point;
+                    while (currentNode && currentNode.level > 1) {
+                        if (currentNode.level === 2) {
+                            intentName = currentNode.name; // We found the 'Intent bucket' node
+                            break;
+                        }
+                        // Move up to the parent node using the chart's 'get' method
+                        currentNode = chart.get(currentNode.parent);
+                    }
+                    
+                    // --- BUILD THE HTML ---
                     let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
 
-                    // 1. Add the Name (Always present)
+                    // 1. Add the Name
                     html += `<b>Name:</b> ${point.name}<br/>`;
 
-                    // 2. Add the Level Title (Always present)
+                    // 2. Add the Level Title
                     if (levelName) {
                         html += `<b>Level:</b> ${levelName}<br/>`;
                     }
                     
-                    // 3. Add the Intent (Present for every level except the root)
-                    if (point.level > 1 && intentName) {
+                    // 3. Add the Intent (found by traversing up the tree)
+                    if (intentName) {
                         html += `<b>Intent:</b> ${intentName}<br/>`;
                     }
-                    
-                    // NOTE: Search Volume has been completely removed as requested.
 
                     html += `</div>`;
                     return html;
                 }
             },
+
+
+
+
 
 
             exporting: { enabled: true },

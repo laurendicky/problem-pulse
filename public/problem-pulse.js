@@ -2183,10 +2183,20 @@ const processIntent = (intentId, intentName, intentData) => {
         // === HIGHCHARTS CONFIGURATION (UPDATED) ==================================
         // =========================================================================
         Highcharts.chart(container, {
-            chart: { type: 'sunburst', height: '80vh', backgroundColor: null },
+            chart: { type: 'sunburst', height: '800px', backgroundColor: null },
             title: { text: 'Visual SEO Plan', align: 'left' },
             credits: { enabled: false },
-            plotOptions: { sunburst: { animation: { duration: 1000 } } },
+        
+            // --- MODIFY THIS SECTION ---
+            plotOptions: {
+                sunburst: {
+                    animation: { duration: 1000 },
+                    
+                    // ADD THESE TWO LINES
+                    borderColor: '#FFFFFF', // Sets the border color to white
+                    borderWidth: 0.05          // Sets the border width to 2 pixels
+                }
+            },
             series: [{
                 type: 'sunburst',
                 name: 'Wide View',
@@ -2200,7 +2210,8 @@ const processIntent = (intentId, intentName, intentData) => {
                     // *** CHANGE 1: Set the default data label color to white ***
                     style: {
                         color: '#FFFFFF',
-                        textOutline: 'none' // Also removes the default Highcharts outline for better readability
+                        textOutline: 'none', // Also removes the default Highcharts outline for better readability
+                        fontWeight: '400'
                     }
                 },
                 levels: [{

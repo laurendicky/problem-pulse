@@ -2032,8 +2032,9 @@ async function generateAndRenderKeywords(posts, audienceContext) {
         `;
     }
 }
+
 // =================================================================================
-// === OPTIMISED FUNCTION: SEO SUNBURST WITH ENHANCED UX & FORMATTING V3 ===
+// === OPTIMISED FUNCTION: SEO SUNBURST WITH ENHANCED UX & FORMATTING V4 ===
 // =================================================================================
 
 async function generateAndRenderSeoSunburst(posts, audienceContext) {
@@ -2046,24 +2047,21 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
     container.innerHTML = '<p class="loading-text">Building data-driven SEO plan...</p>';
 
     try {
+        // AI prompt and data fetching logic remains the same...
         const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
-
         const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Analyze the provided posts to create a full SEO plan. Structure your response as a valid JSON object. For each of the three intents (problem_aware, solution_seeking, purchase_intent), provide a primary keyword and its related keywords. CRITICAL: For each keyword (primary, secondary, and long_tail), you MUST provide: "keyword", "searchVolume", "difficulty", and "contentFormat". For each long_tail keyword, also provide an "exampleTitle". JSON Structure: { "problem_aware": { "primary": { ... }, "secondary": [ ... ], "long_tail": [ ... ] }, ... }`;
-
         const openAIParams = {
             model: "gpt-4o",
             messages: [{ role: "system", content: "You are an SEO strategist that outputs structured JSON with keyword metrics." }, { role: "user", content: prompt }],
             temperature: 0.1,
             response_format: { "type": "json_object" }
         };
-
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('AI SEO plan generation failed.');
-
         const aiResult = await response.json();
         const seoPlan = JSON.parse(aiResult.openaiResponse);
 
-        // --- Data Transformation (no changes needed here) ---
+        // Data transformation logic remains the same...
         const sunburstData = [{
             id: 'root', parent: '', name: 'SEO Plan'
         }, {
@@ -2091,16 +2089,14 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         processIntent('ss', seoPlan.solution_seeking);
         processIntent('pi', seoPlan.purchase_intent);
 
-
         // =========================================================================
-        // === HIGHCHARTS CONFIGURATION WITH ALL REQUESTED OPTIMISATIONS ===
+        // === HIGHCHARTS CONFIGURATION WITH ALL REQUESTED ADJUSTMENTS ===
         // =========================================================================
         Highcharts.chart(container, {
-            // OPTIMISATION 1: Transparent background
             chart: {
                 type: 'sunburst',
                 height: '600px',
-                backgroundColor: null // Makes the chart background transparent
+                backgroundColor: null
             },
             title: {
                 text: 'Visual SEO Plan',
@@ -2109,144 +2105,108 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
             credits: {
                 enabled: false
             },
-            // OPTIMISATION 3: Smooth loading animation
             plotOptions: {
                 sunburst: {
                     animation: {
-                        duration: 1000 // 1-second smooth fade/draw-in animation
+                        duration: 1000
                     }
                 }
             },
             series: [{
                 type: 'sunburst',
+                // ADJUSTMENT 3: Change 'Series 1' to 'Wide View' for drill-up text
+                name: 'Wide View',
                 data: sunburstData,
                 allowDrillToNode: true,
                 cursor: 'pointer',
-                // OPTIMISATION 5: Better label formatting to avoid overflow
                 dataLabels: {
                     format: '{point.name}',
-                    // Filter hides labels for very small slices to improve readability
-                    filter: {
-                        property: 'innerArcLength',
-                        operator: '>',
-                        value: 20
-                    },
-                    rotationMode: 'circular', // Best mode for sunburst readability
-                    style: {
-                        textOverflow: 'ellipsis', // Fallback for long text
-                        whiteSpace: 'nowrap' // Prevents ugly default wrapping
-                    }
+                    filter: { property: 'innerArcLength', operator: '>', value: 20 },
+                    rotationMode: 'circular',
+                    style: { textOverflow: 'ellipsis', whiteSpace: 'nowrap' }
                 },
-                // OPTIMISATION 2 & 5: Configure levels for center label and consistent look
                 levels: [{
                     level: 1,
                     levelIsConstant: false,
-                    // Configuration for the root node "SEO Plan"
                     dataLabels: {
-                        enabled: true, // Ensure it's always enabled
-                        // Always show this label, regardless of size
-                        filter: {
-                            property: 'value',
-                            operator: '>',
-                            value: -1
-                        },
+                        enabled: true,
+                        filter: { property: 'value', operator: '>', value: -1 },
                         style: {
-                            fontSize: '1.8em',
+                            // ADJUSTMENT 1: Smaller font size to fit in the center circle
+                            fontSize: '1.1em',
                             fontWeight: 'bold',
                             color: '#333333',
-                            textOverflow: 'none' // Disable ellipsis for the center label
+                            textOverflow: 'none'
                         }
                     }
                 }, {
-                    level: 2,
-                    colorByPoint: true
+                    level: 2, colorByPoint: true
                 }, {
-                    level: 3,
-                    colorVariation: { key: 'brightness', to: -0.25 }
+                    level: 3, colorVariation: { key: 'brightness', to: -0.25 }
                 }, {
-                    level: 4,
-                    colorVariation: { key: 'brightness', to: 0.25 }
+                    level: 4, colorVariation: { key: 'brightness', to: 0.25 }
                 }, {
-                    level: 5,
-                    colorVariation: { key: 'brightness', to: -0.45 }
+                    level: 5, colorVariation: { key: 'brightness', to: -0.45 }
                 }, {
-                    level: 6,
-                    colorVariation: { key: 'brightness', to: 0.45 }
+                    level: 6, colorVariation: { key: 'brightness', to: 0.45 }
                 }]
             }],
 
-            // OPTIMISATION 4: Advanced Tooltip with wrapping and custom level names
             tooltip: {
-                useHTML: true, // Required for custom styling and wrapping
+                useHTML: true,
                 headerFormat: '',
-                // Custom function to generate tooltip content
                 pointFormatter: function() {
-                    const point = this; // Easier to reference
+                    const point = this;
                     const extra = point.options.extra;
 
-                    // Map hierarchy levels to custom, readable names
-                    const levelNameMap = {
-                        1: 'SEO Plan',
-                        2: 'Intent bucket',
-                        3: 'Primary keyword',
-                        4: 'Secondary keyword',
-                        5: 'Long-tail keyword',
-                        6: 'Content example'
+                    // ADJUSTMENT 2: New map to prevent 'undefined' and remove "Level:" prefix
+                    // This map only includes levels that need a type descriptor.
+                    const nodeTypeMap = {
+                        3: 'Primary Keyword',
+                        4: 'Secondary Keyword',
+                        5: 'Long-tail Keyword',
+                        6: 'Content Example'
                     };
 
-                    const levelName = levelNameMap[point.level] || `Level ${point.level}`;
+                    const nodeType = nodeTypeMap[point.level];
 
-                    // Function to find the parent "Intent" name (e.g., "Problem-Aware")
                     const getIntentName = (p) => {
                         let current = p;
                         while (current && current.level > 2) {
                             current = point.series.chart.get(current.parent);
                         }
-                        // Only return if the found parent is an intent bucket
                         return (current && current.level === 2) ? current.name : null;
                     };
-
                     const intentName = getIntentName(point);
                     
-                    // --- Build the HTML for the tooltip ---
-                    // Style ensures wrapping inside the box
-                    let html = `<div style="max-width: 300px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
+                    let html = `<div style="width: 350px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
 
                     // Main Title (Keyword or Content Title)
                     html += `<b>${point.name}</b><br/>`;
+
+                    // ADJUSTMENT 2: Conditionally add the node type without the word "Level"
+                    // This will not show for the root or intent buckets, fixing the issue.
+                    if (nodeType) {
+                        html += `<span style="font-size: 0.9em; color: #555;">${nodeType}</span><br/>`;
+                    }
+
                     html += `<hr style="margin: 4px 0; border-top: 1px solid #ccc;">`;
-
-                    // Level Name
-                    html += `<b>Level:</b> ${levelName}<br/>`;
-
-                    // Intent Name (if applicable)
+                    
                     if (intentName) {
                         html += `<b>Intent:</b> ${intentName}<br/>`;
                     }
-
-                    // Search Volume (if available)
                     if (extra && extra.searchVolume !== undefined) {
                         html += `<b>Search volume:</b> ${extra.searchVolume.toLocaleString()}<br/>`;
                     }
-                    
-                    // Include other metrics if they exist
                     if (extra && extra.difficulty !== undefined) {
                         html += `<b>Difficulty:</b> ${extra.difficulty}/100<br/>`;
                     }
-
                     html += `</div>`;
                     return html;
                 }
             },
-            exporting: {
-                enabled: true
-            },
-            accessibility: {
-                enabled: true,
-                point: {
-                    valueDescriptionFormat: '{point.name}, level {point.level}.'
-                }
-            },
+            exporting: { enabled: true },
+            accessibility: { enabled: true, point: { valueDescriptionFormat: '{point.name}, level {point.level}.' } },
         });
 
     } catch (error) {
@@ -2254,6 +2214,8 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         container.innerHTML = `<p class="error-message">Could not generate the visual SEO plan.</p>`;
     }
 }
+
+
 async function enhanceDiscoveryWithComments(posts, nicheContext) {
     console.log("--- Starting PHASE 2: Enhancing discovery with comments ---");
     const brandContainer = document.getElementById('top-brands-container');

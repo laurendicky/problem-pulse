@@ -2096,15 +2096,21 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         const seoPlan = JSON.parse(aiResult.openaiResponse);
 
         // Data transformation logic remains the same - it's robust enough for the new structure.
+
         const sunburstData = [{
-            id: 'root', parent: '', name: 'SEO Plan'
+            id: 'root', parent: '', name: 'SEO Plan', 
+            extra: { levelName: 'SEO Plan' } // <-- ADD THIS
         }, {
-            id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF'
+            id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF',
+            extra: { levelName: 'Intent bucket' } // <-- ADD THIS
         }, {
-            id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF'
+            id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF',
+            extra: { levelName: 'Intent bucket' } // <-- ADD THIS
         }, {
-            id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8'
+            id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8',
+            extra: { levelName: 'Intent bucket' } // <-- ADD THIS
         }];
+
         const processIntent = (intentId, intentName, intentData) => {
             if (!intentData || !Array.isArray(intentData)) return;
             
@@ -2116,8 +2122,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                     id: primaryId, 
                     parent: intentId, 
                     name: primary.keyword, 
-                    /* value: primary.searchVolume, */ // <-- REMOVED
-                    extra: { ...primary, intentName } 
+                 extra: { ...primary, intentName, levelName: 'Primary keyword' } // <-- ADD levelName
                 });
 
                 // Level 4: Secondary Keywords
@@ -2128,8 +2133,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                         id: secondaryId, 
                         parent: primaryId, 
                         name: secondary.keyword, 
-                        /* value: secondary.searchVolume, */ // <-- REMOVED
-                        extra: { ...secondary, intentName } 
+                        extra: { ...secondary, intentName, levelName: 'Secondary keyword' } // <-- ADD levelName
                     });
 
                     // Level 5: Long-tail Keywords
@@ -2140,8 +2144,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                             id: longtailId, 
                             parent: secondaryId, 
                             name: longtail.keyword, 
-                            /* value: longtail.searchVolume, */ // <-- REMOVED
-                            extra: { ...longtail, intentName } 
+                            extra: { ...longtail, intentName, levelName: 'Long-tail keyword' } // <-- ADD levelName
                         });
 
                         // Level 6: Content Examples (The "Leaf" Nodes)
@@ -2155,7 +2158,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                                 parent: longtailId,
                                 name: content.title,
                                 value: Math.max(value, 1), // This is the ONLY level that should have a 'value'
-                                extra: { ...content, intentName, searchVolume: longtail.searchVolume }
+                                extra: { ...content, intentName, searchVolume: longtail.searchVolume, levelName: 'Content example' }
                             });
                         });
                     });

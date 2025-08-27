@@ -2175,90 +2175,96 @@ const processIntent = (intentId, intentName, intentData) => {
     });
 };
 
-
         processIntent('pa', 'Problem-Aware', seoPlan.problem_aware);
         processIntent('ss', 'Solution-Seeking', seoPlan.solution_seeking);
         processIntent('pi', 'Purchase-Intent', seoPlan.purchase_intent);
+
+
+
         // =========================================================================
-        // === HIGHCHARTS CONFIGURATION (UPDATED) ==================================
+        // === HIGHCHARTS CONFIGURATION (FINAL MODERN STYLING) =====================
         // =========================================================================
         Highcharts.chart(container, {
             chart: { type: 'sunburst', height: '600px', backgroundColor: null },
             title: { text: 'Visual SEO Plan', align: 'left' },
             credits: { enabled: false },
             plotOptions: { sunburst: { animation: { duration: 1000 } } },
+            
             series: [{
                 type: 'sunburst',
                 name: 'Wide View',
                 data: sunburstData,
                 allowDrillToNode: true,
                 cursor: 'pointer',
+                
+                // This creates the subtle angular separation between slices
+                borderColor: '#FFFFFF',
+                borderWidth: 0.5,
+
+                // This removes the text labels for a clean, icon-like appearance
                 dataLabels: {
-                    format: '{point.name}',
-                    filter: { property: 'innerArcLength', operator: '>', value: 20 },
-                    rotationMode: 'circular',
-                    // *** CHANGE 1: Set the default data label color to white ***
-                    style: {
-                        color: '#FFFFFF',
-                        textOutline: 'none' // Also removes the default Highcharts outline for better readability
-                    }
+                    enabled: false
                 },
+                
+                // --- THIS IS THE KEY CHANGE FOR RADIAL SPACING ---
+                // We now define a fixed pixel height for each ring.
+                // The space between them is created automatically.
                 levels: [{
                     level: 1,
                     levelIsConstant: false,
-                    dataLabels: { 
-                        enabled: true, 
-                        filter: { property: 'value', operator: '>', value: -1 }, 
-                        // *** CHANGE 2: Ensure the Level 1 override also has white text ***
-                        style: { 
-                            fontSize: '1.1em', 
-                            fontWeight: 'normal',
-                            color: '#FFFFFF',      // <-- Added color
-                            textOutline: 'none'   // <-- Added for consistency
-                        } 
+                    // --- NEW: Create a 20px "hole" in the center ---
+                    levelSize: {
+                        value: 20,
+                        unit: 'pixels'
                     }
-                }, { level: 2, colorByPoint: true }, { level: 3, colorVariation: { key: 'brightness', to: -0.25 } }, { level: 4, colorVariation: { key: 'brightness', to: 0.25 } }, { level: 5, colorVariation: { key: 'brightness', to: -0.45 } }, { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }]
+                }, {
+                    level: 2, // Intent bucket
+                    colorByPoint: true,
+                    // --- NEW: Set a fixed height for this ring ---
+                    levelSize: {
+                        value: 45,
+                        unit: 'pixels'
+                    }
+                }, {
+                    level: 3, // Primary keywords
+                    colorVariation: { key: 'brightness', to: -0.1 },
+                    levelSize: { value: 45, unit: 'pixels' }
+                }, {
+                    level: 4, // Secondary keywords
+                    colorVariation: { key: 'brightness', to: -0.25 },
+                    levelSize: { value: 45, unit: 'pixels' }
+                }, {
+                    level: 5, // Long-tail keywords
+                    colorVariation: { key: 'brightness', to: -0.4 },
+                    levelSize: { value: 45, unit: 'pixels' }
+                }, {
+                    level: 6, // Content examples
+                    colorVariation: { key: 'brightness', to: -0.55 },
+                    levelSize: { value: 45, unit: 'pixels' }
+                }]
             }],
 
-            // In the Highcharts.chart configuration...
-
-// =========================================================================
-// === STEP 2: FINAL, SIMPLIFIED TOOLTIP ===================================
-// =========================================================================
-tooltip: {
-    useHTML: true,
-    headerFormat: '',
-    pointFormatter: function() {
-        const point = this; // The point object being hovered over
-        
-        // --- Build the HTML Output ---
-        // Access custom properties directly from the point object. No '.options' or '.extra'.
-        let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
-
-        // 1. Add the Name (Built-in property)
-        html += `<b>Name:</b> ${point.name}<br/>`;
-
-        // 2. Add the Level (Our custom property, now directly on the point)
-        if (point.levelName) {
-            html += `<b>Level:</b> ${point.levelName}<br/>`;
-        }
-        
-        // 3. Add the Intent (Our custom property)
-        if (point.intentName) {
-            html += `<b>Intent:</b> ${point.intentName}<br/>`;
-        }
-
-        // 4. Add the Search Volume (Our custom property)
-        // Check for 'undefined' because a search volume of 0 is valid.
-        if (point.searchVolume !== undefined) {
-            html += `<b>Search volume:</b> ${point.searchVolume.toLocaleString()}<br/>`;
-        }
-
-        html += `</div>`;
-        return html;
-    }
-},
-
+            // --- Your perfectly working tooltip configuration (NO CHANGES NEEDED) ---
+            tooltip: {
+                useHTML: true,
+                headerFormat: '',
+                pointFormatter: function() {
+                    const point = this;
+                    let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
+                    html += `<b>Name:</b> ${point.name}<br/>`;
+                    if (point.levelName) {
+                        html += `<b>Level:</b> ${point.levelName}<br/>`;
+                    }
+                    if (point.intentName) {
+                        html += `<b>Intent:</b> ${point.intentName}<br/>`;
+                    }
+                    if (point.searchVolume !== undefined) {
+                        html += `<b>Search volume:</b> ${point.searchVolume.toLocaleString()}<br/>`;
+                    }
+                    html += `</div>`;
+                    return html;
+                }
+            },
 
             exporting: { enabled: true },
             accessibility: { enabled: true },

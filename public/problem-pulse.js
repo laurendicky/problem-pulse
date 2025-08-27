@@ -2034,7 +2034,7 @@ async function generateAndRenderKeywords(posts, audienceContext) {
 }
 
 // =================================================================================
-// === NEW FUNCTION: SEO PLAN SUNBURST CHART ===
+// === UPGRADED FUNCTION: SEO SUNBURST WITH METRICS V2 ===
 // =================================================================================
 
 async function generateAndRenderSeoSunburst(posts, audienceContext) {
@@ -2044,30 +2044,37 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         return;
     }
 
-    container.innerHTML = '<p class="loading-text">Building visual SEO plan...</p>';
+    container.innerHTML = '<p class="loading-text">Building data-driven SEO plan...</p>';
 
     try {
         const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        // 1. AI Call to extract and structure keywords into a hierarchical plan
-        const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Analyze the following user posts.
-        FIRST, extract up to 15 high-value keywords and categorize them by intent (Problem-Aware, Solution-Seeking, Purchase-Intent).
-        SECOND, structure those keywords into a hierarchy: select ONE primary keyword for each intent, then assign the rest as secondary or long-tail keywords under it.
-        THIRD, create one example blog title for each long-tail keyword.
+        // 1. UPGRADED AI Prompt to include metrics
+        const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Analyze the provided posts to create a full SEO plan.
 
-        Respond ONLY with a valid JSON object in this exact structure:
+        Structure your response as a valid JSON object. For each of the three intents (problem_aware, solution_seeking, purchase_intent), provide a primary keyword and its related keywords.
+
+        CRITICAL: For each keyword (primary, secondary, and long_tail), you MUST provide:
+        - "keyword": The keyword phrase itself.
+        - "searchVolume": A realistic monthly search volume estimate (e.g., 1200).
+        - "difficulty": An SEO difficulty score from 0-100 (e.g., 35).
+        - "contentFormat": The ideal content type to rank (e.g., "How-to Guide", "Comparison Review", "Listicle").
+
+        For each long_tail keyword, also provide an "exampleTitle".
+
+        JSON Structure:
         {
-          "problem_aware": { "primary": "...", "secondary": ["...", "..."], "long_tail": { "long-tail keyword": "Example Blog Title 1" } },
-          "solution_seeking": { "primary": "...", "secondary": ["...", "..."], "long_tail": { "another keyword": "Example Blog Title 2" } },
-          "purchase_intent": { "primary": "...", "secondary": ["...", "..."], "long_tail": { "final keyword": "Example Blog Title 3" } }
-        }
-
-        Posts to analyze:
-        ${topPostsText}`;
+          "problem_aware": {
+            "primary": { "keyword": "...", "searchVolume": ..., "difficulty": ..., "contentFormat": "..." },
+            "secondary": [ { "keyword": "...", "searchVolume": ..., "difficulty": ..., "contentFormat": "..." } ],
+            "long_tail": [ { "keyword": "...", "searchVolume": ..., "difficulty": ..., "contentFormat": "...", "exampleTitle": "..." } ]
+          },
+          // ... repeat for solution_seeking and purchase_intent
+        }`;
 
         const openAIParams = {
             model: "gpt-4o",
-            messages: [{ role: "system", content: "You are an SEO strategist that outputs structured JSON plans." }, { role: "user", content: prompt }],
+            messages: [{ role: "system", content: "You are an SEO strategist that outputs structured JSON with keyword metrics." }, { role: "user", content: prompt }],
             temperature: 0.1,
             response_format: { "type": "json_object" }
         };
@@ -2078,7 +2085,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         const aiResult = await response.json();
         const seoPlan = JSON.parse(aiResult.openaiResponse);
 
-        // 2. Transform the AI response into a flat array for Highcharts
+        // 2. Transform the new data structure for Highcharts
         const sunburstData = [{
             id: 'root', parent: '', name: 'SEO Plan'
         }, {
@@ -2089,27 +2096,32 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
             id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8'
         }];
 
-        const processIntent = (intentKey, intentId, plan) => {
+        const processIntent = (intentId, plan) => {
             if (!plan || !plan.primary) return;
+            
+            const { primary, secondary, long_tail } = plan;
             const primaryId = `${intentId}_primary`;
-            sunburstData.push({ id: primaryId, parent: intentId, name: plan.primary, value: 5 });
 
-            (plan.secondary || []).forEach((kw, i) => {
-                sunburstData.push({ id: `${primaryId}_sec_${i}`, parent: primaryId, name: kw, value: 2 });
+            // Add nodes with all the new data attached to the 'extra' object
+            sunburstData.push({ id: primaryId, parent: intentId, name: primary.keyword, value: primary.searchVolume, extra: primary });
+
+            (secondary || []).forEach((kw, i) => {
+                sunburstData.push({ id: `${primaryId}_sec_${i}`, parent: primaryId, name: kw.keyword, value: kw.searchVolume, extra: kw });
             });
             
-            Object.entries(plan.long_tail || {}).forEach(([kw, content], i) => {
+            (long_tail || []).forEach((kw, i) => {
                 const longTailId = `${primaryId}_lt_${i}`;
-                sunburstData.push({ id: longTailId, parent: primaryId, name: kw, value: 1 });
-                sunburstData.push({ id: `${longTailId}_content`, parent: longTailId, name: content, value: 1, extra: { type: 'Content Example' } });
+                sunburstData.push({ id: longTailId, parent: primaryId, name: kw.keyword, value: kw.searchVolume, extra: kw });
+                // Content Example (leaf node)
+                sunburstData.push({ id: `${longTailId}_content`, parent: longTailId, name: kw.exampleTitle, value: kw.searchVolume, extra: { ...kw, type: 'Content Example' } });
             });
         };
 
-        processIntent('problem_aware', 'pa', seoPlan.problem_aware);
-        processIntent('solution_seeking', 'ss', seoPlan.solution_seeking);
-        processIntent('purchase_intent', 'pi', seoPlan.purchase_intent);
+        processIntent('pa', seoPlan.problem_aware);
+        processIntent('ss', seoPlan.solution_seeking);
+        processIntent('pi', seoPlan.purchase_intent);
 
-        // 3. Render the Highcharts Sunburst Chart
+        // 3. Render Highcharts with an UPGRADED Tooltip
         Highcharts.chart(container, {
             chart: { type: 'sunburst', height: '600px' },
             title: { text: 'Visual SEO Plan', align: 'left' },
@@ -2124,31 +2136,39 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                     filter: { property: 'innerArcLength', operator: '>', value: 16 },
                     style: { textOverflow: 'ellipsis' }
                 },
-                levels: [{
-                    level: 1, levelIsConstant: false,
-                    dataLabels: { filter: { property: 'outerArcLength', operator: '>', value: 64 } }
-                }, { level: 2, colorByPoint: true },
-                   { level: 3, colorVariation: { key: 'brightness', to: -0.25 } },
-                   { level: 4, colorVariation: { key: 'brightness', to: 0.45 } },
-                   { level: 5, colorVariation: { key: 'brightness', to: 0.65 } }]
+                levels: [{ level: 1, levelIsConstant: false }, { level: 2, colorByPoint: true }, { level: 3 }, { level: 4 }, { level: 5 }]
             }],
+            // --- THIS IS THE KEY UPGRADE ---
             tooltip: {
-                useHTML: true, headerFormat: '',
+                useHTML: true,
+                headerFormat: '',
                 pointFormatter: function() {
-                    let levelName = 'Root';
-                    if (this.level === 2) levelName = 'Intent';
-                    if (this.level === 3) levelName = 'Primary Keyword';
-                    if (this.level === 4) levelName = 'Secondary/Long-tail';
-                    if (this.level === 5) levelName = this.options.extra?.type || 'Content Example';
-                    return `<div><b>${this.name}</b><br/><span style="color:#888;">Level: ${levelName}</span></div>`;
+                    if (!this.options.extra) {
+                         return `<b>${this.name}</b>`; // Fallback for root/intent nodes
+                    }
+                    const { keyword, searchVolume, difficulty, contentFormat, type } = this.options.extra;
+                    const name = this.name;
+                    const levelName = type ? type : 'Keyword';
+
+                    let html = `<div style="font-family: sans-serif; font-size: 14px; max-width: 300px;">`;
+                    html += `<b>${name}</b><br/>`;
+                    html += `<hr style="margin: 4px 0; border-color: #f0f0f0;">`;
+                    
+                    if (searchVolume !== undefined) {
+                      html += `<span>📈 Volume: <b>${searchVolume.toLocaleString()}</b>/mo</span><br/>`;
+                    }
+                    if (difficulty !== undefined) {
+                      html += `<span>🧗‍♀️ Difficulty: <b>${difficulty}/100</b></span><br/>`;
+                    }
+                    if (contentFormat) {
+                      html += `<span>📝 Format: <b>${contentFormat}</b></span>`;
+                    }
+                    html += `</div>`;
+                    return html;
                 }
             },
             exporting: { enabled: true },
             accessibility: { enabled: true, point: { valueDescriptionFormat: '{point.name}, level {point.level}.' } },
-            responsive: { rules: [{
-                condition: { maxWidth: 600 },
-                chartOptions: { series: [{ dataLabels: { filter: { property: 'innerArcLength', operator: '>', value: 30 } } }] }
-            }] }
         });
 
     } catch (error) {

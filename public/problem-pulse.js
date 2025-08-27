@@ -2183,7 +2183,7 @@ const processIntent = (intentId, intentName, intentData) => {
         // === HIGHCHARTS CONFIGURATION (UPDATED) ==================================
         // =========================================================================
         Highcharts.chart(container, {
-            chart: { type: 'sunburst', height: '800px', backgroundColor: null },
+            chart: { type: 'sunburst', height: '650px', backgroundColor: null },
             title: { text: 'Visual SEO Plan', align: 'left' },
             credits: { enabled: false },
         
@@ -2194,7 +2194,7 @@ const processIntent = (intentId, intentName, intentData) => {
                     
                     // ADD THESE TWO LINES
                     borderColor: '#FFFFFF', // Sets the border color to white
-                    borderWidth: 0.05          // Sets the border width to 2 pixels
+                    borderWidth: 1          // Sets the border width to 2 pixels
                 }
             },
             series: [{

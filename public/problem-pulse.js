@@ -2032,9 +2032,8 @@ async function generateAndRenderKeywords(posts, audienceContext) {
         `;
     }
 }
-
 // =================================================================================
-// === OPTIMISED FUNCTION: SEO SUNBURST WITH CORRECT HIERARCHY & TOOLTIPS V7 ===
+// === OPTIMISED FUNCTION: BALANCED HIERARCHY & REFINED LABELS V8 (FINAL) ===
 // =================================================================================
 
 async function generateAndRenderSeoSunburst(posts, audienceContext) {
@@ -2044,52 +2043,34 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         return;
     }
 
-    container.innerHTML = '<p class="loading-text">Building data-driven SEO plan...</p>';
+    container.innerHTML = '<p class="loading-text">Building a balanced, data-driven SEO plan...</p>';
 
     try {
         const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        // ADJUSTMENT 1: A new, highly specific prompt to generate the required deep hierarchy.
-        const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Create a comprehensive, multi-level SEO plan based on the provided text.
+        // ADJUSTMENT 1: A new, strict prompt to enforce a BALANCED and PRUNED hierarchy.
+        const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Create a visually balanced, multi-level SEO plan.
 
         Structure your response as a single, valid JSON object.
 
-        For each of the three intents (problem_aware, solution_seeking, purchase_intent), provide an array of 2-3 primary keywords.
-
-        - For EACH primary keyword, provide an array of 2-4 "secondary_keywords".
+        For each of the three intents (problem_aware, solution_seeking, purchase_intent):
+        - Provide an array of exactly 2-3 "primary_keywords".
+        - For EACH primary keyword, provide an array of 2-3 "secondary_keywords".
         - For EACH secondary keyword, provide an array of 2-3 "long_tail_keywords".
-        - For EACH long-tail keyword, provide an array of 6-8 "content_examples".
+        - For EACH long-tail keyword, provide an array of 1-2 "content_examples" to avoid visual clutter.
 
         CRITICAL: Every keyword object (primary, secondary, long_tail) MUST contain:
         - "keyword": The keyword phrase.
         - "searchVolume": A realistic monthly search volume (integer).
 
-        Each "content_examples" item should be an object with a single key: "title".
-
-        Example JSON Structure:
-        {
-          "problem_aware": [
-            {
-              "keyword": "primary keyword A", "searchVolume": 5000,
-              "secondary_keywords": [
-                {
-                  "keyword": "secondary keyword A1", "searchVolume": 1200,
-                  "long_tail_keywords": [
-                    {
-                      "keyword": "long-tail keyword A1a", "searchVolume": 300,
-                      "content_examples": [ { "title": "Example Blog Title 1" } ]
-                    }
-                  ]
-                }
-              ]
-            }
-          ],
-          "solution_seeking": [ ... ], "purchase_intent": [ ... ]
-        }`;
+        Each "content_examples" item MUST be an object with a single key: "title".
+        
+        This structure is mandatory to ensure the final visualization is clean and balanced.
+        `;
 
         const openAIParams = {
             model: "gpt-4o",
-            messages: [{ role: "system", content: "You are a JSON-only SEO strategist." }, { role: "user", content: prompt }],
+            messages: [{ role: "system", content: "You are a JSON-only SEO strategist that creates balanced data structures." }, { role: "user", content: prompt }],
             temperature: 0.2,
             response_format: { "type": "json_object" }
         };
@@ -2100,53 +2081,33 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         const aiResult = await response.json();
         const seoPlan = JSON.parse(aiResult.openaiResponse);
 
-        // ADJUSTMENT 2: Completely rewritten data transformation logic to handle the new deep structure.
-        const sunburstData = [{
-            id: 'root', parent: '', name: 'SEO Plan'
-        }, {
-            id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF'
-        }, {
-            id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF'
-        }, {
-            id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8'
-        }];
-
+        // Data transformation logic remains the same, as it's designed to handle this nested structure.
+        const sunburstData = [{ id: 'root', parent: '', name: 'SEO Plan' }, { id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF' }, { id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF' }, { id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8' }];
         const processIntent = (intentId, intentName, intentData) => {
             if (!intentData || !Array.isArray(intentData)) return;
-            // Level 3: Primary Keywords
             intentData.forEach((primary, i) => {
                 const primaryId = `${intentId}_p_${i}`;
                 sunburstData.push({ id: primaryId, parent: intentId, name: primary.keyword, value: primary.searchVolume, extra: { ...primary, intentName } });
-                // Level 4: Secondary Keywords
                 (primary.secondary_keywords || []).forEach((secondary, j) => {
                     const secondaryId = `${primaryId}_s_${j}`;
                     sunburstData.push({ id: secondaryId, parent: primaryId, name: secondary.keyword, value: secondary.searchVolume, extra: { ...secondary, intentName } });
-                    // Level 5: Long-tail Keywords
                     (secondary.long_tail_keywords || []).forEach((longtail, k) => {
                         const longtailId = `${secondaryId}_l_${k}`;
                         sunburstData.push({ id: longtailId, parent: secondaryId, name: longtail.keyword, value: longtail.searchVolume, extra: { ...longtail, intentName } });
-                        // Level 6: Content Examples
                         (longtail.content_examples || []).forEach((content, l) => {
                             const value = longtail.searchVolume / (longtail.content_examples.length || 1);
-                            sunburstData.push({
-                                id: `${longtailId}_c_${l}`,
-                                parent: longtailId,
-                                name: content.title,
-                                value: Math.max(value, 1), // Ensure leaf nodes have a value
-                                extra: { ...content, intentName, searchVolume: longtail.searchVolume }
-                            });
+                            sunburstData.push({ id: `${longtailId}_c_${l}`, parent: longtailId, name: content.title, value: Math.max(value, 1), extra: { ...content, intentName, searchVolume: longtail.searchVolume } });
                         });
                     });
                 });
             });
         };
-
         processIntent('pa', 'Problem-Aware', seoPlan.problem_aware);
         processIntent('ss', 'Solution-Seeking', seoPlan.solution_seeking);
         processIntent('pi', 'Purchase-Intent', seoPlan.purchase_intent);
 
         // =========================================================================
-        // === HIGHCHARTS CONFIGURATION WITH CORRECTED TOOLTIPS & LEVELS ===
+        // === HIGHCHARTS CONFIGURATION WITH IMPROVED LABELS & TOOLTIPS ===
         // =========================================================================
         Highcharts.chart(container, {
             chart: { type: 'sunburst', height: '600px', backgroundColor: null },
@@ -2162,64 +2123,61 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                 dataLabels: {
                     format: '{point.name}',
                     filter: { property: 'innerArcLength', operator: '>', value: 20 },
-                    rotationMode: 'circular'
+                    // ADJUSTMENT 2: Use 'parallel' rotation to curve text along the arcs.
+                    rotationMode: 'parallel'
                 },
                 levels: [{
                     level: 1,
-                    levelIsConstant: false,
                     dataLabels: { enabled: true, filter: { property: 'value', operator: '>', value: -1 }, style: { fontSize: '1.1em', fontWeight: 'bold' } }
                 }, { level: 2, colorByPoint: true }, { level: 3, colorVariation: { key: 'brightness', to: -0.25 } }, { level: 4, colorVariation: { key: 'brightness', to: 0.25 } }, { level: 5, colorVariation: { key: 'brightness', to: -0.45 } }, { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }]
             }],
 
-            // ADJUSTMENT 3: A completely rewritten tooltip that follows all new rules.
+            // ADJUSTMENT 3: Implementing your specified tooltip structure.
             tooltip: {
                 useHTML: true,
-                headerFormat: '',
-                pointFormatter: function() {
-                    const point = this;
-                    const extra = point.options.extra || {};
-
-                    const levelNameMap = {
-                        1: 'SEO Plan',
-                        2: 'Intent bucket',
-                        3: 'Primary keyword',
-                        4: 'Secondary keyword',
-                        5: 'Long-tail keyword',
-                        6: 'Content example / blog title / LP'
+                // Apply styles for wrapping and width directly.
+                style: {
+                    whiteSpace: "normal",
+                    minwidth: "220px",
+                    maxWidth: "350px"
+                },
+                formatter: function() {
+                    const point = this.point;
+                    const extra = point.extra || {};
+                    const levelMap = {
+                        1: "SEO Plan",
+                        2: "Intent bucket",
+                        3: "Primary keyword",
+                        4: "Secondary keyword",
+                        5: "Long-tail keyword",
+                        6: "Content example / blog title / LP"
                     };
-                    const levelName = levelNameMap[point.level];
-                    const intentName = extra.intentName || (point.level === 2 ? point.name : null);
 
-                    let html = `<div style="max-width: 350px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
-
-                    // Rule: Name: [node name]
-                    html += `<b>Name:</b> ${point.name}<br/>`;
-
-                    // Rule: Level: [exact level label]
+                    const levelName = levelMap[point.node.level];
+                    const intentName = extra.intentName || (point.node.level === 2 ? point.name : null);
+                    
+                    // Build the HTML string, checking for data to avoid "undefined".
+                    let html = `<b>${point.name}</b><br/>`;
                     if (levelName) {
-                        html += `<b>Level:</b> ${levelName}<br/>`;
+                      html += `Level: ${levelName}<br/>`;
                     }
-
-                    // Rule: Intent: [name] (if applicable)
-                    if (point.level > 1 && intentName) {
-                        html += `<b>Intent:</b> ${intentName}<br/>`;
+                    if (intentName && point.node.level > 1) {
+                      html += `Intent: ${intentName}<br/>`;
                     }
-
-                    // Rule: Search volume: [if available]
                     if (extra.searchVolume !== undefined) {
-                        html += `<b>Search volume:</b> ${extra.searchVolume.toLocaleString()}<br/>`;
+                      html += `Search volume: ${extra.searchVolume.toLocaleString()}`;
                     }
-
-                    html += `</div>`;
+                    
                     return html;
                 }
             },
             exporting: { enabled: true },
             accessibility: { enabled: true },
         });
+
     } catch (error) {
         console.error("Failed to generate or render SEO Sunburst chart:", error);
-        container.innerHTML = `<p class="error-message">Could not generate the visual SEO plan.</p>`;
+        container.innerHTML = `<p class="error-message">Could not generate the visual SEO plan. Please try again.</p>`;
     }
 }
 

@@ -2042,18 +2042,15 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
     container.innerHTML = '<p class="loading-text">Building data-driven SEO plan...</p>';
 
     try {
-        const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.
-selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+        const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        // ADJUSTMENT 1: The prompt is updated to match your exact node count requirements.
-        const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Create a 
-comprehensive, multi-level SEO plan based on the provided text.
+        // *** CHANGE 1: The AI prompt is updated to match the new node count rules. ***
+        const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Create a comprehensive, multi-level SEO plan based on the provided text.
 
         Structure your response as a single, valid JSON object.
 
-        Your structure must follow these rules precisely:
-        - The root object must have three keys: "problem_aware", "solution_seeking", and "purchase_intent".
-        - For each of these three intents, provide an array of 2-5 "primary_keywords".
+        For each of the three intents (problem_aware, solution_seeking, purchase_intent), provide an array of 2-5 primary keywords.
+
         - For EACH primary keyword, provide an array of 2-4 "secondary_keywords".
         - For EACH secondary keyword, provide an array of 2-3 "long_tail_keywords".
         - For EACH long-tail keyword, provide an array of 1-2 "content_examples".
@@ -2064,7 +2061,7 @@ comprehensive, multi-level SEO plan based on the provided text.
 
         Each "content_examples" item should be an object with a single key: "title".
 
-        Example JSON Structure Snippet:
+        Example JSON Structure:
         {
           "problem_aware": [
             {
@@ -2075,7 +2072,7 @@ comprehensive, multi-level SEO plan based on the provided text.
                   "long_tail_keywords": [
                     {
                       "keyword": "long-tail keyword A1a", "searchVolume": 300,
-                      "content_examples": [ { "title": "Example Blog Title 1" }, { "title": "Example Blog Title 2" } ]
+                      "content_examples": [ { "title": "Example Blog Title 1" } ]
                     }
                   ]
                 }
@@ -2087,20 +2084,18 @@ comprehensive, multi-level SEO plan based on the provided text.
 
         const openAIParams = {
             model: "gpt-4o",
-            messages: [{ role: "system", content: "You are a JSON-only SEO strategist." }, { role: "user", content: 
-prompt }],
+            messages: [{ role: "system", content: "You are a JSON-only SEO strategist." }, { role: "user", content: prompt }],
             temperature: 0.2,
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/
-json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('AI SEO plan generation failed.');
 
         const aiResult = await response.json();
         const seoPlan = JSON.parse(aiResult.openaiResponse);
 
-        // This data transformation logic correctly handles the new structure.
+        // Data transformation logic remains the same - it's robust enough for the new structure.
         const sunburstData = [{
             id: 'root', parent: '', name: 'SEO Plan'
         }, {
@@ -2110,32 +2105,56 @@ json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         }, {
             id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8'
         }];
-
         const processIntent = (intentId, intentName, intentData) => {
             if (!intentData || !Array.isArray(intentData)) return;
+            
             // Level 3: Primary Keywords
             intentData.forEach((primary, i) => {
                 const primaryId = `${intentId}_p_${i}`;
-                sunburstData.push({ id: primaryId, parent: intentId, name: primary.keyword, value: primary.
-searchVolume, extra: { ...primary, intentName } });
+                // CHANGE: Removed the 'value' property from this parent node.
+                sunburstData.push({ 
+                    id: primaryId, 
+                    parent: intentId, 
+                    name: primary.keyword, 
+                    /* value: primary.searchVolume, */ // <-- REMOVED
+                    extra: { ...primary, intentName } 
+                });
+
                 // Level 4: Secondary Keywords
                 (primary.secondary_keywords || []).forEach((secondary, j) => {
                     const secondaryId = `${primaryId}_s_${j}`;
-                    sunburstData.push({ id: secondaryId, parent: primaryId, name: secondary.keyword, value: 
-secondary.searchVolume, extra: { ...secondary, intentName } });
+                    // CHANGE: Removed the 'value' property from this parent node.
+                    sunburstData.push({ 
+                        id: secondaryId, 
+                        parent: primaryId, 
+                        name: secondary.keyword, 
+                        /* value: secondary.searchVolume, */ // <-- REMOVED
+                        extra: { ...secondary, intentName } 
+                    });
+
                     // Level 5: Long-tail Keywords
                     (secondary.long_tail_keywords || []).forEach((longtail, k) => {
                         const longtailId = `${secondaryId}_l_${k}`;
-                        sunburstData.push({ id: longtailId, parent: secondaryId, name: longtail.keyword, value: 
-longtail.searchVolume, extra: { ...longtail, intentName } });
-                        // Level 6: Content Examples
+                        // CHANGE: Removed the 'value' property from this parent node.
+                        sunburstData.push({ 
+                            id: longtailId, 
+                            parent: secondaryId, 
+                            name: longtail.keyword, 
+                            /* value: longtail.searchVolume, */ // <-- REMOVED
+                            extra: { ...longtail, intentName } 
+                        });
+
+                        // Level 6: Content Examples (The "Leaf" Nodes)
+                        // NO CHANGE HERE: This logic is correct because these are the final nodes.
+                        // Their values will be summed up to create the size of their parents.
                         (longtail.content_examples || []).forEach((content, l) => {
+                            // This logic correctly distributes the long-tail's search volume among its content ideas.
                             const value = longtail.searchVolume / (longtail.content_examples.length || 1);
                             sunburstData.push({
                                 id: `${longtailId}_c_${l}`,
                                 parent: longtailId,
                                 name: content.title,
-                                value: Math.max(value, 1), // Ensure leaf nodes have a value
+                                value: Math.max(value, 1), // This is the ONLY level that should have a 'value'
                                 extra: { ...content, intentName, searchVolume: longtail.searchVolume }
                             });
                         });
@@ -2149,7 +2168,7 @@ longtail.searchVolume, extra: { ...longtail, intentName } });
         processIntent('pi', 'Purchase-Intent', seoPlan.purchase_intent);
 
         // =========================================================================
-        // === HIGHCHARTS CONFIGURATION WITH ADJUSTED TOOLTIP AND CORRECT LABELS ===
+        // === HIGHCHARTS CONFIGURATION ============================================
         // =========================================================================
         Highcharts.chart(container, {
             chart: { type: 'sunburst', height: '600px', backgroundColor: null },
@@ -2170,14 +2189,11 @@ longtail.searchVolume, extra: { ...longtail, intentName } });
                 levels: [{
                     level: 1,
                     levelIsConstant: false,
-                    dataLabels: { enabled: true, filter: { property: 'value', operator: '>', value: -1 }, style: { 
-fontSize: '1.1em', fontWeight: 'bold' } }
-                }, { level: 2, colorByPoint: true }, { level: 3, colorVariation: { key: 'brightness', to: -0.25 } }, 
-{ level: 4, colorVariation: { key: 'brightness', to: 0.25 } }, { level: 5, colorVariation: { key: 
-'brightness', to: -0.45 } }, { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }]
+                    dataLabels: { enabled: true, filter: { property: 'value', operator: '>', value: -1 }, style: { fontSize: '1.1em', fontWeight: 'bold' } }
+                }, { level: 2, colorByPoint: true }, { level: 3, colorVariation: { key: 'brightness', to: -0.25 } }, { level: 4, colorVariation: { key: 'brightness', to: 0.25 } }, { level: 5, colorVariation: { key: 'brightness', to: -0.45 } }, { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }]
             }],
 
-            // ADJUSTMENT 2: Tooltip updated to meet all formatting and width rules.
+            // Tooltip logic is updated with the minimum width requirement.
             tooltip: {
                 useHTML: true,
                 headerFormat: '',
@@ -2185,7 +2201,6 @@ fontSize: '1.1em', fontWeight: 'bold' } }
                     const point = this;
                     const extra = point.options.extra || {};
 
-                    // The level map contains the exact labels you requested.
                     const levelNameMap = {
                         1: 'SEO Plan',
                         2: 'Intent bucket',
@@ -2197,9 +2212,8 @@ fontSize: '1.1em', fontWeight: 'bold' } }
                     const levelName = levelNameMap[point.level];
                     const intentName = extra.intentName || (point.level === 2 ? point.name : null);
 
-                    // The style attribute now includes `min-width: 250px`.
-                    let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: 
-normal; word-wrap: break-word;">`;
+                    // *** CHANGE 2: Enforce a minimum width of 250px on the tooltip container. ***
+                    let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
 
                     // Rule: Name: [node name]
                     html += `<b>Name:</b> ${point.name}<br/>`;
@@ -2215,8 +2229,7 @@ normal; word-wrap: break-word;">`;
                     }
 
                     // Rule: Search volume: [if available]
-                    // This now correctly shows volume for levels 3, 4, and 5.
-                    if (extra.searchVolume !== undefined && point.level >=3 && point.level <= 5) {
+                    if (extra.searchVolume !== undefined) {
                         html += `<b>Search volume:</b> ${extra.searchVolume.toLocaleString()}<br/>`;
                     }
 
@@ -2232,6 +2245,7 @@ normal; word-wrap: break-word;">`;
         container.innerHTML = `<p class="error-message">Could not generate the visual SEO plan.</p>`;
     }
 }
+
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;

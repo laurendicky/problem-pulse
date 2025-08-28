@@ -2951,48 +2951,64 @@ function initializeProblemFinderTool() {
 
     console.log("Problem Finder tool successfully initialized.");
 }
-
 /**
- * This function listens for clicks on any "Generate Growth Plan" button,
- * updates the header, and switches to the Growth Kit tab.
+ * DIAGNOSTIC VERSION: This function will print information to the console
+ * to help us find the exact point of failure.
  */
 function setupProblemCardLinks() {
+    console.log("setupProblemCardLinks() has been activated and is listening for clicks.");
+  
     document.addEventListener('click', function(event) {
   
-      // First, check if a button with our new class was clicked.
-      if (!event.target.classList.contains('generate-growth-btn')) {
-        return; // If not, do nothing.
+      // The MOST LIKELY FIX is here: .closest() finds the button even if you click text inside it.
+      const clickedButton = event.target.closest('.generate-growth-btn');
+  
+      // Check if one of our buttons was clicked.
+      if (!clickedButton) {
+        // This is normal, it just means a click happened somewhere else on the page.
+        return;
       }
   
-      // --- 1. Get Information from the Card ---
+      // If we get here, a button was clicked! Let's start investigating.
+      console.log("✅ SUCCESS: A .generate-growth-btn was clicked!");
   
-      // Find the card that the clicked button lives in.
-      const parentCard = event.target.closest('.findings-block');
-      if (!parentCard) return;
+      // --- Investigation Step 1: Find the parent card ---
+      const parentCard = clickedButton.closest('.findings-block');
+      console.log("Looking for parent card (.findings-block)...", parentCard);
   
-      // Find the title element within that card.
-      const problemTitleElement = parentCard.querySelector('.section-title');
-      const problemTitle = problemTitleElement.textContent;
-  
-      // Get the audience name from your global variable.
-      const audienceName = window.originalGroupName || 'your audience';
-  
-      // --- 2. Update the Header Text ---
-  
-      // Find the header element by its ID.
-      const growthHeader = document.getElementById('growth-header');
-      if (growthHeader) {
-        growthHeader.textContent = `Growth Plan to target ${audienceName} struggling with ${problemTitle}`;
+      // --- Investigation Step 2: Find the title inside the card ---
+      const problemTitleElement = parentCard ? parentCard.querySelector('.section-title') : null;
+      console.log("Looking for title (.section-title)...", problemTitleElement);
+      
+      if (problemTitleElement) {
+          console.log("Found problem title text:", problemTitleElement.textContent);
       }
   
-      // --- 3. Switch to the Growth Tab ---
-  
-      // Find the clickable link for the growth tab by its ID and "click" it.
-      // This will run your existing tab-switching logic automatically.
+      // --- Investigation Step 3: Find the growth tab link ---
       const growthTabLink = document.getElementById('growth-tab-link');
-      if (growthTabLink) {
-        growthTabLink.click();
+      console.log("Looking for the growth tab link (#growth-tab-link)...", growthTabLink);
+  
+  
+      // --- Now, we try to perform the actions ---
+      if (problemTitleElement && growthTabLink) {
+          const problemTitle = problemTitleElement.textContent;
+          const audienceName = window.originalGroupName || 'your audience';
+          const growthHeader = document.getElementById('growth-header');
+  
+          if (growthHeader) {
+              growthHeader.textContent = `Growth Plan to target ${audienceName} struggling with ${problemTitle}`;
+              console.log("✅ SUCCESS: Updated the header text.");
+          } else {
+              console.error("❌ FAILURE: Could not find the header element with id #growth-header.");
+          }
+  
+          growthTabLink.click();
+          console.log("✅ ACTION: Programmatically 'clicked' the growth tab link.");
+  
+      } else {
+          console.error("❌ ACTION HALTED: Could not proceed because either the problem title or the tab link was not found.");
       }
+  
     });
   }
 

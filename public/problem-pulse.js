@@ -2419,8 +2419,7 @@ const processIntent = (intentId, intentName, intentData) => {
             chart: { type: 'sunburst', height: '650px', backgroundColor: null },
             title: { text: null },
             credits: { enabled: false },
-
-            // VVV ADD THIS ENTIRE BLOCK VVV
+        
             breadcrumbs: {
                 useHTML: true, // Allows standard CSS styling for wrapping
                 position: {
@@ -2433,10 +2432,6 @@ const processIntent = (intentId, intentName, intentData) => {
                     textOverflow: 'ellipsis'
                 }
             },
-            // ^^^ END OF BLOCK TO ADD ^^^
-
-            // --- MODIFY THIS SECTION ---
-            plotOptions: { // This line is already in your code
             // --- MODIFY THIS SECTION ---
             plotOptions: {
                 sunburst: {
@@ -2498,6 +2493,7 @@ tooltip: {
         // 1. Add the Name (Built-in property)
         const capitalizedName = point.name.replace(/(^\w{1})|(\s+\w{1})/g, letter => letter.toUpperCase());
         html += `<b>Name:</b> <b>${capitalizedName}</b><br/>`;
+        
         // 2. Add the Level (Our custom property, now directly on the point)
         if (point.levelName) {
             html += `<b>Level:</b> ${point.levelName}<br/>`;

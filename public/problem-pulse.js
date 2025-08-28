@@ -2952,55 +2952,37 @@ function initializeProblemFinderTool() {
     console.log("Problem Finder tool successfully initialized.");
 }
 
-/**
- * =======================================================================
- * === ULTIMATE DIAGNOSTIC TOOL ==========================================
- * This function's only job is to investigate the HTML structure when
- * a button is clicked and report its findings to the console.
- * =======================================================================
- */
 function setupProblemCardLinks() {
-    console.log("🕵️‍♂️ Diagnostic listener is active. Please click a '.generate-growth-btn'.");
-  
     document.addEventListener('click', function(event) {
+      
+      // Use .closest() to reliably find the button.
       const clickedButton = event.target.closest('.generate-growth-btn');
   
+      // If a button wasn't clicked, do nothing.
       if (!clickedButton) {
-        return; // Not our button, ignore the click.
+        return;
       }
   
-      // --- START OF INVESTIGATION ---
-      console.clear(); // Clears the console for a clean report.
-      console.log("--- 🕵️‍♂️ DIAGNOSTIC REPORT START 🕵️‍♂️ ---");
-      console.log("✅ Button Clicked:", clickedButton);
+      // --- All selectors below have been verified by the diagnostic tool ---
   
-      // 1. Find the parent card.
       const parentCard = clickedButton.closest('.findings-block');
-      console.log("✅ Parent Card Found (.findings-block):", parentCard);
-  
-      if (parentCard) {
-        // 2. THIS IS THE MOST IMPORTANT PART:
-        // We will now list EVERY SINGLE element inside the card and its classes.
-        console.log("--- Listing all elements inside the parent card ---");
-        const allElementsInside = parentCard.querySelectorAll('*');
-        allElementsInside.forEach(el => {
-          // This will log the element's type (e.g., H3, DIV) and its full class list.
-          console.log(` -> Element: <${el.tagName}>, Classes: "${el.className}"`);
-        });
-        console.log("--- End of element list ---");
-  
-        // 3. Now we will re-test our selector and see the result.
-        const problemTitleElement = parentCard.querySelector('[class*="section-title"]');
-        console.log("✅ Test Result for '[class*=\"section-title\"]':", problemTitleElement);
-  
-      } else {
-        console.error("❌ CRITICAL FAILURE: Could not find the parent card with class '.findings-block'.");
-      }
-  
-      // 4. Finally, let's re-check the tab link just to be sure.
+      const problemTitleElement = parentCard ? parentCard.querySelector('[class*="section-title"]') : null;
       const growthTabLink = document.getElementById('growth-tab-link');
-      console.log("✅ Growth Tab Link Found (#growth-tab-link):", growthTabLink);
-      console.log("--- 🕵️‍♂️ DIAGNOSTIC REPORT END 🕵️‍♂️ ---");
+  
+      // Only proceed if we found BOTH the title and the tab link.
+      if (problemTitleElement && growthTabLink) {
+        const problemTitle = problemTitleElement.textContent.trim();
+        const audienceName = window.originalGroupName || 'your audience';
+        const growthHeader = document.getElementById('growth-header');
+  
+        // 1. Update the header text.
+        if (growthHeader) {
+          growthHeader.textContent = `Growth Plan to target ${audienceName} struggling with ${problemTitle}`;
+        }
+  
+        // 2. "Click" the link to switch to the growth tab.
+        growthTabLink.click();
+      }
     });
   }
 

@@ -2198,8 +2198,13 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
             break; // No more candidates
         }
     }
-    // --- C. Render the HTML for the cards ONLY ---
+
+
+    // --- C. Render the HTML, including the new toggle button ---
     container.innerHTML = `
+        <div class="card-toggle-wrapper">
+            <button id="toggle-all-cards-btn" class="card-toggle-button">Expand All</button>
+        </div>
         <div class="action-cards-grid">
             ${renderActionCardHTML('Traffic Drivers', 'High-volume, top-of-funnel content', trafficDrivers, (idea) => `This content targets the high-volume keyword "${idea.primaryKeyword}". It's designed to attract a broad audience early in their journey, maximizing site traffic and brand awareness for ${audienceContext}.`)}
             ${renderActionCardHTML('Conversion Boosters', 'Content for a ready-to-buy audience', conversionBoosters, (idea) => `This targets users showing clear purchase intent for ${audienceContext}. Answering these questions directly can lead to conversions, as the audience is actively evaluating solutions like yours.`)}
@@ -2208,23 +2213,18 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
         </div>
     `;
 
-    // --- D. Find YOUR wrapper and inject the button and event listener ---
-    const toggleWrapper = document.querySelector('.card-toggle-wrapper');
+    // --- D. Add Event Listener for the new toggle button ---
+    const toggleBtn = document.getElementById('toggle-all-cards-btn');
     const allCards = document.querySelectorAll('.action-cards-grid .action-card');
-    
-    if (toggleWrapper && allCards.length > 0) {
-        // Clear the wrapper first in case of re-runs, then add the button
-        toggleWrapper.innerHTML = `<button id="toggle-all-cards-btn" class="card-toggle-button">Expand All</button>`;
-        const toggleBtn = document.getElementById('toggle-all-cards-btn');
-
-        if (toggleBtn) {
-            toggleBtn.addEventListener('click', () => {
-                const shouldOpen = Array.from(allCards).some(card => !card.open);
-                allCards.forEach(card => card.open = shouldOpen);
-                toggleBtn.textContent = shouldOpen ? 'Collapse All' : 'Expand All';
-            });
-        }
+    if(toggleBtn && allCards.length > 0) {
+        toggleBtn.addEventListener('click', () => {
+            // Check if ANY card is closed. If so, the action is to open all.
+            const shouldOpen = Array.from(allCards).some(card => !card.open);
+            allCards.forEach(card => card.open = shouldOpen);
+            toggleBtn.textContent = shouldOpen ? 'Collapse All' : 'Expand All';
+        });
     }
+}
 // =================================================================================
 // === UPGRADED FUNCTION: Renders a single COLLAPSIBLE Action Card ===
 // =================================================================================
@@ -2264,8 +2264,6 @@ function renderActionCardHTML(title, subtitle, ideas, whyItMattersGenerator) {
         </details>
     `;
 }
-// PASTE THIS ENTIRE FUNCTION TO REPLACE YOUR OLD ONE
-
 async function generateAndRenderSeoSunburst(posts, audienceContext) {
     const container = document.getElementById('keyword-sunburst');
     if (!container) {
@@ -2278,18 +2276,43 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
     try {
         const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
+        // *** CHANGE 1: The AI prompt is updated to match the new node count rules. ***
         const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Create a comprehensive, multi-level SEO plan based on the provided text.
+
         Structure your response as a single, valid JSON object.
+
         For each of the three intents (problem_aware, solution_seeking, purchase_intent), provide an array of 2-5 primary keywords.
+
         - For EACH primary keyword, provide an array of 2-4 "secondary_keywords".
         - For EACH secondary keyword, provide an array of 2-3 "long_tail_keywords".
         - For EACH long-tail keyword, provide an array of 1-2 "content_examples".
+
         CRITICAL: Every keyword object (primary, secondary, long_tail) MUST contain:
         - "keyword": The keyword phrase.
         - "searchVolume": A realistic monthly search volume (integer).
+
         Each "content_examples" item should be an object with a single key: "title".
+
         Example JSON Structure:
-        { "problem_aware": [ { "keyword": "primary keyword A", "searchVolume": 5000, "secondary_keywords": [ { "keyword": "secondary keyword A1", "searchVolume": 1200, "long_tail_keywords": [ { "keyword": "long-tail keyword A1a", "searchVolume": 300, "content_examples": [ { "title": "Example Blog Title 1" } ] } ] } ] } ], "solution_seeking": [ ... ], "purchase_intent": [ ... ] }`;
+        {
+          "problem_aware": [
+            {
+              "keyword": "primary keyword A", "searchVolume": 5000,
+              "secondary_keywords": [
+                {
+                  "keyword": "secondary keyword A1", "searchVolume": 1200,
+                  "long_tail_keywords": [
+                    {
+                      "keyword": "long-tail keyword A1a", "searchVolume": 300,
+                      "content_examples": [ { "title": "Example Blog Title 1" } ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "solution_seeking": [ ... ], "purchase_intent": [ ... ]
+        }`;
 
         const openAIParams = {
             model: "gpt-4o",
@@ -2305,50 +2328,127 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         const seoPlan = JSON.parse(aiResult.openaiResponse);
         generateAndRenderActionCards(seoPlan, audienceContext);
 
-        const sunburstData = [{ id: 'root', parent: '', name: 'SEO Plan', levelName: 'SEO Plan' }, { id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF', levelName: 'Intent bucket' }, { id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF', levelName: 'Intent bucket' }, { id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8', levelName: 'Intent bucket' }];
-        const processIntent = (intentId, intentName, intentData) => {
-            if (!intentData || !Array.isArray(intentData)) return;
-            intentData.forEach((primary, i) => {
-                const primaryId = `${intentId}_p_${i}`;
-                sunburstData.push({ id: primaryId, parent: intentId, name: primary.keyword, intentName: intentName, levelName: 'Primary keyword', searchVolume: primary.searchVolume });
-                (primary.secondary_keywords || []).forEach((secondary, j) => {
-                    const secondaryId = `${primaryId}_s_${j}`;
-                    sunburstData.push({ id: secondaryId, parent: primaryId, name: secondary.keyword, intentName: intentName, levelName: 'Secondary keyword', searchVolume: secondary.searchVolume });
-                    (secondary.long_tail_keywords || []).forEach((longtail, k) => {
-                        const longtailId = `${secondaryId}_l_${k}`;
-                        sunburstData.push({ id: longtailId, parent: secondaryId, name: longtail.keyword, intentName: intentName, levelName: 'Long-tail keyword', searchVolume: longtail.searchVolume });
-                        (longtail.content_examples || []).forEach((content, l) => {
-                            const value = longtail.searchVolume / (longtail.content_examples.length || 1);
-                            sunburstData.push({ id: `${longtailId}_c_${l}`, parent: longtailId, name: content.title, value: Math.max(value, 1), intentName: intentName, levelName: 'Content example', searchVolume: longtail.searchVolume });
-                        });
+        // Data transformation logic remains the same - it's robust enough for the new structure.
+        // In generateAndRenderSeoSunburst...
+
+// =========================================================================
+// === STEP 1: CORRECTED DATA GENERATION ===================================
+// =========================================================================
+
+// Data transformation logic
+const sunburstData = [{
+    id: 'root', parent: '', name: 'SEO Plan',
+    levelName: 'SEO Plan' // <-- FLATTENED PROPERTY
+}, {
+    id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF',
+    levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
+}, {
+    id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF',
+    levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
+}, {
+    id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8',
+    levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
+}];
+
+const processIntent = (intentId, intentName, intentData) => {
+    if (!intentData || !Array.isArray(intentData)) return;
+    
+    // Level 3: Primary Keywords
+    intentData.forEach((primary, i) => {
+        const primaryId = `${intentId}_p_${i}`;
+        sunburstData.push({ 
+            id: primaryId, 
+            parent: intentId, 
+            name: primary.keyword, 
+            // NO 'extra' OBJECT. Properties are added directly.
+            intentName: intentName,
+            levelName: 'Primary keyword',
+            searchVolume: primary.searchVolume
+        });
+
+        // Level 4: Secondary Keywords
+        (primary.secondary_keywords || []).forEach((secondary, j) => {
+            const secondaryId = `${primaryId}_s_${j}`;
+            sunburstData.push({ 
+                id: secondaryId, 
+                parent: primaryId, 
+                name: secondary.keyword, 
+                intentName: intentName,
+                levelName: 'Secondary keyword',
+                searchVolume: secondary.searchVolume
+            });
+
+            // Level 5: Long-tail Keywords
+            (secondary.long_tail_keywords || []).forEach((longtail, k) => {
+                const longtailId = `${secondaryId}_l_${k}`;
+                sunburstData.push({ 
+                    id: longtailId, 
+                    parent: secondaryId, 
+                    name: longtail.keyword, 
+                    intentName: intentName,
+                    levelName: 'Long-tail keyword',
+                    searchVolume: longtail.searchVolume
+                });
+
+                // Level 6: Content Examples
+                (longtail.content_examples || []).forEach((content, l) => {
+                    const value = longtail.searchVolume / (longtail.content_examples.length || 1);
+                    sunburstData.push({
+                        id: `${longtailId}_c_${l}`,
+                        parent: longtailId,
+                        name: content.title,
+                        value: Math.max(value, 1),
+                        intentName: intentName,
+                        levelName: 'Content example',
+                        searchVolume: longtail.searchVolume // Storing the parent's volume
                     });
                 });
             });
-        };
+        });
+    });
+};
+
+
         processIntent('pa', 'Problem-Aware', seoPlan.problem_aware);
         processIntent('ss', 'Solution-Seeking', seoPlan.solution_seeking);
         processIntent('pi', 'Purchase-Intent', seoPlan.purchase_intent);
-
+        // =========================================================================
+        // === HIGHCHARTS CONFIGURATION (UPDATED) ==================================
+        // =========================================================================
         Highcharts.chart(container, {
             chart: { type: 'sunburst', height: '650px', backgroundColor: null },
             title: { text: null },
             credits: { enabled: false },
+
+            // VVV ADD THIS ENTIRE BLOCK VVV
+            breadcrumbs: {
+                useHTML: true, // Allows standard CSS styling for wrapping
+                position: {
+                    y: 15 // Adds spacing between breadcrumbs and chart
+                },
+                style: {
+                    // This CSS ensures the text wraps instead of getting cut off
+                    width: '100%',
+                    whiteSpace: 'normal',
+                    textOverflow: 'ellipsis'
+                }
+            },
+            // ^^^ END OF BLOCK TO ADD ^^^
+
+            // --- MODIFY THIS SECTION ---
+            plotOptions: { // This line is already in your code
+            // --- MODIFY THIS SECTION ---
             plotOptions: {
                 sunburst: {
                     animation: { duration: 1000 },
-                    borderWidth: 3,
-                    borderColor: 'rgba(255, 255, 255, 0.2)',
-                    shadow: {
-                        color: 'rgba(0, 0, 0, 0.35)',
-                        width: 5,
-                        offsetX: 1,
-                        offsetY: 1
-                    }
+                    
+                    // ADD THESE TWO LINES
+                    borderColor: '#FFFFFF', // Sets the border color to white
+                    borderWidth: 1          // Sets the border width to 2 pixels
                 }
             },
             series: [{
                 type: 'sunburst',
-                name: 'Wide View',
                 data: sunburstData,
                 allowDrillToNode: true,
                 cursor: 'pointer',
@@ -2356,9 +2456,10 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                     format: '{point.name}',
                     filter: { property: 'innerArcLength', operator: '>', value: 20 },
                     rotationMode: 'circular',
+                    // *** CHANGE 1: Set the default data label color to white ***
                     style: {
                         color: '#FFFFFF',
-                        textOutline: 'none',
+                        textOutline: 'none', // Also removes the default Highcharts outline for better readability
                         fontWeight: '400'
                     }
                 },
@@ -2368,35 +2469,57 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                     dataLabels: { 
                         enabled: true, 
                         filter: { property: 'value', operator: '>', value: -1 }, 
+                        // *** CHANGE 2: Ensure the Level 1 override also has white text ***
                         style: { 
                             fontSize: '1.1em', 
                             fontWeight: '400',
-                            color: '#FFFFFF',
-                            textOutline: 'none'
+                            color: '#FFFFFF',      // <-- Added color
+                            textOutline: 'none'   // <-- Added for consistency
                         } 
                     }
                 }, { level: 2, colorByPoint: true }, { level: 3, colorVariation: { key: 'brightness', to: -0.25 } }, { level: 4, colorVariation: { key: 'brightness', to: 0.25 } }, { level: 5, colorVariation: { key: 'brightness', to: -0.45 } }, { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }]
             }],
-            tooltip: {
-                useHTML: true,
-                headerFormat: '',
-                pointFormatter: function() {
-                    const point = this;
-                    let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
-                    html += `<b>Name:</b> ${point.name}<br/>`;
-                    if (point.levelName) {
-                        html += `<b>Level:</b> ${point.levelName}<br/>`;
-                    }
-                    if (point.intentName) {
-                        html += `<b>Intent:</b> ${point.intentName}<br/>`;
-                    }
-                    if (point.searchVolume !== undefined) {
-                        html += `<b>Search volume:</b> ${point.searchVolume.toLocaleString()}<br/>`;
-                    }
-                    html += `</div>`;
-                    return html;
-                }
-            },
+
+            // In the Highcharts.chart configuration...
+
+// =========================================================================
+// === STEP 2: FINAL, SIMPLIFIED TOOLTIP ===================================
+// =========================================================================
+tooltip: {
+    useHTML: true,
+    headerFormat: '',
+    pointFormatter: function() {
+        const point = this; // The point object being hovered over
+        
+        // --- Build the HTML Output ---
+        // Access custom properties directly from the point object. No '.options' or '.extra'.
+        let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
+
+        // 1. Add the Name (Built-in property)
+        const capitalizedName = point.name.replace(/(^\w{1})|(\s+\w{1})/g, letter => letter.toUpperCase());
+        html += `<b>Name:</b> <b>${capitalizedName}</b><br/>`;
+        // 2. Add the Level (Our custom property, now directly on the point)
+        if (point.levelName) {
+            html += `<b>Level:</b> ${point.levelName}<br/>`;
+        }
+        
+        // 3. Add the Intent (Our custom property)
+        if (point.intentName) {
+            html += `<b>Intent:</b> ${point.intentName}<br/>`;
+        }
+
+        // 4. Add the Search Volume (Our custom property)
+        // Check for 'undefined' because a search volume of 0 is valid.
+        if (point.searchVolume !== undefined) {
+            html += `<b>Search volume:</b> ${point.searchVolume.toLocaleString()}<br/>`;
+        }
+
+        html += `</div>`;
+        return html;
+    }
+},
+
+
             exporting: { enabled: true },
             accessibility: { enabled: true },
         });

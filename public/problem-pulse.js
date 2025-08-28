@@ -2412,6 +2412,9 @@ const processIntent = (intentId, intentName, intentData) => {
         processIntent('pa', 'Problem-Aware', seoPlan.problem_aware);
         processIntent('ss', 'Solution-Seeking', seoPlan.solution_seeking);
         processIntent('pi', 'Purchase-Intent', seoPlan.purchase_intent);
+
+        const seriesName = sunburstData.find(d => d.id === 'root')?.name || 'SEO Plan';
+
                 // =========================================================================
         // === START: COPY AND REPLACE THIS ENTIRE BLOCK ===========================
         // =========================================================================
@@ -2437,7 +2440,7 @@ const processIntent = (intentId, intentName, intentData) => {
 
             series: [{
                 type: 'sunburst',
-                // The 'name' property is correctly removed.
+                name: seriesName,
                 data: sunburstData,
                 allowDrillToNode: true,
                 cursor: 'pointer',

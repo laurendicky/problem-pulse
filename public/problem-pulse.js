@@ -2977,7 +2977,7 @@ function setupProblemCardLinks() {
       console.log("Looking for parent card (.findings-block)...", parentCard);
   
       // --- Investigation Step 2: Find the title inside the card ---
-      const problemTitleElement = parentCard ? parentCard.querySelector('.section-title') : null;
+      const problemTitleElement = parentCard ? parentCard.querySelector('[class*="section-title"]') : null;
       console.log("Looking for title (.section-title)...", problemTitleElement);
       
       if (problemTitleElement) {

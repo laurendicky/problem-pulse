@@ -2113,6 +2113,149 @@ async function generateAndRenderKeywords(posts, audienceContext) {
         `;
     }
 }
+
+// =================================================================================
+// === NEW FUNCTION 1 of 2: The Main Logic for the Action Cards ===
+// =================================================================================
+function generateAndRenderActionCards(seoPlan, audienceContext) {
+    const container = document.getElementById('keyword-opportunities-container');
+    if (!container) return;
+
+    // --- A. Flatten the complex SEO plan into a simple list of content ideas ---
+    const allContentIdeas = [];
+    ['problem_aware', 'solution_seeking', 'purchase_intent'].forEach(intent => {
+        if (!seoPlan[intent]) return;
+        seoPlan[intent].forEach(primary => {
+            (primary.secondary_keywords || []).forEach(secondary => {
+                (secondary.long_tail_keywords || []).forEach(longtail => {
+                    (longtail.content_examples || []).forEach(content => {
+                        allContentIdeas.push({
+                            title: content.title,
+                            intent: intent,
+                            primaryKeyword: primary.keyword,
+                            primaryVolume: primary.searchVolume,
+                            secondaryKeyword: secondary.keyword,
+                            secondaryVolume: secondary.searchVolume,
+                            longTailKeyword: longtail.keyword,
+                            longTailVolume: longtail.searchVolume,
+                        });
+                    });
+                });
+            });
+        });
+    });
+
+    if (allContentIdeas.length === 0) {
+        container.innerHTML = ''; // Don't show the section if no keywords were generated
+        return;
+    }
+
+    // --- B. Curate the content for each of the 4 cards ---
+
+    // Card 1: Traffic Drivers (Top 4 problem-aware posts by primary keyword volume)
+    const trafficDrivers = allContentIdeas
+        .filter(idea => idea.intent === 'problem_aware')
+        .sort((a, b) => b.primaryVolume - a.primaryVolume)
+        .slice(0, 4);
+
+    // Card 2: Conversion Boosters (Top 4 purchase-intent posts by primary keyword volume)
+    const conversionBoosters = allContentIdeas
+        .filter(idea => idea.intent === 'purchase_intent')
+        .sort((a, b) => b.primaryVolume - a.primaryVolume)
+        .slice(0, 4);
+
+    // Card 3: Quick Wins (Top 4 posts with the lowest long-tail search volume, easiest to rank for)
+    const quickWins = allContentIdeas
+        .sort((a, b) => a.longTailVolume - b.longTailVolume)
+        .slice(0, 4);
+
+    // Card 4: The Shortlist (AI-simulated curation balancing volume and intent)
+    const intentWeights = { purchase_intent: 3, solution_seeking: 1.5, problem_aware: 1 };
+    const shortlist = allContentIdeas
+        .map(idea => {
+            const score = (idea.primaryVolume * 0.6 + idea.longTailVolume * 0.4) * (intentWeights[idea.intent] || 1);
+            return { ...idea, score };
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 4);
+
+    // --- C. Render the HTML ---
+    container.innerHTML = `
+        <div class="action-cards-grid">
+            ${renderActionCardHTML(
+                'Traffic Drivers',
+                'High-volume, top-of-funnel content',
+                trafficDrivers,
+                (idea) => `This content targets the high-volume keyword "${idea.primaryKeyword}". It's designed to attract a broad audience early in their journey, maximizing site traffic and brand awareness for ${audienceContext}.`
+            )}
+            ${renderActionCardHTML(
+                'Conversion Boosters',
+                'Content for a ready-to-buy audience',
+                conversionBoosters,
+                (idea) => `This targets users showing clear purchase intent for ${audienceContext}. Answering these questions directly can lead to conversions, as the audience is actively evaluating solutions like yours.`
+            )}
+            ${renderActionCardHTML(
+                'Quick Wins',
+                'Low-competition, high-relevance topics',
+                quickWins,
+                (idea) => `Targeting the low-volume, specific keyword "${idea.longTailKeyword}" can lead to faster search ranking results. It's a way to build authority and capture highly-qualified traffic with less competition.`
+            )}
+            ${renderActionCardHTML(
+                'The Shortlist',
+                'Our top strategic content recommendations',
+                shortlist,
+                (idea) => `This idea was selected for its strong balance of search volume and high-value user intent. It represents a prime opportunity to capture a strategic audience segment for ${audienceContext}.`
+            )}
+        </div>
+    `;
+}
+
+// =================================================================================
+// === NEW FUNCTION 2 of 2: The Renderer for a Single Action Card ===
+// =================================================================================
+function renderActionCardHTML(title, subtitle, ideas, whyItMattersGenerator) {
+    if (!ideas || ideas.length === 0) return ''; // Don't render a card if it has no content
+
+    const blogTitlesHTML = ideas.map((idea, index) => {
+        return `
+            <details class="action-item-dropdown">
+                <summary class="action-item-summary">
+                    <span class="action-item-icon">📝</span>
+                    ${idea.title}
+                </summary>
+                <div class="action-item-context">
+                    <div class="context-item primary">
+                        <span class="context-label">Primary Keyword</span>
+                        <span class="context-value">${idea.primaryKeyword}</span>
+                    </div>
+                    <div class="context-item secondary">
+                        <span class="context-label">Secondary Keyword</span>
+                        <span class="context-value">${idea.secondaryKeyword}</span>
+                    </div>
+                    <div class="context-item longtail">
+                        <span class="context-label">Long-Tail Keyword</span>
+                        <span class="context-value">${idea.longTailKeyword}</span>
+                    </div>
+                    <div class="context-item why">
+                        <span class="context-label">Why It Matters</span>
+                        <p class="context-prose">${whyItMattersGenerator(idea)}</p>
+                    </div>
+                </div>
+            </details>
+        `;
+    }).join('');
+
+    return `
+        <div class="action-card">
+            <h3 class="action-card-title">${title}</h3>
+            <p class="action-card-subtitle">${subtitle}</p>
+            <div class="action-item-list">
+                ${blogTitlesHTML}
+            </div>
+        </div>
+    `;
+}
+
 async function generateAndRenderSeoSunburst(posts, audienceContext) {
     const container = document.getElementById('keyword-sunburst');
     if (!container) {
@@ -2175,6 +2318,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
 
         const aiResult = await response.json();
         const seoPlan = JSON.parse(aiResult.openaiResponse);
+        generateAndRenderActionCards(seoPlan, audienceContext);
 
         // Data transformation logic remains the same - it's robust enough for the new structure.
         // In generateAndRenderSeoSunburst...
@@ -2265,7 +2409,7 @@ const processIntent = (intentId, intentName, intentData) => {
         // =========================================================================
         Highcharts.chart(container, {
             chart: { type: 'sunburst', height: '650px', backgroundColor: null },
-            title: { text: 'Visual SEO Plan', align: 'left' },
+            title: { text: null },
             credits: { enabled: false },
         
             // --- MODIFY THIS SECTION ---
@@ -2510,7 +2654,6 @@ generateAndRenderHybridSentiment(filteredItems, originalGroupName);
         generateAndRenderMindsetSummary(filteredItems, originalGroupName);
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);
         generateAndRenderAIPrompt(filteredItems, originalGroupName);
-        generateAndRenderKeywords(filteredItems, originalGroupName);
         generateAndRenderSeoSunburst(filteredItems, originalGroupName);
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));

@@ -2198,13 +2198,8 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
             break; // No more candidates
         }
     }
-
-
-    // --- C. Render the HTML, including the new toggle button ---
+    // --- C. Render the HTML for the cards ONLY ---
     container.innerHTML = `
-        <div class="card-toggle-wrapper">
-            <button id="toggle-all-cards-btn" class="card-toggle-button">Expand All</button>
-        </div>
         <div class="action-cards-grid">
             ${renderActionCardHTML('Traffic Drivers', 'High-volume, top-of-funnel content', trafficDrivers, (idea) => `This content targets the high-volume keyword "${idea.primaryKeyword}". It's designed to attract a broad audience early in their journey, maximizing site traffic and brand awareness for ${audienceContext}.`)}
             ${renderActionCardHTML('Conversion Boosters', 'Content for a ready-to-buy audience', conversionBoosters, (idea) => `This targets users showing clear purchase intent for ${audienceContext}. Answering these questions directly can lead to conversions, as the audience is actively evaluating solutions like yours.`)}
@@ -2213,18 +2208,23 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
         </div>
     `;
 
-    // --- D. Add Event Listener for the new toggle button ---
-    const toggleBtn = document.getElementById('toggle-all-cards-btn');
+    // --- D. Find YOUR wrapper and inject the button and event listener ---
+    const toggleWrapper = document.querySelector('.card-toggle-wrapper');
     const allCards = document.querySelectorAll('.action-cards-grid .action-card');
-    if(toggleBtn && allCards.length > 0) {
-        toggleBtn.addEventListener('click', () => {
-            // Check if ANY card is closed. If so, the action is to open all.
-            const shouldOpen = Array.from(allCards).some(card => !card.open);
-            allCards.forEach(card => card.open = shouldOpen);
-            toggleBtn.textContent = shouldOpen ? 'Collapse All' : 'Expand All';
-        });
+    
+    if (toggleWrapper && allCards.length > 0) {
+        // Clear the wrapper first in case of re-runs, then add the button
+        toggleWrapper.innerHTML = `<button id="toggle-all-cards-btn" class="card-toggle-button">Expand All</button>`;
+        const toggleBtn = document.getElementById('toggle-all-cards-btn');
+
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', () => {
+                const shouldOpen = Array.from(allCards).some(card => !card.open);
+                allCards.forEach(card => card.open = shouldOpen);
+                toggleBtn.textContent = shouldOpen ? 'Collapse All' : 'Expand All';
+            });
+        }
     }
-}
 // =================================================================================
 // === UPGRADED FUNCTION: Renders a single COLLAPSIBLE Action Card ===
 // =================================================================================
@@ -2425,9 +2425,17 @@ const processIntent = (intentId, intentName, intentData) => {
                 sunburst: {
                     animation: { duration: 1000 },
                     
-                    // ADD THESE TWO LINES
-                    borderColor: '#FFFFFF', // Sets the border color to white
-                    borderWidth: 1          // Sets the border width to 2 pixels
+                    // Creates the gap
+                    borderWidth: 3,
+                    borderColor: 'rgba(255, 255, 255, 0.1)',
+
+                    // Adds a subtle shadow for depth
+                    shadow: {
+                        color: 'rgba(0, 0, 0, 0.35)',
+                        width: 5,
+                        offsetX: 1,
+                        offsetY: 1
+                    }
                 }
             },
             series: [{

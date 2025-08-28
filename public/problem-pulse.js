@@ -22,6 +22,23 @@ const emotionalIntensityScores = { 'annoy': 3, 'irritated': 3, 'bored': 2, 'issu
 const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
 
 
+// =================================================================================
+// === ADD THIS MISSING HELPER FUNCTION TO YOUR SCRIPT ===
+// =================================================================================
+function generateNgrams(words, n) {
+    const ngrams = [];
+    if (n > words.length) {
+        return ngrams;
+    }
+    for (let i = 0; i <= words.length - n; i++) {
+        // This check prevents creating phrases from common words like "is a" or "for the"
+        const ngramSlice = words.slice(i, i + n);
+        if (!ngramSlice.some(word => stopWords.includes(word))) {
+            ngrams.push(ngramSlice.join(' '));
+        }
+    }
+    return ngrams;
+}
 
 // =================================================================================
 // === NEW HELPER FUNCTION: classifySentimentWithAI (Add this to your script) ===
@@ -697,6 +714,70 @@ async function extractAndValidateEntities(posts, nicheContext) {
     } catch (error) {
         console.error("Entity extraction error:", error);
         return { topBrands: [], topProducts: [] };
+    }
+}
+// =================================================================================
+// === ADD THIS MISSING CORE FUNCTION TO YOUR SCRIPT ===
+// =================================================================================
+async function enhanceDiscoveryWithComments(initialPosts, nicheContext) {
+    console.log("Starting comment-based discovery enhancement...");
+    try {
+        // Fetch comments for the top 50 posts
+        const postIds = initialPosts.slice(0, 50).map(p => p.data.id);
+        const comments = await fetchCommentsForPosts(postIds);
+
+        if (comments.length < 20) {
+            console.log("Not enough comments found to enhance discovery. Skipping.");
+            return;
+        }
+
+        // Deduplicate comments aggressively to remove bots/spam
+        const uniqueComments = deduplicateByContent(comments);
+        console.log(`Found ${uniqueComments.length} unique comments for entity extraction.`);
+
+        // Use the same AI entity extraction on the comments
+        const entitiesFromComments = await extractAndValidateEntities(uniqueComments, nicheContext);
+
+        // Merge the new findings with the existing ones
+        const { topBrands, topProducts } = entitiesFromComments;
+
+        // This logic safely merges new entities from comments with existing ones from posts
+        const mergeData = (existingData, newData) => {
+            const combined = new Map();
+            // Add existing data first
+            Object.entries(existingData).forEach(([name, details]) => {
+                combined.set(name, { ...details });
+            });
+            // Add or update with new data
+            newData.forEach(([name, details]) => {
+                if (combined.has(name)) {
+                    const existing = combined.get(name);
+                    existing.count += details.count;
+                    // Simple de-duplication of posts array
+                    const postIds = new Set(existing.posts.map(p => p.data.id));
+                    details.posts.forEach(p => {
+                        if (!postIds.has(p.data.id)) {
+                            existing.posts.push(p);
+                            postIds.add(p.data.id);
+                        }
+                    });
+                } else {
+                    combined.set(name, { ...details });
+                }
+            });
+            return Array.from(combined.entries());
+        };
+
+        const finalBrands = mergeData(window._entityData.brands || {}, topBrands).sort((a, b) => b[1].count - a[1].count).slice(0, 8);
+        const finalProducts = mergeData(window._entityData.products || {}, topProducts).sort((a, b) => b[1].count - a[1].count).slice(0, 8);
+
+        // Re-render the discovery lists with the combined and updated data
+        renderDiscoveryList('top-brands-container', finalBrands, 'Top Brands & Specific Products', 'brands');
+        renderDiscoveryList('top-products-container', finalProducts, 'Top Generic Products', 'products');
+        console.log("Successfully enhanced discovery lists with comment data.");
+
+    } catch (error) {
+        console.error("Failed to enhance discovery with comments:", error);
     }
 }
 

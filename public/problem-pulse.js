@@ -2412,38 +2412,32 @@ const processIntent = (intentId, intentName, intentData) => {
         processIntent('pa', 'Problem-Aware', seoPlan.problem_aware);
         processIntent('ss', 'Solution-Seeking', seoPlan.solution_seeking);
         processIntent('pi', 'Purchase-Intent', seoPlan.purchase_intent);
+                // =========================================================================
+        // === START: COPY AND REPLACE THIS ENTIRE BLOCK ===========================
         // =========================================================================
-        // === HIGHCHARTS CONFIGURATION (UPDATED) ==================================
-        // =========================================================================
+
         Highcharts.chart(container, {
             chart: { type: 'sunburst', height: '650px', backgroundColor: null },
             title: { text: null },
             credits: { enabled: false },
-        
+
+            // THIS IS THE KEY FIX for removing "Series 1" and enabling CSS control
             breadcrumbs: {
-                useHTML: true, // Allows standard CSS styling for wrapping
-                position: {
-                    y: 15 // Adds spacing between breadcrumbs and chart
-                },
-                style: {
-                    // This CSS ensures the text wraps instead of getting cut off
-                    width: '100%',
-                    whiteSpace: 'normal',
-                    textOverflow: 'ellipsis'
-                }
+                showFullPath: false, // <-- This removes the "Series 1" prefix
+                useHTML: true        // <-- This allows our CSS to control wrapping
             },
-            // --- MODIFY THIS SECTION ---
+
             plotOptions: {
                 sunburst: {
                     animation: { duration: 1000 },
-                    
-                    // ADD THESE TWO LINES
-                    borderColor: '#FFFFFF', // Sets the border color to white
-                    borderWidth: 1          // Sets the border width to 2 pixels
+                    borderColor: '#FFFFFF',
+                    borderWidth: 1
                 }
             },
+
             series: [{
                 type: 'sunburst',
+                // The 'name' property is correctly removed.
                 data: sunburstData,
                 allowDrillToNode: true,
                 cursor: 'pointer',
@@ -2451,74 +2445,60 @@ const processIntent = (intentId, intentName, intentData) => {
                     format: '{point.name}',
                     filter: { property: 'innerArcLength', operator: '>', value: 20 },
                     rotationMode: 'circular',
-                    // *** CHANGE 1: Set the default data label color to white ***
                     style: {
                         color: '#FFFFFF',
-                        textOutline: 'none', // Also removes the default Highcharts outline for better readability
+                        textOutline: 'none',
                         fontWeight: '400'
                     }
                 },
                 levels: [{
                     level: 1,
                     levelIsConstant: false,
-                    dataLabels: { 
-                        enabled: true, 
-                        filter: { property: 'value', operator: '>', value: -1 }, 
-                        // *** CHANGE 2: Ensure the Level 1 override also has white text ***
-                        style: { 
-                            fontSize: '1.1em', 
+                    dataLabels: {
+                        enabled: true,
+                        filter: { property: 'value', operator: '>', value: -1 },
+                        style: {
+                            fontSize: '1.1em',
                             fontWeight: '400',
-                            color: '#FFFFFF',      // <-- Added color
-                            textOutline: 'none'   // <-- Added for consistency
-                        } 
+                            color: '#FFFFFF',
+                            textOutline: 'none'
+                        }
                     }
                 }, { level: 2, colorByPoint: true }, { level: 3, colorVariation: { key: 'brightness', to: -0.25 } }, { level: 4, colorVariation: { key: 'brightness', to: 0.25 } }, { level: 5, colorVariation: { key: 'brightness', to: -0.45 } }, { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }]
             }],
 
-            // In the Highcharts.chart configuration...
+            tooltip: {
+                useHTML: true,
+                headerFormat: '',
+                pointFormatter: function() {
+                    const point = this;
+                    let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
 
-// =========================================================================
-// === STEP 2: FINAL, SIMPLIFIED TOOLTIP ===================================
-// =========================================================================
-tooltip: {
-    useHTML: true,
-    headerFormat: '',
-    pointFormatter: function() {
-        const point = this; // The point object being hovered over
-        
-        // --- Build the HTML Output ---
-        // Access custom properties directly from the point object. No '.options' or '.extra'.
-        let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
+                    // THIS IS THE FIX for the bold and capitalized name in the tooltip
+                    const capitalizedName = point.name.replace(/(^\w{1})|(\s+\w{1})/g, letter => letter.toUpperCase());
+                    html += `<b>Name:</b> <b>${capitalizedName}</b><br/>`; // <-- MODIFIED LINE
 
-        // 1. Add the Name (Built-in property)
-        const capitalizedName = point.name.replace(/(^\w{1})|(\s+\w{1})/g, letter => letter.toUpperCase());
-        html += `<b>Name:</b> <b>${capitalizedName}</b><br/>`;
-        
-        // 2. Add the Level (Our custom property, now directly on the point)
-        if (point.levelName) {
-            html += `<b>Level:</b> ${point.levelName}<br/>`;
-        }
-        
-        // 3. Add the Intent (Our custom property)
-        if (point.intentName) {
-            html += `<b>Intent:</b> ${point.intentName}<br/>`;
-        }
-
-        // 4. Add the Search Volume (Our custom property)
-        // Check for 'undefined' because a search volume of 0 is valid.
-        if (point.searchVolume !== undefined) {
-            html += `<b>Search volume:</b> ${point.searchVolume.toLocaleString()}<br/>`;
-        }
-
-        html += `</div>`;
-        return html;
-    }
-},
-
+                    if (point.levelName) {
+                        html += `<b>Level:</b> ${point.levelName}<br/>`;
+                    }
+                    if (point.intentName) {
+                        html += `<b>Intent:</b> ${point.intentName}<br/>`;
+                    }
+                    if (point.searchVolume !== undefined) {
+                        html += `<b>Search volume:</b> ${point.searchVolume.toLocaleString()}<br/>`;
+                    }
+                    html += `</div>`;
+                    return html;
+                }
+            },
 
             exporting: { enabled: true },
             accessibility: { enabled: true },
         });
+
+        // =========================================================================
+        // === END OF BLOCK TO REPLACE =============================================
+        // =========================================================================
     } catch (error) {
         console.error("Failed to generate or render SEO Sunburst chart:", error);
         container.innerHTML = `<p class="error-message">Could not generate the visual SEO plan.</p>`;

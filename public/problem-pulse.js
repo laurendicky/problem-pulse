@@ -2947,8 +2947,54 @@ function initializeProblemFinderTool() {
     });
 
     initializeDashboardInteractivity();
+    setupProblemCardLinks();
+
     console.log("Problem Finder tool successfully initialized.");
 }
+
+/**
+ * This function listens for clicks on any "Generate Growth Plan" button,
+ * updates the header, and switches to the Growth Kit tab.
+ */
+function setupProblemCardLinks() {
+    document.addEventListener('click', function(event) {
+  
+      // First, check if a button with our new class was clicked.
+      if (!event.target.classList.contains('generate-growth-btn')) {
+        return; // If not, do nothing.
+      }
+  
+      // --- 1. Get Information from the Card ---
+  
+      // Find the card that the clicked button lives in.
+      const parentCard = event.target.closest('.findings-block');
+      if (!parentCard) return;
+  
+      // Find the title element within that card.
+      const problemTitleElement = parentCard.querySelector('.section-title');
+      const problemTitle = problemTitleElement.textContent;
+  
+      // Get the audience name from your global variable.
+      const audienceName = window.originalGroupName || 'your audience';
+  
+      // --- 2. Update the Header Text ---
+  
+      // Find the header element by its ID.
+      const growthHeader = document.getElementById('growth-header');
+      if (growthHeader) {
+        growthHeader.textContent = `Growth Plan to target ${audienceName} struggling with ${problemTitle}`;
+      }
+  
+      // --- 3. Switch to the Growth Tab ---
+  
+      // Find the clickable link for the growth tab by its ID and "click" it.
+      // This will run your existing tab-switching logic automatically.
+      const growthTabLink = document.getElementById('growth-tab-link');
+      if (growthTabLink) {
+        growthTabLink.click();
+      }
+    });
+  }
 
 function waitForElementAndInit() {
     const keyElementId = 'find-communities-btn';

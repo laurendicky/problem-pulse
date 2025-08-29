@@ -2875,7 +2875,94 @@ function updateGrowthHeaderDropdown(problemTitles) {
   }
   
 
+  function initializeProblemFinderTool() {
+    const style = document.createElement('style');
+    document.head.appendChild(style);
 
+    console.log("Problem Finder elements found. Initializing...");
+    const welcomeDiv = document.getElementById('welcome-div');
+    const pillsContainer = document.getElementById('pf-suggestion-pills');
+    const groupInput = document.getElementById('group-input');
+    const findCommunitiesBtn = document.getElementById('find-communities-btn');
+    const searchSelectedBtn = document.getElementById('search-selected-btn');
+    const step1Container = document.getElementById('step-1-container');
+    const step2Container = document.getElementById('subreddit-selection-container');
+    const inspireButton = document.getElementById('inspire-me-button');
+    const choicesContainer = document.getElementById('subreddit-choices');
+    const audienceTitle = document.getElementById('pf-audience-title');
+
+    // Check if critical elements exist before proceeding
+    if (!findCommunitiesBtn || !searchSelectedBtn || !choicesContainer) {
+        console.error("Critical error: A key UI element was not found. Aborting initialization.");
+        return;
+    }
+
+    const transitionToStep2 = () => {
+        if (step2Container.classList.contains('visible')) return;
+        if (welcomeDiv) { welcomeDiv.style.display = 'none'; }
+        step1Container.classList.add('hidden');
+        step2Container.classList.add('visible');
+        choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>';
+        audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`;
+    };
+    
+    // Setup for suggestion pills
+    if (pillsContainer) {
+        pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
+        pillsContainer.addEventListener('click', (event) => {
+            if (event.target.classList.contains('pf-suggestion-pill')) {
+                groupInput.value = event.target.getAttribute('data-value');
+                findCommunitiesBtn.click();
+            }
+        });
+    }
+
+    if (inspireButton) {
+        inspireButton.addEventListener('click', () => {
+            if(pillsContainer) pillsContainer.classList.toggle('visible');
+        });
+    }
+
+    // --- Event Listener for "Find Communities" Button ---
+    findCommunitiesBtn.addEventListener("click", async (event) => {
+        event.preventDefault();
+        const groupName = groupInput.value.trim();
+        if (!groupName) {
+            alert("Please enter a group of people or select a suggestion.");
+            return;
+        }
+        originalGroupName = groupName;
+        transitionToStep2();
+        try {
+            const initialSuggestions = await findSubredditsForGroup(groupName);
+            const rankedSubreddits = await fetchAndRankSubreddits(initialSuggestions);
+            displaySubredditChoices(rankedSubreddits);
+        } catch (error) {
+            console.error("Failed during subreddit validation process:", error);
+            displaySubredditChoices([]);
+        }
+    });
+
+    // --- Event Listener for "Search Selected" Button ---
+    searchSelectedBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        runProblemFinder();
+    });
+    
+    // Logic for making the subreddit choices clickable
+    choicesContainer.addEventListener('click', (event) => {
+        const choiceDiv = event.target.closest('.subreddit-choice');
+        if (choiceDiv) {
+            const checkbox = choiceDiv.querySelector('input[type="checkbox"]');
+            if (checkbox) checkbox.checked = !checkbox.checked;
+        }
+    });
+
+    // Initialize the other interactive parts of the dashboard
+    initializeDashboardInteractivity();
+    
+    console.log("Problem Finder tool successfully initialized.");
+}
 
 function waitForElementAndInit() {
     const keyElementId = 'find-communities-btn';

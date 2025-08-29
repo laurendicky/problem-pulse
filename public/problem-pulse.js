@@ -2250,8 +2250,8 @@ function renderActionCardHTML(title, subtitle, ideas, whyItMattersGenerator) {
 
     // The main card is now a <details> element
     return `
-        <details class="action-card" open>
-            <summary class="action-card-summary">
+    <details class="action-card">
+    <summary class="action-card-summary">
                 <div class="action-card-header">
                     <h3 class="action-card-title">${title}</h3>
                     <p class="action-card-subtitle">${subtitle}</p>
@@ -2589,16 +2589,18 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
  */
 async function runProblemFinder(options = {}) {
     const { isUpdate = false } = options;
+
+    const growthHeaderPrefix = document.getElementById('growth-header-prefix');
+    if (growthHeaderPrefix) {
+        // By this point, originalGroupName has the user's real input.
+        growthHeaderPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${originalGroupName}</span> struggling with`;
+    }
     const searchButton = document.getElementById('search-selected-btn');
     if (!searchButton) { console.error("Could not find button."); return; }
     const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked');
     if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
     const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
-    const growthHeaderPrefix = document.getElementById('growth-header-prefix');
-    if (growthHeaderPrefix) {
-        // By now, originalGroupName has the user's input (e.g., "Dog Lovers")
-        growthHeaderPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${originalGroupName}</span> struggling with`;
-    }
+
     const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
     if (!isUpdate) {
         searchButton.classList.add('is-loading');

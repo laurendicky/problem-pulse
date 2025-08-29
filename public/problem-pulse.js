@@ -2905,71 +2905,65 @@ function initializeProblemFinderTool() {
 
     console.log("Problem Finder tool successfully initialized.");
 }
-
 /**
  * =======================================================================
- * === NEW FUNCTION: Builds the Webflow Dropdown =========================
- * This function takes the list of problems and correctly populates
- * the Webflow dropdown component.
- * =======================================================================
+ * === REPLACEMENT 1 of 2: Your New Dropdown Builder =====================
+ * =================================T======================================
  */
-function updateProblemSelectorDropdown(problems) {
-    // Find the list where Webflow expects the links to go.
-    const dropdownList = document.querySelector('#problem-selector .w-dropdown-list');
-    // Find the text label of the dropdown button.
-    const dropdownLabel = document.querySelector('#problem-selector .w-dropdown-toggle div');
+function updateGrowthHeaderDropdown(problemTitles) {
+    const dropdownList = document.querySelector('#growth-header-dropdown .w-dropdown-list');
+    if (!dropdownList) return;
   
-    if (!dropdownList) {
-      console.error("Critical Error: Could not find the dropdown list element.");
-      return;
-    }
+    dropdownList.innerHTML = ''; // Clear defaults
   
-    // 1. Clear out the default "Link 1, 2, 3" placeholders.
-    dropdownList.innerHTML = '';
-  
-    // 2. Create the "View All" link and add it to the list.
+    // Create "Broad Problems" link which acts as our "View All"
     const viewAllLink = document.createElement('a');
-    viewAllLink.href = '#';
-    viewAllLink.className = 'w-dropdown-link'; // Use Webflow's class
-    viewAllLink.textContent = 'View All Opportunities';
-    viewAllLink.setAttribute('data-problem', 'all'); // Use a data-attribute
+    viewAllLink.className = 'w-dropdown-link';
+    viewAllLink.textContent = 'broad problems';
+    viewAllLink.setAttribute('data-problem', 'all');
     dropdownList.appendChild(viewAllLink);
   
-    // 3. Loop through each problem and create a new link for it.
-    problems.forEach(problemTitle => {
+    // Create a link for each specific problem
+    problemTitles.forEach(title => {
       const problemLink = document.createElement('a');
-      problemLink.href = '#';
       problemLink.className = 'w-dropdown-link';
-      problemLink.textContent = problemTitle;
-      problemLink.setAttribute('data-problem', problemTitle);
+      problemLink.textContent = title;
+      problemLink.setAttribute('data-problem', title);
       dropdownList.appendChild(problemLink);
     });
-  
-    // 4. Reset the dropdown label to its default state.
-    if (dropdownLabel) {
-      dropdownLabel.textContent = 'Filter by Problem...';
-    }
   }
+  
+  
+  /**
+   * =======================================================================
+   * === REPLACEMENT 2 of 2: Your Final Interaction Handler ================
+   * =======================================================================
+   */
   function setupGrowthKitInteraction() {
-    const growthHeader = document.getElementById('growth-header');
     const audienceName = window.originalGroupName || 'your audience';
-    const dropdownList = document.querySelector('#problem-selector .w-dropdown-list');
-    const dropdownLabel = document.querySelector('#problem-selector .w-dropdown-toggle div');
+    const headerPrefix = document.getElementById('growth-header-prefix');
+    const headerLabel = document.getElementById('growth-header-label');
+    const dropdownList = document.querySelector('#growth-header-dropdown .w-dropdown-list');
+  
+    // Set the default state when the page first loads
+    if (headerPrefix) headerPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${audienceName}</span> struggling with`;
+    if (headerLabel) headerLabel.textContent = 'broad problems';
+  
   
     function filterGrowthPlan(problemTitle) {
-      if (!growthHeader) return;
+      if (!headerPrefix || !headerLabel) return;
   
       if (problemTitle === 'all') {
-        growthHeader.innerHTML = `Your Complete Growth Plan for <span class="audience-highlight">${audienceName}</span>`;
-        if (dropdownLabel) dropdownLabel.textContent = 'View All Opportunities';
-        // NOTE: You will add your logic to SHOW ALL growth items here.
-        console.log("Filtering to show ALL growth items.");
+        // Set the header to the default state
+        headerPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${audienceName}</span> struggling with`;
+        headerLabel.textContent = 'broad problems';
+        // YOUR ACTION: Code to SHOW ALL growth items goes here.
   
       } else {
-        growthHeader.innerHTML = `Growth Plan to target <span class="audience-highlight">${audienceName}</span> struggling with <span class="problem-highlight">${problemTitle}</span>`;
-        if (dropdownLabel) dropdownLabel.textContent = problemTitle;
-        // NOTE: You will add your logic to FILTER growth items for this problem here.
-        console.log(`Filtering to show ONLY items for: "${problemTitle}"`);
+        // Set the header to the specific problem state
+        headerPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${audienceName}</span> struggling with`;
+        headerLabel.textContent = problemTitle;
+        // YOUR ACTION: Code to FILTER growth items for this problem goes here.
       }
     }
   
@@ -2984,12 +2978,12 @@ function updateProblemSelectorDropdown(problems) {
   
       if (problemTitleElement && growthTabLink) {
         const title = problemTitleElement.textContent.trim();
-        filterGrowthPlan(title);
-        growthTabLink.click();
+        filterGrowthPlan(title); // Update the header
+        growthTabLink.click();   // Switch tabs
       }
     });
   
-    // --- Listen for clicks inside the Dropdown ---
+    // --- Listen for clicks inside the Dropdown Header ---
     if (dropdownList) {
       dropdownList.addEventListener('click', function(event) {
         const clickedLink = event.target.closest('.w-dropdown-link');
@@ -2999,14 +2993,12 @@ function updateProblemSelectorDropdown(problems) {
         const selectedProblem = clickedLink.getAttribute('data-problem');
         filterGrowthPlan(selectedProblem);
   
-        // Closes the Webflow dropdown after selection
-        const dropdownToggle = document.querySelector('#problem-selector .w-dropdown-toggle');
+        // Close the Webflow dropdown after selection
+        const dropdownToggle = document.querySelector('#growth-header-dropdown .w-dropdown-toggle');
         if (dropdownToggle) dropdownToggle.click();
       });
     }
   }
-
-
 function waitForElementAndInit() {
     const keyElementId = 'find-communities-btn';
     let retries = 0;

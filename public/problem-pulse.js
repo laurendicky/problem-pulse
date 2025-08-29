@@ -2664,50 +2664,35 @@ async function runProblemFinder(options = {}) {
         if (!openAIResponse.ok) throw new Error('OpenAI summary generation failed.');
         const openAIData = await openAIResponse.json();
         const summaries = parseAISummary(openAIData.openaiResponse);
+
         const validatedSummaries = summaries.filter(finding => filteredItems.filter(post => calculateRelevanceScore(post, finding) > 0).length >= 3);
         
-// THIS IS THE FIX: We now check if there are any valid summaries BEFORE continuing.
-if (validatedSummaries.length === 0) {
-    console.warn("AI generated summaries, but none met the validation threshold of 3 supporting posts.");
-    // We'll still show the error message from the original code if needed.
-    throw new Error("While posts were found, no clear, common problems emerged after analysis.");
-}
-        
-const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
-const sortedFindings = validatedSummaries.map((summary, index) => ({
-    summary,
-    prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100),
-    supportCount: metrics[index].supportCount
-})).sort((a, b) => b.prevalence - a.prevalence);
+        if (validatedSummaries.length === 0) {
+            console.warn("AI generated summaries, but none met the validation threshold of 3 supporting posts.");
+            throw new Error("While posts were found, no clear, common problems emerged after analysis.");
+        }
+                
+        const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
+        const sortedFindings = validatedSummaries.map((summary, index) => ({
+            summary,
+            prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100),
+            supportCount: metrics[index].supportCount
+        })).sort((a, b) => b.prevalence - a.prevalence);
 
-// --- START OF CORRECTED SECTION ---
+        // =================================================================
+        // DEBUGGING CHECKPOINTS ARE HERE
+        // =================================================================
+        console.log("CHECKPOINT A: Analysis is complete. Found these findings:", sortedFindings);
 
-// 1. Get the problem titles just ONCE.
-const problemTitles = sortedFindings.map(finding => finding.summary.title);
+        const problemTitles = sortedFindings.map(finding => finding.summary.title);
+        updateGrowthHeaderDropdown(problemTitles);
 
-// 2. Call the correct function with the correct name.
-updateGrowthHeaderDropdown(problemTitles); 
-
-// (The duplicate lines have been removed)
-
-// --- END OF CORRECTED SECTION ---
-
-console.log(`Found ${sortedFindings.length} valid problems to display.`);
-
-// This forEach loop continues as before, no changes needed here.
-sortedFindings.forEach(finding => {
-    const summary = finding.summary;
-    const cleanQuotes = (summary.quotes || []).map(q => q.trim()).filter(q => q.length > 0).map(q => (q.
-length > 63 ? q.substring(0, 60) + '...' : q));
-    const finalQuotes = cleanQuotes.slice(0, 3);
-    const fillerQuote = finalQuotes.length > 0 ? finalQuotes[finalQuotes.length - 1] : "";
-    while (finalQuotes.length < 3) {
-        finalQuotes.push(fillerQuote);
-    }
-    summary.quotes = finalQuotes;
-});
+        console.log("CHECKPOINT B: The dropdown should now be updated.");
+        // =================================================================
 
         window._summaries = sortedFindings.map(item => item.summary);
+
+
         for (let i = 1; i <= 5; i++) {
             const block = document.getElementById(`findings-block${i}`);
             if (block) block.style.display = "none";
@@ -2810,7 +2795,10 @@ length > 63 ? q.substring(0, 60) + '...' : q));
         setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
         setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
     } catch (err) {
-        console.error("A fatal error stopped the primary analysis:", err);
+        // This will now be very obvious if an error happens
+        console.error("!!!!!!!! A FATAL ERROR STOPPED THE ANALYSIS !!!!!!!!", err);
+        alert("An error occurred during analysis. Please check the console for details. Error: " + err.message);
+
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
         if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); resultsWrapper.style.opacity = '1'; }
     } finally {
@@ -2850,11 +2838,17 @@ function initializeDashboardInteractivity() {
     });
 }
 
-
 function updateGrowthHeaderDropdown(problemTitles) {
+    console.log("CHECKPOINT 1: Entering updateGrowthHeaderDropdown function with these titles:", problemTitles);
+
     const dropdownList = document.querySelector('#growth-header-dropdown .w-dropdown-list');
-    if (!dropdownList) return;
-  
+    
+    if (!dropdownList) {
+        console.error("DEBUGGING ERROR: Could not find the dropdown list element with selector '#growth-header-dropdown .w-dropdown-list'. Check your Webflow element's ID and class.");
+        return;
+    }
+
+    console.log("CHECKPOINT 2: Successfully found the dropdown list element. Clearing it now.");
     dropdownList.innerHTML = ''; // Clear defaults
   
     // Create "Broad Problems" link which acts as our "View All"
@@ -2872,8 +2866,10 @@ function updateGrowthHeaderDropdown(problemTitles) {
       problemLink.setAttribute('data-problem', title);
       dropdownList.appendChild(problemLink);
     });
-  }
-  
+
+    console.log("CHECKPOINT 3: Finished populating the dropdown with new links.");
+}
+
   function setupGrowthKitInteraction() {
     // Find the key elements of the dropdown header
     const audienceName = window.originalGroupName || 'your audience';

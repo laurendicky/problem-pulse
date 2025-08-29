@@ -2579,7 +2579,12 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
         }
     });
 }
-
+/**
+ * =======================================================================
+ * === FINAL CORRECTED runProblemFinder Function =========================
+ * This version calls the correct dropdown function name to fix the error.
+ * =======================================================================
+ */
 async function runProblemFinder(options = {}) {
     const { isUpdate = false } = options;
     const searchButton = document.getElementById('search-selected-btn');
@@ -2662,9 +2667,10 @@ async function runProblemFinder(options = {}) {
         })).sort((a, b) => b.prevalence - a.prevalence);
 
         // =======================================================================
-        // === THIS IS THE ONLY NEW PART: Build the dropdown after finding problems. ===
+        // === THIS IS THE ONLY LINE THAT NEEDED FIXING ==========================
+        // It now calls the correct function name: updateGrowthHeaderDropdown
         const problemTitles = sortedFindings.map(finding => finding.summary.title);
-        updateProblemSelectorDropdown(problemTitles);
+        updateGrowthHeaderDropdown(problemTitles);
         // =======================================================================
 
         sortedFindings.forEach(finding => {
@@ -2790,8 +2796,6 @@ async function runProblemFinder(options = {}) {
         }
     }
 }
-
-// =================================================================================
 // === REPLACEMENT FUNCTION: initializeDashboardInteractivity ===
 // =================================================================================
 

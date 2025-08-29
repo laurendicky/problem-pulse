@@ -2789,7 +2789,7 @@ async function runProblemFinder(options = {}) {
             searchButton.disabled = false;
         }
     }
-
+}
 
 // =================================================================================
 // === REPLACEMENT FUNCTION: initializeDashboardInteractivity ===

@@ -2947,44 +2947,72 @@ function initializeProblemFinderTool() {
     });
 
     initializeDashboardInteractivity();
-    setupProblemCardLinks();
+    setupGrowthKitInteraction();
 
     console.log("Problem Finder tool successfully initialized.");
 }
+/**
+ * =======================================================================
+ * === FINAL, POLISHED VERSION ===========================================
+ * This function now uses innerHTML to wrap the audience and problem
+ * variables in spans, allowing for custom CSS styling.
+ * =======================================================================
+ */
+function setupGrowthKitInteraction() {
 
-function setupProblemCardLinks() {
-    document.addEventListener('click', function(event) {
-      
-      // Use .closest() to reliably find the button.
-      const clickedButton = event.target.closest('.generate-growth-btn');
+    const problemSelector = document.getElementById('problem-selector');
+    const growthHeader = document.getElementById('growth-header');
   
-      // If a button wasn't clicked, do nothing.
-      if (!clickedButton) {
-        return;
+    // This is the core function that updates the view.
+    function filterGrowthPlan(problemTitle) {
+      if (!problemSelector || !growthHeader) return;
+  
+      // Get the specific audience name from the global variable.
+      const audienceName = window.originalGroupName || 'your audience';
+  
+      if (problemTitle === 'all') {
+        // --- CHANGE 1: Switched to innerHTML for the "View All" state ---
+        growthHeader.innerHTML = `Your Complete Growth Plan for <span class="audience-highlight">${audienceName}</span>`;
+        
+        problemSelector.value = 'all';
+        // Add your code here to show ALL growth kit items
+        console.log("Filtering to show ALL growth items.");
+  
+      } else {
+        // --- CHANGE 2: Switched to innerHTML for the filtered state ---
+        growthHeader.innerHTML = `Growth Plan to target <span class="audience-highlight">${audienceName}</span> struggling with <span class="problem-highlight">${problemTitle}</span>`;
+        
+        problemSelector.value = problemTitle;
+        // Add your code here to FILTER the growth kit items based on the title
+        console.log(`Filtering growth items for: "${problemTitle}"`);
       }
+    }
   
-      // --- All selectors below have been verified by the diagnostic tool ---
+    // --- PART 1: Listen for clicks on the Problem Cards (No changes here) ---
+    document.addEventListener('click', function(event) {
+      const clickedButton = event.target.closest('.generate-growth-btn');
+      if (!clickedButton) return;
   
       const parentCard = clickedButton.closest('.findings-block');
       const problemTitleElement = parentCard ? parentCard.querySelector('[class*="section-title"]') : null;
       const growthTabLink = document.getElementById('growth-tab-link');
   
-      // Only proceed if we found BOTH the title and the tab link.
       if (problemTitleElement && growthTabLink) {
-        const problemTitle = problemTitleElement.textContent.trim();
-        const audienceName = window.originalGroupName || 'your audience';
-        const growthHeader = document.getElementById('growth-header');
-  
-        // 1. Update the header text.
-        if (growthHeader) {
-          growthHeader.textContent = `Growth Plan to target ${audienceName} struggling with ${problemTitle}`;
-        }
-  
-        // 2. "Click" the link to switch to the growth tab.
-        growthTabLink.click();
+        const title = problemTitleElement.textContent.trim();
+        filterGrowthPlan(title); // Use our central function
+        growthTabLink.click();   // Switch to the tab
       }
     });
+  
+    // --- PART 2: Listen for changes on the Dropdown (No changes here) ---
+    if (problemSelector) {
+      problemSelector.addEventListener('change', function() {
+        const selectedProblem = this.value;
+        filterGrowthPlan(selectedProblem);
+      });
+    }
   }
+
 
 function waitForElementAndInit() {
     const keyElementId = 'find-communities-btn';

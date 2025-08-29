@@ -2832,7 +2832,12 @@ function initializeDashboardInteractivity() {
     });
 }
 
-
+/**
+ * =======================================================================
+ * === COMPLETE REPLACEMENT for initializeProblemFinderTool ==============
+ * =======================================================================
+ * This version defines all functions BEFORE calling them, fixing the error.
+ */
 function initializeProblemFinderTool() {
     const style = document.createElement('style');
     document.head.appendChild(style);
@@ -2907,6 +2912,7 @@ function initializeProblemFinderTool() {
         }
     });
 
+    // We now call the setup functions AFTER they have been defined in your script.
     initializeDashboardInteractivity();
     setupGrowthKitInteraction();
 

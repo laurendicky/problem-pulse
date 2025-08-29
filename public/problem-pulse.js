@@ -2874,7 +2874,71 @@ function updateGrowthHeaderDropdown(problemTitles) {
     });
   }
   
+  function setupGrowthKitInteraction() {
+    // Find the key elements of the dropdown header
+    const audienceName = window.originalGroupName || 'your audience';
+    const headerPrefix = document.getElementById('growth-header-prefix');
+    const headerLabel = document.getElementById('growth-header-label');
+    const dropdownList = document.querySelector('#growth-header-dropdown .w-dropdown-list');
 
+    // Set the default state for the header when the tool first loads
+    if (headerPrefix) {
+        headerPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${audienceName}</span> struggling with`;
+    }
+    if (headerLabel) {
+        headerLabel.textContent = 'broad problems';
+    }
+
+    // This function will be called when a user clicks a problem
+    function filterGrowthPlan(problemTitle) {
+        if (!headerPrefix || !headerLabel) return;
+
+        const currentAudience = window.originalGroupName || 'your audience';
+        headerPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${currentAudience}</span> struggling with`;
+
+        if (problemTitle === 'all') {
+            headerLabel.textContent = 'broad problems';
+            // In the future, you can add code here to SHOW ALL growth items
+        } else {
+            headerLabel.textContent = problemTitle;
+            // In the future, you can add code here to FILTER growth items
+        }
+    }
+
+    // --- Listen for clicks on the "Generate Growth Plan" buttons on the problem cards ---
+    document.addEventListener('click', function(event) {
+        const clickedButton = event.target.closest('.generate-growth-btn');
+        if (!clickedButton) return;
+
+        const parentCard = clickedButton.closest('.findings-block');
+        const problemTitleElement = parentCard ? parentCard.querySelector('.section-title') : null;
+        const growthTabLink = document.getElementById('growth-tab-link');
+
+        if (problemTitleElement && growthTabLink) {
+            const title = problemTitleElement.textContent.trim();
+            filterGrowthPlan(title); // Update the header text
+            growthTabLink.click();   // Switch to the Growth Plan tab
+        }
+    });
+
+    // --- Listen for clicks inside the Dropdown Header itself ---
+    if (dropdownList) {
+        dropdownList.addEventListener('click', function(event) {
+            const clickedLink = event.target.closest('.w-dropdown-link');
+            if (!clickedLink) return;
+
+            event.preventDefault();
+            const selectedProblem = clickedLink.getAttribute('data-problem');
+            filterGrowthPlan(selectedProblem);
+
+            // This is a common way to programmatically close a Webflow dropdown
+            const dropdownToggle = document.querySelector('#growth-header-dropdown .w-dropdown-toggle');
+            if (dropdownToggle && dropdownToggle.getAttribute('aria-expanded') === 'true') {
+                 dropdownToggle.click();
+            }
+        });
+    }
+}
   function initializeProblemFinderTool() {
     const style = document.createElement('style');
     document.head.appendChild(style);
@@ -2960,7 +3024,8 @@ function updateGrowthHeaderDropdown(problemTitles) {
 
     // Initialize the other interactive parts of the dashboard
     initializeDashboardInteractivity();
-    
+    setupGrowthKitInteraction();
+
     console.log("Problem Finder tool successfully initialized.");
 }
 

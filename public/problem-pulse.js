@@ -2588,6 +2588,9 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
  *      and adds logging so you can see what's happening.
  */
 async function runProblemFinder(options = {}) {
+
+    console.log("CHECKPOINT 2: Inside runProblemFinder. The audience is:", originalGroupName);
+
     const { isUpdate = false } = options;
 
     const growthHeaderPrefix = document.getElementById('growth-header-prefix');
@@ -3005,11 +3008,12 @@ function updateGrowthHeaderDropdown(problemTitles) {
         }
     });
 
-    // --- Event Listener for "Search Selected" Button ---
-    searchSelectedBtn.addEventListener("click", (event) => {
-        event.preventDefault();
-        runProblemFinder();
-    });
+        // --- Event Listener for "Search Selected" Button ---
+        searchSelectedBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            console.log("CHECKPOINT 1: 'Search Selected' button clicked. The audience should be:", originalGroupName);
+            runProblemFinder();
+        });
     
     // Logic for making the subreddit choices clickable
     choicesContainer.addEventListener('click', (event) => {

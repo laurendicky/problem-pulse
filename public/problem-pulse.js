@@ -2326,6 +2326,8 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
 
         const aiResult = await response.json();
         const seoPlan = JSON.parse(aiResult.openaiResponse);
+        window._fullSeoPlan = seoPlan; 
+
         generateAndRenderActionCards(seoPlan, audienceContext);
 
         // Data transformation logic remains the same - it's robust enough for the new structure.
@@ -2683,6 +2685,7 @@ async function runProblemFinder(options = {}) {
             prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100),
             supportCount: metrics[index].supportCount
         })).sort((a, b) => b.prevalence - a.prevalence);
+        window._allFindings = sortedFindings;
 
         // =================================================================
         // DEBUGGING CHECKPOINTS ARE HERE
@@ -2875,6 +2878,42 @@ function updateGrowthHeaderDropdown(problemTitles) {
     console.log("CHECKPOINT 3: Finished populating the dropdown with new links.");
 }
 
+function filterGrowthPlanByProblem(problemTitle) {
+    // If no plan exists or user selects "broad problems", return the full master plan
+    if (!window._fullSeoPlan || problemTitle === 'all') {
+        return window._fullSeoPlan;
+    }
+
+    // Find the specific finding the user clicked on
+    const selectedFinding = window._allFindings.find(finding => finding.summary.title === problemTitle);
+
+    // If we can't find that finding for some reason, return the full plan as a fallback
+    if (!selectedFinding) {
+        return window._fullSeoPlan;
+    }
+
+    // Get the keywords associated with that problem (e.g., ["budget", "cost", "pricing"])
+    const problemKeywords = new Set(selectedFinding.summary.keywords.map(k => k.toLowerCase()));
+
+    // Create a deep copy of the master plan to avoid modifying it
+    const filteredPlan = JSON.parse(JSON.stringify(window._fullSeoPlan));
+
+    // Filter each intent category (problem_aware, etc.)
+    for (const intent in filteredPlan) {
+        filteredPlan[intent] = filteredPlan[intent].filter(primary => {
+            // Check if this primary keyword or any of its children are related to the problem
+            const hasMatchingKeyword = 
+                problemKeywords.has(primary.keyword.toLowerCase()) ||
+                (primary.secondary_keywords || []).some(secondary => problemKeywords.has(secondary.keyword.toLowerCase())) ||
+                (primary.secondary_keywords || []).some(secondary => 
+                    (secondary.long_tail_keywords || []).some(longtail => problemKeywords.has(longtail.keyword.toLowerCase()))
+                );
+            return hasMatchingKeyword;
+        });
+    }
+
+    return filteredPlan;
+}
   function setupGrowthKitInteraction() {
     // Find the key elements of the dropdown header
     const audienceName = window.originalGroupName || 'your audience';
@@ -2890,21 +2929,30 @@ function updateGrowthHeaderDropdown(problemTitles) {
         headerLabel.textContent = 'broad problems';
     }
 
-    // This function will be called when a user clicks a problem
+
     function filterGrowthPlan(problemTitle) {
-        if (!headerPrefix || !headerLabel) return;
+        // Find the header label element. If it's not there, we can't do anything.
+        const headerLabel = document.getElementById('growth-header-label');
+        if (!headerLabel) return;
 
-        const currentAudience = window.originalGroupName || 'your audience';
-        headerPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${currentAudience}</span> struggling with`;
+        // 1. Update the header's text to show the selected problem.
+        headerLabel.textContent = (problemTitle === 'all') ? 'broad problems' : problemTitle;
 
-        if (problemTitle === 'all') {
-            headerLabel.textContent = 'broad problems';
-            // In the future, you can add code here to SHOW ALL growth items
-        } else {
-            headerLabel.textContent = problemTitle;
-            // In the future, you can add code here to FILTER growth items
+        // 2. Get the newly filtered SEO plan using our helper function.
+        const filteredSeoData = filterGrowthPlanByProblem(problemTitle);
+
+        // A safety check in case the filtering fails.
+        if (!filteredSeoData) {
+            console.error("Could not get filtered SEO data for the selected problem.");
+            return;
         }
+
+        // 3. Re-render the Action Cards with ONLY the filtered data.
+        const currentAudience = window.originalGroupName || 'your audience';
+        generateAndRenderActionCards(filteredSeoData, currentAudience);
     }
+
+
 
     // --- Listen for clicks on the "Generate Growth Plan" buttons on the problem cards ---
     document.addEventListener('click', function(event) {

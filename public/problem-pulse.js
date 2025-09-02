@@ -2583,7 +2583,7 @@ function formatDataForTreegraph(audienceName, solutions) {
 
     return treeData;
 }
-// DELETE your old renderValueTree function and REPLACE it with this new one.
+// DELETE your old renderValueTree function and REPLACE it with this new, working version.
 
 function renderValueTree(treeData) {
     const container = document.getElementById('value-tree');
@@ -2599,8 +2599,7 @@ function renderValueTree(treeData) {
 
     Highcharts.chart('value-tree', {
         chart: {
-            // CHANGE 1: The chart is now vertical.
-            // We removed "inverted: true" and increased the default height.
+            // Keep the vertical layout, it's the right approach for the page
             height: 800,
             backgroundColor: 'transparent'
         },
@@ -2622,8 +2621,8 @@ function renderValueTree(treeData) {
                 fillColor: '#FFFFFF'
             },
             dataLabels: {
+                // The HTML labels are correct
                 useHTML: true,
-                // CHANGE 3: Pushed labels down to sit nicely below the node point.
                 y: 40,
                 align: 'center',
                 style: {
@@ -2637,7 +2636,6 @@ function renderValueTree(treeData) {
                     let html = '';
                     switch (point.type) {
                         case 'root':
-                            // The root label is positioned differently
                             return `<div class="tree-label tree-label-root">${point.name}</div>`;
                         case 'problem':
                             html = `<div class="tree-label tree-label-problem">
@@ -2655,30 +2653,25 @@ function renderValueTree(treeData) {
                     return html;
                 }
             },
-            // CHANGE 2: Manually control spacing to prevent ALL overlap.
+            // Keep the manual spacing algorithm, it prevents overlap
             layoutAlgorithm: {
-                levelDistance: 120, // Distance between Problem and Offer levels
-                nodeDistance: 80    // Vertical distance between Offer nodes
+                levelDistance: 120,
+                nodeDistance: 80
             },
+            // *** THE MAIN FIX IS HERE ***
+            // We are using the default link type (straight line) which is guaranteed to work.
             link: {
-                // CHANGE 4: Use curved lines for a more organic look.
-                type: 'spline',
                 color: 'rgba(255, 255, 255, 0.5)',
-                lineWidth: 1.5,
+                lineWidth: 1.5
             },
             levels: [{
                 level: 1, // Root
                 color: '#ff7ce2',
-                dataLabels: {
-                    // Position root label above the node point
-                    y: -40
-                }
+                dataLabels: { y: -40 }
             }, {
                 level: 2, // Problems
                 color: '#f472b6',
-                link: {
-                    dashStyle: 'Dot'
-                }
+                link: { dashStyle: 'Dot' } // This is a valid way to style links
             }, {
                 level: 3, // Offers
                 color: '#00a5ce'
@@ -2686,6 +2679,7 @@ function renderValueTree(treeData) {
         }]
     });
 }
+
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;

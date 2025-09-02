@@ -2583,7 +2583,8 @@ function formatDataForTreegraph(audienceName, solutions) {
 
     return treeData;
 }
-// DELETE your old renderValueTree function and REPLACE it with this new, working version.
+
+// DELETE your old renderValueTree function and REPLACE it with this new, final version.
 
 function renderValueTree(treeData) {
     const container = document.getElementById('value-tree');
@@ -2597,10 +2598,17 @@ function renderValueTree(treeData) {
         return;
     }
 
+    // Dynamically calculate the chart height to prevent clipping or excessive empty space
+    const baseHeight = 150;
+    const heightPerNode = 170; // Generous spacing for each 'offer' node
+    const offerNodes = treeData.filter(d => d.type === 'offer').length;
+    const calculatedHeight = baseHeight + (offerNodes * heightPerNode);
+
+
     Highcharts.chart('value-tree', {
         chart: {
-            // Keep the vertical layout, it's the right approach for the page
-            height: 800,
+            // CHANGE 1: No more 'inverted'. We use a dynamic vertical height.
+            height: calculatedHeight,
             backgroundColor: 'transparent'
         },
         title: {
@@ -2615,16 +2623,19 @@ function renderValueTree(treeData) {
             tooltip: {
                 enabled: false
             },
+            // CHANGE 2: Use a 'hanging' layout algorithm for the mind-map look.
+            // This creates the nice curved lines automatically.
+            hanging: true,
             marker: {
                 symbol: 'circle',
-                radius: 6,
+                radius: 8,
                 fillColor: '#FFFFFF'
             },
             dataLabels: {
-                // The HTML labels are correct
                 useHTML: true,
-                y: 40,
-                align: 'center',
+                // CHANGE 3: Position labels to the side of the nodes for readability.
+                align: 'left',
+                x: 25,
                 style: {
                     color: '#333',
                     textOutline: 'none',
@@ -2636,6 +2647,7 @@ function renderValueTree(treeData) {
                     let html = '';
                     switch (point.type) {
                         case 'root':
+                            // The root label is positioned to the left of its node
                             return `<div class="tree-label tree-label-root">${point.name}</div>`;
                         case 'problem':
                             html = `<div class="tree-label tree-label-problem">
@@ -2653,25 +2665,24 @@ function renderValueTree(treeData) {
                     return html;
                 }
             },
-            // Keep the manual spacing algorithm, it prevents overlap
-            layoutAlgorithm: {
-                levelDistance: 120,
-                nodeDistance: 80
-            },
-            // *** THE MAIN FIX IS HERE ***
-            // We are using the default link type (straight line) which is guaranteed to work.
             link: {
                 color: 'rgba(255, 255, 255, 0.5)',
-                lineWidth: 1.5
+                lineWidth: 1.5,
             },
             levels: [{
                 level: 1, // Root
                 color: '#ff7ce2',
-                dataLabels: { y: -40 }
+                dataLabels: {
+                    // Custom positioning for the root label
+                    align: 'right',
+                    x: -25
+                }
             }, {
                 level: 2, // Problems
                 color: '#f472b6',
-                link: { dashStyle: 'Dot' } // This is a valid way to style links
+                link: {
+                    dashStyle: 'Dot'
+                }
             }, {
                 level: 3, // Offers
                 color: '#00a5ce'

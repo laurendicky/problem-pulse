@@ -2547,23 +2547,44 @@ async function generateOfferAnglesAI(summaries) {
         return [];
     }
 }
+// REPLACE your old formatDataForTreegraph function with this one.
 
-/**
- * Formats data for the Highcharts Treegraph.
- */
 function formatDataForTreegraph(audienceName, solutions) {
-    const treeData = [{ id: 'root', name: audienceName, color: '#ff7ce2' }];
+    const treeData = [];
+
+    // 1. Root Node (Audience)
+    treeData.push({
+        id: 'root',
+        name: audienceName,
+        type: 'root' // Add a type for styling
+    });
+
+    // 2. Problem and Offer Angle Nodes
     solutions.forEach((solution, index) => {
         const problemId = `problem_${index}`;
-        treeData.push({ id: problemId, parent: 'root', name: `Pain Point: ${solution.problem}` });
-        treeData.push({ id: `offer_${index}`, parent: problemId, name: `💡 Offer Angle: ${solution.offer_angle}`, color: '#00a5ce' });
+        const offerId = `offer_${index}`;
+
+        // Problem node
+        treeData.push({
+            id: problemId,
+            parent: 'root',
+            name: solution.problem, // Just the problem text
+            type: 'problem' // Add a type for styling
+        });
+
+        // Offer Angle node
+        treeData.push({
+            id: offerId,
+            parent: problemId,
+            name: solution.offer_angle, // Just the offer text
+            type: 'offer' // Add a type for styling
+        });
     });
+
     return treeData;
 }
+// REPLACE your old renderValueTree function with this one.
 
-/**
- * Renders the Problem -> Offer Mapper Treegraph using Highcharts.
- */
 function renderValueTree(treeData) {
     const container = document.getElementById('value-tree');
     if (!container) return;
@@ -2575,31 +2596,90 @@ function renderValueTree(treeData) {
         container.innerHTML = '<p class="placeholder-text">Not enough data to build the Problem & Offer Mapper.</p>';
         return;
     }
+
     Highcharts.chart('value-tree', {
-        chart: { inverted: true, backgroundColor: 'transparent' },
-        title: { text: null },
-        credits: { enabled: false },
+        chart: {
+            height: 600, // Give the chart more vertical space
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
         series: [{
             type: 'treegraph',
             data: treeData,
-            tooltip: { pointFormat: '{point.name}' },
-            dataLabels: {
-                enabled: true,
-                align: 'left',
-                pointFormat: '{point.name}',
-                style: { color: '#FFFFFF', textOutline: 'none', fontWeight: 'normal', fontSize: '14px', fontFamily: 'sans-serif' }
+            tooltip: {
+                enabled: false // We don't need tooltips, the labels are the content
             },
-            layoutAlgorithm: { type: 'box', orientation: 'horizontal' },
-            levels: [
-                { level: 1, color: '#ff7ce2', dataLabels: { style: { fontSize: '18px', fontWeight: 'bold' } } },
-                { level: 2, color: '#f472b6', dataLabels: { style: { fontSize: '15px' } } },
-                { level: 3, color: '#00a5ce', dataLabels: { style: { fontSize: '15px', fontWeight: 'bold' } } }
-            ],
-            marker: { radius: 6 },
-            link: { color: 'rgba(255, 255, 255, 0.3)', lineWidth: 1 }
+            marker: {
+                symbol: 'circle',
+                radius: 6,
+                fillColor: '#FFFFFF'
+            },
+            dataLabels: {
+                // *** THIS IS THE KEY FIX ***
+                useHTML: true, // Allow HTML for complex labels
+                align: 'center',
+                style: {
+                    color: '#333',
+                    textOutline: 'none',
+                    fontWeight: 'normal',
+                    fontSize: '14px',
+                },
+                formatter: function() {
+                    // This function builds the custom HTML for each label
+                    const point = this.point;
+                    let html = '';
+
+                    switch (point.type) {
+                        case 'root':
+                            html = `<div class="tree-label tree-label-root">${point.name}</div>`;
+                            break;
+                        case 'problem':
+                            html = `<div class="tree-label tree-label-problem">
+                                        <h4>Pain Point</h4>
+                                        <p>${point.name}</p>
+                                    </div>`;
+                            break;
+                        case 'offer':
+                            html = `<div class="tree-label tree-label-offer">
+                                        <h4>💡 Offer Angle</h4>
+                                        <p>${point.name}</p>
+                                    </div>`;
+                            break;
+                    }
+                    return html;
+                }
+            },
+            // Use different styling for each level of the tree
+            levels: [{
+                level: 1, // Root
+                levelIsConstant: false,
+                color: '#ff7ce2',
+                dataLabels: { y: -30 } // Position root label above the node
+            }, {
+                level: 2, // Problems
+                color: '#f472b6',
+                link: {
+                    color: 'rgba(255, 255, 255, 0.5)',
+                    lineWidth: 1,
+                    dashStyle: 'Dot'
+                }
+            }, {
+                level: 3, // Offers
+                color: '#00a5ce',
+                link: {
+                    color: 'rgba(255, 255, 255, 0.7)',
+                    lineWidth: 1.5,
+                }
+            }]
         }]
     });
 }
+
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;

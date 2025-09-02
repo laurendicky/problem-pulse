@@ -2326,8 +2326,6 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
 
         const aiResult = await response.json();
         const seoPlan = JSON.parse(aiResult.openaiResponse);
-        window._fullSeoPlan = seoPlan; 
-
         generateAndRenderActionCards(seoPlan, audienceContext);
 
         // Data transformation logic remains the same - it's robust enough for the new structure.
@@ -2510,6 +2508,98 @@ const processIntent = (intentId, intentName, intentData) => {
     }
 }
 
+// PASTE THIS ENTIRE BLOCK OF CODE HERE
+
+// =================================================================================
+// === PROBLEM -> OFFER MAPPER (TREEGRAPH) FUNCTIONS ===============================
+// =================================================================================
+
+/**
+ * Uses AI to generate potential offer angles from a list of problems.
+ */
+async function generateOfferAnglesAI(summaries) {
+    if (!summaries || summaries.length === 0) {
+        console.log("No summaries provided for offer angles.");
+        return [];
+    }
+    const problemTitles = summaries.map(s => s.title);
+    const prompt = `You are a world-class startup advisor. For each customer problem below for the audience "${originalGroupName}", generate a single, concise "offer angle" or value proposition that directly solves it. Respond ONLY with a valid JSON object with a single key "solutions", which is an array of objects. Each object must have two keys: "problem" (the original problem string) and "offer_angle" (your generated solution). Problems: ${JSON.stringify(problemTitles)}`;
+    const openAIParams = {
+        model: "gpt-4o",
+        messages: [{ role: "system", content: "You are a startup advisor creating value propositions in strict JSON format." }, { role: "user", content: prompt }],
+        temperature: 0.5,
+        max_tokens: 1500,
+        response_format: { "type": "json_object" }
+    };
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        });
+        if (!response.ok) throw new Error(`OpenAI API Error for offer angles: ${response.statusText}`);
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        if (parsed.solutions && Array.isArray(parsed.solutions)) return parsed.solutions;
+        else throw new Error("AI response did not contain a valid 'solutions' array.");
+    } catch (error) {
+        console.error("Offer Angle generation failed:", error);
+        return [];
+    }
+}
+
+/**
+ * Formats data for the Highcharts Treegraph.
+ */
+function formatDataForTreegraph(audienceName, solutions) {
+    const treeData = [{ id: 'root', name: audienceName, color: '#ff7ce2' }];
+    solutions.forEach((solution, index) => {
+        const problemId = `problem_${index}`;
+        treeData.push({ id: problemId, parent: 'root', name: `Pain Point: ${solution.problem}` });
+        treeData.push({ id: `offer_${index}`, parent: problemId, name: `💡 Offer Angle: ${solution.offer_angle}`, color: '#00a5ce' });
+    });
+    return treeData;
+}
+
+/**
+ * Renders the Problem -> Offer Mapper Treegraph using Highcharts.
+ */
+function renderValueTree(treeData) {
+    const container = document.getElementById('value-tree');
+    if (!container) return;
+    if (typeof Highcharts === 'undefined' || typeof Highcharts.seriesTypes.treegraph === 'undefined') {
+        container.innerHTML = "<p class='error-message'>Highcharts treegraph module not loaded.</p>";
+        return;
+    }
+    if (!treeData || treeData.length <= 1) {
+        container.innerHTML = '<p class="placeholder-text">Not enough data to build the Problem & Offer Mapper.</p>';
+        return;
+    }
+    Highcharts.chart('value-tree', {
+        chart: { inverted: true, backgroundColor: 'transparent' },
+        title: { text: null },
+        credits: { enabled: false },
+        series: [{
+            type: 'treegraph',
+            data: treeData,
+            tooltip: { pointFormat: '{point.name}' },
+            dataLabels: {
+                enabled: true,
+                align: 'left',
+                pointFormat: '{point.name}',
+                style: { color: '#FFFFFF', textOutline: 'none', fontWeight: 'normal', fontSize: '14px', fontFamily: 'sans-serif' }
+            },
+            layoutAlgorithm: { type: 'box', orientation: 'horizontal' },
+            levels: [
+                { level: 1, color: '#ff7ce2', dataLabels: { style: { fontSize: '18px', fontWeight: 'bold' } } },
+                { level: 2, color: '#f472b6', dataLabels: { style: { fontSize: '15px' } } },
+                { level: 3, color: '#00a5ce', dataLabels: { style: { fontSize: '15px', fontWeight: 'bold' } } }
+            ],
+            marker: { radius: 6 },
+            link: { color: 'rgba(255, 255, 255, 0.3)', lineWidth: 1 }
+        }]
+    });
+}
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;
@@ -2581,14 +2671,8 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
         }
     });
 }
+// DELETE YOUR OLD runProblemFinder FUNCTION AND REPLACE IT WITH THIS ONE
 
-/**
- * =======================================================================
- * === REPLACEMENT 2 of 2: Your Final runProblemFinder Function ==========
- * =======================================================================
- * FIX: This version correctly handles the case where no problems are found
- *      and adds logging so you can see what's happening.
- */
 async function runProblemFinder(options = {}) {
 
     console.log("CHECKPOINT 2: Inside runProblemFinder. The audience is:", originalGroupName);
@@ -2597,7 +2681,6 @@ async function runProblemFinder(options = {}) {
 
     const growthHeaderPrefix = document.getElementById('growth-header-prefix');
     if (growthHeaderPrefix) {
-        // By this point, originalGroupName has the user's real input.
         growthHeaderPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${originalGroupName}</span> struggling with`;
     }
     const searchButton = document.getElementById('search-selected-btn');
@@ -2619,7 +2702,7 @@ async function runProblemFinder(options = {}) {
     const countHeaderDiv = document.getElementById("count-header");
     if (!isUpdate) {
         if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases", "value-tree"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; }); // Added "value-tree" to the clear list
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
         for (let i = 1; i <= 5; i++) {
             const block = document.getElementById(`findings-block${i}`);
@@ -2673,30 +2756,25 @@ async function runProblemFinder(options = {}) {
         const summaries = parseAISummary(openAIData.openaiResponse);
 
         const validatedSummaries = summaries.filter(finding => filteredItems.filter(post => calculateRelevanceScore(post, finding) > 0).length >= 3);
-        
+
         if (validatedSummaries.length === 0) {
             console.warn("AI generated summaries, but none met the validation threshold of 3 supporting posts.");
             throw new Error("While posts were found, no clear, common problems emerged after analysis.");
         }
-                
+
         const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
         const sortedFindings = validatedSummaries.map((summary, index) => ({
             summary,
             prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100),
             supportCount: metrics[index].supportCount
         })).sort((a, b) => b.prevalence - a.prevalence);
-        window._allFindings = sortedFindings;
 
-        // =================================================================
-        // DEBUGGING CHECKPOINTS ARE HERE
-        // =================================================================
         console.log("CHECKPOINT A: Analysis is complete. Found these findings:", sortedFindings);
 
         const problemTitles = sortedFindings.map(finding => finding.summary.title);
         updateGrowthHeaderDropdown(problemTitles);
 
         console.log("CHECKPOINT B: The dropdown should now be updated.");
-        // =================================================================
 
         window._summaries = sortedFindings.map(item => item.summary);
 
@@ -2779,6 +2857,27 @@ async function runProblemFinder(options = {}) {
             console.error("CRITICAL (but isolated): Failed to assign posts to findings.", err);
             for (let i = 1; i <= 5; i++) { const redditDiv = document.getElementById(`reddit-div${i}`); if (redditDiv) { redditDiv.innerHTML = `<div style="font-style: italic; color: #999;">Could not load sample posts.</div>`; } }
         }
+
+        // =========================================================================
+        // === NEW CODE FOR THE TREEGRAPH IS ADDED HERE ============================
+        // =========================================================================
+        try {
+            console.log("Generating Problem -> Offer Mapper...");
+            const valueTreeContainer = document.getElementById('value-tree');
+            if(valueTreeContainer) valueTreeContainer.innerHTML = '<p class="loading-text">Generating AI value propositions... <span class="loader-dots"></span></p>';
+            
+            const solutions = await generateOfferAnglesAI(window._summaries);
+            const treeData = formatDataForTreegraph(originalGroupName, solutions);
+            renderValueTree(treeData);
+
+            console.log("Successfully rendered Problem -> Offer Mapper.");
+        } catch (error) {
+            console.error("Failed to create the value tree:", error);
+            const valueTreeContainer = document.getElementById('value-tree');
+            if(valueTreeContainer) valueTreeContainer.innerHTML = '<p class="error-message">Could not generate the Problem & Offer Mapper.</p>';
+        }
+        // =========================================================================
+        
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
             if (resultsWrapper) {
                 resultsWrapper.style.setProperty('display', 'flex', 'important');
@@ -2803,10 +2902,8 @@ async function runProblemFinder(options = {}) {
         setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
         setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
     } catch (err) {
-        // This will now be very obvious if an error happens
         console.error("!!!!!!!! A FATAL ERROR STOPPED THE ANALYSIS !!!!!!!!", err);
         alert("An error occurred during analysis. Please check the console for details. Error: " + err.message);
-
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
         if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); resultsWrapper.style.opacity = '1'; }
     } finally {
@@ -2816,6 +2913,7 @@ async function runProblemFinder(options = {}) {
         }
     }
 }
+
 function initializeDashboardInteractivity() {
     document.addEventListener('click', (e) => {
         const backButton = e.target.closest('#results-wrapper-b #back-to-step1-btn');
@@ -2878,42 +2976,6 @@ function updateGrowthHeaderDropdown(problemTitles) {
     console.log("CHECKPOINT 3: Finished populating the dropdown with new links.");
 }
 
-function filterGrowthPlanByProblem(problemTitle) {
-    // If no plan exists or user selects "broad problems", return the full master plan
-    if (!window._fullSeoPlan || problemTitle === 'all') {
-        return window._fullSeoPlan;
-    }
-
-    // Find the specific finding the user clicked on
-    const selectedFinding = window._allFindings.find(finding => finding.summary.title === problemTitle);
-
-    // If we can't find that finding for some reason, return the full plan as a fallback
-    if (!selectedFinding) {
-        return window._fullSeoPlan;
-    }
-
-    // Get the keywords associated with that problem (e.g., ["budget", "cost", "pricing"])
-    const problemKeywords = new Set(selectedFinding.summary.keywords.map(k => k.toLowerCase()));
-
-    // Create a deep copy of the master plan to avoid modifying it
-    const filteredPlan = JSON.parse(JSON.stringify(window._fullSeoPlan));
-
-    // Filter each intent category (problem_aware, etc.)
-    for (const intent in filteredPlan) {
-        filteredPlan[intent] = filteredPlan[intent].filter(primary => {
-            // Check if this primary keyword or any of its children are related to the problem
-            const hasMatchingKeyword = 
-                problemKeywords.has(primary.keyword.toLowerCase()) ||
-                (primary.secondary_keywords || []).some(secondary => problemKeywords.has(secondary.keyword.toLowerCase())) ||
-                (primary.secondary_keywords || []).some(secondary => 
-                    (secondary.long_tail_keywords || []).some(longtail => problemKeywords.has(longtail.keyword.toLowerCase()))
-                );
-            return hasMatchingKeyword;
-        });
-    }
-
-    return filteredPlan;
-}
   function setupGrowthKitInteraction() {
     // Find the key elements of the dropdown header
     const audienceName = window.originalGroupName || 'your audience';
@@ -2929,30 +2991,21 @@ function filterGrowthPlanByProblem(problemTitle) {
         headerLabel.textContent = 'broad problems';
     }
 
-
+    // This function will be called when a user clicks a problem
     function filterGrowthPlan(problemTitle) {
-        // Find the header label element. If it's not there, we can't do anything.
-        const headerLabel = document.getElementById('growth-header-label');
-        if (!headerLabel) return;
+        if (!headerPrefix || !headerLabel) return;
 
-        // 1. Update the header's text to show the selected problem.
-        headerLabel.textContent = (problemTitle === 'all') ? 'broad problems' : problemTitle;
-
-        // 2. Get the newly filtered SEO plan using our helper function.
-        const filteredSeoData = filterGrowthPlanByProblem(problemTitle);
-
-        // A safety check in case the filtering fails.
-        if (!filteredSeoData) {
-            console.error("Could not get filtered SEO data for the selected problem.");
-            return;
-        }
-
-        // 3. Re-render the Action Cards with ONLY the filtered data.
         const currentAudience = window.originalGroupName || 'your audience';
-        generateAndRenderActionCards(filteredSeoData, currentAudience);
+        headerPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${currentAudience}</span> struggling with`;
+
+        if (problemTitle === 'all') {
+            headerLabel.textContent = 'broad problems';
+            // In the future, you can add code here to SHOW ALL growth items
+        } else {
+            headerLabel.textContent = problemTitle;
+            // In the future, you can add code here to FILTER growth items
+        }
     }
-
-
 
     // --- Listen for clicks on the "Generate Growth Plan" buttons on the problem cards ---
     document.addEventListener('click', function(event) {

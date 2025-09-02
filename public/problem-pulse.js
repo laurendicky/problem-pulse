@@ -2583,7 +2583,7 @@ function formatDataForTreegraph(audienceName, solutions) {
 
     return treeData;
 }
-// REPLACE your old renderValueTree function with this one.
+// DELETE your old renderValueTree function and REPLACE it with this new one.
 
 function renderValueTree(treeData) {
     const container = document.getElementById('value-tree');
@@ -2599,7 +2599,9 @@ function renderValueTree(treeData) {
 
     Highcharts.chart('value-tree', {
         chart: {
-            height: 600, // Give the chart more vertical space
+            // CHANGE 1: The chart is now vertical.
+            // We removed "inverted: true" and increased the default height.
+            height: 800,
             backgroundColor: 'transparent'
         },
         title: {
@@ -2612,7 +2614,7 @@ function renderValueTree(treeData) {
             type: 'treegraph',
             data: treeData,
             tooltip: {
-                enabled: false // We don't need tooltips, the labels are the content
+                enabled: false
             },
             marker: {
                 symbol: 'circle',
@@ -2620,8 +2622,9 @@ function renderValueTree(treeData) {
                 fillColor: '#FFFFFF'
             },
             dataLabels: {
-                // *** THIS IS THE KEY FIX ***
-                useHTML: true, // Allow HTML for complex labels
+                useHTML: true,
+                // CHANGE 3: Pushed labels down to sit nicely below the node point.
+                y: 40,
                 align: 'center',
                 style: {
                     color: '#333',
@@ -2630,14 +2633,12 @@ function renderValueTree(treeData) {
                     fontSize: '14px',
                 },
                 formatter: function() {
-                    // This function builds the custom HTML for each label
                     const point = this.point;
                     let html = '';
-
                     switch (point.type) {
                         case 'root':
-                            html = `<div class="tree-label tree-label-root">${point.name}</div>`;
-                            break;
+                            // The root label is positioned differently
+                            return `<div class="tree-label tree-label-root">${point.name}</div>`;
                         case 'problem':
                             html = `<div class="tree-label tree-label-problem">
                                         <h4>Pain Point</h4>
@@ -2654,32 +2655,37 @@ function renderValueTree(treeData) {
                     return html;
                 }
             },
-            // Use different styling for each level of the tree
+            // CHANGE 2: Manually control spacing to prevent ALL overlap.
+            layoutAlgorithm: {
+                levelDistance: 120, // Distance between Problem and Offer levels
+                nodeDistance: 80    // Vertical distance between Offer nodes
+            },
+            link: {
+                // CHANGE 4: Use curved lines for a more organic look.
+                type: 'spline',
+                color: 'rgba(255, 255, 255, 0.5)',
+                lineWidth: 1.5,
+            },
             levels: [{
                 level: 1, // Root
-                levelIsConstant: false,
                 color: '#ff7ce2',
-                dataLabels: { y: -30 } // Position root label above the node
+                dataLabels: {
+                    // Position root label above the node point
+                    y: -40
+                }
             }, {
                 level: 2, // Problems
                 color: '#f472b6',
                 link: {
-                    color: 'rgba(255, 255, 255, 0.5)',
-                    lineWidth: 1,
                     dashStyle: 'Dot'
                 }
             }, {
                 level: 3, // Offers
-                color: '#00a5ce',
-                link: {
-                    color: 'rgba(255, 255, 255, 0.7)',
-                    lineWidth: 1.5,
-                }
+                color: '#00a5ce'
             }]
         }]
     });
 }
-
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;

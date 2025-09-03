@@ -2815,7 +2815,12 @@ async function runProblemFinder(options = {}) {
         const problemTitles = sortedFindings.map(finding => finding.summary.title);
         updateGrowthHeaderDropdown(problemTitles);
         console.log("CHECKPOINT B: The dropdown should now be updated.");
-        
+        if (problemTitles.length > 0) {
+            const headerLabel = document.getElementById('growth-header-label');
+            if (headerLabel) {
+                headerLabel.textContent = problemTitles[0];
+            }
+        }
         window._summaries = sortedFindings.map(item => item.summary);
         
         for (let i = 1; i <= 5; i++) {

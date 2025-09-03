@@ -1,4 +1,4 @@
- // =================================================================================
+// =================================================================================
 // FINAL SCRIPT WITH HIGHCHARTS SPLIT PACKED BUBBLE CHART (WITH CLICK EVENT)
 // =================================================================================
 
@@ -2659,8 +2659,8 @@ async function generateAndRenderValueMindMap(audienceName, summaries) {
         ]
     });
 }
+// DELETE your old generateOfferAnglesAI function and REPLACE it with this one.
 
-// Re-add the small AI helper function here for completeness
 async function generateOfferAnglesAI(summaries) {
     if (!summaries || summaries.length === 0) {
         console.log("No summaries provided for offer angles.");
@@ -2679,7 +2679,8 @@ async function generateOfferAnglesAI(summaries) {
         const response = await fetch(OPENAI_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ payload: openAIParams })
+            // *** THIS IS THE LINE THAT IS NOW FIXED ***
+            body: JSON.stringify({ openaiPayload: openAIParams })
         });
         if (!response.ok) throw new Error(`OpenAI API Error for offer angles: ${response.statusText}`);
         const data = await response.json();
@@ -2691,7 +2692,6 @@ async function generateOfferAnglesAI(summaries) {
         return [];
     }
 }
-
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;

@@ -2715,7 +2715,8 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
         }
     });
 }
-// DELETE YOUR OLD runProblemFinder FUNCTION AND REPLACE IT WITH THIS ONE
+
+// PASTE THIS ENTIRE FUNCTION INTO THE SPOT IDENTIFIED ABOVE
 
 async function runProblemFinder(options = {}) {
 
@@ -2746,7 +2747,7 @@ async function runProblemFinder(options = {}) {
     const countHeaderDiv = document.getElementById("count-header");
     if (!isUpdate) {
         if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases", "value-tree"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; }); // Added "value-tree" to the clear list
+        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases", "value-tree"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
         for (let i = 1; i <= 5; i++) {
             const block = document.getElementById(`findings-block${i}`);
@@ -2798,31 +2799,25 @@ async function runProblemFinder(options = {}) {
         if (!openAIResponse.ok) throw new Error('OpenAI summary generation failed.');
         const openAIData = await openAIResponse.json();
         const summaries = parseAISummary(openAIData.openaiResponse);
-
         const validatedSummaries = summaries.filter(finding => filteredItems.filter(post => calculateRelevanceScore(post, finding) > 0).length >= 3);
-
         if (validatedSummaries.length === 0) {
             console.warn("AI generated summaries, but none met the validation threshold of 3 supporting posts.");
             throw new Error("While posts were found, no clear, common problems emerged after analysis.");
         }
-
         const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
         const sortedFindings = validatedSummaries.map((summary, index) => ({
             summary,
             prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100),
             supportCount: metrics[index].supportCount
         })).sort((a, b) => b.prevalence - a.prevalence);
-
+        
         console.log("CHECKPOINT A: Analysis is complete. Found these findings:", sortedFindings);
-
         const problemTitles = sortedFindings.map(finding => finding.summary.title);
         updateGrowthHeaderDropdown(problemTitles);
-
         console.log("CHECKPOINT B: The dropdown should now be updated.");
-
+        
         window._summaries = sortedFindings.map(item => item.summary);
-
-
+        
         for (let i = 1; i <= 5; i++) {
             const block = document.getElementById(`findings-block${i}`);
             if (block) block.style.display = "none";
@@ -2901,9 +2896,9 @@ async function runProblemFinder(options = {}) {
             console.error("CRITICAL (but isolated): Failed to assign posts to findings.", err);
             for (let i = 1; i <= 5; i++) { const redditDiv = document.getElementById(`reddit-div${i}`); if (redditDiv) { redditDiv.innerHTML = `<div style="font-style: italic; color: #999;">Could not load sample posts.</div>`; } }
         }
-        // PASTE THIS ONE LINE WHERE THE OLD BLOCK WAS:
-
-generateAndRenderValueMindMap(originalGroupName, window._summaries);
+        
+        // This is the single, correct call for the new mind map
+        generateAndRenderValueMindMap(originalGroupName, window._summaries);
         
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
             if (resultsWrapper) {
@@ -2940,6 +2935,7 @@ generateAndRenderValueMindMap(originalGroupName, window._summaries);
         }
     }
 }
+
 
 function initializeDashboardInteractivity() {
     document.addEventListener('click', (e) => {

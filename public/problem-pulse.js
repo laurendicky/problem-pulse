@@ -1,4 +1,4 @@
-// =================================================================================
+ // =================================================================================
 // FINAL SCRIPT WITH HIGHCHARTS SPLIT PACKED BUBBLE CHART (WITH CLICK EVENT)
 // =================================================================================
 
@@ -2507,16 +2507,160 @@ const processIntent = (intentId, intentName, intentData) => {
         container.innerHTML = `<p class="error-message">Could not generate the visual SEO plan.</p>`;
     }
 }
-
-// PASTE THIS ENTIRE BLOCK OF CODE HERE
+// PASTE THIS ENTIRE BLOCK OF NEW CODE WHERE THE OLD FUNCTIONS WERE
 
 // =================================================================================
-// === PROBLEM -> OFFER MAPPER (TREEGRAPH) FUNCTIONS ===============================
+// === NEW & FINAL MIND MAP FUNCTIONS (SCATTER PLOT METHOD) ========================
 // =================================================================================
 
 /**
- * Uses AI to generate potential offer angles from a list of problems.
+ * This is our new data formatting function. It manually calculates the X/Y coordinates
+ * for every single node, giving us complete control over the layout.
+ * @param {string} audienceName The name for the root node.
+ * @param {Array} solutions The array of {problem, offer_angle} objects.
+ * @returns {object} An object containing the data for the points and the lines.
  */
+function formatDataForMindMap(audienceName, solutions) {
+    const points = [];
+    const lines = [];
+
+    // 1. Define the columns for our layout
+    const rootX = 10;
+    const problemX = 50;
+    const offerX = 90;
+
+    // 2. Add the Root Node (Audience)
+    const rootPoint = {
+        x: rootX,
+        y: 50, // Center it vertically
+        name: audienceName,
+        type: 'root'
+    };
+    points.push(rootPoint);
+
+    // 3. Calculate vertical positions for each Problem/Offer branch
+    const numBranches = solutions.length;
+    solutions.forEach((solution, index) => {
+        // Distribute branches evenly across the vertical space
+        const yPos = 100 * (index + 1) / (numBranches + 1);
+
+        // Create the Problem Node
+        const problemPoint = {
+            x: problemX,
+            y: yPos,
+            name: solution.problem,
+            type: 'problem'
+        };
+        points.push(problemPoint);
+
+        // Create the Offer Node
+        const offerPoint = {
+            x: offerX,
+            y: yPos,
+            name: solution.offer_angle,
+            type: 'offer'
+        };
+        points.push(offerPoint);
+
+        // Create the connecting lines
+        lines.push({ name: `line-${index}-a`, data: [ [rootPoint.x, rootPoint.y], [problemPoint.x, yPos] ] });
+        lines.push({ name: `line-${index}-b`, data: [ [problemPoint.x, yPos], [offerPoint.x, yPos] ] });
+    });
+
+    return { points, lines };
+}
+
+
+/**
+ * This is our new rendering function. It uses a scatter plot for the nodes and a
+ * spline plot for the lines, giving us a reliable and beautiful result.
+ * @param {string} audienceName The name for the root node.
+ * @param {Array} summaries The raw problem summaries from the analysis.
+ */
+async function generateAndRenderValueMindMap(audienceName, summaries) {
+    const container = document.getElementById('value-tree');
+    if (!container) return;
+
+    // Set a loading state
+    container.innerHTML = '<p class="loading-text">Generating AI value propositions... <span class="loader-dots"></span></p>';
+
+    // --- AI Generation is now inside this function ---
+    const solutions = await generateOfferAnglesAI(summaries); // We re-use the AI function name
+    
+    if (!solutions || solutions.length === 0) {
+        container.innerHTML = '<p class="placeholder-text">Could not generate any offer angles.</p>';
+        return;
+    }
+    
+    // --- Manual Layout Calculation ---
+    const { points, lines } = formatDataForMindMap(audienceName, solutions);
+
+    // --- Highcharts Rendering ---
+    Highcharts.chart('value-tree', {
+        chart: {
+            type: 'spline', // Base chart type for the lines
+            height: 600,
+            backgroundColor: 'transparent'
+        },
+        title: { text: null },
+        credits: { enabled: false },
+        xAxis: { visible: false, min: 0, max: 100 },
+        yAxis: { visible: false, min: 0, max: 100 },
+        legend: { enabled: false },
+        tooltip: { enabled: false },
+        plotOptions: {
+            series: { animation: { duration: 1000 } },
+            spline: {
+                lineWidth: 1.5,
+                color: 'rgba(255, 255, 255, 0.5)',
+                marker: { enabled: false }
+            },
+            scatter: {
+                marker: {
+                    radius: 8,
+                    symbol: 'circle',
+                    lineWidth: 2,
+                    lineColor: 'rgba(255, 255, 255, 0.8)',
+                    fillColor: 'transparent'
+                }
+            }
+        },
+        series: [
+            // Series 1: The points with the HTML labels
+            {
+                type: 'scatter',
+                name: 'Nodes',
+                data: points,
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    align: 'left',
+                    x: 20, // Position labels to the right of the point
+                    y: 5,
+                    formatter: function() {
+                        const point = this.point;
+                        let html = '';
+                        switch (point.type) {
+                            case 'root':
+                                return `<div class="tree-label tree-label-root">${point.name}</div>`;
+                            case 'problem':
+                                return `<div class="tree-label tree-label-problem"><h4>Pain Point</h4><p>${point.name}</p></div>`;
+                            case 'offer':
+                                return `<div class="tree-label tree-label-offer"><h4>💡 Offer Angle</h4><p>${point.name}</p></div>`;
+                        }
+                    }
+                }
+            },
+            // Series 2+: All the connecting lines
+            ...lines.map(line => ({
+                ...line, // Spread the { name, data } object
+                type: 'spline'
+            }))
+        ]
+    });
+}
+
+// Re-add the small AI helper function here for completeness
 async function generateOfferAnglesAI(summaries) {
     if (!summaries || summaries.length === 0) {
         console.log("No summaries provided for offer angles.");
@@ -2535,7 +2679,7 @@ async function generateOfferAnglesAI(summaries) {
         const response = await fetch(OPENAI_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: openAIParams })
+            body: JSON.stringify({ payload: openAIParams })
         });
         if (!response.ok) throw new Error(`OpenAI API Error for offer angles: ${response.statusText}`);
         const data = await response.json();
@@ -2546,149 +2690,6 @@ async function generateOfferAnglesAI(summaries) {
         console.error("Offer Angle generation failed:", error);
         return [];
     }
-}
-// REPLACE your old formatDataForTreegraph function with this one.
-
-function formatDataForTreegraph(audienceName, solutions) {
-    const treeData = [];
-
-    // 1. Root Node (Audience)
-    treeData.push({
-        id: 'root',
-        name: audienceName,
-        type: 'root' // Add a type for styling
-    });
-
-    // 2. Problem and Offer Angle Nodes
-    solutions.forEach((solution, index) => {
-        const problemId = `problem_${index}`;
-        const offerId = `offer_${index}`;
-
-        // Problem node
-        treeData.push({
-            id: problemId,
-            parent: 'root',
-            name: solution.problem, // Just the problem text
-            type: 'problem' // Add a type for styling
-        });
-
-        // Offer Angle node
-        treeData.push({
-            id: offerId,
-            parent: problemId,
-            name: solution.offer_angle, // Just the offer text
-            type: 'offer' // Add a type for styling
-        });
-    });
-
-    return treeData;
-}
-
-// DELETE your old renderValueTree function and REPLACE it with this new, final version.
-
-function renderValueTree(treeData) {
-    const container = document.getElementById('value-tree');
-    if (!container) return;
-    if (typeof Highcharts === 'undefined' || typeof Highcharts.seriesTypes.treegraph === 'undefined') {
-        container.innerHTML = "<p class='error-message'>Highcharts treegraph module not loaded.</p>";
-        return;
-    }
-    if (!treeData || treeData.length <= 1) {
-        container.innerHTML = '<p class="placeholder-text">Not enough data to build the Problem & Offer Mapper.</p>';
-        return;
-    }
-
-    // Dynamically calculate the chart height to prevent clipping or excessive empty space
-    const baseHeight = 150;
-    const heightPerNode = 170; // Generous spacing for each 'offer' node
-    const offerNodes = treeData.filter(d => d.type === 'offer').length;
-    const calculatedHeight = baseHeight + (offerNodes * heightPerNode);
-
-
-    Highcharts.chart('value-tree', {
-        chart: {
-            // CHANGE 1: No more 'inverted'. We use a dynamic vertical height.
-            height: calculatedHeight,
-            backgroundColor: 'transparent'
-        },
-        title: {
-            text: null
-        },
-        credits: {
-            enabled: false
-        },
-        series: [{
-            type: 'treegraph',
-            data: treeData,
-            tooltip: {
-                enabled: false
-            },
-            // CHANGE 2: Use a 'hanging' layout algorithm for the mind-map look.
-            // This creates the nice curved lines automatically.
-            hanging: true,
-            marker: {
-                symbol: 'circle',
-                radius: 8,
-                fillColor: '#FFFFFF'
-            },
-            dataLabels: {
-                useHTML: true,
-                // CHANGE 3: Position labels to the side of the nodes for readability.
-                align: 'left',
-                x: 25,
-                style: {
-                    color: '#333',
-                    textOutline: 'none',
-                    fontWeight: 'normal',
-                    fontSize: '14px',
-                },
-                formatter: function() {
-                    const point = this.point;
-                    let html = '';
-                    switch (point.type) {
-                        case 'root':
-                            // The root label is positioned to the left of its node
-                            return `<div class="tree-label tree-label-root">${point.name}</div>`;
-                        case 'problem':
-                            html = `<div class="tree-label tree-label-problem">
-                                        <h4>Pain Point</h4>
-                                        <p>${point.name}</p>
-                                    </div>`;
-                            break;
-                        case 'offer':
-                            html = `<div class="tree-label tree-label-offer">
-                                        <h4>💡 Offer Angle</h4>
-                                        <p>${point.name}</p>
-                                    </div>`;
-                            break;
-                    }
-                    return html;
-                }
-            },
-            link: {
-                color: 'rgba(255, 255, 255, 0.5)',
-                lineWidth: 1.5,
-            },
-            levels: [{
-                level: 1, // Root
-                color: '#ff7ce2',
-                dataLabels: {
-                    // Custom positioning for the root label
-                    align: 'right',
-                    x: -25
-                }
-            }, {
-                level: 2, // Problems
-                color: '#f472b6',
-                link: {
-                    dashStyle: 'Dot'
-                }
-            }, {
-                level: 3, // Offers
-                color: '#00a5ce'
-            }]
-        }]
-    });
 }
 
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
@@ -2948,26 +2949,9 @@ async function runProblemFinder(options = {}) {
             console.error("CRITICAL (but isolated): Failed to assign posts to findings.", err);
             for (let i = 1; i <= 5; i++) { const redditDiv = document.getElementById(`reddit-div${i}`); if (redditDiv) { redditDiv.innerHTML = `<div style="font-style: italic; color: #999;">Could not load sample posts.</div>`; } }
         }
+        // PASTE THIS ONE LINE WHERE THE OLD BLOCK WAS:
 
-        // =========================================================================
-        // === NEW CODE FOR THE TREEGRAPH IS ADDED HERE ============================
-        // =========================================================================
-        try {
-            console.log("Generating Problem -> Offer Mapper...");
-            const valueTreeContainer = document.getElementById('value-tree');
-            if(valueTreeContainer) valueTreeContainer.innerHTML = '<p class="loading-text">Generating AI value propositions... <span class="loader-dots"></span></p>';
-            
-            const solutions = await generateOfferAnglesAI(window._summaries);
-            const treeData = formatDataForTreegraph(originalGroupName, solutions);
-            renderValueTree(treeData);
-
-            console.log("Successfully rendered Problem -> Offer Mapper.");
-        } catch (error) {
-            console.error("Failed to create the value tree:", error);
-            const valueTreeContainer = document.getElementById('value-tree');
-            if(valueTreeContainer) valueTreeContainer.innerHTML = '<p class="error-message">Could not generate the Problem & Offer Mapper.</p>';
-        }
-        // =========================================================================
+generateAndRenderValueMindMap(originalGroupName, window._summaries);
         
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
             if (resultsWrapper) {

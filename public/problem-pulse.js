@@ -2507,190 +2507,142 @@ const processIntent = (intentId, intentName, intentData) => {
         container.innerHTML = `<p class="error-message">Could not generate the visual SEO plan.</p>`;
     }
 }
-// PASTE THIS ENTIRE BLOCK OF NEW CODE WHERE THE OLD FUNCTIONS WERE
+
+// PASTE THIS ENTIRE BLOCK WHERE THE OLD MIND MAP FUNCTIONS WERE
 
 // =================================================================================
-// === NEW & FINAL MIND MAP FUNCTIONS (SCATTER PLOT METHOD) ========================
+// === FINAL MIND MAP SOLUTION (NETWORK GRAPH METHOD) ==============================
 // =================================================================================
 
 /**
- * This is our new data formatting function. It manually calculates the X/Y coordinates
- * for every single node, giving us complete control over the layout.
- * @param {string} audienceName The name for the root node.
- * @param {Array} solutions The array of {problem, offer_angle} objects.
- * @returns {object} An object containing the data for the points and the lines.
+ * A new, more reliable AI function that ensures a 1-to-1 mapping of problems to offers.
  */
-function formatDataForMindMap(audienceName, solutions) {
-    const points = [];
-    const lines = [];
+async function generateProblemOfferPairsAI(summaries) {
+    if (!summaries || summaries.length === 0) return [];
+    
+    const problemTitles = summaries.map(s => s.title);
+    const prompt = `You are a startup advisor. For each customer problem provided for the audience "${originalGroupName}", generate a single, concise "offer angle".
+    
+    Respond ONLY with a valid JSON object. The object should have a single key "pairs". The value should be an array of objects, where each object has two keys: "problem" and "offer". Ensure there is one object for each problem provided.
 
-    // 1. Define the columns for our layout
-    const rootX = 10;
-    const problemX = 50;
-    const offerX = 90;
+    Example Response:
+    {
+      "pairs": [
+        { "problem": "Scaling Issues in Start-ups", "offer": "Get a scalable tech blueprint and on-demand CTO-level advice." },
+        { "problem": "Emotional Challenges in Entrepreneurship", "offer": "Join a peer-support network with guided wellness sessions for founders." }
+      ]
+    }
 
-    // 2. Add the Root Node (Audience)
-    const rootPoint = {
-        x: rootX,
-        y: 50, // Center it vertically
-        name: audienceName,
-        type: 'root'
+    Problems to solve:
+    ${JSON.stringify(problemTitles)}
+    `;
+
+    const openAIParams = {
+        model: "gpt-4o",
+        messages: [{ role: "system", content: "You are a startup advisor creating problem-solution pairs in strict JSON format." }, { role: "user", content: prompt }],
+        temperature: 0.6,
+        max_tokens: 2000,
+        response_format: { "type": "json_object" }
     };
-    points.push(rootPoint);
 
-    // 3. Calculate vertical positions for each Problem/Offer branch
-    const numBranches = solutions.length;
-    solutions.forEach((solution, index) => {
-        // Distribute branches evenly across the vertical space
-        const yPos = 100 * (index + 1) / (numBranches + 1);
-
-        // Create the Problem Node
-        const problemPoint = {
-            x: problemX,
-            y: yPos,
-            name: solution.problem,
-            type: 'problem'
-        };
-        points.push(problemPoint);
-
-        // Create the Offer Node
-        const offerPoint = {
-            x: offerX,
-            y: yPos,
-            name: solution.offer_angle,
-            type: 'offer'
-        };
-        points.push(offerPoint);
-
-        // Create the connecting lines
-        lines.push({ name: `line-${index}-a`, data: [ [rootPoint.x, rootPoint.y], [problemPoint.x, yPos] ] });
-        lines.push({ name: `line-${index}-b`, data: [ [problemPoint.x, yPos], [offerPoint.x, yPos] ] });
-    });
-
-    return { points, lines };
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        });
+        if (!response.ok) throw new Error(`OpenAI API Error for pairs: ${response.statusText}`);
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        if (parsed.pairs && Array.isArray(parsed.pairs)) return parsed.pairs;
+        else throw new Error("AI response did not contain a valid 'pairs' array.");
+    } catch (error) {
+        console.error("Problem/Offer pair generation failed:", error);
+        return [];
+    }
 }
 
 
 /**
- * This is our new rendering function. It uses a scatter plot for the nodes and a
- * spline plot for the lines, giving us a reliable and beautiful result.
- * @param {string} audienceName The name for the root node.
- * @param {Array} summaries The raw problem summaries from the analysis.
+ * The final rendering function. Uses Highcharts Network Graph for a beautiful, organic layout.
  */
 async function generateAndRenderValueMindMap(audienceName, summaries) {
     const container = document.getElementById('value-tree');
     if (!container) return;
 
-    // Set a loading state
     container.innerHTML = '<p class="loading-text">Generating AI value propositions... <span class="loader-dots"></span></p>';
 
-    // --- AI Generation is now inside this function ---
-    const solutions = await generateOfferAnglesAI(summaries); // We re-use the AI function name
-    
-    if (!solutions || solutions.length === 0) {
+    const pairs = await generateProblemOfferPairsAI(summaries);
+    if (!pairs || pairs.length === 0) {
         container.innerHTML = '<p class="placeholder-text">Could not generate any offer angles.</p>';
         return;
     }
-    
-    // --- Manual Layout Calculation ---
-    const { points, lines } = formatDataForMindMap(audienceName, solutions);
 
-    // --- Highcharts Rendering ---
+    const nodes = [];
+    const links = [];
+
+    // Root Node
+    nodes.push({ id: audienceName, name: audienceName, type: 'root', mass: 5 });
+
+    // Problem & Offer Nodes
+    pairs.forEach((pair, index) => {
+        const problemId = `problem-${index}`;
+        const offerId = `offer-${index}`;
+        
+        nodes.push({ id: problemId, name: pair.problem, type: 'problem' });
+        nodes.push({ id: offerId, name: pair.offer, type: 'offer' });
+
+        // This creates the correct links: Root -> Problem -> Offer
+        links.push({ from: audienceName, to: problemId });
+        links.push({ from: problemId, to: offerId });
+    });
+
     Highcharts.chart('value-tree', {
         chart: {
-            type: 'spline', // Base chart type for the lines
-            height: 600,
+            type: 'networkgraph',
+            height: '600px',
             backgroundColor: 'transparent'
         },
         title: { text: null },
         credits: { enabled: false },
-        xAxis: { visible: false, min: 0, max: 100 },
-        yAxis: { visible: false, min: 0, max: 100 },
-        legend: { enabled: false },
-        tooltip: { enabled: false },
         plotOptions: {
-            series: { animation: { duration: 1000 } },
-            spline: {
-                lineWidth: 1.5,
-                color: 'rgba(255, 255, 255, 0.5)',
-                marker: { enabled: false }
-            },
-            scatter: {
-                marker: {
-                    radius: 8,
-                    symbol: 'circle',
-                    lineWidth: 2,
-                    lineColor: 'rgba(255, 255, 255, 0.8)',
-                    fillColor: 'transparent'
+            networkgraph: {
+                keys: ['from', 'to'],
+                layoutAlgorithm: {
+                    enableSimulation: true,
+                    friction: -0.9,
+                    linkLength: 150 // Increase distance between nodes
+                },
+                marker: { radius: 0 }, // We hide the default marker
+                link: {
+                    width: 1.5,
+                    color: 'rgba(255, 255, 255, 0.5)'
                 }
             }
         },
-        series: [
-            // Series 1: The points with the HTML labels
-            {
-                type: 'scatter',
-                name: 'Nodes',
-                data: points,
-                dataLabels: {
-                    enabled: true,
-                    useHTML: true,
-                    align: 'left',
-                    x: 20, // Position labels to the right of the point
-                    y: 5,
-                    formatter: function() {
-                        const point = this.point;
-                        let html = '';
-                        switch (point.type) {
-                            case 'root':
-                                return `<div class="tree-label tree-label-root">${point.name}</div>`;
-                            case 'problem':
-                                return `<div class="tree-label tree-label-problem"><h4>Pain Point</h4><p>${point.name}</p></div>`;
-                            case 'offer':
-                                return `<div class="tree-label tree-label-offer"><h4>💡 Offer Angle</h4><p>${point.name}</p></div>`;
-                        }
+        series: [{
+            data: links,
+            dataLabels: {
+                enabled: true,
+                useHTML: true,
+                linkFormat: '', // Hide default line labels
+                formatter: function() {
+                    // This function provides the HTML for the NODES
+                    const point = this.point;
+                    let html = '';
+                    switch (point.type) {
+                        case 'root':
+                            return `<div class="tree-label tree-label-root">${point.name}</div>`;
+                        case 'problem':
+                            return `<div class="tree-label tree-label-problem"><h4>Pain Point</h4><p>${point.name}</p></div>`;
+                        case 'offer':
+                            return `<div class="tree-label tree-label-offer"><h4>💡 Offer Angle</h4><p>${point.name}</p></div>`;
                     }
                 }
             },
-            // Series 2+: All the connecting lines
-            ...lines.map(line => ({
-                ...line, // Spread the { name, data } object
-                type: 'spline'
-            }))
-        ]
+            nodes: nodes
+        }]
     });
-}
-// DELETE your old generateOfferAnglesAI function and REPLACE it with this one.
-
-async function generateOfferAnglesAI(summaries) {
-    if (!summaries || summaries.length === 0) {
-        console.log("No summaries provided for offer angles.");
-        return [];
-    }
-    const problemTitles = summaries.map(s => s.title);
-    const prompt = `You are a world-class startup advisor. For each customer problem below for the audience "${originalGroupName}", generate a single, concise "offer angle" or value proposition that directly solves it. Respond ONLY with a valid JSON object with a single key "solutions", which is an array of objects. Each object must have two keys: "problem" (the original problem string) and "offer_angle" (your generated solution). Problems: ${JSON.stringify(problemTitles)}`;
-    const openAIParams = {
-        model: "gpt-4o",
-        messages: [{ role: "system", content: "You are a startup advisor creating value propositions in strict JSON format." }, { role: "user", content: prompt }],
-        temperature: 0.5,
-        max_tokens: 1500,
-        response_format: { "type": "json_object" }
-    };
-    try {
-        const response = await fetch(OPENAI_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            // *** THIS IS THE LINE THAT IS NOW FIXED ***
-            body: JSON.stringify({ openaiPayload: openAIParams })
-        });
-        if (!response.ok) throw new Error(`OpenAI API Error for offer angles: ${response.statusText}`);
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
-        if (parsed.solutions && Array.isArray(parsed.solutions)) return parsed.solutions;
-        else throw new Error("AI response did not contain a valid 'solutions' array.");
-    } catch (error) {
-        console.error("Offer Angle generation failed:", error);
-        return [];
-    }
 }
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');

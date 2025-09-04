@@ -2586,34 +2586,47 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
             addedNodes.add(pair.offer);
         }
     });
+// =================================================================================
+// === PASTE THIS ENTIRE CORRECTED CHART CONFIGURATION =============================
+// =================================================================================
+Highcharts.chart('value-tree', {
+    chart: {
+        type: 'sankey',
+        backgroundColor: 'transparent',
+        margin: [10, 10, 10, 10]
+    },
+    title: { text: null },
+    credits: { enabled: false },
+    tooltip: { enabled: false },
+    series: [{
+        keys: ['from', 'to', 'weight'],
+        data: sankeyData,
+        nodes: sankeyNodes,
+        nodeWidth: 80, // Adjusts horizontal space between columns
+        nodePadding: 25, // Adjusts vertical space between nodes
 
-    Highcharts.chart('value-tree', {
-        chart: {
-            type: 'sankey',
-            backgroundColor: 'transparent',
-            margin: [10, 10, 10, 10]
+        // --- IMPROVEMENT: Set a more visible, static link color ---
+        link: {
+            color: 'rgba(94, 209, 216, 0.6)', // A nice teal color from your example
+            linkOpacity: 0.6
         },
-        title: { text: null },
-        credits: { enabled: false },
-        tooltip: { enabled: false },
-        series: [{
-            keys: ['from', 'to', 'weight'],
-            data: sankeyData,
-            nodes: sankeyNodes,
-            nodeWidth: 80, // Adjusts the horizontal space between columns
-            nodePadding: 25, // Adjusts the vertical space between nodes
-            linkColorMode: 'gradient',
-            dataLabels: {
-                enabled: true,
-                useHTML: true,
-                nodeFormatter: function() {
-                    const point = this.point;
-                    const className = point.type === 'problem' ? 'sankey-problem' : 'sankey-offer';
-                    return `<div class="sankey-label ${className}">${point.name}</div>`;
-                }
-            },
-        }]
-    });
+
+        dataLabels: {
+            enabled: true,
+            useHTML: true,
+
+            // --- THIS IS THE CRITICAL FIX ---
+            // This tells Highcharts NOT to draw its own default label.
+            format: '',
+
+            nodeFormatter: function() {
+                const point = this.point;
+                const className = point.type === 'problem' ? 'sankey-problem' : 'sankey-offer';
+                return `<div class="sankey-label ${className}">${point.name}</div>`;
+            }
+        },
+    }]
+});
 }
 
 async function generateAndRenderPowerPhrases(posts, audienceContext) {

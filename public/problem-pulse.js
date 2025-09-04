@@ -2591,38 +2591,45 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
             addedNodes.add(pair.offer);
         }
     });
+// =================================================================================
+// === PASTE THIS ENTIRE FINAL CHART CONFIGURATION =================================
+// =================================================================================
+Highcharts.chart('value-tree', {
+    chart: {
+        type: 'sankey',
+        backgroundColor: 'transparent',
+        margin: [20, 20, 20, 20] // Added slightly more margin
+    },
+    title: { text: null },
+    credits: { enabled: false },
+    tooltip: { enabled: false },
+    series: [{
+        keys: ['from', 'to', 'weight'],
+        data: sankeyData,
+        nodes: sankeyNodes,
+        nodePadding: 25, // Vertical space between nodes
 
-    Highcharts.chart('value-tree', {
-        chart: {
-            type: 'sankey',
-            backgroundColor: 'transparent',
-            margin: [10, 10, 10, 10]
+        // Link styling
+        link: {
+            color: 'rgba(94, 209, 216, 0.6)',
+            linkOpacity: 0.6
         },
-        title: { text: null },
-        credits: { enabled: false },
-        tooltip: { enabled: false },
-        series: [{
-            keys: ['from', 'to', 'weight'],
-            data: sankeyData,
-            nodes: sankeyNodes,
-            nodeWidth: 80, 
-            nodePadding: 25,
-            link: {
-                color: 'rgba(94, 209, 216, 0.6)',
-                linkOpacity: 0.6
-            },
-            dataLabels: {
-                enabled: true,
-                useHTML: true,
-                format: '',
-                nodeFormatter: function() {
-                    const point = this.point;
-                    const className = point.type === 'problem' ? 'sankey-problem' : 'sankey-offer';
-                    return `<div class="sankey-label ${className}">${point.name}</div>`;
-                }
-            },
-        }]
-    });
+
+        // --- THIS IS THE DEFINITIVE FIX ---
+        // We use the standard 'formatter' and remove all conflicting properties.
+        dataLabels: {
+            enabled: true,
+            useHTML: true,
+            formatter: function() {
+                // 'this.point' correctly refers to the node data
+                const point = this.point;
+                const className = point.type === 'problem' ? 'sankey-problem' : 'sankey-offer';
+                // Return the custom HTML div, which will now be rendered correctly
+                return `<div class="sankey-label ${className}">${point.name}</div>`;
+            }
+        },
+    }]
+});
 }
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');

@@ -2507,13 +2507,6 @@ const processIntent = (intentId, intentName, intentData) => {
         container.innerHTML = `<p class="error-message">Could not generate the visual SEO plan.</p>`;
     }
 }
-
-// PASTE THIS ENTIRE BLOCK WHERE THE OLD MIND MAP FUNCTIONS WERE
-
-// =================================================================================
-// === FINAL MIND MAP SOLUTION (NETWORK GRAPH METHOD) ==============================
-// =================================================================================
-
 /**
  * A new, more reliable AI function that ensures a 1-to-1 mapping of problems to offers.
  */
@@ -2523,7 +2516,9 @@ async function generateProblemOfferPairsAI(summaries) {
     const problemTitles = summaries.map(s => s.title);
     const prompt = `You are a startup advisor. For each customer problem provided for the audience "${originalGroupName}", generate a single, concise "offer angle".
     
-    Respond ONLY with a valid JSON object. The object should have a single key "pairs". The value should be an array of objects, where each object has two keys: "problem" and "offer". Ensure there is one object for each problem provided.
+    Respond ONLY with a valid JSON object. The object should have a single key "pairs". The value should be an array of objects, where each object has two keys: "problem" and "offer". 
+    
+    CRITICAL: Ensure there is one object for each problem provided, and that neither the "problem" nor the "offer" value is an empty string.
 
     Example Response:
     {
@@ -2561,8 +2556,6 @@ async function generateProblemOfferPairsAI(summaries) {
         return [];
     }
 }
-
-
 /**
  * The final rendering function. Uses Highcharts Network Graph for a beautiful, organic layout.
  */
@@ -2573,10 +2566,17 @@ async function generateAndRenderValueMindMap(audienceName, summaries) {
     container.innerHTML = '<p class="loading-text">Generating AI value propositions... <span class="loader-dots"></span></p>';
 
     const pairs = await generateProblemOfferPairsAI(summaries);
-    if (!pairs || pairs.length === 0) {
+
+    // =========================================================================
+    // === THIS IS THE FIX: Filter out any bad data from the AI ================
+    // =========================================================================
+    const validatedPairs = pairs.filter(p => p.problem && p.offer && p.problem.trim() !== "" && p.offer.trim() !== "");
+
+    if (!validatedPairs || validatedPairs.length === 0) {
         container.innerHTML = '<p class="placeholder-text">Could not generate any offer angles.</p>';
         return;
     }
+    // =========================================================================
 
     const nodes = [];
     const links = [];
@@ -2584,8 +2584,8 @@ async function generateAndRenderValueMindMap(audienceName, summaries) {
     // Root Node
     nodes.push({ id: audienceName, name: audienceName, type: 'root', mass: 5 });
 
-    // Problem & Offer Nodes
-    pairs.forEach((pair, index) => {
+    // Problem & Offer Nodes (using the validated data)
+    validatedPairs.forEach((pair, index) => {
         const problemId = `problem-${index}`;
         const offerId = `offer-${index}`;
         
@@ -2644,6 +2644,7 @@ async function generateAndRenderValueMindMap(audienceName, summaries) {
         }]
     });
 }
+
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;

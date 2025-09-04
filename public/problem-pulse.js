@@ -3043,7 +3043,6 @@ function updateGrowthHeaderDropdown(problemTitles) {
 }
   function initializeProblemFinderTool() {
     const style = document.createElement('style');
-    const style = document.createElement('style');
     // =========================================================================
     // === PASTE THIS NEW CSS ==================================================
     // =========================================================================

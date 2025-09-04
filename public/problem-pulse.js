@@ -2507,26 +2507,22 @@ const processIntent = (intentId, intentName, intentData) => {
         container.innerHTML = `<p class="error-message">Could not generate the visual SEO plan.</p>`;
     }
 }
-/**
- * A new, more reliable AI function that ensures a 1-to-1 mapping of problems to offers.
- */
+// =================================================================================
+// === NEW SOLUTION: PROBLEM/OFFER SANKEY DIAGRAM ==================================
+// =================================================================================
+
 async function generateProblemOfferPairsAI(summaries) {
     if (!summaries || summaries.length === 0) return [];
     
     const problemTitles = summaries.map(s => s.title);
-    const prompt = `You are a startup advisor. For each customer problem provided for the audience "${originalGroupName}", generate a single, concise "offer angle".
+    const prompt = `You are a startup advisor. For each customer problem provided for the audience "${originalGroupName}", generate a single, concise "offer angle" or "solution".
     
-    Respond ONLY with a valid JSON object. The object should have a single key "pairs". The value should be an array of objects, where each object has two keys: "problem" and "offer". 
+    Respond ONLY with a valid JSON object with a single key "pairs". The value should be an array of objects, where each object has two keys: "problem" and "offer". 
     
     CRITICAL: Ensure there is one object for each problem provided, and that neither the "problem" nor the "offer" value is an empty string.
 
     Example Response:
-    {
-      "pairs": [
-        { "problem": "Scaling Issues in Start-ups", "offer": "Get a scalable tech blueprint and on-demand CTO-level advice." },
-        { "problem": "Emotional Challenges in Entrepreneurship", "offer": "Join a peer-support network with guided wellness sessions for founders." }
-      ]
-    }
+    { "pairs": [ { "problem": "Models take forever to train", "offer": "Cut training time by 60%" } ] }
 
     Problems to solve:
     ${JSON.stringify(problemTitles)}
@@ -2556,91 +2552,66 @@ async function generateProblemOfferPairsAI(summaries) {
         return [];
     }
 }
-/**
- * The final rendering function. Uses Highcharts Network Graph for a beautiful, organic layout.
- */
-async function generateAndRenderValueMindMap(audienceName, summaries) {
+
+async function generateAndRenderValueSankey(audienceName, summaries) {
     const container = document.getElementById('value-tree');
     if (!container) return;
 
     container.innerHTML = '<p class="loading-text">Generating AI value propositions... <span class="loader-dots"></span></p>';
 
     const pairs = await generateProblemOfferPairsAI(summaries);
-
-    // =========================================================================
-    // === THIS IS THE FIX: Filter out any bad data from the AI ================
-    // =========================================================================
     const validatedPairs = pairs.filter(p => p.problem && p.offer && p.problem.trim() !== "" && p.offer.trim() !== "");
 
-    if (!validatedPairs || validatedPairs.length === 0) {
+    if (validatedPairs.length === 0) {
         container.innerHTML = '<p class="placeholder-text">Could not generate any offer angles.</p>';
         return;
     }
-    // =========================================================================
 
-    const nodes = [];
-    const links = [];
+    const sankeyData = [];
+    const sankeyNodes = [];
+    const addedNodes = new Set();
 
-    // Root Node
-    nodes.push({ id: audienceName, name: audienceName, type: 'root', mass: 5 });
+    validatedPairs.forEach(pair => {
+        // Create the link from problem to offer
+        sankeyData.push([pair.problem, pair.offer, 1]); // Weight of 1 for uniform lines
 
-    // Problem & Offer Nodes (using the validated data)
-    validatedPairs.forEach((pair, index) => {
-        const problemId = `problem-${index}`;
-        const offerId = `offer-${index}`;
-        
-        nodes.push({ id: problemId, name: pair.problem, type: 'problem' });
-        nodes.push({ id: offerId, name: pair.offer, type: 'offer' });
-
-        // This creates the correct links: Root -> Problem -> Offer
-        links.push({ from: audienceName, to: problemId });
-        links.push({ from: problemId, to: offerId });
+        // Add the problem node if it doesn't exist
+        if (!addedNodes.has(pair.problem)) {
+            sankeyNodes.push({ id: pair.problem, column: 0, type: 'problem' });
+            addedNodes.add(pair.problem);
+        }
+        // Add the offer node if it doesn't exist
+        if (!addedNodes.has(pair.offer)) {
+            sankeyNodes.push({ id: pair.offer, column: 1, type: 'offer' });
+            addedNodes.add(pair.offer);
+        }
     });
 
     Highcharts.chart('value-tree', {
         chart: {
-            type: 'networkgraph',
-            height: '600px',
-            backgroundColor: 'transparent'
+            type: 'sankey',
+            backgroundColor: 'transparent',
+            margin: [10, 10, 10, 10]
         },
         title: { text: null },
         credits: { enabled: false },
-        plotOptions: {
-            networkgraph: {
-                keys: ['from', 'to'],
-                layoutAlgorithm: {
-                    enableSimulation: true,
-                    friction: -0.9,
-                    linkLength: 150 // Increase distance between nodes
-                },
-                marker: { radius: 0 }, // We hide the default marker
-                link: {
-                    width: 1.5,
-                    color: 'rgba(255, 255, 255, 0.5)'
-                }
-            }
-        },
+        tooltip: { enabled: false },
         series: [{
-            data: links,
+            keys: ['from', 'to', 'weight'],
+            data: sankeyData,
+            nodes: sankeyNodes,
+            nodeWidth: 80, // Adjusts the horizontal space between columns
+            nodePadding: 25, // Adjusts the vertical space between nodes
+            linkColorMode: 'gradient',
             dataLabels: {
                 enabled: true,
                 useHTML: true,
-                linkFormat: '', // Hide default line labels
-                formatter: function() {
-                    // This function provides the HTML for the NODES
+                nodeFormatter: function() {
                     const point = this.point;
-                    let html = '';
-                    switch (point.type) {
-                        case 'root':
-                            return `<div class="tree-label tree-label-root">${point.name}</div>`;
-                        case 'problem':
-                            return `<div class="tree-label tree-label-problem"><h4>Pain Point</h4><p>${point.name}</p></div>`;
-                        case 'offer':
-                            return `<div class="tree-label tree-label-offer"><h4>💡 Offer Angle</h4><p>${point.name}</p></div>`;
-                    }
+                    const className = point.type === 'problem' ? 'sankey-problem' : 'sankey-offer';
+                    return `<div class="sankey-label ${className}">${point.name}</div>`;
                 }
             },
-            nodes: nodes
         }]
     });
 }
@@ -2904,7 +2875,7 @@ async function runProblemFinder(options = {}) {
         }
         
         // This is the single, correct call for the new mind map
-        generateAndRenderValueMindMap(originalGroupName, window._summaries);
+        generateAndRenderValueSankey(originalGroupName, window._summaries);
         
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
             if (resultsWrapper) {
@@ -3072,6 +3043,34 @@ function updateGrowthHeaderDropdown(problemTitles) {
 }
   function initializeProblemFinderTool() {
     const style = document.createElement('style');
+    const style = document.createElement('style');
+    // =========================================================================
+    // === PASTE THIS NEW CSS ==================================================
+    // =========================================================================
+    style.textContent = `
+        .sankey-label {
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 15px;
+            font-weight: 500;
+            white-space: normal !important;
+            word-break: break-word !important;
+            text-align: center;
+            line-height: 1.4;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+        }
+        .sankey-problem {
+            background-color: #e0f2fe; /* Light Blue */
+            color: #0c4a6e; /* Dark Blue Text */
+        }
+        .sankey-offer {
+            background-color: #ede9fe; /* Light Purple */
+            color: #5b21b6; /* Dark Purple Text */
+        }
+    `;
+    // =========================================================================
+    document.head.appendChild(style);
     document.head.appendChild(style);
 
     console.log("Problem Finder elements found. Initializing...");

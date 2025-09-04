@@ -2553,6 +2553,9 @@ async function generateProblemOfferPairsAI(summaries) {
     }
 }
 
+// =================================================================================
+// === PASTE THIS ENTIRE CORRECTED FUNCTION ========================================
+// =================================================================================
 async function generateAndRenderValueSankey(audienceName, summaries) {
     const container = document.getElementById('value-tree');
     if (!container) return;
@@ -2577,58 +2580,50 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
 
         // Add the problem node if it doesn't exist
         if (!addedNodes.has(pair.problem)) {
-            sankeyNodes.push({ id: pair.problem, column: 0, type: 'problem' });
+            // --- THIS IS THE FIX: Add the 'name' property ---
+            sankeyNodes.push({ id: pair.problem, name: pair.problem, column: 0, type: 'problem' });
             addedNodes.add(pair.problem);
         }
         // Add the offer node if it doesn't exist
         if (!addedNodes.has(pair.offer)) {
-            sankeyNodes.push({ id: pair.offer, column: 1, type: 'offer' });
+            // --- THIS IS THE FIX: Add the 'name' property ---
+            sankeyNodes.push({ id: pair.offer, name: pair.offer, column: 1, type: 'offer' });
             addedNodes.add(pair.offer);
         }
     });
-// =================================================================================
-// === PASTE THIS ENTIRE CORRECTED CHART CONFIGURATION =============================
-// =================================================================================
-Highcharts.chart('value-tree', {
-    chart: {
-        type: 'sankey',
-        backgroundColor: 'transparent',
-        margin: [10, 10, 10, 10]
-    },
-    title: { text: null },
-    credits: { enabled: false },
-    tooltip: { enabled: false },
-    series: [{
-        keys: ['from', 'to', 'weight'],
-        data: sankeyData,
-        nodes: sankeyNodes,
-        nodeWidth: 80, // Adjusts horizontal space between columns
-        nodePadding: 25, // Adjusts vertical space between nodes
 
-        // --- IMPROVEMENT: Set a more visible, static link color ---
-        link: {
-            color: 'rgba(94, 209, 216, 0.6)', // A nice teal color from your example
-            linkOpacity: 0.6
+    Highcharts.chart('value-tree', {
+        chart: {
+            type: 'sankey',
+            backgroundColor: 'transparent',
+            margin: [10, 10, 10, 10]
         },
-
-        dataLabels: {
-            enabled: true,
-            useHTML: true,
-
-            // --- THIS IS THE CRITICAL FIX ---
-            // This tells Highcharts NOT to draw its own default label.
-            format: '',
-
-            nodeFormatter: function() {
-                const point = this.point;
-                const className = point.type === 'problem' ? 'sankey-problem' : 'sankey-offer';
-                return `<div class="sankey-label ${className}">${point.name}</div>`;
-            }
-        },
-    }]
-});
+        title: { text: null },
+        credits: { enabled: false },
+        tooltip: { enabled: false },
+        series: [{
+            keys: ['from', 'to', 'weight'],
+            data: sankeyData,
+            nodes: sankeyNodes,
+            nodeWidth: 80, 
+            nodePadding: 25,
+            link: {
+                color: 'rgba(94, 209, 216, 0.6)',
+                linkOpacity: 0.6
+            },
+            dataLabels: {
+                enabled: true,
+                useHTML: true,
+                format: '',
+                nodeFormatter: function() {
+                    const point = this.point;
+                    const className = point.type === 'problem' ? 'sankey-problem' : 'sankey-offer';
+                    return `<div class="sankey-label ${className}">${point.name}</div>`;
+                }
+            },
+        }]
+    });
 }
-
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;

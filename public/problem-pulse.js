@@ -6,9 +6,9 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 const HARD_MIN_SUBSCRIBERS = 1000;
-const HARD_MIN_ACTIVE_USERS = 5;
+const HARD_MIN_ACTIVE_USERS = 0;
 const LENIENT_MIN_SUBSCRIBERS = 500;
-const LENIENT_MIN_ACTIVE_USERS = 1;
+const LENIENT_MIN_ACTIVE_USERS = 0;
 let originalGroupName = '';
 let _allRankedSubreddits = [];
 

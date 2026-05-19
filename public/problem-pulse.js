@@ -2707,39 +2707,39 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
 // === NEW FUNCTION: AI AUDIENCE OVERVIEW (DEMOGRAPHICS) ===
 // =================================================================================
 
+
+
 async function generateAndRenderOverview(posts, audienceContext) {
-    console.log("CHECKPOINT 1: Overview Function Started. Audience:", audienceContext);
-    
     const container = document.getElementById('overview-div');
-    
-    if (!container) {
-        console.error("ERROR: I could not find a div with ID 'overview-div' on this page.");
-        return;
-    }
+    if (!container) return;
 
-    if (!posts || posts.length === 0) {
-        console.warn("WARNING: No posts were passed to the overview function.");
-        container.innerHTML = "No posts found to analyze demographics.";
-        return;
-    }
-
-    container.innerHTML = `<p class="loading-text">Analyzing demographics for ${audienceContext}...</p>`;
+    container.innerHTML = `<p class="loading-text">Calculating demographic proportions...</p>`;
 
     try {
-        const topPostsText = posts.slice(0, 40).map(p => 
-            `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 700)
+        const topPostsText = posts.slice(0, 50).map(p => 
+            `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 600)
         ).join('\n---\n');
 
-        const prompt = `Identify common age range, gender, and life stage for the "${audienceContext}" audience based on these posts. Respond ONLY with a JSON object keys: "age_range", "gender", "life_stage", "location_clues". \n\nPosts: ${topPostsText}`;
+        const prompt = `You are a data analyst. Based on the language, slang, and life experiences mentioned in these Reddit posts for "${audienceContext}", provide a specific demographic estimate.
+
+        CRITICAL: You must provide numerical percentages. Even if they are estimates, they must be specific.
+
+        Respond ONLY with a valid JSON object with these keys:
+        1. "male_pct": (Integer) Estimated % of males.
+        2. "female_pct": (Integer) Estimated % of females.
+        3. "age_18_24": (Integer) Estimated % aged 18-24.
+        4. "age_25_45": (Integer) Estimated % aged 25-45.
+        5. "age_45_plus": (Integer) Estimated % aged 45+.
+        6. "top_life_stage": (String) 3-4 words (e.g. "Young Professionals", "Parents of Teens").
+
+        Text: ${topPostsText}`;
 
         const openAIParams = {
             model: "gpt-4o-mini",
-            messages: [{ role: "system", content: "You are a demographic analyst." }, { role: "user", content: prompt }],
-            temperature: 0.3,
+            messages: [{ role: "system", content: "You are a precise demographic estimator." }, { role: "user", content: prompt }],
+            temperature: 0.1, // Lower temperature makes it more consistent
             response_format: { "type": "json_object" }
         };
-
-        console.log("CHECKPOINT 2: Sending data to AI...");
 
         const response = await fetch(OPENAI_PROXY_URL, { 
             method: 'POST', 
@@ -2750,24 +2750,51 @@ async function generateAndRenderOverview(posts, audienceContext) {
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
-        console.log("CHECKPOINT 3: AI responded successfully!", parsed);
-
         container.innerHTML = `
-            <div style="padding: 20px; background: rgba(255,255,255,0.05); border-radius: 10px;">
-                <h3 style="color: #00a5ce; margin-top:0;">Audience Snapshot</h3>
-                <p><strong>Age:</strong> ${parsed.age_range}</p>
-                <p><strong>Gender:</strong> ${parsed.gender}</p>
-                <p><strong>Life Stage:</strong> ${parsed.life_stage}</p>
+            <div style="background: #111; padding: 24px; border-radius: 12px; border: 1px solid #333; color: white; font-family: sans-serif;">
+                <h3 style="margin: 0 0 20px 0; font-size: 18px; color: #00a5ce;">Audience Demographics</h3>
+                
+                <!-- Gender Section -->
+                <div style="margin-bottom: 25px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
+                        <span>Male: <strong>${parsed.male_pct}%</strong></span>
+                        <span>Female: <strong>${parsed.female_pct}%</strong></span>
+                    </div>
+                    <div style="width: 100%; height: 8px; background: #333; border-radius: 4px; display: flex; overflow: hidden;">
+                        <div style="width: ${parsed.male_pct}%; background: #00a5ce; height: 100%;"></div>
+                        <div style="width: ${parsed.female_pct}%; background: #fd80c7; height: 100%;"></div>
+                    </div>
+                </div>
+
+                <!-- Age Section -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px; text-align: center;">
+                    <div style="background: #1a1a1a; padding: 10px; border-radius: 8px;">
+                        <div style="font-size: 11px; color: #888; text-transform: uppercase;">18-24</div>
+                        <div style="font-size: 18px; font-weight: bold;">${parsed.age_18_24}%</div>
+                    </div>
+                    <div style="background: #1a1a1a; padding: 10px; border-radius: 8px; border: 1px solid #00a5ce;">
+                        <div style="font-size: 11px; color: #888; text-transform: uppercase;">25-45</div>
+                        <div style="font-size: 18px; font-weight: bold;">${parsed.age_25_45}%</div>
+                    </div>
+                    <div style="background: #1a1a1a; padding: 10px; border-radius: 8px;">
+                        <div style="font-size: 11px; color: #888; text-transform: uppercase;">45+</div>
+                        <div style="font-size: 18px; font-weight: bold;">${parsed.age_45_plus}%</div>
+                    </div>
+                </div>
+
+                <!-- Life Stage -->
+                <div style="border-top: 1px solid #333; padding-top: 15px; font-size: 14px;">
+                    <span style="color: #888;">Primary Life Stage:</span> 
+                    <span style="margin-left: 5px; color: #00a5ce; font-weight: 500;">${parsed.top_life_stage}</span>
+                </div>
             </div>
         `;
 
     } catch (error) {
-        console.error("CHECKPOINT ERROR:", error);
-        container.innerHTML = "Error loading snapshot.";
+        console.error("Overview error:", error);
+        container.innerHTML = "Error analyzing detailed demographics.";
     }
 }
-
-
 
 
 async function runProblemFinder(options = {}) {

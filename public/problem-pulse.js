@@ -385,6 +385,9 @@ async function fetchCommentsForPosts(postIds, batchSize = 5) {
 function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1); return word; }
 async function generateEmotionMapData(posts) { try { const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || p.data.link_title}\nBody: ${(p.data.selftext || p.data.body).substring(0, 1000)}`).join('\n---\n'); const prompt = `You are a world-class market research analyst for '${originalGroupName}'. Analyze the following text to identify the 15 most significant problems, pain points, or key topics.\n\nFor each one, provide:\n1. "problem": A short, descriptive name for the problem (e.g., "Finding Reliable Vendors", "Budgeting Anxiety").\n2. "intensity": A score from 1 (mild) to 10 (severe) of how big a problem this is.\n3. "frequency": A score from 1 (rarely mentioned) to 10 (frequently mentioned) based on its prevalence in the text.\n\nRespond ONLY with a valid JSON object with a single key "problems", which is an array of these objects.\nExample: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequency": 9 }] }`; const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 1500, response_format: { "type": "json_object" } }; const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) { throw new Error(`AI API failed with status: ${response.status}`); } const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const aiProblems = parsed.problems || []; if (aiProblems.length >= 3) { console.log("Successfully used AI analysis for Problem Map."); const chartData = aiProblems.map(item => { if (!item.problem || typeof item.intensity !== 'number' || typeof item.frequency !== 'number') return null; return { x: item.frequency, y: item.intensity, label: item.problem }; }).filter(Boolean); return chartData.sort((a, b) => b.x - a.x); } else { console.warn("AI analysis returned too few problems. Falling back to keyword analysis."); } } catch (error) { console.error("AI analysis for Problem Map failed:", error, "Falling back to reliable keyword-based analysis."); } const emotionFreq = {}; posts.forEach(post => { const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase(); const words = text.replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { const lemma = lemmatize(rawWord); if (emotionalIntensityScores[lemma]) { emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1; } }); }); const chartData = Object.entries(emotionFreq).map(([word, freq]) => ({ x: freq, y: emotionalIntensityScores[word], label: word })); return chartData.sort((a, b) => b.x - a.x).slice(0, 25); }
 
+
+
+
 function renderEmotionMap(data) {
     const container = document.getElementById('emotion-map-container');
     if (!container) return;
@@ -396,19 +399,15 @@ function renderEmotionMap(data) {
     if (data.length < 3) {
         container.innerHTML = `
             <h3 class="dashboard-section-title">Problem Polarity Map</h3>
-            <p class="chart-placeholder-text">Not enough distinct problems were found to build a map.</p>
+            <p class="chart-placeholder-text">Not enough distinct problems were found.</p>
         `;
         return;
     }
 
-    // HTML with classes instead of inline styles
     container.innerHTML = `
         <h3 class="dashboard-section-title">Problem Polarity Map</h3>
-        <p id="problem-map-description" class="chart-description">Top Right = The most frequent & emotionally intense problems.</p>
-        <div id="emotion-map-wrapper">
-            <div id="emotion-map">
-                <canvas id="emotion-chart-canvas"></canvas>
-            </div>
+        <div id="emotion-map-wrapper" style="position: relative; height: 500px; margin-top: 20px;">
+            <canvas id="emotion-chart-canvas"></canvas>
             <button id="chart-zoom-btn"></button>
         </div>
     `;
@@ -416,123 +415,99 @@ function renderEmotionMap(data) {
     const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d');
     if (!ctx) return;
 
-    const maxFreq = Math.max(...data.map(p => p.x));
-    const allFrequencies = data.map(p => p.x);
-    const minObservedFreq = Math.min(...allFrequencies);
-    const collapsedMinX = 5;
-    const isCollapseFeatureEnabled = minObservedFreq >= collapsedMinX;
-    const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0;
+    // --- PLUGIN: DRAW LABELS DIRECTLY ON CANVAS ---
+    const alwaysVisibleLabels = {
+        id: 'alwaysVisibleLabels',
+        afterDraw(chart) {
+            const { ctx, scales: { x, y } } = chart;
+            ctx.save();
+            ctx.font = 'bold 12px "Plus Jakarta Sans", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'bottom';
+            
+            // Logic: Only label the top 15 items to keep it clean
+            const itemsToLabel = chart.data.datasets[0].data.slice(0, 15);
+
+            itemsToLabel.forEach((point) => {
+                const posX = x.getPixelForValue(point.x);
+                const posY = y.getPixelForValue(point.y);
+
+                // Add a text shadow for better readability on dark backgrounds
+                ctx.shadowColor = 'rgba(0, 0, 0, 1)';
+                ctx.shadowBlur = 4;
+                ctx.fillStyle = 'white';
+
+                // Draw the label 10 pixels above the bubble
+                ctx.fillText(point.label, posX, posY - 12);
+            });
+            ctx.restore();
+        }
+    };
+
+    // --- PLUGIN: QUADRANT BACKGROUNDS (Same as before) ---
+    const quadrantPlugin = {
+        id: 'quadrantPlugin',
+        beforeDraw(chart) {
+            const { ctx, chartArea: { top, bottom, left, right }, scales: { x, y } } = chart;
+            const midX = x.getPixelForValue(5);
+            const midY = y.getPixelForValue(5);
+            ctx.save();
+            // Top Right: Critical Zone Shading
+            ctx.fillStyle = 'rgba(253, 128, 199, 0.04)';
+            ctx.fillRect(midX, top, right - midX, midY - top);
+            // Draw Crosshair lines
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(midX, top); ctx.lineTo(midX, bottom);
+            ctx.moveTo(left, midY); ctx.lineTo(right, midY);
+            ctx.stroke();
+            // Corner Labels
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            ctx.font = 'bold 9px sans-serif';
+            ctx.fillText('CRITICAL', right - 50, top + 15);
+            ctx.fillText('MINOR', left + 10, bottom - 10);
+            ctx.restore();
+        }
+    };
 
     window.myEmotionChart = new Chart(ctx, {
         type: 'scatter',
+        plugins: [quadrantPlugin, alwaysVisibleLabels], // Add our new label plugin here
         data: {
             datasets: [{
-                label: 'Problems/Topics',
                 data: data,
-                backgroundColor: 'rgba(52, 152, 219, 0.9)',
-                borderColor: 'rgba(41, 128, 185, 1)',
+                backgroundColor: '#fd80c7',
+                borderColor: '#ffffff',
                 borderWidth: 1,
-                pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20,
-                pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20,
+                pointRadius: (context) => 5 + (context.raw.x / 10) * 12,
             }]
         },
         options: {
             maintainAspectRatio: false,
+            layout: { padding: { top: 30 } }, // Add padding so top labels don't get cut off
             plugins: {
-                legend: {
-                    display: false
-                },
-                tooltip: {
-                    mode: 'nearest',
-                    intersect: false,
-                    callbacks: {
-                        title: function(tooltipItems) {
-                            return tooltipItems[0].raw.label;
-                        },
-                        label: function(context) {
-                            return '';
-                        },
-                        afterBody: function(tooltipItems) {
-                            const point = tooltipItems[0].raw;
-                            return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`;
-                        }
-                    },
-                    displayColors: false,
-                    titleFont: {
-                        size: 14,
-                        weight: 'bold'
-                    },
-                    bodyFont: {
-                        size: 12
-                    },
-                    backgroundColor: '#ff7ce2',
-                    titleColor: '#ffffff',
-                    bodyColor: '#dddddd',
-                }
+                legend: { display: false },
+                tooltip: { enabled: true } // Keep tooltip as a backup for details
             },
             scales: {
                 x: {
-                    title: {
-                        display: true,
-                        text: 'Frequency (1-10)',
-                        color: 'white',
-                        font: {
-                            weight: 'bold'
-                        }
-                    },
-                    min: initialMinX,
-                    max: 10,
-                    grid: {
-                        color: 'rgba(255, 255, 255, 0.15)'
-                    },
-                    ticks: {
-                        color: 'white'
-                    }
+                    title: { display: true, text: 'FREQUENCY (Mentions)', color: '#666' },
+                    min: 0, max: 10,
+                    grid: { display: false },
+                    ticks: { color: '#444' }
                 },
                 y: {
-                    title: {
-                        display: true,
-                        text: 'Problem Intensity (1-10)',
-                        color: 'white',
-                        font: {
-                            weight: 'bold'
-                        }
-                    },
-                    min: 0,
-                    max: 10,
-                    grid: {
-                        color: 'rgba(255, 255, 255, 0.15)'
-                    },
-                    ticks: {
-                        color: 'white'
-                    }
+                    title: { display: true, text: 'INTENSITY (Pain Level)', color: '#666' },
+                    min: 0, max: 10,
+                    grid: { display: false },
+                    ticks: { color: '#444' }
                 }
             }
         }
     });
-
-    const zoomButton = document.getElementById('chart-zoom-btn');
-    // This style is dynamic based on logic, so it's correct to keep it here.
-    zoomButton.style.display = 'none';
-
-    if (isCollapseFeatureEnabled) {
-        zoomButton.style.display = 'block'; // Or 'inline-block', etc.
-        const updateButtonText = () => {
-            const isCurrentlyCollapsed = window.myEmotionChart.options.scales.x.min !== 0;
-            zoomButton.textContent = isCurrentlyCollapsed ? 'Zoom Out to See Full Range' : 'Zoom In to High-Frequency';
-        };
-
-        zoomButton.addEventListener('click', () => {
-            const chart = window.myEmotionChart;
-            const isCurrentlyCollapsed = chart.options.scales.x.min !== 0;
-            chart.options.scales.x.min = isCurrentlyCollapsed ? 0 : collapsedMinX;
-            chart.update('none');
-            updateButtonText();
-        });
-
-        updateButtonText();
-    }
 }
+
 
 // =================================================================================
 // === REVISED HYBRID FUNCTION V5: DEFINITIVE UNIQUE POST COUNTING ===

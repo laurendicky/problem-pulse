@@ -96,17 +96,7 @@ exports.handler = async (event) => {
         ...headers,
         'Content-Type': 'application/json',
       },
-const responseText =
-  chatCompletion?.choices?.[0]?.message?.content ||
-  "No response returned";
-
-return {
-  statusCode: 200,
-  headers: {
-    ...headers,
-    'Content-Type': 'application/json',
-  },
-  body: JSON.stringify({
-    openaiResponse: responseText,
-  }),
+      body: JSON.stringify({ error: error.message }),
+    };
+  }
 };

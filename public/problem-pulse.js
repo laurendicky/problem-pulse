@@ -385,10 +385,8 @@ async function fetchCommentsForPosts(postIds, batchSize = 5) {
 function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1); return word; }
 async function generateEmotionMapData(posts) { try { const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || p.data.link_title}\nBody: ${(p.data.selftext || p.data.body).substring(0, 1000)}`).join('\n---\n'); const prompt = `You are a world-class market research analyst for '${originalGroupName}'. Analyze the following text to identify the 15 most significant problems, pain points, or key topics.\n\nFor each one, provide:\n1. "problem": A short, descriptive name for the problem (e.g., "Finding Reliable Vendors", "Budgeting Anxiety").\n2. "intensity": A score from 1 (mild) to 10 (severe) of how big a problem this is.\n3. "frequency": A score from 1 (rarely mentioned) to 10 (frequently mentioned) based on its prevalence in the text.\n\nRespond ONLY with a valid JSON object with a single key "problems", which is an array of these objects.\nExample: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequency": 9 }] }`; const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 1500, response_format: { "type": "json_object" } }; const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) { throw new Error(`AI API failed with status: ${response.status}`); } const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const aiProblems = parsed.problems || []; if (aiProblems.length >= 3) { console.log("Successfully used AI analysis for Problem Map."); const chartData = aiProblems.map(item => { if (!item.problem || typeof item.intensity !== 'number' || typeof item.frequency !== 'number') return null; return { x: item.frequency, y: item.intensity, label: item.problem }; }).filter(Boolean); return chartData.sort((a, b) => b.x - a.x); } else { console.warn("AI analysis returned too few problems. Falling back to keyword analysis."); } } catch (error) { console.error("AI analysis for Problem Map failed:", error, "Falling back to reliable keyword-based analysis."); } const emotionFreq = {}; posts.forEach(post => { const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase(); const words = text.replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { const lemma = lemmatize(rawWord); if (emotionalIntensityScores[lemma]) { emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1; } }); }); const chartData = Object.entries(emotionFreq).map(([word, freq]) => ({ x: freq, y: emotionalIntensityScores[word], label: word })); return chartData.sort((a, b) => b.x - a.x).slice(0, 25); }
 
-
-
 function renderEmotionMap(data) {
-    const container = document.getElementById('polarity-map'); // Updated ID
+    const container = document.getElementById('polarity-map'); // Corrected ID
     if (!container) return;
 
     if (window.myEmotionChart) {
@@ -396,13 +394,13 @@ function renderEmotionMap(data) {
     }
 
     if (data.length < 3) {
-        container.innerHTML = `<p style="color: #666; text-align: center; padding: 50px;">Not enough data to map.</p>`;
+        container.innerHTML = `<p style="color: #666; text-align: center; padding: 50px;">Waiting for more data points...</p>`;
         return;
     }
 
-    // REMOVED: Internal Title and Description as requested
+    // Container setup (No title, high-quality dark background)
     container.innerHTML = `
-        <div id="emotion-map-wrapper" style="position: relative; height: 600px; width: 100%; background: #0000ff;">
+        <div id="emotion-map-wrapper" style="position: relative; height: 600px; width: 100%; border-radius: 16px; overflow: hidden; background: #000033;">
             <canvas id="emotion-chart-canvas"></canvas>
         </div>
     `;
@@ -410,90 +408,121 @@ function renderEmotionMap(data) {
     const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d');
     if (!ctx) return;
 
-    // --- STEP 1: NORMALIZE THE DATA (The "Un-squasher") ---
-    const xValues = data.map(d => d.x);
-    const yValues = data.map(d => d.y);
-    const minX = Math.min(...xValues);
-    const maxX = Math.max(...xValues);
-    const minY = Math.min(...yValues);
-    const maxY = Math.max(...yValues);
+    // --- 1. DATA NORMALIZATION & COLLISION DETECTION ---
+    const xVals = data.map(d => d.x);
+    const yVals = data.map(d => d.y);
+    const minX = Math.min(...xVals), maxX = Math.max(...xVals);
+    const minY = Math.min(...yVals), maxY = Math.max(...yVals);
 
-    const normalizedData = data.map(d => {
-        // We stretch the values to fill a 1-9 scale so they don't hit the very edges
-        const nx = ((d.x - minX) / (maxX - minX || 1)) * 8 + 1;
-        const ny = ((d.y - minY) / (maxY - minY || 1)) * 8 + 1;
-        
-        // Add "Jitter": prevents overlapping by adding a tiny random offset
-        const jitterX = (Math.random() - 0.5) * 0.5;
-        const jitterY = (Math.random() - 0.5) * 0.5;
-
-        return {
-            x: nx + jitterX,
-            y: ny + jitterY,
-            label: d.label,
-            originalX: d.x,
-            originalY: d.y
-        };
+    // Spread the dots out to fill the 1.5 to 8.5 range (leaving room for labels at edges)
+    const processedData = data.map(d => {
+        let nx = ((d.x - minX) / (maxX - minX || 1)) * 7 + 1.5;
+        let ny = ((d.y - minY) / (maxY - minY || 1)) * 7 + 1.5;
+        return { ...d, x: nx, y: ny, originalX: d.x, originalY: d.y };
     });
 
-    // --- STEP 2: PLUGINS (Quadrants and Labels) ---
-    const quadrantPlugin = {
-        id: 'quadrantPlugin',
+    // Sort by "Importance" (X + Y) to find the Top 3
+    const sortedData = [...processedData].sort((a, b) => (b.x + b.y) - (a.x + a.y));
+    const top3Labels = new Set(sortedData.slice(0, 3).map(d => d.label));
+
+    // Nudge logic to prevent direct overlaps
+    for (let i = 0; i < processedData.length; i++) {
+        for (let j = i + 1; j < processedData.length; j++) {
+            const dist = Math.sqrt(Math.pow(processedData[i].x - processedData[j].x, 2) + Math.pow(processedData[i].y - processedData[j].y, 2));
+            if (dist < 0.6) { // If they are too close
+                processedData[i].x -= 0.3;
+                processedData[j].x += 0.3;
+            }
+        }
+    }
+
+    // --- 2. THE STRATEGIC MATRIX PLUGIN ---
+    const matrixPlugin = {
+        id: 'matrixPlugin',
         beforeDraw(chart) {
-            const { ctx, chartArea: { top, bottom, left, right }, scales: { x, y } } = chart;
+            const { ctx, chartArea: { top, bottom, left, right, width, height }, scales: { x, y } } = chart;
             const midX = x.getPixelForValue(5);
             const midY = y.getPixelForValue(5);
+
             ctx.save();
+            // Quadrant Colors (Gradients)
+            // Top Right: THE BURN LIST
+            ctx.fillStyle = 'rgba(255, 79, 163, 0.08)';
+            ctx.fillRect(midX, top, right - midX, midY - top);
             
-            // Draw Divider Lines
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-            ctx.setLineDash([5, 5]);
+            // Labels for Strategy
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('THE BURN LIST (FIX NOW)', (midX + right) / 2, top + 25);
+            ctx.fillText('ACUTE CRISES', (midX + left) / 2, top + 25);
+            ctx.fillText('SILENT TAX (LONG TERM)', (midX + right) / 2, bottom - 15);
+            ctx.fillText('THE NOISE', (midX + left) / 2, bottom - 15);
+
+            // Crosshair
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
+            ctx.lineWidth = 1;
             ctx.beginPath();
             ctx.moveTo(midX, top); ctx.lineTo(midX, bottom);
             ctx.moveTo(left, midY); ctx.lineTo(right, midY);
             ctx.stroke();
-
-            // Corner Labels
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-            ctx.font = 'bold 12px sans-serif';
-            ctx.fillText('CRITICAL', right - 70, top + 30);
-            ctx.fillText('MINOR', left + 20, bottom - 20);
             ctx.restore();
         }
     };
 
-    const labelPlugin = {
-        id: 'labelPlugin',
+    // --- 3. THE SMART LABEL PLUGIN ---
+    const smartLabelPlugin = {
+        id: 'smartLabelPlugin',
         afterDraw(chart) {
             const { ctx, scales: { x, y } } = chart;
             ctx.save();
-            ctx.font = 'bold 13px "Plus Jakarta Sans", sans-serif';
-            ctx.fillStyle = 'white';
-            ctx.textAlign = 'center';
-            ctx.shadowColor = 'black';
-            ctx.shadowBlur = 6;
-
+            
             chart.data.datasets[0].data.forEach((point) => {
                 const px = x.getPixelForValue(point.x);
                 const py = y.getPixelForValue(point.y);
-                // Draw label above the bubble
-                ctx.fillText(point.label, px, py - 15);
+                const isTop3 = top3Labels.has(point.label);
+
+                // Styling for Top 3 vs Others
+                ctx.font = isTop3 ? 'bold 13px sans-serif' : '11px sans-serif';
+                ctx.fillStyle = isTop3 ? '#00e5ff' : 'rgba(255,255,255,0.7)';
+                ctx.textAlign = 'center';
+                
+                // Shadow for legibility
+                ctx.shadowColor = 'black';
+                ctx.shadowBlur = 4;
+
+                // Draw Label
+                ctx.fillText(point.label, px, py - 18);
+
+                // Add a small leader line for top 3
+                if (isTop3) {
+                    ctx.strokeStyle = '#00e5ff';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath();
+                    ctx.moveTo(px, py - 8);
+                    ctx.lineTo(px, py - 15);
+                    ctx.stroke();
+                }
             });
             ctx.restore();
         }
     };
 
+    // --- 4. CHART INITIALIZATION ---
     window.myEmotionChart = new Chart(ctx, {
         type: 'scatter',
-        plugins: [quadrantPlugin, labelPlugin],
+        plugins: [matrixPlugin, smartLabelPlugin],
         data: {
             datasets: [{
-                data: normalizedData,
-                backgroundColor: '#fd80c7',
+                data: processedData,
+                backgroundColor: (context) => {
+                    const label = context.raw?.label;
+                    return top3Labels.has(label) ? '#00e5ff' : '#fd80c7';
+                },
                 borderColor: 'white',
-                borderWidth: 2,
-                pointRadius: 12,
-                pointHoverRadius: 15
+                borderWidth: 1,
+                pointRadius: (context) => top3Labels.has(context.raw?.label) ? 12 : 8,
+                pointHoverRadius: 15,
             }]
         },
         options: {
@@ -504,20 +533,21 @@ function renderEmotionMap(data) {
                     min: 0, max: 10, display: true, 
                     grid: { display: false }, 
                     ticks: { display: false },
-                    title: { display: true, text: 'FREQUENCY →', color: 'rgba(255,255,255,0.5)' }
+                    title: { display: true, text: 'FREQUENCY →', color: 'rgba(255,255,255,0.3)', font: { size: 10 } }
                 },
                 y: { 
                     min: 0, max: 10, display: true, 
                     grid: { display: false }, 
                     ticks: { display: false },
-                    title: { display: true, text: 'INTENSITY →', color: 'rgba(255,255,255,0.5)' }
+                    title: { display: true, text: 'INTENSITY →', color: 'rgba(255,255,255,0.3)', font: { size: 10 } }
                 }
             },
             plugins: {
                 legend: { display: false },
                 tooltip: {
+                    backgroundColor: '#000',
                     callbacks: {
-                        label: (ctx) => ` ${ctx.raw.label}`
+                        label: (ctx) => ` ${ctx.raw.label} (Score: ${ctx.raw.originalY}/10)`
                     }
                 }
             }

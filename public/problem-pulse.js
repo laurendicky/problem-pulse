@@ -1269,23 +1269,21 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
 
 const briefCache = new Map();
 
-// =================================================================================
-// === OPTIMIZED: DETACHED LOADING (Text first, Chart later) ===
-// =================================================================================
 
 // =================================================================================
 // === OPTIMIZED: DETACHED LOADING (Text first, Chart later) ===
 // =================================================================================
+
+
 async function generateAndRenderBrandBrief(itemName, itemType) {
     const isBrand = itemType === 'brands';
     const targetPanel = document.getElementById(isBrand ? 'brand-detail-panel' : 'product-detail-panel');
 
     if (!targetPanel) return;
 
-    // 1. Show global loading state
+    // 1. Loading state (No close button added here)
     targetPanel.innerHTML = '<div class="brief-content"><p class="loading-text">Building brief... <span class="loader-dots"></span></p></div>';
 
-    // 2. Return cached version immediately if available
     if (briefCache.has(itemName)) {
         targetPanel.innerHTML = briefCache.get(itemName);
         if (isBrand && targetPanel.querySelector('#brand-momentum-chart-data')) {
@@ -1300,7 +1298,6 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
     const topPostsText = top50Posts.map(p => `"${p.data.title || ''} - ${p.data.selftext || p.data.body || ''}"`).join('\n');
 
     try {
-        // --- STEP A: PREPARE PARAMETERS ---
         const prompt = isBrand ?
             `Analyze "${itemName}" based on: ${topPostsText}. Return JSON with: what_it_is, use_case, loves (array), hates (array), verdict.` :
             `Analyze category "${itemName}" based on: ${topPostsText}. Return JSON with: what_it_is, job_to_be_done, table_stakes (array), disruption_opportunities (array).`;
@@ -1312,28 +1309,21 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
             response_format: { "type": "json_object" } 
         };
 
-        // --- STEP B: FETCH TEXT ONLY (This is the fast part) ---
-        const response = await fetch(OPENAI_PROXY_URL, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ openaiPayload: openAIParams }) 
-        });
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
-        // --- STEP C: RENDER TEXT UI IMMEDIATELY ---
+        // --- REMOVED THE CLOSE BUTTON FROM THE STRINGS BELOW ---
         let htmlContent = '';
         if (isBrand) {
             htmlContent = `
                 <div class="brief-content">
-                    <button class="context-close-btn">×</button>
                     <h3 class="brief-header">${itemName}</h3>
                     <div class="brief-section"><h4 class="brief-section-title">What It Is</h4><p class="brief-text">${parsed.what_it_is}</p></div>
                     
-                    <!-- THE CHART PLACEHOLDER (Will be filled later) -->
                     <div class="brief-section">
                         <h4 class="brief-section-title">Momentum Trend</h4>
-                        <div id="brand-momentum-chart" style="height:180px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.03); border-radius:8px; font-size:12px; color:#888;">
+                        <div id="brand-momentum-chart" style="height:200px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.03); border-radius:8px; font-size:12px; color:#888;">
                             <span class="loader-dots">Crunching historical mentions...</span>
                         </div>
                     </div>
@@ -1346,7 +1336,6 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         } else {
             htmlContent = `
                 <div class="brief-content">
-                    <button class="context-close-btn">×</button>
                     <h3 class="brief-header">${itemName}</h3>
                     <div class="brief-section"><h4>Category Info</h4><p>${parsed.what_it_is}</p></div>
                     <div class="brief-section"><h4>Job to be Done</h4><p>${parsed.job_to_be_done}</p></div>
@@ -1357,33 +1346,29 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         targetPanel.innerHTML = htmlContent;
         briefCache.set(itemName, htmlContent);
 
-        // --- STEP D: KICK OFF SLOW CHART FETCH IN BACKGROUND ---
         if (isBrand) {
             const selectedSubreddits = Array.from(document.querySelectorAll('#subreddit-choices input:checked')).map(cb => cb.value);
             const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
             
-            // Note: NO 'await' here. This runs while the user reads the text!
             fetchSentimentTrendData(itemName, subredditQueryString).then(trendResult => {
                 if (trendResult && trendResult.length > 0) {
                     renderBrandMomentumChart(trendResult);
-                    // Cache the data for re-opens
                     const s = document.createElement('script');
                     s.id = 'brand-momentum-chart-data';
                     s.type = 'application/json';
                     s.textContent = JSON.stringify(trendResult);
-                    targetPanel.appendChild(s);
+                    targetPanel.querySelector('.brief-content').appendChild(s);
                 } else {
-                    const chartArea = document.getElementById('brand-momentum-chart');
-                    if(chartArea) chartArea.innerHTML = '<span style="opacity:0.5">Not enough historical data found.</span>';
+                    document.getElementById('brand-momentum-chart').innerHTML = '<span>Not enough data.</span>';
                 }
             });
         }
-
     } catch (error) {
-        console.error("Brief error:", error);
         targetPanel.innerHTML = `<div class="brief-content"><p>Error loading content.</p></div>`;
     }
 }
+
+
 
 // =================================================================================
 // === BACKGROUND CHART FETCH (Optimized for Speed) ===
@@ -1432,11 +1417,8 @@ async function fetchSentimentTrendData(brandName, subredditQueryString) {
 // =================================================================================
 function renderBrandMomentumChart(data) {
     if (typeof Highcharts === 'undefined' || !data || data.length === 0) {
-        // Display a message if no data is available
         const chartContainer = document.getElementById('brand-momentum-chart');
-        if (chartContainer) {
-            chartContainer.innerHTML = '<p class="chart-placeholder-text">Not enough data to generate a momentum chart.</p>';
-        }
+        if (chartContainer) chartContainer.innerHTML = '<p>Not enough data.</p>';
         return;
     }
 
@@ -1444,48 +1426,41 @@ function renderBrandMomentumChart(data) {
         chart: { type: 'line', backgroundColor: 'transparent' },
         title: { text: null },
         credits: { enabled: false },
-        xAxis: { categories: data.map(d => d.period), labels: { style: { color: '#555' } } },
-        yAxis: { title: { text: '% Positive', style: { color: '#555' } }, min: 0, max: 100, labels: { style: { color: '#555' } } },
+        xAxis: { categories: data.map(d => d.period), labels: { style: { color: '#888' } } },
+        yAxis: { title: { text: null }, min: 0, max: 100, labels: { style: { color: '#888' } } },
         legend: { enabled: false },
         series: [{
-            name: '% Positive Sentiment',
-            data: data.map(d => ({
-                y: d.positivePercentage,
-                context: d.context // Pass context to each point
-            })),
+            name: '% Positive',
+            data: data.map(d => ({ y: d.positivePercentage, context: d.context })),
             color: '#00a5ce'
         }],
-        // --- KEY CHANGE: Replaced pointFormat with a more powerful formatter function ---
         tooltip: {
             useHTML: true,
+            outside: true, // FIX: Tooltip won't be cut off by graph edges
             backgroundColor: '#FFFFFF',
             borderColor: '#E0E0E0',
             borderWidth: 1,
-            padding: 12,
-            shape: 'square',
-            shadow: { color: 'rgba(0, 0, 0, 0.1)', opacity: 1, offsetX: 1, offsetY: 2 },
+            padding: 16, // FIX: Added internal padding for breathability
+            borderRadius: 10,
+            shadow: true,
+            style: { 
+                fontSize: '14px', 
+                zIndex: 9999 
+            },
             formatter: function () {
                 const context = this.point.options.context;
-                if (!context) return 'No context available.';
-
-                let html = `<div style="font-family: sans-serif; font-size: 14px;">`;
+                let html = `<div style="min-width: 220px; max-width: 280px; white-space: normal; line-height: 1.4;">`;
                 html += `<b>${this.key}</b><br/>`;
-                html += `<span style="color: ${this.series.color};">●</span> ${this.series.name}: <b>${this.y}%</b>`;
-                html += `<hr style="margin: 6px 0; border-color: #f0f0f0;">`;
-
-                // === THIS IS THE FIX ===
-                // Added 'white-space: normal;' and 'overflow-wrap: break-word;' to the style attribute.
-                html += `<div style="font-size: 12px; max-width: 250px; white-space: normal; overflow-wrap: break-word;">`;
-
-                if (context.positive_theme) {
-                    html += `<div style="margin-bottom: 5px;"><span style="color: #28a745;">🟢</span> <strong>Positive:</strong> ${context.positive_theme}</div>`;
+                html += `<span style="color:${this.series.color}">●</span> Positive: <b>${this.y}%</b>`;
+                
+                if (context) {
+                    html += `<hr style="margin: 8px 0; border: 0; border-top: 1px solid #eee;">`;
+                    if (context.positive_theme) html += `<div style="margin-bottom:4px"><span style="color:#28a745">🟢</span> ${context.positive_theme}</div>`;
+                    if (context.negative_theme) html += `<div style="margin-bottom:8px"><span style="color:#dc3545">🔴</span> ${context.negative_theme}</div>`;
+                    html += `<div style="font-size:12px; font-style:italic; color:#666;">${context.verdict}</div>`;
                 }
-                if (context.negative_theme) {
-                    html += `<div style="margin-bottom: 5px;"><span style="color: #dc3545;">🔴</span> <strong>Critical:</strong> ${context.negative_theme}</div>`;
-                }
-                html += `<div style="margin-top: 8px; font-style: italic;"><strong>Verdict:</strong> ${context.verdict}</div>`;
 
-                html += `</div></div>`;
+                html += `</div>`;
                 return html;
             }
         }

@@ -793,23 +793,39 @@ async function enhanceDiscoveryWithComments(initialPosts, nicheContext) {
 // =================================================================================
 // === REPLACEMENT FUNCTION: renderDiscoveryList ===
 // =================================================================================
+
 function renderDiscoveryList(containerId, data, title, type) {
     const container = document.getElementById(containerId);
     if (!container) return;
-    let listItems = '<p class="discovery-list-placeholder">No significant mentions found.</p>';
-    if (data.length > 0) {
-        listItems = data.map(([name, details], index) => `
-            <li class="discovery-list-item" data-word="${name}" data-type="${type}">
-                <div class="discovery-item-info">
-                    <span class="rank">${index + 1}.</span>
-                    <span class="name">${name}</span>
-                    <span class="count">${details.count} mentions</span>
-                </div>
-                <button class="brief-button">See Brief</button>
-            </li>
-        `).join('');
-    }
-    container.innerHTML = `<h3 class="dashboard-section-title">${title}</h3><ul class="discovery-list">${listItems}</ul>`;
+
+    // 1. Find the "slots" you built in Webflow
+    const slots = container.querySelectorAll('.discovery-list-item');
+    
+    // 2. Hide all slots by default
+    slots.forEach(slot => slot.style.display = 'none');
+
+    // 3. Fill the slots with real data
+    data.forEach(([name, details], index) => {
+        if (slots[index]) {
+            const slot = slots[index];
+            
+            // Fill Rank, Name, and Count
+            const rankEl = slot.querySelector('.rank');
+            const nameEl = slot.querySelector('.name');
+            const countEl = slot.querySelector('.count');
+
+            if (rankEl) rankEl.textContent = `${index + 1}.`;
+            if (nameEl) nameEl.textContent = name;
+            if (countEl) countEl.textContent = `${details.count} mentions`;
+
+            // Attach data for the "See Brief" click
+            slot.setAttribute('data-word', name);
+            slot.setAttribute('data-type', type);
+
+            // Show the slot (Use 'flex' to match your horizontal layout)
+            slot.style.display = 'flex'; 
+        }
+    });
 }
 
 
@@ -1265,76 +1281,45 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
 
 const briefCache = new Map();
 
+
 async function generateAndRenderBrandBrief(itemName, itemType) {
     const isBrand = itemType === 'brands';
     const targetPanel = document.getElementById(isBrand ? 'brand-detail-panel' : 'product-detail-panel');
-    const overlay = document.getElementById('brief-overlay');
 
-    if (!targetPanel || !overlay) {
-        console.error("Brandscape detail panels or overlay not found in the DOM.");
+    if (!targetPanel) {
+        console.error("Panel not found in Webflow. Check your IDs.");
         return;
     }
 
-    document.querySelectorAll('.custom-side-panel.visible').forEach(p => p.classList.remove('visible'));
+    // 1. Show a loading state inside your Webflow div immediately
+    targetPanel.innerHTML = '<div class="brief-content"><p class="loading-text">Analyzing mentions... <span class="loader-dots"></span></p></div>';
 
-    targetPanel.innerHTML = '<div class="brief-content"><p class="loading-text">Analyzing... <span class="loader-dots"></span></p></div>';
-    targetPanel.classList.add('visible');
-    overlay.classList.add('visible');
-
-    const close = () => {
-        targetPanel.classList.remove('visible');
-        overlay.classList.remove('visible');
-    };
-    overlay.onclick = close;
-
+    // 2. Check if we have this brief saved already
     if (briefCache.has(itemName)) {
         targetPanel.innerHTML = briefCache.get(itemName);
         if (targetPanel.querySelector('#brand-momentum-chart')) {
             const chartData = JSON.parse(targetPanel.querySelector('#brand-momentum-chart-data').textContent);
             renderBrandMomentumChart(chartData);
         }
-        targetPanel.querySelector('.context-close-btn')?.addEventListener('click', close);
         return;
     }
-
+    
     const postsForAnalysis = (window._entityData?.[itemType]?.[itemName]?.posts || []);
-    if (postsForAnalysis.length < 3) {
-        const htmlContent = `
-            <div class="brief-content">
-                <button class="context-close-btn">×</button>
-                <h3 class="brief-header">Analysis for: ${itemName}</h3>
-                <p class="error-message" style="text-align: center; padding: 2rem;">
-                    Not enough mentions found (minimum 3 required) to generate a detailed brief.
-                </p>
-            </div>`;
-        targetPanel.innerHTML = htmlContent;
-        targetPanel.querySelector('.context-close-btn').addEventListener('click', close);
-        return;
-    }
-
+    
     try {
         const top75Posts = postsForAnalysis.slice(0, 75);
         const topPostsText = top75Posts.map(p => `"${p.data.title || ''} - ${p.data.selftext || p.data.body || ''}"`).join('\n');
 
-
         const prompt = isBrand ?
-            `You are an expert market research analyst creating a competitive brief for "${itemName}" based on user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights.
+            `Analyze "${itemName}" based on: ${topPostsText}. Return JSON with: what_it_is, use_case, loves (array), hates (array), verdict.` :
+            `Analyze category "${itemName}" based on: ${topPostsText}. Return JSON with: what_it_is, job_to_be_done, table_stakes (array), disruption_opportunities (array).`;
 
-            Respond ONLY with a valid JSON object with the following keys:
-            1.  "what_it_is": A simple, one-line explanation of what the brand/product is. CRITICAL: Spell out any acronyms.
-            2.  "use_case": A single sentence describing the primary job people hire this product for.
-            3.  "loves": An array of 3 bullet points of key strengths. CRITICAL: Inject real, short user phrases from the text into these points (e.g., "Users rave about its ability to 'ship code fixes in seconds'").
-            4.  "hates": An array of 3 bullet points. CRITICAL: Frame each pain point as an opportunity (e.g., "Endless scrolling UX → ripe for a plugin/UX layer fix.").
-            5.  "verdict": A single, insightful sentence summarizing the brand's position in the market (e.g., "Loved for versatility, but vulnerable on transparency. A sticky but disruptable brand.").` :
-            `You are a market validation analyst creating a category analysis for "${itemName}" based on user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights.
-
-            Respond ONLY with a valid JSON object with the following keys:
-            1.  "what_it_is": A simple, one-line explanation of what this product category is. CRITICAL: Spell out any acronyms.
-            2.  "job_to_be_done": A single sentence describing the fundamental goal people want to achieve with this type of product.
-            3.  "table_stakes": An array of 3 bullet points describing the absolute must-have features or benefits for any product in this category.
-            4.  "disruption_opportunities": An array of 3 bullet points describing common frustrations or unsolved problems across the entire category that a new product could solve.`;
-
-        const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are an analyst providing structured JSON output." }, { role: "user", content: `${prompt}\n\nUser Comments:\n${topPostsText}` }], temperature: 0.2, response_format: { "type": "json_object" } };
+        const openAIParams = { 
+            model: "gpt-4o", 
+            messages: [{ role: "system", content: "You are a market analyst. Output ONLY valid JSON." }, { role: "user", content: prompt }], 
+            temperature: 0.2, 
+            response_format: { "type": "json_object" } 
+        };
 
         const briefPromise = fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }).then(res => res.json());
 
@@ -1344,90 +1329,45 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         const trendPromise = isBrand ? fetchSentimentTrendData(itemName, subredditQueryString) : Promise.resolve(null);
 
         const [briefResult, trendResult] = await Promise.all([briefPromise, trendPromise]);
-
         const parsed = JSON.parse(briefResult.openaiResponse);
 
         let htmlContent = '';
         if (isBrand) {
-            const latestSentiment = trendResult && trendResult.length > 0 ? trendResult[trendResult.length - 1]?.positivePercentage : 0;
-            const trendlineText = latestSentiment ? `Trendline: Positive sentiment is currently at ${latestSentiment}%.` : "Not enough data for a sentiment trend.";
-            const mentionCount = window._entityData?.[itemType]?.[itemName]?.count || 0;
-
             htmlContent = `
                 <div class="brief-content">
                     <button class="context-close-btn">×</button>
-                    <h3 class="brief-header">Competitive Brief: ${itemName}</h3>
-                    
-                    <!-- === NEW SECTION ADDED HERE === -->
-                    <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">ℹ️</span>What It Is</h4>
-                        <p class="brief-text">${parsed.what_it_is}</p>
-                    </div>
-
-                    <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">📈</span>Brand Momentum</h4>
-                        <div id="brand-momentum-chart"></div>
-                        <script type="application/json" id="brand-momentum-chart-data">${JSON.stringify(trendResult)}</script>
-                        <p class="brief-ai-insight">Based on ${mentionCount} mentions. ${trendlineText}</p>
-                    </div>
-                    <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">💡</span>Primary Use Case</h4>
-                        <p class="brief-text">${parsed.use_case}</p>
-                    </div>
-                    <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">🟢</span>What People Love</h4>
-                        <ul class="brief-list loves">${parsed.loves.map(item => `<li>${item}</li>`).join('')}</ul>
-                    </div>
-                    <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">🔴</span>Pain Points & Opportunities</h4>
-                        <ul class="brief-list hates">${parsed.hates.map(item => `<li>${item}</li>`).join('')}</ul>
-                    </div>
-                    <div class="brief-verdict">
-                        <p><strong>🔮 Verdict:</strong> ${parsed.verdict}</p>
-                    </div>
+                    <h3 class="brief-header">${itemName}</h3>
+                    <div class="brief-section"><h4 class="brief-section-title">What It Is</h4><p class="brief-text">${parsed.what_it_is}</p></div>
+                    <div class="brief-section"><h4 class="brief-section-title">Brand Momentum</h4><div id="brand-momentum-chart"></div><script type="application/json" id="brand-momentum-chart-data">${JSON.stringify(trendResult)}</script></div>
+                    <div class="brief-section"><h4 class="brief-section-title">Use Case</h4><p class="brief-text">${parsed.use_case}</p></div>
+                    <div class="brief-section"><h4 class="brief-section-title">Strengths</h4><ul class="brief-list">${parsed.loves.map(i => `<li>${i}</li>`).join('')}</ul></div>
+                    <div class="brief-section"><h4 class="brief-section-title">Weaknesses</h4><ul class="brief-list">${parsed.hates.map(i => `<li>${i}</li>`).join('')}</ul></div>
+                    <div class="brief-verdict"><p>${parsed.verdict}</p></div>
                 </div>`;
-        } else { // Generic Product
+        } else {
             htmlContent = `
                 <div class="brief-content">
                     <button class="context-close-btn">×</button>
-                    <h3 class="brief-header">Category Analysis: ${itemName}</h3>
-                    
-                    <!-- === NEW SECTION ADDED HERE === -->
-                    <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">ℹ️</span>What It Is</h4>
-                        <p class="brief-text">${parsed.what_it_is}</p>
-                    </div>
-                    
-                    <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">💡</span>Primary Job-to-be-Done</h4>
-                        <p class="brief-text">${parsed.job_to_be_done}</p>
-                    </div>
-                    <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">🔵</span>Table Stakes (Must-Haves)</h4>
-                        <ul class="brief-list stakes">${parsed.table_stakes.map(item => `<li>${item}</li>`).join('')}</ul>
-                    </div>
-                    <div class="brief-section">
-                        <h4 class="brief-section-title"><span class="brief-section-icon">🔴</span>Disruption Opportunities</h4>
-                        <ul class="brief-list hates">${parsed.disruption_opportunities.map(item => `<li>${item}</li>`).join('')}</ul>
-                    </div>
+                    <h3 class="brief-header">${itemName}</h3>
+                    <div class="brief-section"><h4 class="brief-section-title">Category Info</h4><p class="brief-text">${parsed.what_it_is}</p></div>
+                    <div class="brief-section"><h4 class="brief-section-title">Job to be Done</h4><p class="brief-text">${parsed.job_to_be_done}</p></div>
+                    <div class="brief-section"><h4 class="brief-section-title">Table Stakes</h4><ul class="brief-list">${parsed.table_stakes.map(i => `<li>${i}</li>`).join('')}</ul></div>
+                    <div class="brief-section"><h4 class="brief-section-title">Opportunities</h4><ul class="brief-list">${parsed.disruption_opportunities.map(i => `<li>${i}</li>`).join('')}</ul></div>
                 </div>`;
         }
 
         targetPanel.innerHTML = htmlContent;
         briefCache.set(itemName, htmlContent);
 
-        if (isBrand && trendResult && trendResult.length > 0) {
+        if (isBrand && trendResult) {
             renderBrandMomentumChart(trendResult);
         }
 
-        targetPanel.querySelector('.context-close-btn').addEventListener('click', close);
-
     } catch (error) {
-        console.error(`Failed to generate brief for ${itemName}:`, error);
-        targetPanel.innerHTML = `<div class="brief-content"><button class="context-close-btn">×</button><p class="error-message">Could not generate brief for ${itemName}.</p></div>`;
-        targetPanel.querySelector('.context-close-btn').addEventListener('click', close);
+        targetPanel.innerHTML = `<div class="brief-content"><p>Error generating brief.</p></div>`;
     }
 }
+
 
 // =================================================================================
 // === REPLACEMENT FUNCTION: renderBrandMomentumChart (V2 - With Contextual Tooltip) ===
@@ -2871,7 +2811,6 @@ async function runProblemFinder(options = {}) {
         renderPosts(filteredItems);
         generateAndRenderHybridSentiment(filteredItems, originalGroupName);
         generateEmotionMapData(filteredItems).then(renderEmotionMap);
-        generateAndRenderMindsetSummary(filteredItems, originalGroupName);
         renderIncludedSubreddits(selectedSubreddits);
         generateAndRenderPowerPhrases(filteredItems, originalGroupName);
         generateAndRenderMindsetSummary(filteredItems, originalGroupName);
@@ -3032,35 +2971,8 @@ async function runProblemFinder(options = {}) {
 }
 
 
-function initializeDashboardInteractivity() {
-    document.addEventListener('click', (e) => {
-        const backButton = e.target.closest('#results-wrapper-b #back-to-step1-btn');
-        if (backButton) {
-            location.reload();
-            return;
-        }
 
-        if (e.target.closest('#results-wrapper-b')) {
-            const cloudWordEl = e.target.closest('.cloud-word');
-            const briefButtonEl = e.target.closest('.brief-button'); //MODIFIED: Target the button now
-            const removeBtnEl = e.target.closest('.remove-sub-btn');
 
-            if (cloudWordEl) {
-                const word = cloudWordEl.dataset.word;
-                const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
-                const postsData = window._sentimentData?.[category]?.[word]?.posts;
-                if (postsData) { showSlidingPanel(word, Array.from(postsData), category); }
-            } else if (briefButtonEl) { // MODIFIED: Check for the button
-                const parentItem = briefButtonEl.closest('.discovery-list-item');
-                const word = parentItem.dataset.word;
-                const type = parentItem.dataset.type;
-                generateAndRenderBrandBrief(word, type);
-            } else if (removeBtnEl) {
-                handleRemoveSubClick(e);
-            }
-        }
-    });
-}
 
 function updateGrowthHeaderDropdown(problemTitles) {
     console.log("CHECKPOINT 1: Entering updateGrowthHeaderDropdown function with these titles:", problemTitles);
@@ -3159,11 +3071,95 @@ function setupGrowthKitInteraction() {
         });
     }
 }
+
+// =================================================================================
+// === UPDATED DISCOVERY LIST RENDERER (Fills Webflow Elements) ===
+// =================================================================================
+function renderDiscoveryList(containerId, data, title, type) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    // 1. Find all the "slots" you built in Webflow inside this container
+    const slots = container.querySelectorAll('.discovery-list-item');
+    
+    // 2. Hide all slots first (resetting the UI)
+    slots.forEach(slot => slot.style.display = 'none');
+
+    // 3. Loop through the AI data and fill your Webflow slots
+    data.forEach(([name, details], index) => {
+        if (slots[index]) {
+            const slot = slots[index];
+            
+            // Fill the Rank, Name, and Count elements you made in Webflow
+            const rankEl = slot.querySelector('.rank');
+            const nameEl = slot.querySelector('.name');
+            const countEl = slot.querySelector('.count');
+
+            if (rankEl) rankEl.textContent = `${index + 1}.`;
+            if (nameEl) nameEl.textContent = name;
+            if (countEl) countEl.textContent = `${details.count} mentions`;
+
+            // Attach data to the slot so the script knows what to analyze if "See Brief" is clicked
+            slot.setAttribute('data-word', name);
+            slot.setAttribute('data-type', type);
+
+            // Make the slot visible (matching your Webflow layout)
+            slot.style.display = 'flex'; 
+        }
+    });
+}
+
+// =================================================================================
+// === UPDATED INTERACTIVITY (Handles Webflow-built buttons) ===
+// =================================================================================
+function initializeDashboardInteractivity() {
+    document.addEventListener('click', (e) => {
+        // 1. Handle Back Button
+        const backButton = e.target.closest('#back-to-step1-btn');
+        if (backButton) {
+            location.reload();
+            return;
+        }
+
+        // 2. Handle "See Brief" Button (The one you built in Webflow)
+        const briefBtn = e.target.closest('.brief-button');
+        if (briefBtn) {
+            const parentSlot = briefBtn.closest('.discovery-list-item');
+            if (parentSlot) {
+                const word = parentSlot.getAttribute('data-word');
+                const type = parentSlot.getAttribute('data-type');
+                
+                // Trigger AI data fetch. 
+                // (Visibility/Animation is handled by your Webflow Interaction)
+                generateAndRenderBrandBrief(word, type);
+            }
+            return;
+        }
+
+        // 3. Handle Word Cloud Clicks
+        const cloudWordEl = e.target.closest('.cloud-word');
+        if (cloudWordEl) {
+            const word = cloudWordEl.dataset.word;
+            const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
+            const postsData = window._sentimentData?.[category]?.[word]?.posts;
+            if (postsData) { showSlidingPanel(word, Array.from(postsData), category); }
+            return;
+        }
+
+        // 4. Handle Subreddit Remove Buttons
+        const removeBtnEl = e.target.closest('.remove-sub-btn');
+        if (removeBtnEl) {
+            handleRemoveSubClick(e);
+            return;
+        }
+    });
+}
+
+// =================================================================================
+// === CORE INITIALIZATION TOOL ===
+// =================================================================================
 function initializeProblemFinderTool() {
     const style = document.createElement('style');
-    // =========================================================================
-    // === PASTE THIS NEW CSS ==================================================
-    // =========================================================================
     style.textContent = `
         .sankey-label {
             padding: 12px 16px;
@@ -3177,17 +3173,9 @@ function initializeProblemFinderTool() {
             line-height: 1.4;
             box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
         }
-        .sankey-problem {
-            background-color: #e0f2fe; /* Light Blue */
-            color: #0c4a6e; /* Dark Blue Text */
-        }
-        .sankey-offer {
-            background-color: #ede9fe; /* Light Purple */
-            color: #5b21b6; /* Dark Purple Text */
-        }
+        .sankey-problem { background-color: #e0f2fe; color: #0c4a6e; }
+        .sankey-offer { background-color: #ede9fe; color: #5b21b6; }
     `;
-    // =========================================================================
-    document.head.appendChild(style);
     document.head.appendChild(style);
 
     console.log("Problem Finder elements found. Initializing...");
@@ -3202,9 +3190,8 @@ function initializeProblemFinderTool() {
     const choicesContainer = document.getElementById('subreddit-choices');
     const audienceTitle = document.getElementById('pf-audience-title');
 
-    // Check if critical elements exist before proceeding
     if (!findCommunitiesBtn || !searchSelectedBtn || !choicesContainer) {
-        console.error("Critical error: A key UI element was not found. Aborting initialization.");
+        console.error("Critical error: A key UI element was not found.");
         return;
     }
 
@@ -3214,10 +3201,9 @@ function initializeProblemFinderTool() {
         step1Container.classList.add('hidden');
         step2Container.classList.add('visible');
         choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>';
-        audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`;
+        if(audienceTitle) audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`;
     };
-
-    // Setup for suggestion pills
+    
     if (pillsContainer) {
         pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
         pillsContainer.addEventListener('click', (event) => {
@@ -3230,11 +3216,10 @@ function initializeProblemFinderTool() {
 
     if (inspireButton) {
         inspireButton.addEventListener('click', () => {
-            if (pillsContainer) pillsContainer.classList.toggle('visible');
+            if(pillsContainer) pillsContainer.classList.toggle('visible');
         });
     }
 
-    // --- Event Listener for "Find Communities" Button ---
     findCommunitiesBtn.addEventListener("click", async (event) => {
         event.preventDefault();
         const groupName = groupInput.value.trim();
@@ -3249,28 +3234,25 @@ function initializeProblemFinderTool() {
             const rankedSubreddits = await fetchAndRankSubreddits(initialSuggestions);
             displaySubredditChoices(rankedSubreddits);
         } catch (error) {
-            console.error("Failed during subreddit validation process:", error);
+            console.error("Failed subreddit validation:", error);
             displaySubredditChoices([]);
         }
     });
 
-    // --- Event Listener for "Search Selected" Button ---
     searchSelectedBtn.addEventListener("click", (event) => {
         event.preventDefault();
-        console.log("CHECKPOINT 1: 'Search Selected' button clicked. The audience should be:", originalGroupName);
         runProblemFinder();
     });
-
-    // Logic for making the subreddit choices clickable
+    
     choicesContainer.addEventListener('click', (event) => {
         const choiceDiv = event.target.closest('.subreddit-choice');
         if (choiceDiv) {
             const checkbox = choiceDiv.querySelector('input[type="checkbox"]');
-            if (checkbox) checkbox.checked = !checkbox.checked;
+            if (checkbox && event.target !== checkbox) checkbox.checked = !checkbox.checked;
         }
     });
 
-    // Initialize the other interactive parts of the dashboard
+    // Initialize logic
     initializeDashboardInteractivity();
     setupGrowthKitInteraction();
 
@@ -3290,11 +3272,10 @@ function waitForElementAndInit() {
             retries++;
             if (retries > maxRetries) {
                 clearInterval(intervalId);
-                console.error(`Initialization FAILED. Key element "#${keyElementId}" not found.`);
+                console.error(`Initialization FAILED. Element "#${keyElementId}" not found.`);
             }
         }
     }, 100);
 }
 
-// --- SCRIPT ENTRY POINT ---
 document.addEventListener('DOMContentLoaded', waitForElementAndInit);

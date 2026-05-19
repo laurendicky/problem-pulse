@@ -2703,7 +2703,84 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     });
 }
 
-// PASTE THIS ENTIRE FUNCTION INTO THE SPOT IDENTIFIED ABOVE
+// =================================================================================
+// === NEW FUNCTION: AI AUDIENCE OVERVIEW (DEMOGRAPHICS) ===
+// =================================================================================
+async function generateAndRenderOverview(posts, audienceContext) {
+    const container = document.getElementById('overview-div');
+    if (!container) return;
+
+    // 1. Set a loading state
+    container.innerHTML = `<p class="loading-text">Extracting demographic signals...</p>`;
+
+    try {
+        // We look at the top 40 posts to find clues about age, gender, and life stage
+        const topPostsText = posts.slice(0, 40).map(p => 
+            `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 700)
+        ).join('\n---\n');
+
+        const prompt = `You are a demographic researcher. Analyze the following Reddit content from the "${audienceContext}" community. 
+        Identify common characteristics of this audience based on self-disclosures (e.g., "I'm 24M", "my wife") and community interests.
+
+        Respond ONLY with a valid JSON object with the following keys:
+        1. "age_range": A short string (e.g., "Primarily 25-34").
+        2. "gender": A short string describing the likely split (e.g., "Majority Male").
+        3. "life_stage": One sentence describing where they are in life (e.g., "Established professionals with young families").
+        4. "location_clues": Any geographic patterns found, or "Global" if none.
+
+        Text to analyze:
+        ${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You are a demographic analyst that outputs only strict JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.3,
+            max_tokens: 400,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        });
+        
+        if (!response.ok) throw new Error('Overview API failed.');
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        // 2. Put the data into your overview-div
+        container.innerHTML = `
+            <div class="overview-card">
+                <h3 class="dashboard-section-title">Audience Snapshot</h3>
+                <div class="overview-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; text-align: left;">
+                    <div class="overview-item">
+                        <span style="font-weight: bold; color: #777; display: block; font-size: 11px; text-transform: uppercase;">Estimated Age</span>
+                        <span style="font-size: 16px; color: white;">${parsed.age_range}</span>
+                    </div>
+                    <div class="overview-item">
+                        <span style="font-weight: bold; color: #777; display: block; font-size: 11px; text-transform: uppercase;">Gender Split</span>
+                        <span style="font-size: 16px; color: white;">${parsed.gender}</span>
+                    </div>
+                    <div class="overview-item" style="grid-column: span 2;">
+                        <span style="font-weight: bold; color: #777; display: block; font-size: 11px; text-transform: uppercase;">Life Stage</span>
+                        <span style="font-size: 16px; color: white;">${parsed.life_stage}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+
+    } catch (error) {
+        console.error("Overview error:", error);
+        container.innerHTML = `<p style="color: red;">Could not load demographic snapshot.</p>`;
+    }
+}
+
+
 
 async function runProblemFinder(options = {}) {
 
@@ -2734,7 +2811,7 @@ async function runProblemFinder(options = {}) {
     const countHeaderDiv = document.getElementById("count-header");
     if (!isUpdate) {
         if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases", "value-tree"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "overview-div", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases", "value-tree"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
         for (let i = 1; i <= 5; i++) {
             const block = document.getElementById(`findings-block${i}`);
@@ -2769,6 +2846,7 @@ async function runProblemFinder(options = {}) {
         renderPosts(filteredItems);
         generateAndRenderHybridSentiment(filteredItems, originalGroupName);
         generateEmotionMapData(filteredItems).then(renderEmotionMap);
+        generateAndRenderMindsetSummary(filteredItems, originalGroupName);
         renderIncludedSubreddits(selectedSubreddits);
         generateAndRenderPowerPhrases(filteredItems, originalGroupName);
         generateAndRenderMindsetSummary(filteredItems, originalGroupName);

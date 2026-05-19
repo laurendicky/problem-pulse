@@ -2706,41 +2706,40 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
 // =================================================================================
 // === NEW FUNCTION: AI AUDIENCE OVERVIEW (DEMOGRAPHICS) ===
 // =================================================================================
-async function generateAndRenderOverview(posts, audienceContext) {
-    const container = document.getElementById('overview-div');
-    if (!container) return;
 
-    // 1. Set a loading state
-    container.innerHTML = `<p class="loading-text">Extracting demographic signals...</p>`;
+async function generateAndRenderOverview(posts, audienceContext) {
+    console.log("CHECKPOINT 1: Overview Function Started. Audience:", audienceContext);
+    
+    const container = document.getElementById('overview-div');
+    
+    if (!container) {
+        console.error("ERROR: I could not find a div with ID 'overview-div' on this page.");
+        return;
+    }
+
+    if (!posts || posts.length === 0) {
+        console.warn("WARNING: No posts were passed to the overview function.");
+        container.innerHTML = "No posts found to analyze demographics.";
+        return;
+    }
+
+    container.innerHTML = `<p class="loading-text">Analyzing demographics for ${audienceContext}...</p>`;
 
     try {
-        // We look at the top 40 posts to find clues about age, gender, and life stage
         const topPostsText = posts.slice(0, 40).map(p => 
             `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 700)
         ).join('\n---\n');
 
-        const prompt = `You are a demographic researcher. Analyze the following Reddit content from the "${audienceContext}" community. 
-        Identify common characteristics of this audience based on self-disclosures (e.g., "I'm 24M", "my wife") and community interests.
-
-        Respond ONLY with a valid JSON object with the following keys:
-        1. "age_range": A short string (e.g., "Primarily 25-34").
-        2. "gender": A short string describing the likely split (e.g., "Majority Male").
-        3. "life_stage": One sentence describing where they are in life (e.g., "Established professionals with young families").
-        4. "location_clues": Any geographic patterns found, or "Global" if none.
-
-        Text to analyze:
-        ${topPostsText}`;
+        const prompt = `Identify common age range, gender, and life stage for the "${audienceContext}" audience based on these posts. Respond ONLY with a JSON object keys: "age_range", "gender", "life_stage", "location_clues". \n\nPosts: ${topPostsText}`;
 
         const openAIParams = {
             model: "gpt-4o-mini",
-            messages: [
-                { role: "system", content: "You are a demographic analyst that outputs only strict JSON." },
-                { role: "user", content: prompt }
-            ],
+            messages: [{ role: "system", content: "You are a demographic analyst." }, { role: "user", content: prompt }],
             temperature: 0.3,
-            max_tokens: 400,
             response_format: { "type": "json_object" }
         };
+
+        console.log("CHECKPOINT 2: Sending data to AI...");
 
         const response = await fetch(OPENAI_PROXY_URL, { 
             method: 'POST', 
@@ -2748,37 +2747,26 @@ async function generateAndRenderOverview(posts, audienceContext) {
             body: JSON.stringify({ openaiPayload: openAIParams }) 
         });
         
-        if (!response.ok) throw new Error('Overview API failed.');
-
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
-        // 2. Put the data into your overview-div
+        console.log("CHECKPOINT 3: AI responded successfully!", parsed);
+
         container.innerHTML = `
-            <div class="overview-card">
-                <h3 class="dashboard-section-title">Audience Snapshot</h3>
-                <div class="overview-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px; text-align: left;">
-                    <div class="overview-item">
-                        <span style="font-weight: bold; color: #777; display: block; font-size: 11px; text-transform: uppercase;">Estimated Age</span>
-                        <span style="font-size: 16px; color: white;">${parsed.age_range}</span>
-                    </div>
-                    <div class="overview-item">
-                        <span style="font-weight: bold; color: #777; display: block; font-size: 11px; text-transform: uppercase;">Gender Split</span>
-                        <span style="font-size: 16px; color: white;">${parsed.gender}</span>
-                    </div>
-                    <div class="overview-item" style="grid-column: span 2;">
-                        <span style="font-weight: bold; color: #777; display: block; font-size: 11px; text-transform: uppercase;">Life Stage</span>
-                        <span style="font-size: 16px; color: white;">${parsed.life_stage}</span>
-                    </div>
-                </div>
+            <div style="padding: 20px; background: rgba(255,255,255,0.05); border-radius: 10px;">
+                <h3 style="color: #00a5ce; margin-top:0;">Audience Snapshot</h3>
+                <p><strong>Age:</strong> ${parsed.age_range}</p>
+                <p><strong>Gender:</strong> ${parsed.gender}</p>
+                <p><strong>Life Stage:</strong> ${parsed.life_stage}</p>
             </div>
         `;
 
     } catch (error) {
-        console.error("Overview error:", error);
-        container.innerHTML = `<p style="color: red;">Could not load demographic snapshot.</p>`;
+        console.error("CHECKPOINT ERROR:", error);
+        container.innerHTML = "Error loading snapshot.";
     }
 }
+
 
 
 
@@ -2843,6 +2831,7 @@ async function runProblemFinder(options = {}) {
         const filteredItems = filterPosts(allItems, selectedMinUpvotes);
         if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
         window._filteredPosts = filteredItems;
+        generateAndRenderOverview(filteredItems, originalGroupName);
         renderPosts(filteredItems);
         generateAndRenderHybridSentiment(filteredItems, originalGroupName);
         generateEmotionMapData(filteredItems).then(renderEmotionMap);

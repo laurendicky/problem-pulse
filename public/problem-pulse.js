@@ -793,15 +793,24 @@ async function enhanceDiscoveryWithComments(initialPosts, nicheContext) {
 // =================================================================================
 // === REPLACEMENT FUNCTION: renderDiscoveryList ===
 // =================================================================================
-
 function renderDiscoveryList(containerId, data, title, type) {
+    console.log(`[Discovery] Rendering ${type} for ${containerId}. Found ${data.length} items.`);
+    
     const container = document.getElementById(containerId);
-    if (!container) return;
+    if (!container) {
+        console.error(`[Discovery] Error: Container #${containerId} not found on page.`);
+        return;
+    }
 
-    // 1. Find the "slots" you built in Webflow
+    // 1. Find the "slots" you duplicated 8 times in Webflow
     const slots = container.querySelectorAll('.discovery-list-item');
     
-    // 2. Hide all slots by default
+    if (slots.length === 0) {
+        console.warn(`[Discovery] No elements with class .discovery-list-item found inside #${containerId}. Did you add them in Webflow?`);
+        return;
+    }
+
+    // 2. Hide all slots first (to reset from previous searches)
     slots.forEach(slot => slot.style.display = 'none');
 
     // 3. Fill the slots with real data
@@ -809,7 +818,6 @@ function renderDiscoveryList(containerId, data, title, type) {
         if (slots[index]) {
             const slot = slots[index];
             
-            // Fill Rank, Name, and Count
             const rankEl = slot.querySelector('.rank');
             const nameEl = slot.querySelector('.name');
             const countEl = slot.querySelector('.count');
@@ -818,11 +826,11 @@ function renderDiscoveryList(containerId, data, title, type) {
             if (nameEl) nameEl.textContent = name;
             if (countEl) countEl.textContent = `${details.count} mentions`;
 
-            // Attach data for the "See Brief" click
+            // Important: This allows the "See Brief" logic to work
             slot.setAttribute('data-word', name);
             slot.setAttribute('data-type', type);
 
-            // Show the slot (Use 'flex' to match your horizontal layout)
+            // Make it visible
             slot.style.display = 'flex'; 
         }
     });
@@ -2775,7 +2783,7 @@ async function runProblemFinder(options = {}) {
     const countHeaderDiv = document.getElementById("count-header");
     if (!isUpdate) {
         if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "top-brands-container", "overview-div", "top-products-container", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases", "value-tree"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "overview-div", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases", "value-tree"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
         for (let i = 1; i <= 5; i++) {
             const block = document.getElementById(`findings-block${i}`);
@@ -3279,3 +3287,6 @@ function waitForElementAndInit() {
 }
 
 document.addEventListener('DOMContentLoaded', waitForElementAndInit);
+
+
+

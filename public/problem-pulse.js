@@ -387,9 +387,8 @@ async function generateEmotionMapData(posts) { try { const topPostsText = posts.
 
 
 
-
 function renderEmotionMap(data) {
-    const container = document.getElementById('emotion-map-container');
+    const container = document.getElementById('polarity-map'); // Updated ID
     if (!container) return;
 
     if (window.myEmotionChart) {
@@ -397,54 +396,47 @@ function renderEmotionMap(data) {
     }
 
     if (data.length < 3) {
-        container.innerHTML = `
-            <h3 class="dashboard-section-title">Problem Polarity Map</h3>
-            <p class="chart-placeholder-text">Not enough distinct problems were found.</p>
-        `;
+        container.innerHTML = `<p style="color: #666; text-align: center; padding: 50px;">Not enough data to map.</p>`;
         return;
     }
 
+    // REMOVED: Internal Title and Description as requested
     container.innerHTML = `
-        <h3 class="dashboard-section-title">Problem Polarity Map</h3>
-        <div id="emotion-map-wrapper" style="position: relative; height: 500px; margin-top: 20px;">
+        <div id="emotion-map-wrapper" style="position: relative; height: 600px; width: 100%; background: #0000ff;">
             <canvas id="emotion-chart-canvas"></canvas>
-            <button id="chart-zoom-btn"></button>
         </div>
     `;
 
     const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d');
     if (!ctx) return;
 
-    // --- PLUGIN: DRAW LABELS DIRECTLY ON CANVAS ---
-    const alwaysVisibleLabels = {
-        id: 'alwaysVisibleLabels',
-        afterDraw(chart) {
-            const { ctx, scales: { x, y } } = chart;
-            ctx.save();
-            ctx.font = 'bold 12px "Plus Jakarta Sans", sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'bottom';
-            
-            // Logic: Only label the top 15 items to keep it clean
-            const itemsToLabel = chart.data.datasets[0].data.slice(0, 15);
+    // --- STEP 1: NORMALIZE THE DATA (The "Un-squasher") ---
+    const xValues = data.map(d => d.x);
+    const yValues = data.map(d => d.y);
+    const minX = Math.min(...xValues);
+    const maxX = Math.max(...xValues);
+    const minY = Math.min(...yValues);
+    const maxY = Math.max(...yValues);
 
-            itemsToLabel.forEach((point) => {
-                const posX = x.getPixelForValue(point.x);
-                const posY = y.getPixelForValue(point.y);
+    const normalizedData = data.map(d => {
+        // We stretch the values to fill a 1-9 scale so they don't hit the very edges
+        const nx = ((d.x - minX) / (maxX - minX || 1)) * 8 + 1;
+        const ny = ((d.y - minY) / (maxY - minY || 1)) * 8 + 1;
+        
+        // Add "Jitter": prevents overlapping by adding a tiny random offset
+        const jitterX = (Math.random() - 0.5) * 0.5;
+        const jitterY = (Math.random() - 0.5) * 0.5;
 
-                // Add a text shadow for better readability on dark backgrounds
-                ctx.shadowColor = 'rgba(0, 0, 0, 1)';
-                ctx.shadowBlur = 4;
-                ctx.fillStyle = 'white';
+        return {
+            x: nx + jitterX,
+            y: ny + jitterY,
+            label: d.label,
+            originalX: d.x,
+            originalY: d.y
+        };
+    });
 
-                // Draw the label 10 pixels above the bubble
-                ctx.fillText(point.label, posX, posY - 12);
-            });
-            ctx.restore();
-        }
-    };
-
-    // --- PLUGIN: QUADRANT BACKGROUNDS (Same as before) ---
+    // --- STEP 2: PLUGINS (Quadrants and Labels) ---
     const quadrantPlugin = {
         id: 'quadrantPlugin',
         beforeDraw(chart) {
@@ -452,56 +444,81 @@ function renderEmotionMap(data) {
             const midX = x.getPixelForValue(5);
             const midY = y.getPixelForValue(5);
             ctx.save();
-            // Top Right: Critical Zone Shading
-            ctx.fillStyle = 'rgba(253, 128, 199, 0.04)';
-            ctx.fillRect(midX, top, right - midX, midY - top);
-            // Draw Crosshair lines
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-            ctx.lineWidth = 1;
+            
+            // Draw Divider Lines
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
+            ctx.setLineDash([5, 5]);
             ctx.beginPath();
             ctx.moveTo(midX, top); ctx.lineTo(midX, bottom);
             ctx.moveTo(left, midY); ctx.lineTo(right, midY);
             ctx.stroke();
+
             // Corner Labels
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-            ctx.font = 'bold 9px sans-serif';
-            ctx.fillText('CRITICAL', right - 50, top + 15);
-            ctx.fillText('MINOR', left + 10, bottom - 10);
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+            ctx.font = 'bold 12px sans-serif';
+            ctx.fillText('CRITICAL', right - 70, top + 30);
+            ctx.fillText('MINOR', left + 20, bottom - 20);
+            ctx.restore();
+        }
+    };
+
+    const labelPlugin = {
+        id: 'labelPlugin',
+        afterDraw(chart) {
+            const { ctx, scales: { x, y } } = chart;
+            ctx.save();
+            ctx.font = 'bold 13px "Plus Jakarta Sans", sans-serif';
+            ctx.fillStyle = 'white';
+            ctx.textAlign = 'center';
+            ctx.shadowColor = 'black';
+            ctx.shadowBlur = 6;
+
+            chart.data.datasets[0].data.forEach((point) => {
+                const px = x.getPixelForValue(point.x);
+                const py = y.getPixelForValue(point.y);
+                // Draw label above the bubble
+                ctx.fillText(point.label, px, py - 15);
+            });
             ctx.restore();
         }
     };
 
     window.myEmotionChart = new Chart(ctx, {
         type: 'scatter',
-        plugins: [quadrantPlugin, alwaysVisibleLabels], // Add our new label plugin here
+        plugins: [quadrantPlugin, labelPlugin],
         data: {
             datasets: [{
-                data: data,
+                data: normalizedData,
                 backgroundColor: '#fd80c7',
-                borderColor: '#ffffff',
-                borderWidth: 1,
-                pointRadius: (context) => 5 + (context.raw.x / 10) * 12,
+                borderColor: 'white',
+                borderWidth: 2,
+                pointRadius: 12,
+                pointHoverRadius: 15
             }]
         },
         options: {
             maintainAspectRatio: false,
-            layout: { padding: { top: 30 } }, // Add padding so top labels don't get cut off
+            layout: { padding: 40 },
+            scales: {
+                x: { 
+                    min: 0, max: 10, display: true, 
+                    grid: { display: false }, 
+                    ticks: { display: false },
+                    title: { display: true, text: 'FREQUENCY →', color: 'rgba(255,255,255,0.5)' }
+                },
+                y: { 
+                    min: 0, max: 10, display: true, 
+                    grid: { display: false }, 
+                    ticks: { display: false },
+                    title: { display: true, text: 'INTENSITY →', color: 'rgba(255,255,255,0.5)' }
+                }
+            },
             plugins: {
                 legend: { display: false },
-                tooltip: { enabled: true } // Keep tooltip as a backup for details
-            },
-            scales: {
-                x: {
-                    title: { display: true, text: 'FREQUENCY (Mentions)', color: '#666' },
-                    min: 0, max: 10,
-                    grid: { display: false },
-                    ticks: { color: '#444' }
-                },
-                y: {
-                    title: { display: true, text: 'INTENSITY (Pain Level)', color: '#666' },
-                    min: 0, max: 10,
-                    grid: { display: false },
-                    ticks: { color: '#444' }
+                tooltip: {
+                    callbacks: {
+                        label: (ctx) => ` ${ctx.raw.label}`
+                    }
                 }
             }
         }

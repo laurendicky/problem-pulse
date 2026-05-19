@@ -1250,56 +1250,52 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
 
 const briefCache = new Map();
 
-
+// =================================================================================
+// === OPTIMIZED: DETACHED LOADING (Text first, Chart later) ===
+// =================================================================================
 async function generateAndRenderBrandBrief(itemName, itemType) {
     const isBrand = itemType === 'brands';
     const targetPanel = document.getElementById(isBrand ? 'brand-detail-panel' : 'product-detail-panel');
 
-    if (!targetPanel) {
-        console.error("Panel not found in Webflow. Check your IDs.");
-        return;
-    }
+    if (!targetPanel) return;
 
-    // 1. Show a loading state inside your Webflow div immediately
-    targetPanel.innerHTML = '<div class="brief-content"><p class="loading-text">Analyzing mentions... <span class="loader-dots"></span></p></div>';
+    // 1. Show global loading state
+    targetPanel.innerHTML = '<div class="brief-content"><p class="loading-text">Building brief... <span class="loader-dots"></span></p></div>';
 
-    // 2. Check if we have this brief saved already
+    // 2. Return cached version immediately if available
     if (briefCache.has(itemName)) {
         targetPanel.innerHTML = briefCache.get(itemName);
-        if (targetPanel.querySelector('#brand-momentum-chart')) {
-            const chartData = JSON.parse(targetPanel.querySelector('#brand-momentum-chart-data').textContent);
-            renderBrandMomentumChart(chartData);
+        // If it's a brand, we might still need to re-render the chart from the hidden script tag
+        if (isBrand && targetPanel.querySelector('#brand-momentum-chart-data')) {
+             const cachedTrend = JSON.parse(targetPanel.querySelector('#brand-momentum-chart-data').textContent);
+             if (cachedTrend) renderBrandMomentumChart(cachedTrend);
         }
         return;
     }
     
     const postsForAnalysis = (window._entityData?.[itemType]?.[itemName]?.posts || []);
-    
-    try {
-        const top75Posts = postsForAnalysis.slice(0, 75);
-        const topPostsText = top75Posts.map(p => `"${p.data.title || ''} - ${p.data.selftext || p.data.body || ''}"`).join('\n');
+    const top50Posts = postsForAnalysis.slice(0, 50);
+    const topPostsText = top50Posts.map(p => `"${p.data.title || ''} - ${p.data.selftext || p.data.body || ''}"`).join('\n');
 
+    try {
+        // --- STEP A: FETCH TEXT DATA ONLY (Priority 1) ---
         const prompt = isBrand ?
             `Analyze "${itemName}" based on: ${topPostsText}. Return JSON with: what_it_is, use_case, loves (array), hates (array), verdict.` :
             `Analyze category "${itemName}" based on: ${topPostsText}. Return JSON with: what_it_is, job_to_be_done, table_stakes (array), disruption_opportunities (array).`;
 
         const openAIParams = { 
-            model: "gpt-4o", 
-            messages: [{ role: "system", content: "You are a market analyst. Output ONLY valid JSON." }, { role: "user", content: prompt }], 
-            temperature: 0.2, 
+            model: "gpt-4o-mini", 
+            messages: [{ role: "system", content: "You are a fast market analyst. Output JSON." }, { role: "user", content: prompt }], 
+            temperature: 0.1, 
             response_format: { "type": "json_object" } 
         };
 
-        const briefPromise = fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }).then(res => res.json());
+        // We only 'await' the brief, NOT the chart
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
 
-        const selectedSubreddits = Array.from(document.querySelectorAll('#subreddit-choices input:checked')).map(cb => cb.value);
-        const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
-
-        const trendPromise = isBrand ? fetchSentimentTrendData(itemName, subredditQueryString) : Promise.resolve(null);
-
-        const [briefResult, trendResult] = await Promise.all([briefPromise, trendPromise]);
-        const parsed = JSON.parse(briefResult.openaiResponse);
-
+        // --- STEP B: RENDER THE UI IMMEDIATELY (Priority 2) ---
         let htmlContent = '';
         if (isBrand) {
             htmlContent = `
@@ -1307,11 +1303,19 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
                     <button class="context-close-btn">×</button>
                     <h3 class="brief-header">${itemName}</h3>
                     <div class="brief-section"><h4 class="brief-section-title">What It Is</h4><p class="brief-text">${parsed.what_it_is}</p></div>
-                    <div class="brief-section"><h4 class="brief-section-title">Brand Momentum</h4><div id="brand-momentum-chart"></div><script type="application/json" id="brand-momentum-chart-data">${JSON.stringify(trendResult)}</script></div>
+                    
+                    <!-- THE CHART PLACEHOLDER -->
+                    <div class="brief-section">
+                        <h4 class="brief-section-title">Sentiment Trend</h4>
+                        <div id="brand-momentum-chart" style="height:200px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.03); border-radius:8px; font-size:12px; color:#888;">
+                            <span>Crunching historical data...</span>
+                        </div>
+                    </div>
+
                     <div class="brief-section"><h4 class="brief-section-title">Use Case</h4><p class="brief-text">${parsed.use_case}</p></div>
                     <div class="brief-section"><h4 class="brief-section-title">Strengths</h4><ul class="brief-list">${parsed.loves.map(i => `<li>${i}</li>`).join('')}</ul></div>
-                    <div class="brief-section"><h4 class="brief-section-title">Weaknesses</h4><ul class="brief-list">${parsed.hates.map(i => `<li>${i}</li>`).join('')}</ul></div>
-                    <div class="brief-verdict"><p>${parsed.verdict}</p></div>
+                    <div class="brief-section"><h4 class="brief-section-title">Pain Points</h4><ul class="brief-list">${parsed.hates.map(i => `<li>${i}</li>`).join('')}</ul></div>
+                    <div class="brief-verdict"><p><strong>Verdict:</strong> ${parsed.verdict}</p></div>
                 </div>`;
         } else {
             htmlContent = `
@@ -1328,14 +1332,73 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         targetPanel.innerHTML = htmlContent;
         briefCache.set(itemName, htmlContent);
 
-        if (isBrand && trendResult) {
-            renderBrandMomentumChart(trendResult);
+        // --- STEP C: KICK OFF CHART IN BACKGROUND (Priority 3) ---
+        if (isBrand) {
+            const selectedSubreddits = Array.from(document.querySelectorAll('#subreddit-choices input:checked')).map(cb => cb.value);
+            const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
+            
+            // Note: NO 'await' here. It runs while the user is reading the strengths!
+            fetchSentimentTrendData(itemName, subredditQueryString).then(trendResult => {
+                if (trendResult && trendResult.length > 0) {
+                    // Update the placeholder with the actual chart
+                    renderBrandMomentumChart(trendResult);
+                    // Store the data in a hidden script tag so it's available if they close/reopen
+                    const scriptTag = document.createElement('script');
+                    scriptTag.id = 'brand-momentum-chart-data';
+                    scriptTag.type = 'application/json';
+                    scriptTag.textContent = JSON.stringify(trendResult);
+                    targetPanel.querySelector('.brief-content').appendChild(scriptTag);
+                } else {
+                    document.getElementById('brand-momentum-chart').innerHTML = '<span>Not enough historical data found.</span>';
+                }
+            });
         }
 
     } catch (error) {
-        targetPanel.innerHTML = `<div class="brief-content"><p>Error generating brief.</p></div>`;
+        console.error("Brief error:", error);
+        targetPanel.innerHTML = `<div class="brief-content"><p>Error loading brief.</p></div>`;
     }
 }
+
+// =================================================================================
+// === BACKGROUND CHART FETCH (Fast classification) ===
+// =================================================================================
+async function fetchSentimentTrendData(brandName, subredditQueryString) {
+    let searchTerms = [`"${brandName}"`];
+    const revisedTimePeriods = [
+        { label: 'Past 6 Mos', value: '6month' },
+        { label: 'Last 30 Days', value: 'month' },
+        { label: 'Last 7 Days', value: 'week' },
+    ];
+
+    const trendData = [];
+    const fetchPromises = revisedTimePeriods.map(period =>
+        fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 30, period.value)
+    );
+    
+    const results = await Promise.allSettled(fetchPromises);
+
+    for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        if (result.status === 'fulfilled' && result.value.length > 0) {
+            const uniquePosts = deduplicatePosts(result.value);
+            const sentimentResults = await classifySentimentWithAI(uniquePosts);
+
+            const positiveMentions = sentimentResults.filter(s => s === 'Positive').length;
+            const negativeMentions = sentimentResults.filter(s => s === 'Negative').length;
+            const totalMentions = positiveMentions + negativeMentions;
+            const positivePercentage = totalMentions > 0 ? Math.round((positiveMentions / totalMentions) * 100) : 50;
+
+            trendData.push({
+                period: revisedTimePeriods[i].label,
+                positivePercentage: positivePercentage
+            });
+        }
+    }
+    return trendData;
+}
+
+
 
 
 // =================================================================================

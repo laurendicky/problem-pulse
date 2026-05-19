@@ -82,8 +82,8 @@ async function classifySentimentWithAI(posts) {
                     allSentiments.push(...batchSentiments);
                 }
             } else {
-                 // If AI fails for a batch, classify all as Neutral to not skew results
-                 allSentiments.push(...Array(batch.length).fill('Neutral'));
+                // If AI fails for a batch, classify all as Neutral to not skew results
+                allSentiments.push(...Array(batch.length).fill('Neutral'));
             }
         } catch (error) {
             console.error("AI sentiment classification batch failed:", error);
@@ -164,7 +164,7 @@ async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm =
 function deduplicateByContent(items) {
     const seenContentSignatures = new Set();
     const uniqueIds = new Set(); // Also track IDs to prevent accidental removal of different comments with same short content
-    
+
     return items.filter(item => {
         const id = item.data.id;
         const content = (item.data.selftext || item.data.body || '').trim();
@@ -191,7 +191,7 @@ function deduplicateByContent(items) {
             }
             seenContentSignatures.add(signature);
         }
-        
+
         uniqueIds.add(id);
         return true;
     });
@@ -228,7 +228,7 @@ function renderPosts(posts) {
         const content = post.data.selftext || post.data.body || 'No additional content.';
         const title = post.data.title || post.data.link_title || 'View Comment Thread';
         const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : '';
-        
+
         // All inline styles have been removed and replaced with CSS classes.
         return `
             <div class="insight">
@@ -292,7 +292,7 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
             const content = post.data.selftext || post.data.body || 'No content.';
             const title = post.data.title || post.data.link_title || 'View Comment';
             const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : '';
-            
+
             // Note: The sample posts use a slightly different class "sample-insight"
             // to allow for different styling than the main post list.
             return `
@@ -386,7 +386,7 @@ function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.e
 async function generateEmotionMapData(posts) { try { const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || p.data.link_title}\nBody: ${(p.data.selftext || p.data.body).substring(0, 1000)}`).join('\n---\n'); const prompt = `You are a world-class market research analyst for '${originalGroupName}'. Analyze the following text to identify the 15 most significant problems, pain points, or key topics.\n\nFor each one, provide:\n1. "problem": A short, descriptive name for the problem (e.g., "Finding Reliable Vendors", "Budgeting Anxiety").\n2. "intensity": A score from 1 (mild) to 10 (severe) of how big a problem this is.\n3. "frequency": A score from 1 (rarely mentioned) to 10 (frequently mentioned) based on its prevalence in the text.\n\nRespond ONLY with a valid JSON object with a single key "problems", which is an array of these objects.\nExample: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequency": 9 }] }`; const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 1500, response_format: { "type": "json_object" } }; const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) { throw new Error(`AI API failed with status: ${response.status}`); } const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const aiProblems = parsed.problems || []; if (aiProblems.length >= 3) { console.log("Successfully used AI analysis for Problem Map."); const chartData = aiProblems.map(item => { if (!item.problem || typeof item.intensity !== 'number' || typeof item.frequency !== 'number') return null; return { x: item.frequency, y: item.intensity, label: item.problem }; }).filter(Boolean); return chartData.sort((a, b) => b.x - a.x); } else { console.warn("AI analysis returned too few problems. Falling back to keyword analysis."); } } catch (error) { console.error("AI analysis for Problem Map failed:", error, "Falling back to reliable keyword-based analysis."); } const emotionFreq = {}; posts.forEach(post => { const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase(); const words = text.replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { const lemma = lemmatize(rawWord); if (emotionalIntensityScores[lemma]) { emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1; } }); }); const chartData = Object.entries(emotionFreq).map(([word, freq]) => ({ x: freq, y: emotionalIntensityScores[word], label: word })); return chartData.sort((a, b) => b.x - a.x).slice(0, 25); }
 
 function renderEmotionMap(data) {
-    const container = document.getElementById('polarity-map'); // Corrected ID
+    const container = document.getElementById('emotion-map-container');
     if (!container) return;
 
     if (window.myEmotionChart) {
@@ -394,167 +394,154 @@ function renderEmotionMap(data) {
     }
 
     if (data.length < 3) {
-        container.innerHTML = `<p style="color: #666; text-align: center; padding: 50px;">Waiting for more data points...</p>`;
+        container.innerHTML = `
+            <p class="chart-placeholder-text">Not enough distinct problems were found to build a map.</p>
+        `;
         return;
     }
 
-    // Container setup (No title, high-quality dark background)
+    // 1. REMOVED HEADER & DESCRIPTION - managing via Webflow
     container.innerHTML = `
-        <div id="emotion-map-wrapper" style="position: relative; height: 600px; width: 100%; border-radius: 16px; overflow: hidden; background: #000033;">
-            <canvas id="emotion-chart-canvas"></canvas>
+        <div id="emotion-map-wrapper">
+            <div id="emotion-map">
+                <canvas id="emotion-chart-canvas"></canvas>
+            </div>
+            <button id="chart-zoom-btn"></button>
         </div>
     `;
 
     const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d');
     if (!ctx) return;
 
-    // --- 1. DATA NORMALIZATION & COLLISION DETECTION ---
-    const xVals = data.map(d => d.x);
-    const yVals = data.map(d => d.y);
-    const minX = Math.min(...xVals), maxX = Math.max(...xVals);
-    const minY = Math.min(...yVals), maxY = Math.max(...yVals);
+    const maxFreq = Math.max(...data.map(p => p.x));
+    const allFrequencies = data.map(p => p.x);
+    const minObservedFreq = Math.min(...allFrequencies);
+    const collapsedMinX = 5;
+    const isCollapseFeatureEnabled = minObservedFreq >= collapsedMinX;
+    const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0;
 
-    // Spread the dots out to fill the 1.5 to 8.5 range (leaving room for labels at edges)
-    const processedData = data.map(d => {
-        let nx = ((d.x - minX) / (maxX - minX || 1)) * 7 + 1.5;
-        let ny = ((d.y - minY) / (maxY - minY || 1)) * 7 + 1.5;
-        return { ...d, x: nx, y: ny, originalX: d.x, originalY: d.y };
-    });
-
-    // Sort by "Importance" (X + Y) to find the Top 3
-    const sortedData = [...processedData].sort((a, b) => (b.x + b.y) - (a.x + a.y));
-    const top3Labels = new Set(sortedData.slice(0, 3).map(d => d.label));
-
-    // Nudge logic to prevent direct overlaps
-    for (let i = 0; i < processedData.length; i++) {
-        for (let j = i + 1; j < processedData.length; j++) {
-            const dist = Math.sqrt(Math.pow(processedData[i].x - processedData[j].x, 2) + Math.pow(processedData[i].y - processedData[j].y, 2));
-            if (dist < 0.6) { // If they are too close
-                processedData[i].x -= 0.3;
-                processedData[j].x += 0.3;
-            }
-        }
-    }
-
-    // --- 2. THE STRATEGIC MATRIX PLUGIN ---
-    const matrixPlugin = {
-        id: 'matrixPlugin',
-        beforeDraw(chart) {
-            const { ctx, chartArea: { top, bottom, left, right, width, height }, scales: { x, y } } = chart;
-            const midX = x.getPixelForValue(5);
-            const midY = y.getPixelForValue(5);
-
-            ctx.save();
-            // Quadrant Colors (Gradients)
-            // Top Right: THE BURN LIST
-            ctx.fillStyle = 'rgba(255, 79, 163, 0.08)';
-            ctx.fillRect(midX, top, right - midX, midY - top);
-            
-            // Labels for Strategy
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
-            ctx.font = 'bold 10px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('THE BURN LIST (FIX NOW)', (midX + right) / 2, top + 25);
-            ctx.fillText('ACUTE CRISES', (midX + left) / 2, top + 25);
-            ctx.fillText('SILENT TAX (LONG TERM)', (midX + right) / 2, bottom - 15);
-            ctx.fillText('THE NOISE', (midX + left) / 2, bottom - 15);
-
-            // Crosshair
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.1)';
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(midX, top); ctx.lineTo(midX, bottom);
-            ctx.moveTo(left, midY); ctx.lineTo(right, midY);
-            ctx.stroke();
-            ctx.restore();
-        }
-    };
-
-    // --- 3. THE SMART LABEL PLUGIN ---
-    const smartLabelPlugin = {
-        id: 'smartLabelPlugin',
-        afterDraw(chart) {
-            const { ctx, scales: { x, y } } = chart;
-            ctx.save();
-            
-            chart.data.datasets[0].data.forEach((point) => {
-                const px = x.getPixelForValue(point.x);
-                const py = y.getPixelForValue(point.y);
-                const isTop3 = top3Labels.has(point.label);
-
-                // Styling for Top 3 vs Others
-                ctx.font = isTop3 ? 'bold 13px sans-serif' : '11px sans-serif';
-                ctx.fillStyle = isTop3 ? '#00e5ff' : 'rgba(255,255,255,0.7)';
-                ctx.textAlign = 'center';
-                
-                // Shadow for legibility
-                ctx.shadowColor = 'black';
-                ctx.shadowBlur = 4;
-
-                // Draw Label
-                ctx.fillText(point.label, px, py - 18);
-
-                // Add a small leader line for top 3
-                if (isTop3) {
-                    ctx.strokeStyle = '#00e5ff';
-                    ctx.lineWidth = 1;
-                    ctx.beginPath();
-                    ctx.moveTo(px, py - 8);
-                    ctx.lineTo(px, py - 15);
-                    ctx.stroke();
-                }
-            });
-            ctx.restore();
-        }
-    };
-
-    // --- 4. CHART INITIALIZATION ---
     window.myEmotionChart = new Chart(ctx, {
         type: 'scatter',
-        plugins: [matrixPlugin, smartLabelPlugin],
         data: {
             datasets: [{
-                data: processedData,
-                backgroundColor: (context) => {
-                    const label = context.raw?.label;
-                    return top3Labels.has(label) ? '#00e5ff' : '#fd80c7';
-                },
-                borderColor: 'white',
+                label: 'Problems/Topics',
+                data: data,
+                // 3. CIRCLE COLOUR: TEAL
+                backgroundColor: '#00a5ce', 
+                borderColor: 'rgba(255, 255, 255, 0.5)',
                 borderWidth: 1,
-                pointRadius: (context) => top3Labels.has(context.raw?.label) ? 12 : 8,
-                pointHoverRadius: 15,
+                pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20,
+                pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20,
+                // 4. ENSURE CIRCLES ARE NOT CLIPPED BY AXIS LINES
+                clip: false, 
             }]
         },
         options: {
             maintainAspectRatio: false,
-            layout: { padding: 40 },
-            scales: {
-                x: { 
-                    min: 0, max: 10, display: true, 
-                    grid: { display: false }, 
-                    ticks: { display: false },
-                    title: { display: true, text: 'FREQUENCY →', color: 'rgba(255,255,255,0.3)', font: { size: 10 } }
-                },
-                y: { 
-                    min: 0, max: 10, display: true, 
-                    grid: { display: false }, 
-                    ticks: { display: false },
-                    title: { display: true, text: 'INTENSITY →', color: 'rgba(255,255,255,0.3)', font: { size: 10 } }
+            // 4. ADD PADDING TO EDGES SO LARGE BUBBLES DON'T CUT OFF
+            layout: {
+                padding: {
+                    top: 30,
+                    right: 35,
+                    bottom: 10,
+                    left: 10
                 }
             },
             plugins: {
-                legend: { display: false },
+                legend: {
+                    display: false
+                },
                 tooltip: {
-                    backgroundColor: '#000',
+                    mode: 'nearest',
+                    intersect: false,
                     callbacks: {
-                        label: (ctx) => ` ${ctx.raw.label} (Score: ${ctx.raw.originalY}/10)`
+                        title: function (tooltipItems) {
+                            return tooltipItems[0].raw.label;
+                        },
+                        label: function (context) {
+                            return '';
+                        },
+                        afterBody: function (tooltipItems) {
+                            const point = tooltipItems[0].raw;
+                            return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`;
+                        }
+                    },
+                    displayColors: false,
+                    titleFont: {
+                        size: 14,
+                        weight: 'bold'
+                    },
+                    bodyFont: {
+                        size: 12
+                    },
+                    // 2. TOOLTIP BACKGROUND: HOT PINK
+                    backgroundColor: '#fd80c7',
+                    titleColor: '#ffffff',
+                    bodyColor: '#dddddd',
+                }
+            },
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Frequency (1-10)',
+                        color: 'white',
+                        font: {
+                            weight: 'bold'
+                        }
+                    },
+                    min: initialMinX,
+                    max: 10,
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.15)'
+                    },
+                    ticks: {
+                        color: 'white'
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'Problem Intensity (1-10)',
+                        color: 'white',
+                        font: {
+                            weight: 'bold'
+                        }
+                    },
+                    min: 0,
+                    max: 10,
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.15)'
+                    },
+                    ticks: {
+                        color: 'white'
                     }
                 }
             }
         }
     });
-}
 
+    const zoomButton = document.getElementById('chart-zoom-btn');
+    zoomButton.style.display = 'none';
+
+    if (isCollapseFeatureEnabled) {
+        zoomButton.style.display = 'block';
+        const updateButtonText = () => {
+            const isCurrentlyCollapsed = window.myEmotionChart.options.scales.x.min !== 0;
+            zoomButton.textContent = isCurrentlyCollapsed ? 'Zoom Out to See Full Range' : 'Zoom In to High-Frequency';
+        };
+
+        zoomButton.addEventListener('click', () => {
+            const chart = window.myEmotionChart;
+            const isCurrentlyCollapsed = chart.options.scales.x.min !== 0;
+            chart.options.scales.x.min = isCurrentlyCollapsed ? 0 : collapsedMinX;
+            chart.update('none');
+            updateButtonText();
+        });
+
+        updateButtonText();
+    }
+}
 
 // =================================================================================
 // === REVISED HYBRID FUNCTION V5: DEFINITIVE UNIQUE POST COUNTING ===
@@ -578,9 +565,9 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
 
     posts.forEach(post => {
         const text = `${post.data.title || post.data.link_title || ''} ${post.data.
-selftext || post.data.body || ''}`.toLowerCase();
+            selftext || post.data.body || ''}`.toLowerCase();
         const words = text.replace(/[^a-z\s']/g, '').split(/\s+/);
-        
+
         const uniqueWordsInPost = { positive: new Set(), negative: new Set() };
 
         words.forEach(rawWord => {
@@ -620,7 +607,7 @@ selftext || post.data.body || ''}`.toLowerCase();
         const text = `${post.data.title || ''} ${post.data.selftext || ''}`.toLowerCase().replace(/[^a-z\s']/g, '');
         const words = text.split(/\s+/).filter(w => w.length > 0);
         const ngrams = [...generateNgrams(words, 2), ...generateNgrams(words, 3), ...generateNgrams(words, 4)];
-        
+
         // ** THE CRITICAL FIX **
         // Get only the UNIQUE ngrams for this post before counting.
         const uniqueNgramsInPost = new Set(ngrams);
@@ -660,23 +647,23 @@ selftext || post.data.body || ''}`.toLowerCase();
             .map(([word, postSet]) => [word, { count: postSet.size, posts: postSet }])
             .sort((a, b) => b[1].count - a[1].count)
             .slice(0, 23);
-        
+
         const topPhrases = phraseList.map(phrase => {
             const postSet = phraseFreq.get(phrase);
             return [phrase, { count: postSet.size, posts: postSet }];
         }).filter(item => item[1]);
 
         const combinedData = [...topWords, ...topPhrases];
-        
+
         const category = title.includes('Positive') ? 'positive' : 'negative';
         window._sentimentData = window._sentimentData || {};
         window._sentimentData[category] = Object.fromEntries(combinedData.map(([key, value]) => [key, value]));
-        
+
         // MODIFIED CODE (FIX)
-container.innerHTML = ''; // Clear the "loading..." text
-const cloudContainer = document.createElement('div');
-container.appendChild(cloudContainer); // This will now be the only child
-        
+        container.innerHTML = ''; // Clear the "loading..." text
+        const cloudContainer = document.createElement('div');
+        container.appendChild(cloudContainer); // This will now be the only child
+
         if (combinedData.length < 3) {
             cloudContainer.innerHTML = `<p style="font-family: sans-serif; color: #777; padding: 1rem; text-align: center;">Not enough distinct terms found.</p>`; return;
         }
@@ -698,7 +685,7 @@ container.appendChild(cloudContainer); // This will now be the only child
     renderCloud(negativeContainer, 'Negative Words & Phrases', wordFreq.negative, finalNegativePhrases, negativeColors);
 }
 
-function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : "Snippet not available."; const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if(closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : "Snippet not available."; const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if (closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title || p.data.link_title || ''}\nContent: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
 async function extractAndValidateEntities(posts, nicheContext) {
@@ -881,7 +868,7 @@ async function handleRemoveSubClick(event) {
             newButton.dataset.subname = subName;
             newButton.dataset.subDetails = subDetailsString;
             newButton.textContent = '+ Add to Analysis';
-            
+
             // REMOVED: The long style.cssText line is no longer needed.
             // The button's appearance is now handled entirely by the '.add-related-sub-btn' class in your CSS.
 
@@ -1025,7 +1012,7 @@ function displaySubredditChoices(rankedSubreddits) {
         loadMoreBtn.id = 'load-more-subs-btn';
         loadMoreBtn.className = 'load-more-button'; // Added a class for styling
         loadMoreBtn.textContent = 'Load More Communities';
-        
+
         // REMOVED: The style.cssText line is now handled by the .load-more-button class in CSS.
 
         loadMoreBtn.onclick = loadMoreSubreddits;
@@ -1162,7 +1149,7 @@ async function handleAddRelatedSubClick(event) {
             newButton.dataset.subname = subName;
             newButton.dataset.subDetails = subDetailsJSON;
             newButton.textContent = 'Remove';
-            
+
             // REMOVED: The long style.cssText line is no longer needed.
             // The button's appearance is now handled entirely by the '.remove-sub-btn' class in your CSS.
 
@@ -1242,7 +1229,7 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
             const members = formatMemberCount(sub.members);
             const [activityEmoji, activityText] = sub.activityLabel.split(' ');
             const description = sub.description.trim() ? sub.description : `A community for discussions and content related to r/${sub.name}.`;
-            
+
             return `
                 <div class="subreddit-tag-detailed">
                     <div>
@@ -1309,7 +1296,7 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         targetPanel.querySelector('.context-close-btn')?.addEventListener('click', close);
         return;
     }
-    
+
     const postsForAnalysis = (window._entityData?.[itemType]?.[itemName]?.posts || []);
     if (postsForAnalysis.length < 3) {
         const htmlContent = `
@@ -1328,7 +1315,7 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
     try {
         const top75Posts = postsForAnalysis.slice(0, 75);
         const topPostsText = top75Posts.map(p => `"${p.data.title || ''} - ${p.data.selftext || p.data.body || ''}"`).join('\n');
-    
+
 
         const prompt = isBrand ?
             `You are an expert market research analyst creating a competitive brief for "${itemName}" based on user comments from the "${originalGroupName}" community. Analyze the provided text to generate insights.
@@ -1479,7 +1466,7 @@ function renderBrandMomentumChart(data) {
             padding: 12,
             shape: 'square',
             shadow: { color: 'rgba(0, 0, 0, 0.1)', opacity: 1, offsetX: 1, offsetY: 2 },
-            formatter: function() {
+            formatter: function () {
                 const context = this.point.options.context;
                 if (!context) return 'No context available.';
 
@@ -1487,7 +1474,7 @@ function renderBrandMomentumChart(data) {
                 html += `<b>${this.key}</b><br/>`;
                 html += `<span style="color: ${this.series.color};">●</span> ${this.series.name}: <b>${this.y}%</b>`;
                 html += `<hr style="margin: 6px 0; border-color: #f0f0f0;">`;
-                
+
                 // === THIS IS THE FIX ===
                 // Added 'white-space: normal;' and 'overflow-wrap: break-word;' to the style attribute.
                 html += `<div style="font-size: 12px; max-width: 250px; white-space: normal; overflow-wrap: break-word;">`;
@@ -1507,7 +1494,7 @@ function renderBrandMomentumChart(data) {
     });
 }
 
-function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if(!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
+function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if (!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
 // =================================================================================
 // === REPLACEMENT FUNCTION: fetchSentimentTrendData (V4 - With Context & Corrected Axis) ===
@@ -1539,7 +1526,7 @@ async function fetchSentimentTrendData(brandName, subredditQueryString) {
         if (result.status === 'fulfilled' && result.value.length > 0) {
             const uniquePosts = deduplicatePosts(result.value);
             const sentimentResults = await classifySentimentWithAI(uniquePosts);
-            
+
             // --- KEY CHANGE 1: Generate context for this time period ---
             const contextSummary = await generateSentimentContextWithAI(uniquePosts, brandName);
 
@@ -1607,7 +1594,7 @@ async function generateAndRenderConstellation(items) {
         });
         batchPromises.push(apiCallPromise);
     }
-    
+
     const results = await Promise.allSettled(batchPromises);
     let rawSignals = [];
     results.forEach(result => {
@@ -1646,7 +1633,7 @@ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms,
     console.log("--- Starting Delayed Highcharts Chart Analysis (in background) ---");
     try {
         const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false);
-        const postIds = demandSignalPosts.sort((a,b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id);
+        const postIds = demandSignalPosts.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id);
         const highIntentComments = await fetchCommentsForPosts(postIds);
         const allItems = [...demandSignalPosts, ...highIntentComments];
         await generateAndRenderConstellation(allItems);
@@ -1746,7 +1733,7 @@ function renderHighchartsBubbleChart(signals) {
                 layoutAlgorithm: {
                     splitSeries: true,
                     gravitationalConstant: 0.05,
-                    seriesInteraction: false, 
+                    seriesInteraction: false,
                     dragBetweenSeries: true,
                     parentNodeLimit: true,
                     parentNodeOptions: {
@@ -1763,10 +1750,10 @@ function renderHighchartsBubbleChart(signals) {
                         fontFamily: "'Plus Jakarta Sans', sans-serif",
                         textAlign: 'center'
                     },
-                    formatter: function() {
+                    formatter: function () {
                         const radius = this.point.marker.radius;
                         if (this.point.name.length * 6 > radius * 1.8) {
-                             return null;
+                            return null;
                         }
                         const fontSize = Math.max(8, radius / 3.5);
                         return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
@@ -1775,7 +1762,7 @@ function renderHighchartsBubbleChart(signals) {
                 // --- NEW FEATURE: Click Event Handler ---
                 point: {
                     events: {
-                        click: function() {
+                        click: function () {
                             // isParentNode is true for the large category bubbles
                             if (!this.isParentNode) {
                                 const bubbleContent = document.getElementById('bubble-content');
@@ -1793,7 +1780,7 @@ function renderHighchartsBubbleChart(signals) {
                                         View on Reddit
                                     </a>
                                 `;
-                                
+
                                 }
                             }
                         }
@@ -1803,7 +1790,7 @@ function renderHighchartsBubbleChart(signals) {
         },
         series: chartSeries
     });
-    
+
     if (panelContent) {
         panelContent.innerHTML = `<div class="panel-placeholder">Click a bubble to see details.</div>`;
     }
@@ -1868,7 +1855,7 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
         };
 
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        
+
         if (!response.ok) throw new Error('Mindset analysis API call failed.');
 
         const data = await response.json();
@@ -1879,19 +1866,19 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
         // This now populates the elements based on the new "title" and "description" structure.
         archetypeHeadingEl.textContent = archetype;
         archetypeDescEl.textContent = summary;
-        
+
         if (values && values.length > 0) {
             // Create a list item for each object, making the title bold.
-            const characteristicsHTML = '<ul>' + values.map(item => 
+            const characteristicsHTML = '<ul>' + values.map(item =>
                 `<li><strong>${item.title}:</strong> ${item.description}</li>`
             ).join('') + '</ul>';
             characteristicsEl.innerHTML = characteristicsHTML;
         } else {
-             characteristicsEl.innerHTML = '<p>Could not identify key characteristics.</p>';
+            characteristicsEl.innerHTML = '<p>Could not identify key characteristics.</p>';
         }
 
         if (rejects && rejects.length > 0) {
-            const rejectsHTML = '<ul>' + rejects.map(item => 
+            const rejectsHTML = '<ul>' + rejects.map(item =>
                 `<li><strong>${item.title}:</strong> ${item.description}</li>`
             ).join('') + '</ul>';
             rejectsEl.innerHTML = rejectsHTML;
@@ -2022,12 +2009,12 @@ async function generateAndRenderAIPrompt(posts, audienceContext) {
         };
 
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        
+
         if (!response.ok) throw new Error('AI prompt generation API call failed.');
 
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
-        
+
         const promptText = `Write a blog post about [YOUR TOPIC] for an audience of ${audienceContext}.
 
 Your writing should adopt the following characteristics:
@@ -2094,13 +2081,13 @@ async function generateAndRenderKeywords(posts, audienceContext) {
         };
 
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        
+
         if (!response.ok) throw new Error('Keyword analysis API call failed.');
 
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
         const { problem_aware, solution_seeking, purchase_intent } = parsed;
-        
+
         const renderCluster = (title, icon, description, keywords) => {
             if (!keywords || keywords.length === 0) return '';
             const keywordList = keywords.map(kw => `<li>${kw}</li>`).join('');
@@ -2117,7 +2104,7 @@ async function generateAndRenderKeywords(posts, audienceContext) {
                 </div>
             `;
         };
-        
+
         container.innerHTML = `
             <h3 class="dashboard-section-title">Keyword Opportunities</h3>
             <div class="keyword-clusters-grid">
@@ -2197,7 +2184,7 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
         shortlist.push(topSolution);
         candidates = candidates.filter(c => c.title !== topSolution.title);
     }
-    
+
     // 3. Pick the single best "Problem Aware" traffic driver
     const topProblem = candidates.filter(c => c.intent === 'problem_aware').sort((a, b) => b.primaryVolume - a.primaryVolume)[0];
     if (topProblem) {
@@ -2212,8 +2199,8 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
             ...idea,
             score: (idea.primaryVolume * 0.7 + idea.longTailVolume * 0.3) * (intentWeights[idea.intent] || 1)
         })).sort((a, b) => b.score - a.score)[0];
-        
-        if(bestRemaining) {
+
+        if (bestRemaining) {
             shortlist.push(bestRemaining);
             candidates = candidates.filter(c => c.title !== bestRemaining.title);
         } else {
@@ -2238,7 +2225,7 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
     // --- D. Add Event Listener for the new toggle button ---
     const toggleBtn = document.getElementById('toggle-all-cards-btn');
     const allCards = document.querySelectorAll('.action-cards-grid .action-card');
-    if(toggleBtn && allCards.length > 0) {
+    if (toggleBtn && allCards.length > 0) {
         toggleBtn.addEventListener('click', () => {
             // Check if ANY card is closed. If so, the action is to open all.
             const shouldOpen = Array.from(allCards).some(card => !card.open);
@@ -2353,82 +2340,82 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         // Data transformation logic remains the same - it's robust enough for the new structure.
         // In generateAndRenderSeoSunburst...
 
-// =========================================================================
-// === STEP 1: CORRECTED DATA GENERATION ===================================
-// =========================================================================
+        // =========================================================================
+        // === STEP 1: CORRECTED DATA GENERATION ===================================
+        // =========================================================================
 
-// Data transformation logic
-const sunburstData = [{
-    id: 'root', parent: '', name: 'SEO Plan',
-    levelName: 'SEO Plan' // <-- FLATTENED PROPERTY
-}, {
-    id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF',
-    levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
-}, {
-    id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF',
-    levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
-}, {
-    id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8',
-    levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
-}];
+        // Data transformation logic
+        const sunburstData = [{
+            id: 'root', parent: '', name: 'SEO Plan',
+            levelName: 'SEO Plan' // <-- FLATTENED PROPERTY
+        }, {
+            id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF',
+            levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
+        }, {
+            id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF',
+            levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
+        }, {
+            id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8',
+            levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
+        }];
 
-const processIntent = (intentId, intentName, intentData) => {
-    if (!intentData || !Array.isArray(intentData)) return;
-    
-    // Level 3: Primary Keywords
-    intentData.forEach((primary, i) => {
-        const primaryId = `${intentId}_p_${i}`;
-        sunburstData.push({ 
-            id: primaryId, 
-            parent: intentId, 
-            name: primary.keyword, 
-            // NO 'extra' OBJECT. Properties are added directly.
-            intentName: intentName,
-            levelName: 'Primary keyword',
-            searchVolume: primary.searchVolume
-        });
+        const processIntent = (intentId, intentName, intentData) => {
+            if (!intentData || !Array.isArray(intentData)) return;
 
-        // Level 4: Secondary Keywords
-        (primary.secondary_keywords || []).forEach((secondary, j) => {
-            const secondaryId = `${primaryId}_s_${j}`;
-            sunburstData.push({ 
-                id: secondaryId, 
-                parent: primaryId, 
-                name: secondary.keyword, 
-                intentName: intentName,
-                levelName: 'Secondary keyword',
-                searchVolume: secondary.searchVolume
-            });
-
-            // Level 5: Long-tail Keywords
-            (secondary.long_tail_keywords || []).forEach((longtail, k) => {
-                const longtailId = `${secondaryId}_l_${k}`;
-                sunburstData.push({ 
-                    id: longtailId, 
-                    parent: secondaryId, 
-                    name: longtail.keyword, 
+            // Level 3: Primary Keywords
+            intentData.forEach((primary, i) => {
+                const primaryId = `${intentId}_p_${i}`;
+                sunburstData.push({
+                    id: primaryId,
+                    parent: intentId,
+                    name: primary.keyword,
+                    // NO 'extra' OBJECT. Properties are added directly.
                     intentName: intentName,
-                    levelName: 'Long-tail keyword',
-                    searchVolume: longtail.searchVolume
+                    levelName: 'Primary keyword',
+                    searchVolume: primary.searchVolume
                 });
 
-                // Level 6: Content Examples
-                (longtail.content_examples || []).forEach((content, l) => {
-                    const value = longtail.searchVolume / (longtail.content_examples.length || 1);
+                // Level 4: Secondary Keywords
+                (primary.secondary_keywords || []).forEach((secondary, j) => {
+                    const secondaryId = `${primaryId}_s_${j}`;
                     sunburstData.push({
-                        id: `${longtailId}_c_${l}`,
-                        parent: longtailId,
-                        name: content.title,
-                        value: Math.max(value, 1),
+                        id: secondaryId,
+                        parent: primaryId,
+                        name: secondary.keyword,
                         intentName: intentName,
-                        levelName: 'Content example',
-                        searchVolume: longtail.searchVolume // Storing the parent's volume
+                        levelName: 'Secondary keyword',
+                        searchVolume: secondary.searchVolume
+                    });
+
+                    // Level 5: Long-tail Keywords
+                    (secondary.long_tail_keywords || []).forEach((longtail, k) => {
+                        const longtailId = `${secondaryId}_l_${k}`;
+                        sunburstData.push({
+                            id: longtailId,
+                            parent: secondaryId,
+                            name: longtail.keyword,
+                            intentName: intentName,
+                            levelName: 'Long-tail keyword',
+                            searchVolume: longtail.searchVolume
+                        });
+
+                        // Level 6: Content Examples
+                        (longtail.content_examples || []).forEach((content, l) => {
+                            const value = longtail.searchVolume / (longtail.content_examples.length || 1);
+                            sunburstData.push({
+                                id: `${longtailId}_c_${l}`,
+                                parent: longtailId,
+                                name: content.title,
+                                value: Math.max(value, 1),
+                                intentName: intentName,
+                                levelName: 'Content example',
+                                searchVolume: longtail.searchVolume // Storing the parent's volume
+                            });
+                        });
                     });
                 });
             });
-        });
-    });
-};
+        };
 
 
         processIntent('pa', 'Problem-Aware', seoPlan.problem_aware);
@@ -2437,7 +2424,7 @@ const processIntent = (intentId, intentName, intentData) => {
 
         const seriesName = sunburstData.find(d => d.id === 'root')?.name || 'SEO Plan';
 
-                // =========================================================================
+        // =========================================================================
         // === START: COPY AND REPLACE THIS ENTIRE BLOCK ===========================
         // =========================================================================
 
@@ -2495,7 +2482,7 @@ const processIntent = (intentId, intentName, intentData) => {
             tooltip: {
                 useHTML: true,
                 headerFormat: '',
-                pointFormatter: function() {
+                pointFormatter: function () {
                     const point = this;
                     let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
 
@@ -2535,7 +2522,7 @@ const processIntent = (intentId, intentName, intentData) => {
 
 async function generateProblemOfferPairsAI(summaries) {
     if (!summaries || summaries.length === 0) return [];
-    
+
     const problemTitles = summaries.map(s => s.title);
     const prompt = `You are a startup advisor. For each customer problem provided for the audience "${originalGroupName}", generate a single, concise "offer angle" or "solution".
     
@@ -2613,45 +2600,45 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
             addedNodes.add(pair.offer);
         }
     });
-// =================================================================================
-// === PASTE THIS ENTIRE FINAL CHART CONFIGURATION =================================
-// =================================================================================
-Highcharts.chart('value-tree', {
-    chart: {
-        type: 'sankey',
-        backgroundColor: 'transparent',
-        margin: [20, 20, 20, 20] // Added slightly more margin
-    },
-    title: { text: null },
-    credits: { enabled: false },
-    tooltip: { enabled: false },
-    series: [{
-        keys: ['from', 'to', 'weight'],
-        data: sankeyData,
-        nodes: sankeyNodes,
-        nodePadding: 25, // Vertical space between nodes
-
-        // Link styling
-        link: {
-            color: 'rgba(94, 209, 216, 0.6)',
-            linkOpacity: 0.6
+    // =================================================================================
+    // === PASTE THIS ENTIRE FINAL CHART CONFIGURATION =================================
+    // =================================================================================
+    Highcharts.chart('value-tree', {
+        chart: {
+            type: 'sankey',
+            backgroundColor: 'transparent',
+            margin: [20, 20, 20, 20] // Added slightly more margin
         },
+        title: { text: null },
+        credits: { enabled: false },
+        tooltip: { enabled: false },
+        series: [{
+            keys: ['from', 'to', 'weight'],
+            data: sankeyData,
+            nodes: sankeyNodes,
+            nodePadding: 25, // Vertical space between nodes
 
-        // --- THIS IS THE DEFINITIVE FIX ---
-        // We use the standard 'formatter' and remove all conflicting properties.
-        dataLabels: {
-            enabled: true,
-            useHTML: true,
-            formatter: function() {
-                // 'this.point' correctly refers to the node data
-                const point = this.point;
-                const className = point.type === 'problem' ? 'sankey-problem' : 'sankey-offer';
-                // Return the custom HTML div, which will now be rendered correctly
-                return `<div class="sankey-label ${className}">${point.name}</div>`;
-            }
-        },
-    }]
-});
+            // Link styling
+            link: {
+                color: 'rgba(94, 209, 216, 0.6)',
+                linkOpacity: 0.6
+            },
+
+            // --- THIS IS THE DEFINITIVE FIX ---
+            // We use the standard 'formatter' and remove all conflicting properties.
+            dataLabels: {
+                enabled: true,
+                useHTML: true,
+                formatter: function () {
+                    // 'this.point' correctly refers to the node data
+                    const point = this.point;
+                    const className = point.type === 'problem' ? 'sankey-problem' : 'sankey-offer';
+                    // Return the custom HTML div, which will now be rendered correctly
+                    return `<div class="sankey-label ${className}">${point.name}</div>`;
+                }
+            },
+        }]
+    });
 }
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
@@ -2707,10 +2694,10 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
             };
             const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
             if (!response.ok) throw new Error('Definition API call failed.');
-            
+
             const data = await response.json();
             const definitionText = data.openaiResponse;
-            
+
             const definitionDiv = document.getElementById(`phrase-def-${index}`);
             if (definitionDiv) {
                 definitionDiv.innerHTML = `<p>${definitionText}</p>`;
@@ -2738,7 +2725,7 @@ async function generateAndRenderOverview(posts, audienceContext) {
     container.innerHTML = `<p class="loading-text">Calculating demographic proportions...</p>`;
 
     try {
-        const topPostsText = posts.slice(0, 50).map(p => 
+        const topPostsText = posts.slice(0, 50).map(p =>
             `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 600)
         ).join('\n---\n');
 
@@ -2763,12 +2750,12 @@ async function generateAndRenderOverview(posts, audienceContext) {
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
         });
-        
+
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
@@ -2913,7 +2900,7 @@ async function runProblemFinder(options = {}) {
             prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100),
             supportCount: metrics[index].supportCount
         })).sort((a, b) => b.prevalence - a.prevalence);
-        
+
         console.log("CHECKPOINT A: Analysis is complete. Found these findings:", sortedFindings);
         const problemTitles = sortedFindings.map(finding => finding.summary.title);
         updateGrowthHeaderDropdown(problemTitles);
@@ -2925,7 +2912,7 @@ async function runProblemFinder(options = {}) {
             }
         }
         window._summaries = sortedFindings.map(item => item.summary);
-        
+
         for (let i = 1; i <= 5; i++) {
             const block = document.getElementById(`findings-block${i}`);
             if (block) block.style.display = "none";
@@ -2955,7 +2942,7 @@ async function runProblemFinder(options = {}) {
                         seeMoreBtn.textContent = 'See more';
                         const newBtn = seeMoreBtn.cloneNode(true);
                         seeMoreBtn.parentNode.replaceChild(newBtn, seeMoreBtn);
-                        newBtn.addEventListener('click', function() {
+                        newBtn.addEventListener('click', function () {
                             const isHidden = teaserEl.style.display !== 'none';
                             teaserEl.style.display = isHidden ? 'none' : 'inline';
                             fullEl.style.display = isHidden ? 'inline' : 'none';
@@ -3004,10 +2991,10 @@ async function runProblemFinder(options = {}) {
             console.error("CRITICAL (but isolated): Failed to assign posts to findings.", err);
             for (let i = 1; i <= 5; i++) { const redditDiv = document.getElementById(`reddit-div${i}`); if (redditDiv) { redditDiv.innerHTML = `<div style="font-style: italic; color: #999;">Could not load sample posts.</div>`; } }
         }
-        
+
         // This is the single, correct call for the new mind map
         generateAndRenderValueSankey(originalGroupName, window._summaries);
-        
+
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
             if (resultsWrapper) {
                 resultsWrapper.style.setProperty('display', 'flex', 'important');
@@ -3079,7 +3066,7 @@ function updateGrowthHeaderDropdown(problemTitles) {
     console.log("CHECKPOINT 1: Entering updateGrowthHeaderDropdown function with these titles:", problemTitles);
 
     const dropdownList = document.querySelector('#growth-header-dropdown .w-dropdown-list');
-    
+
     if (!dropdownList) {
         console.error("DEBUGGING ERROR: Could not find the dropdown list element with selector '#growth-header-dropdown .w-dropdown-list'. Check your Webflow element's ID and class.");
         return;
@@ -3087,27 +3074,27 @@ function updateGrowthHeaderDropdown(problemTitles) {
 
     console.log("CHECKPOINT 2: Successfully found the dropdown list element. Clearing it now.");
     dropdownList.innerHTML = ''; // Clear defaults
-  
+
     // Create "Broad Problems" link which acts as our "View All"
     const viewAllLink = document.createElement('a');
     viewAllLink.className = 'w-dropdown-link';
     viewAllLink.textContent = 'broad problems';
     viewAllLink.setAttribute('data-problem', 'all');
     dropdownList.appendChild(viewAllLink);
-  
+
     // Create a link for each specific problem
     problemTitles.forEach(title => {
-      const problemLink = document.createElement('a');
-      problemLink.className = 'w-dropdown-link';
-      problemLink.textContent = title;
-      problemLink.setAttribute('data-problem', title);
-      dropdownList.appendChild(problemLink);
+        const problemLink = document.createElement('a');
+        problemLink.className = 'w-dropdown-link';
+        problemLink.textContent = title;
+        problemLink.setAttribute('data-problem', title);
+        dropdownList.appendChild(problemLink);
     });
 
     console.log("CHECKPOINT 3: Finished populating the dropdown with new links.");
 }
 
-  function setupGrowthKitInteraction() {
+function setupGrowthKitInteraction() {
     // Find the key elements of the dropdown header
     const audienceName = window.originalGroupName || 'your audience';
     const headerPrefix = document.getElementById('growth-header-prefix');
@@ -3139,7 +3126,7 @@ function updateGrowthHeaderDropdown(problemTitles) {
     }
 
     // --- Listen for clicks on the "Generate Growth Plan" buttons on the problem cards ---
-    document.addEventListener('click', function(event) {
+    document.addEventListener('click', function (event) {
         const clickedButton = event.target.closest('.generate-growth-btn');
         if (!clickedButton) return;
 
@@ -3156,7 +3143,7 @@ function updateGrowthHeaderDropdown(problemTitles) {
 
     // --- Listen for clicks inside the Dropdown Header itself ---
     if (dropdownList) {
-        dropdownList.addEventListener('click', function(event) {
+        dropdownList.addEventListener('click', function (event) {
             const clickedLink = event.target.closest('.w-dropdown-link');
             if (!clickedLink) return;
 
@@ -3167,12 +3154,12 @@ function updateGrowthHeaderDropdown(problemTitles) {
             // This is a common way to programmatically close a Webflow dropdown
             const dropdownToggle = document.querySelector('#growth-header-dropdown .w-dropdown-toggle');
             if (dropdownToggle && dropdownToggle.getAttribute('aria-expanded') === 'true') {
-                 dropdownToggle.click();
+                dropdownToggle.click();
             }
         });
     }
 }
-  function initializeProblemFinderTool() {
+function initializeProblemFinderTool() {
     const style = document.createElement('style');
     // =========================================================================
     // === PASTE THIS NEW CSS ==================================================
@@ -3229,7 +3216,7 @@ function updateGrowthHeaderDropdown(problemTitles) {
         choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>';
         audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`;
     };
-    
+
     // Setup for suggestion pills
     if (pillsContainer) {
         pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
@@ -3243,7 +3230,7 @@ function updateGrowthHeaderDropdown(problemTitles) {
 
     if (inspireButton) {
         inspireButton.addEventListener('click', () => {
-            if(pillsContainer) pillsContainer.classList.toggle('visible');
+            if (pillsContainer) pillsContainer.classList.toggle('visible');
         });
     }
 
@@ -3267,13 +3254,13 @@ function updateGrowthHeaderDropdown(problemTitles) {
         }
     });
 
-        // --- Event Listener for "Search Selected" Button ---
-        searchSelectedBtn.addEventListener("click", (event) => {
-            event.preventDefault();
-            console.log("CHECKPOINT 1: 'Search Selected' button clicked. The audience should be:", originalGroupName);
-            runProblemFinder();
-        });
-    
+    // --- Event Listener for "Search Selected" Button ---
+    searchSelectedBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        console.log("CHECKPOINT 1: 'Search Selected' button clicked. The audience should be:", originalGroupName);
+        runProblemFinder();
+    });
+
     // Logic for making the subreddit choices clickable
     choicesContainer.addEventListener('click', (event) => {
         const choiceDiv = event.target.closest('.subreddit-choice');

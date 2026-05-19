@@ -793,28 +793,24 @@ async function enhanceDiscoveryWithComments(initialPosts, nicheContext) {
 // =================================================================================
 // === REPLACEMENT FUNCTION: renderDiscoveryList ===
 // =================================================================================
-function renderDiscoveryList(containerId, data, title, type) {
-    console.log(`[Discovery] Rendering ${type} for ${containerId}. Found ${data.length} items.`);
-    
-    const container = document.getElementById(containerId);
-    if (!container) {
-        console.error(`[Discovery] Error: Container #${containerId} not found on page.`);
-        return;
-    }
 
-    // 1. Find the "slots" you duplicated 8 times in Webflow
+
+
+function renderDiscoveryList(containerId, data, title, type) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    // 1. Find the "slots" you built in Webflow
     const slots = container.querySelectorAll('.discovery-list-item');
     
-    if (slots.length === 0) {
-        console.warn(`[Discovery] No elements with class .discovery-list-item found inside #${containerId}. Did you add them in Webflow?`);
-        return;
-    }
-
-    // 2. Hide all slots first (to reset from previous searches)
-    slots.forEach(slot => slot.style.display = 'none');
+    // 2. Hide EVERY slot initially (this resets the list for new searches)
+    slots.forEach(slot => {
+        slot.style.display = 'none';
+    });
 
     // 3. Fill the slots with real data
     data.forEach(([name, details], index) => {
+        // Only fill if a Webflow slot actually exists for this index (1-8)
         if (slots[index]) {
             const slot = slots[index];
             
@@ -826,15 +822,19 @@ function renderDiscoveryList(containerId, data, title, type) {
             if (nameEl) nameEl.textContent = name;
             if (countEl) countEl.textContent = `${details.count} mentions`;
 
-            // Important: This allows the "See Brief" logic to work
+            // Attach data for the "See Brief" click logic
             slot.setAttribute('data-word', name);
             slot.setAttribute('data-type', type);
 
-            // Make it visible
+            // Show the slot (matching your design)
             slot.style.display = 'flex'; 
         }
     });
+
+    // CRITICAL: We removed the line that was doing "container.innerHTML =" 
+    // This ensures we don't accidentally create a second list.
 }
+
 
 
 function renderFAQs(faqs) {
@@ -3287,6 +3287,7 @@ function waitForElementAndInit() {
 }
 
 document.addEventListener('DOMContentLoaded', waitForElementAndInit);
+
 
 
 

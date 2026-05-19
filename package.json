@@ -2,6 +2,6 @@
   "name": "simple-openai-proxy",
   "version": "1.0.0",
   "dependencies": {
-    "openai": "^5.0.0"
+    "openai": "^4.0.0"
   }
 }

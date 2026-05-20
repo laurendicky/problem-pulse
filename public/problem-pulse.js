@@ -2740,6 +2740,77 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     }
 }
 
+async function generateAndRenderToneOfVoice(posts, audienceContext) {
+    const container = document.getElementById('tone-voice-container');
+    if (!container) return;
+
+    container.innerHTML = `<p class="loading-text">Analyzing communication DNA... <span class="loader-dots"></span></p>`;
+
+    const leanSamples = posts.slice(0, 15).map(p => {
+        return `TITLE: ${p.data.title}\nBODY: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`;
+    }).join('\n---\n');
+
+    try {
+        const prompt = `Analyze the communication style of the "${audienceContext}" community on Reddit.
+        
+        Respond with a JSON object containing:
+        1. "tone_adjectives": 3 adjectives describing how they talk (e.g., Cynical, Empathetic, Technical).
+        2. "forbidden_words": 3-4 phrases that make a person sound like an "outsider" or "marketer" (The Cringe List).
+        3. "hook_syntax": 2 examples of how to start a post that actually gets replies (e.g., "Has anyone actually tried X?").
+        4. "community_vibe": A 1-sentence description of their BS-detector level.
+
+        TEXT:
+        ${leanSamples}`;
+
+        const openAIParams = {
+            model: "gpt-4o-mini",
+            messages: [{ role: "system", content: "You are a brand strategist specializing in community entry." }, { role: "user", content: prompt }],
+            temperature: 0.2,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        container.innerHTML = `
+            <div class="tone-voice-grid">
+                <!-- Vibe Card -->
+                <div class="tone-card">
+                    <h4 class="card-title">Community Tone</h4>
+                    <p class="card-description">${parsed.community_vibe}</p>
+                    <div class="tag-container">
+                        ${parsed.tone_adjectives.map(t => `<span class="tag">${t}</span>`).join('')}
+                    </div>
+                </div>
+                
+                <!-- Forbidden Card -->
+                <div class="tone-card forbidden">
+                    <h4 class="card-title">"Cringe" Filter</h4>
+                    <p class="card-description">Avoid these to not get banned/ignored:</p>
+                    <div class="list-container">
+                        ${parsed.forbidden_words.map(w => `<div class="list-item">✕ "${w}"</div>`).join('')}
+                    </div>
+                </div>
+
+                <!-- Hooks Card -->
+                <div class="tone-card hooks">
+                    <h4 class="card-title">Engagement Hooks</h4>
+                    <p class="card-description">Proven ways to open a conversation:</p>
+                    <div class="list-container">
+                        ${parsed.hook_syntax.map(h => `<div class="list-item">✓ ${h}</div>`).join('')}
+                    </div>
+                </div>
+            </div>
+        `;
+
+    } catch (error) {
+        console.error("Tone Analysis Error:", error);
+        container.innerHTML = "<p class='placeholder-text'>Communication analysis unavailable for this community.</p>";
+    }
+}
+
+
 // =================================================================================
 // === NEW FUNCTION: AI AUDIENCE OVERVIEW (DEMOGRAPHICS) ===
 // =================================================================================
@@ -2900,6 +2971,7 @@ async function runProblemFinder(options = {}) {
         generateAndRenderHybridSentiment(filteredItems, originalGroupName);
         generateEmotionMapData(filteredItems).then(renderEmotionMap);
         renderIncludedSubreddits(selectedSubreddits);
+        generateAndRenderToneOfVoice(filteredItems, originalGroupName);
         generateAndRenderPowerPhrases(filteredItems, originalGroupName);
         generateAndRenderMindsetSummary(filteredItems, originalGroupName);
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);

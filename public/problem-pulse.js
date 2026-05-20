@@ -691,21 +691,17 @@ async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map
 
 
 async function extractAndValidateEntities(posts, nicheContext) {
-    // 1. Blacklist junk words
-    const blacklist = new Set(['redact', 'update', 'aita', 'tldr', 'edit', 'post', 'reddit', 'thread', 'link', 'comment', 'sub', 'people', 'guy', 'girl', 'year', 'month', 'today', 'day', 'time', 'help', 'question']);
+    const textPool = posts.slice(0, 60).map(p => (p.data.title || '') + " " + (p.data.selftext || p.data.body || '').substring(0, 300)).join('\n');
 
-    // Use a large sample of text to find the names first
-    const textPoolForExtraction = posts.slice(0, 60).map(p => (p.data.title || '') + " " + (p.data.selftext || p.data.body || '').substring(0, 300)).join('\n');
-
-    const prompt = `You are a market research lead. Identify the specific Brands/Companies and Product Categories discussed in this data.
+    const prompt = `You are a market analyst. Identify the top 8 most important commercial 'Entities' in the ${nicheContext} community. 
+    An entity is either a specific BRAND (e.g. Nike) or a specific PRODUCT CATEGORY (e.g. Sourdough).
     
-    RULES:
-    - Exclude generic nouns (dog, food, water).
-    - Exclude meta-Reddit terms (AITA, OP).
-    - Group variations (e.g. 'KitchenAid' and 'Kitchen Aid' = 'KitchenAid').
-    - Only return brands actually being used, discussed, or compared.
+    Also identify:
+    1. "triggers": The top 3 reasons people switch or upgrade in this niche.
+    2. "versus": The top 2 brand-vs-brand or product-vs-product comparisons.
 
-    Return JSON: {"brands": [], "products": []}`;
+    Respond ONLY with a JSON object: 
+    {"entities": [{"name": "Nike", "type": "brand"}, {"name": "Sourdough", "type": "category"}], "triggers": [], "versus": []}`;
 
     try {
         const response = await fetch(OPENAI_PROXY_URL, { 
@@ -713,7 +709,7 @@ async function extractAndValidateEntities(posts, nicheContext) {
             headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify({ openaiPayload: { 
                 model: "gpt-4o-mini", 
-                messages: [{ role: "user", content: prompt + "\n\n" + textPoolForExtraction }],
+                messages: [{ role: "user", content: prompt + "\n\nText:\n" + textPool }],
                 response_format: { "type": "json_object" }
             } }) 
         });
@@ -722,35 +718,39 @@ async function extractAndValidateEntities(posts, nicheContext) {
         
         if (!window._entityData) window._entityData = { brands: {}, products: {} };
 
-        // 2. THE DEEP SCAN LOGIC
-        // We take the names the AI found, and search for them through EVERY post/comment in memory
-        ['brands', 'products'].forEach(type => {
-            if (!parsed[type]) return;
-            parsed[type].forEach(name => {
-                const cleanName = name.trim();
-                if (blacklist.has(cleanName.toLowerCase()) || cleanName.length < 3) return;
+        const finalStream = [];
 
-                const regex = new RegExp(`\\b${cleanName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'gi');
-                
-                // Scan the WHOLE posts array (window._filteredPosts or all Crawled items)
+        if (parsed.entities) {
+            parsed.entities.forEach(item => {
+                const cleanName = item.name.trim();
+                const regex = new RegExp(`\\b${cleanName.replace(/ /g, '\\s')}\\b`, 'gi');
                 const matches = posts.filter(p => regex.test((p.data.title || '') + " " + (p.data.selftext || p.data.body || '')));
                 
-                // 3. THE AUTHORITY FLOOR: We only show items with 3+ mentions to ensure reliability
-                if (matches.length >= 3) {
-                    window._entityData[type][cleanName] = { count: matches.length, posts: matches };
+                if (matches.length >= 2) {
+                    // Store for the "See Brief" logic
+                    const typeKey = item.type === 'brand' ? 'brands' : 'products';
+                    window._entityData[typeKey][cleanName] = { count: matches.length, posts: matches };
+                    
+                    finalStream.push({
+                        name: cleanName,
+                        count: matches.length,
+                        type: item.type // 'brand' or 'category'
+                    });
                 }
             });
-        });
+        }
 
         return {
-            topBrands: Object.entries(window._entityData.brands).sort((a, b) => b[1].count - a[1].count).slice(0, 8),
-            topProducts: Object.entries(window._entityData.products).sort((a, b) => b[1].count - a[1].count).slice(0, 8)
+            stream: finalStream.sort((a,b) => b.count - a.count),
+            triggers: parsed.triggers,
+            versus: parsed.versus
         };
     } catch (error) {
-        console.error("Extraction error:", error);
-        return { topBrands: [], topProducts: [] };
+        console.error("Intel error:", error);
+        return null;
     }
 }
+
 
 
 // =================================================================================
@@ -2859,7 +2859,15 @@ async function runProblemFinder(options = {}) {
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);
         generateAndRenderAIPrompt(filteredItems, originalGroupName);
         generateAndRenderSeoSunburst(filteredItems, originalGroupName);
-        extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
+        extractAndValidateEntities(filteredItems, originalGroupName).then(intel => {
+            if (!intel) return;
+            
+            // 1. Render the Unified Stream on the left (8 combined items)
+            renderDiscoveryList('top-brands-container', intel.stream);
+        
+            // 2. Render the Strategic Radar on the right (Triggers & Comparisons)
+            renderMarketRadar(intel);
+        });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
         if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }
         const topKeywords = getTopKeywords(filteredItems, 10);
@@ -3113,52 +3121,70 @@ function setupGrowthKitInteraction() {
         });
     }
 }
+function renderMarketRadar(intel) {
+    const container = document.getElementById('top-products-container');
+    if (!container) return;
 
+    // This creates the professional "Strategic Radar" layout on the right side
+    container.innerHTML = `
+        <div class="market-radar-wrapper" style="color: white;">
+            <h3 class="dashboard-section-title" style="margin-bottom:20px;">Market Opportunity Radar</h3>
+            
+            <!-- Triggers Card -->
+            <div class="radar-card" style="background: rgba(255,255,255,0.04); padding: 20px; border-radius: 12px; margin-bottom: 20px; border-left: 4px solid #00a5ce;">
+                <h4 class="radar-title" style="font-size: 11px; text-transform: uppercase; color: #888; margin-bottom: 12px; letter-spacing: 1px;">Top Switching Triggers</h4>
+                <ul style="padding-left: 18px; font-size: 14px; margin: 0;">
+                    ${intel.triggers.map(t => `<li class="radar-list-item" style="margin-bottom:8px; line-height:1.4;">${t}</li>`).join('')}
+                </ul>
+            </div>
+
+            <!-- Versus Card -->
+            <div class="radar-card" style="background: rgba(255,255,255,0.04); padding: 20px; border-radius: 12px; border-left: 4px solid #fd80c7;">
+                <h4 class="radar-title" style="font-size: 11px; text-transform: uppercase; color: #888; margin-bottom: 12px; letter-spacing: 1px;">Competitive Battlegrounds</h4>
+                <div style="font-size: 15px; font-weight: 500;">
+                    ${intel.versus.map(v => `<div style="margin-bottom:12px; display:flex; align-items:center;"><span style="margin-right:10px;">⚔️</span> ${v}</div>`).join('')}
+                </div>
+            </div>
+        </div>
+    `;
+}
 // =================================================================================
 // === UPDATED DISCOVERY LIST RENDERER (Fills Webflow Elements) ===
 // =================================================================================
-
-function renderDiscoveryList(containerId, data, title, type) {
+function renderDiscoveryList(containerId, data) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
-    // Find the slots you duplicated 8 times in Webflow
+    // Use your duplicated Webflow slots
     const slots = container.querySelectorAll('.discovery-list-item');
-    
-    // Hide all initially
     slots.forEach(slot => slot.style.display = 'none');
 
-    data.forEach(([name, details], index) => {
+    data.forEach((item, index) => {
         if (slots[index]) {
             const slot = slots[index];
-            
-            const rankEl = slot.querySelector('.rank');
             const nameEl = slot.querySelector('.name');
             const countEl = slot.querySelector('.count');
 
-            if (rankEl) rankEl.textContent = `${index + 1}.`;
-            if (nameEl) nameEl.textContent = name;
+            // --- THE AUTHORITY FIX: Add the Badge ---
+            const badgeColor = item.type === 'brand' ? '#fd80c7' : '#00a5ce';
+            const badgeLabel = item.type === 'brand' ? 'BRAND' : 'CATEGORY';
             
-            // --- AUTHORITY LOGIC: Mapping counts to high-value status labels ---
-            let statusText = "";
-            if (details.count >= 15) {
-                statusText = `<span style="color:#00a5ce; font-weight:bold;">MARKET AUTHORITY</span> (${details.count} signals)`;
-            } else if (details.count >= 8) {
-                statusText = `<span style="font-weight:bold;">HIGH SIGNAL</span> (${details.count} signals)`;
-            } else {
-                statusText = `ESTABLISHED TREND (${details.count} signals)`;
-            }
-
+            if (nameEl) nameEl.textContent = item.name;
             if (countEl) {
-                countEl.innerHTML = statusText;
+                countEl.innerHTML = `
+                    <span style="font-size:9px; border:1px solid ${badgeColor}; color:${badgeColor}; padding:2px 5px; border-radius:4px; margin-right:8px; vertical-align:middle;">${badgeLabel}</span>
+                    <span style="font-weight:bold;">${item.count >= 15 ? 'MARKET LEADER' : 'NOTABLE SIGNAL'}</span> 
+                    (${item.count} signals)
+                `;
             }
 
-            slot.setAttribute('data-word', name);
-            slot.setAttribute('data-type', type);
+            slot.setAttribute('data-word', item.name);
+            slot.setAttribute('data-type', item.type === 'brand' ? 'brands' : 'products');
             slot.style.display = 'flex'; 
         }
     });
 }
+
 
 // =================================================================================
 // === UPDATED INTERACTIVITY (Handles Webflow-built buttons) ===

@@ -691,25 +691,21 @@ async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map
 
 
 async function extractAndValidateEntities(posts, nicheContext) {
-    // 1. Blacklist to prevent meta-Reddit words from appearing as brands
-    const blacklist = new Set(['redact', 'update', 'aita', 'tldr', 'edit', 'post', 'reddit', 'thread', 'link', 'comment', 'sub', 'people', 'guy', 'girl', 'year', 'month', 'today', 'day', 'time']);
+    // 1. Blacklist junk words
+    const blacklist = new Set(['redact', 'update', 'aita', 'tldr', 'edit', 'post', 'reddit', 'thread', 'link', 'comment', 'sub', 'people', 'guy', 'girl', 'year', 'month', 'today', 'day', 'time', 'help', 'question']);
 
-    const topPostsText = posts.slice(0, 60).map(p => {
-        const title = p.data.title || '';
-        const body = (p.data.selftext || p.data.body || '').substring(0, 400);
-        return `${title}\n${body}`;
-    }).join('\n---\n');
+    // Use a large sample of text to find the names first
+    const textPoolForExtraction = posts.slice(0, 60).map(p => (p.data.title || '') + " " + (p.data.selftext || p.data.body || '').substring(0, 300)).join('\n');
 
-    const prompt = `You are a high-level market researcher. Review these discussions from the '${nicheContext}' community. 
-    Identify the top specific Brands/Companies and Product Categories mentioned.
+    const prompt = `You are a market research lead. Identify the specific Brands/Companies and Product Categories discussed in this data.
     
     RULES:
-    - Exclude generic common nouns (e.g., 'dog', 'food', 'water').
-    - Exclude Reddit-specific slang or meta-words.
-    - Group variations (e.g., 'KitchenAid' and 'Kitchen Aid' should just be 'KitchenAid').
-    - Only return brands people are actually using, discussing or complaining about.
+    - Exclude generic nouns (dog, food, water).
+    - Exclude meta-Reddit terms (AITA, OP).
+    - Group variations (e.g. 'KitchenAid' and 'Kitchen Aid' = 'KitchenAid').
+    - Only return brands actually being used, discussed, or compared.
 
-    Respond ONLY with a valid JSON object: {"brands": ["Name1", "Name2"], "products": ["Product1", "Product2"]}`;
+    Return JSON: {"brands": [], "products": []}`;
 
     try {
         const response = await fetch(OPENAI_PROXY_URL, { 
@@ -717,7 +713,7 @@ async function extractAndValidateEntities(posts, nicheContext) {
             headers: { 'Content-Type': 'application/json' }, 
             body: JSON.stringify({ openaiPayload: { 
                 model: "gpt-4o-mini", 
-                messages: [{ role: "system", content: "You are a meticulous market research analyst." }, { role: "user", content: prompt + "\n\nText to analyze:\n" + topPostsText }],
+                messages: [{ role: "user", content: prompt + "\n\n" + textPoolForExtraction }],
                 response_format: { "type": "json_object" }
             } }) 
         });
@@ -726,29 +722,22 @@ async function extractAndValidateEntities(posts, nicheContext) {
         
         if (!window._entityData) window._entityData = { brands: {}, products: {} };
 
+        // 2. THE DEEP SCAN LOGIC
+        // We take the names the AI found, and search for them through EVERY post/comment in memory
         ['brands', 'products'].forEach(type => {
             if (!parsed[type]) return;
             parsed[type].forEach(name => {
                 const cleanName = name.trim();
-                // Skip if in blacklist, too short, or just a number
-                if (blacklist.has(cleanName.toLowerCase()) || cleanName.length < 3 || !isNaN(cleanName)) return;
+                if (blacklist.has(cleanName.toLowerCase()) || cleanName.length < 3) return;
 
                 const regex = new RegExp(`\\b${cleanName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'gi');
+                
+                // Scan the WHOLE posts array (window._filteredPosts or all Crawled items)
                 const matches = posts.filter(p => regex.test((p.data.title || '') + " " + (p.data.selftext || p.data.body || '')));
                 
-                // --- THE AUTHORITY FILTER ---
-                // Only save to global data if it has 2 or more distinct mentions
-                if (matches.length >= 2) {
-                    // Merge logic: if brand exists, add posts, otherwise create new
-                    if (window._entityData[type][cleanName]) {
-                        const existingIds = new Set(window._entityData[type][cleanName].posts.map(p => p.data.id));
-                        matches.forEach(m => {
-                            if (!existingIds.has(m.data.id)) window._entityData[type][cleanName].posts.push(m);
-                        });
-                        window._entityData[type][cleanName].count = window._entityData[type][cleanName].posts.length;
-                    } else {
-                        window._entityData[type][cleanName] = { count: matches.length, posts: matches };
-                    }
+                // 3. THE AUTHORITY FLOOR: We only show items with 3+ mentions to ensure reliability
+                if (matches.length >= 3) {
+                    window._entityData[type][cleanName] = { count: matches.length, posts: matches };
                 }
             });
         });
@@ -3132,31 +3121,44 @@ function setupGrowthKitInteraction() {
 function renderDiscoveryList(containerId, data, title, type) {
     const container = document.getElementById(containerId);
     if (!container) return;
-    container.innerHTML = ""; 
 
-    if (data.length === 0) {
-        container.innerHTML = '<p style="padding:20px; opacity:0.5; font-size:14px;">Scanning for market signals...</p>';
-        return;
-    }
+    // Find the slots you duplicated 8 times in Webflow
+    const slots = container.querySelectorAll('.discovery-list-item');
+    
+    // Hide all initially
+    slots.forEach(slot => slot.style.display = 'none');
 
-    container.innerHTML = data.map(([name, details], i) => {
-        // --- UX FIX: Transform low numbers into "Signal Strength" labels ---
-        let signalLabel = `${details.count} mentions`;
-        if (details.count <= 3) signalLabel = "Notable Signal";
-        if (details.count > 3 && details.count <= 8) signalLabel = "Rising Trend";
-        if (details.count > 8) signalLabel = "High Volume";
+    data.forEach(([name, details], index) => {
+        if (slots[index]) {
+            const slot = slots[index];
+            
+            const rankEl = slot.querySelector('.rank');
+            const nameEl = slot.querySelector('.name');
+            const countEl = slot.querySelector('.count');
 
-        return `
-            <div class="discovery-list-item" data-word="${name}" data-type="${type}" style="display: flex;">
-                <div class="rank">${i + 1}.</div>
-                <div class="name">${name}</div>
-                <div class="count">${signalLabel}</div>
-                <button class="brief-button">View More</button>
-            </div>
-        `;
-    }).join('');
+            if (rankEl) rankEl.textContent = `${index + 1}.`;
+            if (nameEl) nameEl.textContent = name;
+            
+            // --- AUTHORITY LOGIC: Mapping counts to high-value status labels ---
+            let statusText = "";
+            if (details.count >= 15) {
+                statusText = `<span style="color:#00a5ce; font-weight:bold;">MARKET AUTHORITY</span> (${details.count} signals)`;
+            } else if (details.count >= 8) {
+                statusText = `<span style="font-weight:bold;">HIGH SIGNAL</span> (${details.count} signals)`;
+            } else {
+                statusText = `ESTABLISHED TREND (${details.count} signals)`;
+            }
+
+            if (countEl) {
+                countEl.innerHTML = statusText;
+            }
+
+            slot.setAttribute('data-word', name);
+            slot.setAttribute('data-type', type);
+            slot.style.display = 'flex'; 
+        }
+    });
 }
-
 
 // =================================================================================
 // === UPDATED INTERACTIVITY (Handles Webflow-built buttons) ===

@@ -2647,45 +2647,55 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
     });
 }
 
+
+
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;
 
     container.innerHTML = `<p class="loading-text">Extracting authentic Reddit vernacular... <span class="loader-dots"></span></p>`;
 
-    // 1. Give the AI more data but tell it to be a "Strict Extractor"
-    const rawSamples = posts.slice(0, 40).map(p => {
-        return `POST: ${p.data.title} \nCONTENT: ${p.data.selftext || p.data.body || ''}`;
+    // 1. TRUNCATION LOGIC: We take 25 posts but limit them to 700 chars each.
+    // This prevents the "Startup Wall of Text" from crashing the API.
+    const rawSamples = posts.slice(0, 25).map(p => {
+        const title = p.data.title || '';
+        const body = (p.data.selftext || p.data.body || '').substring(0, 700); 
+        return `TITLE: ${title} \nCONTENT: ${body}`;
     }).join('\n---\n');
 
     try {
-        const prompt = `You are a data researcher. Your goal is to identify unique phrases, jargon, and shorthand used in this specific Reddit data for "${audienceContext}".
+        const prompt = `You are a data researcher extracting cultural shorthand and jargon for "${audienceContext}" from Reddit.
 
         STRICT RULES:
-        1. ONLY extract terms that appear in the provided text. Do NOT use your general knowledge.
-        2. Identify Reddit-specific shorthand (e.g., AITA, NTA, OP, TIL) IF they appear.
-        3. Identify Niche Jargon: phrases unique to this community (e.g., "Land Shark", "Puppy Blues", "Reactive").
-        4. ABSOLUTELY NO "Marketing Speak": Avoid cutesy terms like "pawsome" or "fur-ever home" unless they are literally in the text.
-        5. IGNORE generic English: No "thank god", "last night", or "right now".
+        1. ONLY extract terms found in the provided text.
+        2. Identify Niche Jargon/Acronyms: (e.g., In Startups: "LTV", "CAC", "Burn Rate", "Pivot". In Dogs: "Land Shark", "Reactive").
+        3. Identify Reddit shorthand: (e.g., "OP", "AITA", "TL;DR").
+        4. IGNORE generic English: No "thank god", "last night", "right now", or "hope this helps".
+        5. DO NOT Hallucinate. If no jargon exists, return an empty array.
 
         Respond ONLY with a JSON object: {"vernacular": [{"term": "...", "definition": "...", "usage_found_in_text": "..."}] }
         
-        The "usage_found_in_text" must be a sentence from the provided data.
-
         DATA:
         ${rawSamples}`;
 
         const openAIParams = {
             model: "gpt-4o-mini", 
             messages: [
-                { role: "system", content: "You are a literal data extraction tool. You do not hallucinate. You only report what is found in the provided source text." },
+                { role: "system", content: "You are a literal data extraction tool. You do not hallucinate. Temperature is 0." },
                 { role: "user", content: prompt }
             ],
-            temperature: 0, // CRITICAL: 0 makes the AI predictable and non-creative
+            temperature: 0, 
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await fetch(OPENAI_PROXY_URL, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        });
+
+        if (!response.ok) throw new Error(`API Error: ${response.status}`);
+
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
         const results = parsed.vernacular || [];
@@ -2713,9 +2723,13 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
 
     } catch (error) {
         console.error("Linguistic Extraction Error:", error);
-        container.innerHTML = "<p>Linguistic analysis currently unavailable.</p>";
+        // Improved error message for debugging
+        container.innerHTML = `<p class="placeholder-text" style="color: #fd80c7;">Analysis timed out due to content length. Try a 'Quick' search instead of 'Deep'.</p>`;
     }
 }
+
+
+
 // =================================================================================
 // === NEW FUNCTION: AI AUDIENCE OVERVIEW (DEMOGRAPHICS) ===
 // =================================================================================

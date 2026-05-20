@@ -689,24 +689,23 @@ function renderContextContent(word, posts) { const contextBox = document.getElem
 function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title || p.data.link_title || ''}\nContent: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_completion_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
 
-
 async function extractAndValidateEntities(posts, nicheContext) {
-    // We take a larger sample for better statistical significance
-    const topPostsText = posts.slice(0, 60).map(p => {
-        const title = p.data.title || p.data.link_title || '';
-        const body = p.data.selftext || p.data.body || '';
-        return `Title: ${title}\nBody: ${body.substring(0, 500)}`;
-    }).join('\n---\n');
+    // 1. Prepare a massive string of all text to allow for total occurrence counting
+    const allText = posts.map(p => 
+        (p.data.title || '') + " " + (p.data.selftext || p.data.body || '')
+    ).join(" [SEP] ").toLowerCase();
 
-    // Enhanced Prompt: Explicitly tells AI to find more candidates to ensure at least 8 pass validation
-    const prompt = `You are a market analyst. Extract exactly 15 Brand names/Specific Products and 15 Generic Product Categories from the '${nicheContext}' community text. 
-    A Brand is a proper noun (e.g., 'Kong', 'Purina'). 
-    A Product is a generic noun (e.g., 'Chew toy', 'Kibble').
+    // 2. Sample a portion for AI to identify the "Targets"
+    const sampleText = posts.slice(0, 50).map(p => 
+        `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 300)}`
+    ).join('\n---\n');
+
+    const prompt = `You are a market analyst. Extract exactly 15 Brand names (proper nouns) and 15 Generic Product Categories from the '${nicheContext}' community. 
     Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}`;
 
     const openAIParams = { 
-        model: "gpt-4o-mini", // Optimized for extraction
-        messages: [{ role: "system", content: "You are a precise JSON extractor." }, { role: "user", content: prompt + "\n\nText: " + topPostsText }], 
+        model: "gpt-4o-mini", 
+        messages: [{ role: "system", content: "You are a precise JSON extractor." }, { role: "user", content: prompt + "\n\nText: " + sampleText }], 
         temperature: 0, 
         response_format: { "type": "json_object" } 
     };
@@ -716,50 +715,82 @@ async function extractAndValidateEntities(posts, nicheContext) {
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
         
-        // Initialize global storage if it doesn't exist
         if (!window._entityData) window._entityData = { brands: {}, products: {} };
 
         ['brands', 'products'].forEach(type => {
             if (!parsed[type]) return;
             parsed[type].forEach(name => {
-                // IMPROVED REGEX: Matches the word, plurals (s/es), and possessives ('s)
-                const regex = new RegExp(`\\b${name}(s|es|'s)?\\b`, 'gi');
-                const matches = posts.filter(p => regex.test((p.data.title || '') + " " + (p.data.selftext || p.data.body || '')));
+                const cleanKey = name.toLowerCase().trim();
+                if (cleanKey.length < 3) return;
+
+                // Regex to find all occurrences including plurals
+                const regex = new RegExp(`\\b${cleanKey}(s|es|'s)?\\b`, 'gi');
                 
-                if (matches.length > 0) {
-                    const cleanName = name.toLowerCase();
-                    // We use a Map-like object to ensure we don't duplicate "Kong" and "KONG"
-                    if (!window._entityData[type][cleanName]) {
-                        window._entityData[type][cleanName] = { 
+                // 3. COUNT TOTAL OCCURRENCES across all text
+                const occurrenceMatch = allText.match(regex);
+                const occurrenceCount = occurrenceMatch ? occurrenceMatch.length : 0;
+
+                // 4. FIND RELEVANT POSTS (for the "See Brief" feature)
+                const relevantPosts = posts.filter(p => regex.test((p.data.title || '') + " " + (p.data.selftext || p.data.body || '')));
+
+                if (occurrenceCount > 0) {
+                    if (!window._entityData[type][cleanKey]) {
+                        window._entityData[type][cleanKey] = { 
                             originalName: name, 
                             count: 0, 
                             posts: [] 
                         };
                     }
                     
-                    // Merge unique posts
-                    const existingIds = new Set(window._entityData[type][cleanName].posts.map(p => p.data.id));
-                    matches.forEach(m => {
-                        if (!existingIds.has(m.data.id)) {
-                            window._entityData[type][cleanName].posts.push(m);
-                        }
+                    // Update total occurrence count
+                    window._entityData[type][cleanKey].count += occurrenceCount;
+
+                    // Merge unique posts without duplicates
+                    const existingIds = new Set(window._entityData[type][cleanKey].posts.map(p => p.data.id));
+                    relevantPosts.forEach(m => {
+                        if (!existingIds.has(m.data.id)) window._entityData[type][cleanKey].posts.push(m);
                     });
-                    window._entityData[type][cleanName].count = window._entityData[type][cleanName].posts.length;
                 }
             });
         });
 
         return {
-            topBrands: Object.entries(window._entityData.brands)
-                .sort((a, b) => b[1].count - a[1].count)
-                .map(([id, data]) => [data.originalName, data]),
-            topProducts: Object.entries(window._entityData.products)
-                .sort((a, b) => b[1].count - a[1].count)
-                .map(([id, data]) => [data.originalName, data])
+            topBrands: Object.entries(window._entityData.brands).sort((a, b) => b[1].count - a[1].count).slice(0, 8),
+            topProducts: Object.entries(window._entityData.products).sort((a, b) => b[1].count - a[1].count).slice(0, 8)
         };
     } catch (error) {
         console.error("Entity extraction error:", error);
         return { topBrands: [], topProducts: [] };
+    }
+}
+
+async function enhanceDiscoveryWithComments(initialPosts, nicheContext) {
+    console.log("Enhancing with comments...");
+    try {
+        // Higher post count for comments to find those hidden brand mentions
+        const postIds = initialPosts.slice(0, 60).map(p => p.data.id);
+        const comments = await fetchCommentsForPosts(postIds);
+        if (!comments || comments.length < 5) return;
+
+        const uniqueComments = deduplicateByContent(comments);
+        
+        // Pass the comments through the updated extraction engine
+        await extractAndValidateEntities(uniqueComments, nicheContext);
+
+        // Re-render the discovery lists with the combined data
+        const finalBrands = Object.entries(window._entityData.brands)
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 8);
+
+        const finalProducts = Object.entries(window._entityData.products)
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 8);
+
+        renderDiscoveryList('top-brands-container', finalBrands, 'Top Brands', 'brands');
+        renderDiscoveryList('top-products-container', finalProducts, 'Top Products', 'products');
+
+    } catch (error) {
+        console.error("Discovery enhancement failed:", error);
     }
 }
 

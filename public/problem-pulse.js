@@ -2646,77 +2646,105 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
         }]
     });
 }
+
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;
 
-    // --- 1. Find Phrases (No changes to this part) ---
+    container.innerHTML = `<p class="loading-text">Analyzing community linguistics... <span class="loader-dots"></span></p>`;
+
+    // 1. GATHER CANDIDATES (Script-side)
     const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
-    const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
+    
+    // Target Acronyms (All caps, 2-5 chars)
     const acronymRegex = /\b[A-Z]{2,5}\b/g;
-    const acronyms = rawText.match(acronymRegex) || [];
-    const acronymFreq = {};
-    acronyms.forEach(acronym => { if (!stopAcronyms.has(acronym)) { acronymFreq[acronym] = (acronymFreq[acronym] || 0) + 1; } });
-    const topAcronyms = Object.entries(acronymFreq).filter(([_, count]) => count > 2).sort((a, b) => b[1] - a[1]).slice(0, 5).map(item => item[0]);
+    const foundAcronyms = rawText.match(acronymRegex) || [];
+    const acronymCounts = {};
+    foundAcronyms.forEach(a => {
+        if (!['A', 'I', 'THE', 'AND', 'FOR', 'REDDIT', 'POST'].includes(a)) {
+            acronymCounts[a] = (acronymCounts[a] || 0) + 1;
+        }
+    });
+
+    // Target N-Grams (Phrases)
     const cleanedText = rawText.toLowerCase().replace(/[^a-z\s']/g, '').replace(/\s+/g, ' ');
     const words = cleanedText.split(' ');
     const bigrams = generateNgrams(words, 2);
     const trigrams = generateNgrams(words, 3);
+    
     const phraseFreq = {};
-    [...bigrams, ...trigrams].forEach(phrase => { phraseFreq[phrase] = (phraseFreq[phrase] || 0) + 1; });
-    const topPhrases = Object.entries(phraseFreq).filter(([_, count]) => count > 2).sort((a, b) => b[1] - a[1]).slice(0, 12 - topAcronyms.length).map(item => item[0]);
-    const finalResults = [...topAcronyms, ...topPhrases];
-
-    if (finalResults.length < 3) {
-        container.innerHTML = '<p style="font-family: Inter, sans-serif; color: #777; padding: 1rem;">Not enough common phrases found.</p>';
-        return;
-    }
-
-    // --- 2. Generate Dropdown HTML Structure ---
-    const phrasesHTML = finalResults.map((item, index) => `
-        <details class="power-phrase-item" id="phrase-item-${index}">
-            <summary class="power-phrase-summary">${item}</summary>
-            <div class="power-phrase-definition" id="phrase-def-${index}">
-                <p class="loading-text">Loading definition...</p>
-            </div>
-        </details>
-    `).join('');
-
-    // --- 3. Render the Dropdowns (Header is removed) ---
-    container.innerHTML = `<div class="power-phrases-list">${phrasesHTML}</div>`;
-
-    // --- 4. Fetch Definitions Asynchronously ---
-    finalResults.forEach(async (phrase, index) => {
-        try {
-            const prompt = `For the target audience "${audienceContext}", what does the phrase or acronym "${phrase}" mean? Provide a single, concise sentence explanation.`;
-            const openAIParams = {
-                model: "gpt-5.4-mini",
-                messages: [
-                    { role: "system", content: "You are an expert at defining niche community jargon. Provide only a single sentence." },
-                    { role: "user", content: prompt }
-                ],
-                temperature: 0.1,
-                max_completion_tokens: 100,
-            };
-            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-            if (!response.ok) throw new Error('Definition API call failed.');
-
-            const data = await response.json();
-            const definitionText = data.openaiResponse;
-
-            const definitionDiv = document.getElementById(`phrase-def-${index}`);
-            if (definitionDiv) {
-                definitionDiv.innerHTML = `<p>${definitionText}</p>`;
-            }
-        } catch (error) {
-            console.error(`Failed to get definition for "${phrase}":`, error);
-            const definitionDiv = document.getElementById(`phrase-def-${index}`);
-            if (definitionDiv) {
-                definitionDiv.innerHTML = `<p class="loading-text" style="color: red;">Could not load definition.</p>`;
-            }
+    [...bigrams, ...trigrams].forEach(phrase => {
+        // Exclude "Boring" English filler phrases
+        const boringPhrases = ['i have', 'it was', 'this is', 'of the', 'in the', 'last night', 'last week', 'right now', 'a lot', 'if you', 'i am', 'has been', 'want to', 'going to', 'at the', 'to be'];
+        if (!boringPhrases.some(boring => phrase.includes(boring))) {
+            phraseFreq[phrase] = (phraseFreq[phrase] || 0) + 1;
         }
     });
+
+    // Sort and get top candidates for AI to review
+    const topAcronyms = Object.entries(acronymCounts).sort((a, b) => b[1] - a[1]).slice(0, 10).map(i => i[0]);
+    const topPhrases = Object.entries(phraseFreq).sort((a, b) => b[1] - a[1]).slice(0, 20).map(i => i[0]);
+    const candidates = [...topAcronyms, ...topPhrases];
+
+    try {
+        // 2. AI CULTURAL FILTERING
+        const prompt = `You are a sociolinguist analyzing the "${audienceContext}" community. 
+        From the following list of candidate phrases and acronyms, identify the 10 most "Niche-Specific" terms. 
+        Ignore generic English phrases. Focus on terms that carry cultural meaning, community jargon, or specific emotional weight within this niche.
+
+        Candidates: ${candidates.join(', ')}
+
+        Respond ONLY with a valid JSON object with a single key "power_phrases" containing an array of 10 objects. 
+        Each object must have:
+        - "term": The phrase or acronym.
+        - "meaning": A 1-sentence definition of what this signifies in this community.
+        - "usage": A short (3-5 words) example of how they use it.
+
+        Example: {"term": "Puppy Blues", "meaning": "The feeling of regret or overwhelm after getting a new dog.", "usage": "Struggling with major puppy blues."}`;
+
+        const openAIParams = {
+            model: "gpt-4o-mini",
+            messages: [{ role: "system", content: "You are a cultural linguistics expert." }, { role: "user", content: prompt }],
+            temperature: 0.2,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        const results = parsed.power_phrases || [];
+
+        // 3. RENDER AS COLLAPSIBLE CARDS (Matching your Webflow design)
+        if (results.length === 0) {
+            container.innerHTML = `<p class="placeholder-text">No niche jargon identified.</p>`;
+            return;
+        }
+
+        container.innerHTML = `
+            <div class="power-phrases-list">
+                ${results.map((item, index) => `
+                    <details class="power-phrase-item">
+                        <summary class="power-phrase-summary">
+                            <span class="phrase-text">${item.term}</span>
+                            <span class="phrase-usage-hint">"${item.usage}"</span>
+                        </summary>
+                        <div class="power-phrase-definition">
+                            <p>${item.meaning}</p>
+                        </div>
+                    </details>
+                `).join('')}
+            </div>
+        `;
+
+    } catch (error) {
+        console.error("Power phrases error:", error);
+        container.innerHTML = "Error analyzing linguistics.";
+    }
 }
+
+
+
+
 
 // =================================================================================
 // === NEW FUNCTION: AI AUDIENCE OVERVIEW (DEMOGRAPHICS) ===

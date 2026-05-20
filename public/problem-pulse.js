@@ -2744,25 +2744,20 @@ async function generateAndRenderToneOfVoice(posts, audienceContext) {
     const container = document.getElementById('tone-voice-container');
     if (!container) return;
 
-    container.innerHTML = `<p class="loading-text">Extracting communication strategy... <span class="loader-dots"></span></p>`;
+    container.innerHTML = `<p class="loading-text">Analyzing communication DNA... <span class="loader-dots"></span></p>`;
 
-    // 1. DATA PREP: Use only the Top 10 most upvoted posts to keep it fast and relevant
     const topVoted = [...posts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 10);
-
-    const leanSamples = topVoted.map(p => {
-        return `UPVOTES: ${p.data.ups} | TITLE: ${p.data.title}\nBODY: ${(p.data.selftext || p.data.body || '').substring(0, 300)}`;
-    }).join('\n---\n');
+    const leanSamples = topVoted.map(p => `UPVOTES: ${p.data.ups} | TITLE: ${p.data.title}\nBODY: ${(p.data.selftext || p.data.body || '').substring(0, 300)}`).join('\n---\n');
 
     try {
-        const prompt = `You are a sociolinguist analyzing the "${audienceContext}" subreddit.
-        
-        TASK:
-        1. ADJECTIVES: 3 specific adjectives for the tone (Avoid generic words like "Informal").
-        2. THE CRINGE LIST: 3-4 terms that are "Cheesy" or "Controversial" specifically in the "${audienceContext}" niche. (DO NOT use ROI, Leverage, or Target Audience).
-        3. HOOK TEMPLATES: 2 templates based on the high-voted titles provided.
-        4. VIBE: 1 sentence on the community BS-detector.
+        const prompt = `Analyze the "${audienceContext}" subreddit style. 
+        Return a JSON object with EXACTLY these 4 keys:
+        1. "tone_adjectives": (array of 3 strings) e.g. ["Technical", "Wry", "Direct"]
+        2. "forbidden_words": (array of 3 strings) Niche-specific cringe terms to avoid.
+        3. "hook_syntax": (array of 2 strings) Post title templates based on top-voted data.
+        4. "vibe": (1 string) Describe the community BS-detector.
 
-        Respond ONLY with a valid JSON object.
+        CRITICAL: Do NOT use generic business words like "ROI", "Target Audience", or "Leverage".
         
         DATA:
         ${leanSamples}`;
@@ -2770,56 +2765,60 @@ async function generateAndRenderToneOfVoice(posts, audienceContext) {
         const openAIParams = {
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "You are a specialized business data extractor. You only output valid JSON. Temperature 0." },
+                { role: "system", content: "You are a JSON-only data extractor. Use the exact keys provided: tone_adjectives, forbidden_words, hook_syntax, vibe." },
                 { role: "user", content: prompt }
             ],
             temperature: 0,
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ openaiPayload: openAIParams }) 
-        });
-
-        if (!response.ok) throw new Error(`Server status: ${response.status}`);
-
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         const data = await response.json();
         
-        // --- SAFETY CHECK: Ensure the response exists before parsing ---
-        if (!data || !data.openaiResponse) {
-            throw new Error("Proxy returned an empty response.");
-        }
+        if (!data || !data.openaiResponse) throw new Error("Empty response");
 
-        // Clean the response (sometimes AI adds markdown blocks)
-        let cleanResponse = data.openaiResponse.replace(/```json/g, '').replace(/```/g, '').trim();
-        const parsed = JSON.parse(cleanResponse);
+        const parsed = JSON.parse(data.openaiResponse.replace(/```json/g, '').replace(/```/g, '').trim());
+
+        // --- FLEXIBLE KEY MAPPING ---
+        // This ensures that even if the AI slightly changes the key names, we still find the data.
+        const toneAdjectives = parsed.tone_adjectives || parsed.adjectives || [];
+        const forbiddenWords = parsed.forbidden_words || parsed.cringe || parsed.forbidden || [];
+        const hookSyntax = parsed.hook_syntax || parsed.templates || parsed.hooks || [];
+        const communityVibe = parsed.vibe || parsed.community_vibe || "Authenticity is the primary currency here.";
 
         // --- RENDER HTML ---
         container.innerHTML = `
             <div class="tone-voice-grid">
+                <!-- Vibe Card -->
                 <div class="tone-card">
                     <h4 class="card-title">Community Vibe</h4>
-                    <p class="card-description">${parsed.vibe || parsed.community_vibe || 'Highly specific community guidelines apply.'}</p>
+                    <p class="card-description">${communityVibe}</p>
                     <div class="tag-container">
-                        ${(parsed.tone_adjectives || []).map(t => `<span class="tag">${t}</span>`).join('')}
+                        ${toneAdjectives.length > 0 
+                            ? toneAdjectives.map(t => `<span class="tag">${t}</span>`).join('') 
+                            : '<span class="tag">Authentic</span><span class="tag">Direct</span>'}
                     </div>
                 </div>
                 
+                <!-- Forbidden Card -->
                 <div class="tone-card forbidden">
                     <h4 class="card-title">The "Niche Cringe" List</h4>
                     <p class="card-description">Avoid these terms to stay authentic:</p>
                     <div class="list-container">
-                        ${(parsed.forbidden_words || []).map(w => `<div class="list-item">✕ "${w}"</div>`).join('')}
+                        ${forbiddenWords.length > 0 
+                            ? forbiddenWords.map(w => `<div class="list-item">✕ "${w}"</div>`).join('') 
+                            : '<div class="list-item">No specific cringe found.</div>'}
                     </div>
                 </div>
 
+                <!-- Hooks Card -->
                 <div class="tone-card hooks">
                     <h4 class="card-title">Successful Post Templates</h4>
                     <p class="card-description">Patterns from top-performing threads:</p>
                     <div class="list-container">
-                        ${(parsed.hook_syntax || []).map(h => `<div class="list-item">✓ ${h}</div>`).join('')}
+                        ${hookSyntax.length > 0 
+                            ? hookSyntax.map(h => `<div class="list-item">✓ ${h}</div>`).join('') 
+                            : '<div class="list-item">✓ Has anyone else dealt with [Problem]?</div>'}
                     </div>
                 </div>
             </div>
@@ -2827,15 +2826,10 @@ async function generateAndRenderToneOfVoice(posts, audienceContext) {
 
     } catch (error) {
         console.error("Tone Analysis Error:", error);
-        // Better fallback UI so the user isn't left with a "Loading" message forever
-        container.innerHTML = `
-            <div style="padding: 20px; text-align: center; color: #888; border: 1px dashed #444; border-radius: 12px;">
-                <p>Communication strategy analysis is currently unavailable for this niche.</p>
-                <small>Try a broader search or a "Deep" search to gather more data.</small>
-            </div>
-        `;
+        container.innerHTML = `<div class="tone-card"><p>Tone analysis is currently taking a coffee break. Try refreshing.</p></div>`;
     }
 }
+
 
 
 

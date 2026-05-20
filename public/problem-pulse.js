@@ -2648,60 +2648,70 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
 }
 
 
-
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;
 
-    container.innerHTML = `<p class="loading-text">Extracting authentic Reddit vernacular... <span class="loader-dots"></span></p>`;
+    container.innerHTML = `<p class="loading-text">Scanning for community jargon... <span class="loader-dots"></span></p>`;
 
-    // 1. TRUNCATION LOGIC: We take 25 posts but limit them to 700 chars each.
-    // This prevents the "Startup Wall of Text" from crashing the API.
-    const rawSamples = posts.slice(0, 25).map(p => {
+    if (!posts || posts.length === 0) {
+        container.innerHTML = `<p class="placeholder-text">No posts available to analyze.</p>`;
+        return;
+    }
+
+    // 1. ULTRA-LEAN DATA PREP: 
+    // We take 12 posts, and only the Title + first 400 characters.
+    // This reduces the data load by 70%, preventing timeouts.
+    const leanSamples = posts.slice(0, 12).map(p => {
         const title = p.data.title || '';
-        const body = (p.data.selftext || p.data.body || '').substring(0, 700); 
-        return `TITLE: ${title} \nCONTENT: ${body}`;
+        const body = (p.data.selftext || p.data.body || '').substring(0, 400);
+        return `T: ${title}\nC: ${body}`;
     }).join('\n---\n');
 
     try {
-        const prompt = `You are a data researcher extracting cultural shorthand and jargon for "${audienceContext}" from Reddit.
+        const prompt = `Extract 6-8 examples of niche jargon, acronyms, or cultural shorthand used by the "${audienceContext}" community on Reddit.
 
-        STRICT RULES:
-        1. ONLY extract terms found in the provided text.
-        2. Identify Niche Jargon/Acronyms: (e.g., In Startups: "LTV", "CAC", "Burn Rate", "Pivot". In Dogs: "Land Shark", "Reactive").
-        3. Identify Reddit shorthand: (e.g., "OP", "AITA", "TL;DR").
-        4. IGNORE generic English: No "thank god", "last night", "right now", or "hope this helps".
-        5. DO NOT Hallucinate. If no jargon exists, return an empty array.
+        RULES:
+        1. ONLY use terms found in the text below.
+        2. IGNORE generic English (e.g., "thank god", "last night").
+        3. FOCUS on industry terms (e.g., SaaS: "MRR", "Churn"; Dogs: "Reactive", "Fostering").
+        4. Provide a 1-sentence definition for each.
 
-        Respond ONLY with a JSON object: {"vernacular": [{"term": "...", "definition": "...", "usage_found_in_text": "..."}] }
-        
-        DATA:
-        ${rawSamples}`;
+        Respond ONLY with this JSON structure: {"vernacular": [{"term": "...", "definition": "..."}] }
+
+        TEXT:
+        ${leanSamples}`;
 
         const openAIParams = {
             model: "gpt-4o-mini", 
             messages: [
-                { role: "system", content: "You are a literal data extraction tool. You do not hallucinate. Temperature is 0." },
+                { role: "system", content: "You are a data extractor. Speed is priority. Do not hallucinate." },
                 { role: "user", content: prompt }
             ],
             temperature: 0, 
             response_format: { "type": "json_object" }
         };
 
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+
         const response = await fetch(OPENAI_PROXY_URL, { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ openaiPayload: openAIParams }) 
+            body: JSON.stringify({ openaiPayload: openAIParams }),
+            signal: controller.signal
         });
 
-        if (!response.ok) throw new Error(`API Error: ${response.status}`);
+        clearTimeout(timeoutId);
+
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
         const results = parsed.vernacular || [];
 
         if (results.length === 0) {
-            container.innerHTML = `<p class="placeholder-text">No unique vernacular found in this specific dataset.</p>`;
+            container.innerHTML = `<p class="placeholder-text">No unique jargon found in this dataset.</p>`;
             return;
         }
 
@@ -2714,7 +2724,6 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
                         </summary>
                         <div class="power-phrase-content">
                             <p class="phrase-definition">${item.definition}</p>
-                            <p class="phrase-usage-example"><strong>Context from Reddit:</strong> <em>"${item.usage_found_in_text}"</em></p>
                         </div>
                     </details>
                 `).join('')}
@@ -2722,13 +2731,14 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
         `;
 
     } catch (error) {
-        console.error("Linguistic Extraction Error:", error);
-        // Improved error message for debugging
-        container.innerHTML = `<p class="placeholder-text" style="color: #fd80c7;">Analysis timed out due to content length. Try a 'Quick' search instead of 'Deep'.</p>`;
+        console.error("Power Phrases Error:", error);
+        // This will tell us if it's a timeout, a server error, or something else
+        let userMessage = "Linguistic analysis timed out.";
+        if (error.name === 'AbortError') userMessage = "Request took too long. Try a 'Quick' search.";
+        
+        container.innerHTML = `<p class="placeholder-text" style="color: #fd80c7;">${userMessage}</p>`;
     }
 }
-
-
 
 // =================================================================================
 // === NEW FUNCTION: AI AUDIENCE OVERVIEW (DEMOGRAPHICS) ===

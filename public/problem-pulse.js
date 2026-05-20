@@ -2744,28 +2744,35 @@ async function generateAndRenderToneOfVoice(posts, audienceContext) {
     const container = document.getElementById('tone-voice-container');
     if (!container) return;
 
-    container.innerHTML = `<p class="loading-text">Analyzing communication DNA... <span class="loader-dots"></span></p>`;
+    container.innerHTML = `<p class="loading-text">Extracting niche-specific communication strategy... <span class="loader-dots"></span></p>`;
 
-    const leanSamples = posts.slice(0, 15).map(p => {
-        return `TITLE: ${p.data.title}\nBODY: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`;
+    // 1. Sort by upvotes to ensure we are looking at the most successful hooks
+    const topVoted = [...posts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 15);
+
+    const leanSamples = topVoted.map(p => {
+        return `UPVOTES: ${p.data.ups} | TITLE: ${p.data.title}\nBODY: ${(p.data.selftext || p.data.body || '').substring(0, 300)}`;
     }).join('\n---\n');
 
     try {
-        const prompt = `Analyze the communication style of the "${audienceContext}" community on Reddit.
+        const prompt = `You are a niche-community expert analyzing the "${audienceContext}" subreddit.
         
-        Respond with a JSON object containing:
-        1. "tone_adjectives": 3 adjectives describing how they talk (e.g., Cynical, Empathetic, Technical).
-        2. "forbidden_words": 3-4 phrases that make a person sound like an "outsider" or "marketer" (The Cringe List).
-        3. "hook_syntax": 2 examples of how to start a post that actually gets replies (e.g., "Has anyone actually tried X?").
-        4. "community_vibe": A 1-sentence description of their BS-detector level.
+        TASK:
+        1. ADJECTIVES: 3 specific adjectives for the tone (Avoid "Informal" or "Casual").
+        2. THE CRINGE LIST: Identify 3-4 words that are "Cheesy" or "Controversial" specifically in the "${audienceContext}" world. 
+           (CRITICAL: Do NOT include generic business words like ROI, Leverage, or Target Audience. I want niche-specific cringe).
+        3. HOOK TEMPLATES: Take the most upvoted titles in the data and turn them into "Fill-in-the-blank" templates.
+        4. VIBE: 1 sentence on the BS-detector level.
 
-        TEXT:
+        DATA:
         ${leanSamples}`;
 
         const openAIParams = {
             model: "gpt-4o-mini",
-            messages: [{ role: "system", content: "You are a brand strategist specializing in community entry." }, { role: "user", content: prompt }],
-            temperature: 0.2,
+            messages: [
+                { role: "system", content: "You are a sociolinguist. You ignore corporate terminology. You focus on the literal data provided. Temperature 0." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0,
             response_format: { "type": "json_object" }
         };
 
@@ -2775,28 +2782,25 @@ async function generateAndRenderToneOfVoice(posts, audienceContext) {
 
         container.innerHTML = `
             <div class="tone-voice-grid">
-                <!-- Vibe Card -->
                 <div class="tone-card">
-                    <h4 class="card-title">Community Tone</h4>
+                    <h4 class="card-title">Community Vibe</h4>
                     <p class="card-description">${parsed.community_vibe}</p>
                     <div class="tag-container">
                         ${parsed.tone_adjectives.map(t => `<span class="tag">${t}</span>`).join('')}
                     </div>
                 </div>
                 
-                <!-- Forbidden Card -->
                 <div class="tone-card forbidden">
-                    <h4 class="card-title">"Cringe" Filter</h4>
-                    <p class="card-description">Avoid these to not get banned/ignored:</p>
+                    <h4 class="card-title">The "Niche Cringe" List</h4>
+                    <p class="card-description">Avoid these cheesy or controversial terms:</p>
                     <div class="list-container">
                         ${parsed.forbidden_words.map(w => `<div class="list-item">✕ "${w}"</div>`).join('')}
                     </div>
                 </div>
 
-                <!-- Hooks Card -->
                 <div class="tone-card hooks">
-                    <h4 class="card-title">Engagement Hooks</h4>
-                    <p class="card-description">Proven ways to open a conversation:</p>
+                    <h4 class="card-title">Successful Post Templates</h4>
+                    <p class="card-description">Based on top-performing threads:</p>
                     <div class="list-container">
                         ${parsed.hook_syntax.map(h => `<div class="list-item">✓ ${h}</div>`).join('')}
                     </div>
@@ -2806,10 +2810,9 @@ async function generateAndRenderToneOfVoice(posts, audienceContext) {
 
     } catch (error) {
         console.error("Tone Analysis Error:", error);
-        container.innerHTML = "<p class='placeholder-text'>Communication analysis unavailable for this community.</p>";
+        container.innerHTML = "";
     }
 }
-
 
 // =================================================================================
 // === NEW FUNCTION: AI AUDIENCE OVERVIEW (DEMOGRAPHICS) ===

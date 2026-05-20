@@ -2651,85 +2651,72 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;
 
-    container.innerHTML = `<p class="loading-text">Analyzing community linguistics... <span class="loader-dots"></span></p>`;
+    container.innerHTML = `<p class="loading-text">Extracting community vernacular... <span class="loader-dots"></span></p>`;
 
-    // 1. GATHER CANDIDATES (Script-side)
-    const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
-    
-    // Target Acronyms (All caps, 2-5 chars)
-    const acronymRegex = /\b[A-Z]{2,5}\b/g;
-    const foundAcronyms = rawText.match(acronymRegex) || [];
-    const acronymCounts = {};
-    foundAcronyms.forEach(a => {
-        if (!['A', 'I', 'THE', 'AND', 'FOR', 'REDDIT', 'POST'].includes(a)) {
-            acronymCounts[a] = (acronymCounts[a] || 0) + 1;
-        }
-    });
-
-    // Target N-Grams (Phrases)
-    const cleanedText = rawText.toLowerCase().replace(/[^a-z\s']/g, '').replace(/\s+/g, ' ');
-    const words = cleanedText.split(' ');
-    const bigrams = generateNgrams(words, 2);
-    const trigrams = generateNgrams(words, 3);
-    
-    const phraseFreq = {};
-    [...bigrams, ...trigrams].forEach(phrase => {
-        // Exclude "Boring" English filler phrases
-        const boringPhrases = ['i have', 'it was', 'this is', 'of the', 'in the', 'last night', 'last week', 'right now', 'a lot', 'if you', 'i am', 'has been', 'want to', 'going to', 'at the', 'to be'];
-        if (!boringPhrases.some(boring => phrase.includes(boring))) {
-            phraseFreq[phrase] = (phraseFreq[phrase] || 0) + 1;
-        }
-    });
-
-    // Sort and get top candidates for AI to review
-    const topAcronyms = Object.entries(acronymCounts).sort((a, b) => b[1] - a[1]).slice(0, 10).map(i => i[0]);
-    const topPhrases = Object.entries(phraseFreq).sort((a, b) => b[1] - a[1]).slice(0, 20).map(i => i[0]);
-    const candidates = [...topAcronyms, ...topPhrases];
+    // 1. PRE-FILTERING: Get a variety of text samples to send to AI
+    // We take the top 30 posts but specifically look for shorter, punchier sentences 
+    // where slang usually lives.
+    const rawSamples = posts.slice(0, 35).map(p => {
+        const text = `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`;
+        return text.substring(0, 400); // Take snippets to stay within token limits
+    }).join('\n---\n');
 
     try {
-        // 2. AI CULTURAL FILTERING
-        const prompt = `You are a sociolinguist analyzing the "${audienceContext}" community. 
-        From the following list of candidate phrases and acronyms, identify the 10 most "Niche-Specific" terms. 
-        Ignore generic English phrases. Focus on terms that carry cultural meaning, community jargon, or specific emotional weight within this niche.
+        const prompt = `You are a sociolinguist specializing in "${audienceContext}" culture.
+        Analyze the provided Reddit text to identify 8-10 examples of "Community Vernacular."
+        
+        VERNACULAR INCLUDES:
+        - Niche-specific jargon (e.g., "Puppy Blues", "Reactive", "Resource Guarding").
+        - Emotional shorthand or acronyms (e.g., "AITA", "Rescueversary").
+        - Metaphorical terms used by this group (e.g., "Land Shark" for a biting puppy).
 
-        Candidates: ${candidates.join(', ')}
+        STRICT EXCLUSIONS (Do NOT include):
+        - Literal medical events (e.g., "another seizure", "vomiting", "vet visit").
+        - Generic social manners (e.g., "thank god", "hope this helps", "good luck", "last night").
+        - Common English filler (e.g., "right now", "more than").
 
-        Respond ONLY with a valid JSON object with a single key "power_phrases" containing an array of 10 objects. 
-        Each object must have:
-        - "term": The phrase or acronym.
-        - "meaning": A 1-sentence definition of what this signifies in this community.
-        - "usage": A short (3-5 words) example of how they use it.
-
-        Example: {"term": "Puppy Blues", "meaning": "The feeling of regret or overwhelm after getting a new dog.", "usage": "Struggling with major puppy blues."}`;
+        Respond ONLY with a JSON object: {"vernacular": [{"term": "...", "definition": "...", "usage": "..."}] }
+        
+        Usage example should be a full natural sentence.
+        Text:
+        ${rawSamples}`;
 
         const openAIParams = {
-            model: "gpt-4o-mini",
-            messages: [{ role: "system", content: "You are a cultural linguistics expert." }, { role: "user", content: prompt }],
-            temperature: 0.2,
+            model: "gpt-4o-mini", 
+            messages: [
+                { role: "system", content: "You are an expert at identifying niche-specific slang and community-driven terminology." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.2, // Low temperature for high accuracy
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await fetch(OPENAI_PROXY_URL, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        });
+        
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
-        const results = parsed.power_phrases || [];
+        const results = parsed.vernacular || [];
 
-        // 3. RENDER AS COLLAPSIBLE CARDS (Matching your Webflow design)
         if (results.length === 0) {
-            container.innerHTML = `<p class="placeholder-text">No niche jargon identified.</p>`;
+            container.innerHTML = `<p class="placeholder-text">No unique vernacular identified for this group.</p>`;
             return;
         }
 
+        // 2. RENDER WITH MODIFIED STRUCTURE
         container.innerHTML = `
             <div class="power-phrases-list">
                 ${results.map((item, index) => `
                     <details class="power-phrase-item">
                         <summary class="power-phrase-summary">
                             <span class="phrase-text">${item.term}</span>
-                            <span class="phrase-usage-hint">"${item.usage}"</span>
                         </summary>
-                        <div class="power-phrase-definition">
-                            <p>${item.meaning}</p>
+                        <div class="power-phrase-content">
+                            <p class="phrase-definition">${item.definition}</p>
+                            <p class="phrase-usage-example"><strong>Example:</strong> <em>"${item.usage}"</em></p>
                         </div>
                     </details>
                 `).join('')}
@@ -2737,13 +2724,10 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
         `;
 
     } catch (error) {
-        console.error("Power phrases error:", error);
-        container.innerHTML = "Error analyzing linguistics.";
+        console.error("Vernacular Analysis Error:", error);
+        container.innerHTML = "<p>Linguistic analysis unavailable for this search.</p>";
     }
 }
-
-
-
 
 
 // =================================================================================

@@ -2651,72 +2651,60 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;
 
-    container.innerHTML = `<p class="loading-text">Extracting community vernacular... <span class="loader-dots"></span></p>`;
+    container.innerHTML = `<p class="loading-text">Extracting authentic Reddit vernacular... <span class="loader-dots"></span></p>`;
 
-    // 1. PRE-FILTERING: Get a variety of text samples to send to AI
-    // We take the top 30 posts but specifically look for shorter, punchier sentences 
-    // where slang usually lives.
-    const rawSamples = posts.slice(0, 35).map(p => {
-        const text = `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`;
-        return text.substring(0, 400); // Take snippets to stay within token limits
+    // 1. Give the AI more data but tell it to be a "Strict Extractor"
+    const rawSamples = posts.slice(0, 40).map(p => {
+        return `POST: ${p.data.title} \nCONTENT: ${p.data.selftext || p.data.body || ''}`;
     }).join('\n---\n');
 
     try {
-        const prompt = `You are a sociolinguist specializing in "${audienceContext}" culture.
-        Analyze the provided Reddit text to identify 8-10 examples of "Community Vernacular."
-        
-        VERNACULAR INCLUDES:
-        - Niche-specific jargon (e.g., "Puppy Blues", "Reactive", "Resource Guarding").
-        - Emotional shorthand or acronyms (e.g., "AITA", "Rescueversary").
-        - Metaphorical terms used by this group (e.g., "Land Shark" for a biting puppy).
+        const prompt = `You are a data researcher. Your goal is to identify unique phrases, jargon, and shorthand used in this specific Reddit data for "${audienceContext}".
 
-        STRICT EXCLUSIONS (Do NOT include):
-        - Literal medical events (e.g., "another seizure", "vomiting", "vet visit").
-        - Generic social manners (e.g., "thank god", "hope this helps", "good luck", "last night").
-        - Common English filler (e.g., "right now", "more than").
+        STRICT RULES:
+        1. ONLY extract terms that appear in the provided text. Do NOT use your general knowledge.
+        2. Identify Reddit-specific shorthand (e.g., AITA, NTA, OP, TIL) IF they appear.
+        3. Identify Niche Jargon: phrases unique to this community (e.g., "Land Shark", "Puppy Blues", "Reactive").
+        4. ABSOLUTELY NO "Marketing Speak": Avoid cutesy terms like "pawsome" or "fur-ever home" unless they are literally in the text.
+        5. IGNORE generic English: No "thank god", "last night", or "right now".
 
-        Respond ONLY with a JSON object: {"vernacular": [{"term": "...", "definition": "...", "usage": "..."}] }
+        Respond ONLY with a JSON object: {"vernacular": [{"term": "...", "definition": "...", "usage_found_in_text": "..."}] }
         
-        Usage example should be a full natural sentence.
-        Text:
+        The "usage_found_in_text" must be a sentence from the provided data.
+
+        DATA:
         ${rawSamples}`;
 
         const openAIParams = {
             model: "gpt-4o-mini", 
             messages: [
-                { role: "system", content: "You are an expert at identifying niche-specific slang and community-driven terminology." },
+                { role: "system", content: "You are a literal data extraction tool. You do not hallucinate. You only report what is found in the provided source text." },
                 { role: "user", content: prompt }
             ],
-            temperature: 0.2, // Low temperature for high accuracy
+            temperature: 0, // CRITICAL: 0 makes the AI predictable and non-creative
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ openaiPayload: openAIParams }) 
-        });
-        
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
         const results = parsed.vernacular || [];
 
         if (results.length === 0) {
-            container.innerHTML = `<p class="placeholder-text">No unique vernacular identified for this group.</p>`;
+            container.innerHTML = `<p class="placeholder-text">No unique vernacular found in this specific dataset.</p>`;
             return;
         }
 
-        // 2. RENDER WITH MODIFIED STRUCTURE
         container.innerHTML = `
             <div class="power-phrases-list">
-                ${results.map((item, index) => `
+                ${results.map((item) => `
                     <details class="power-phrase-item">
                         <summary class="power-phrase-summary">
                             <span class="phrase-text">${item.term}</span>
                         </summary>
                         <div class="power-phrase-content">
                             <p class="phrase-definition">${item.definition}</p>
-                            <p class="phrase-usage-example"><strong>Example:</strong> <em>"${item.usage}"</em></p>
+                            <p class="phrase-usage-example"><strong>Context from Reddit:</strong> <em>"${item.usage_found_in_text}"</em></p>
                         </div>
                     </details>
                 `).join('')}
@@ -2724,12 +2712,10 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
         `;
 
     } catch (error) {
-        console.error("Vernacular Analysis Error:", error);
-        container.innerHTML = "<p>Linguistic analysis unavailable for this search.</p>";
+        console.error("Linguistic Extraction Error:", error);
+        container.innerHTML = "<p>Linguistic analysis currently unavailable.</p>";
     }
 }
-
-
 // =================================================================================
 // === NEW FUNCTION: AI AUDIENCE OVERVIEW (DEMOGRAPHICS) ===
 // =================================================================================

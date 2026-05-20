@@ -689,46 +689,65 @@ function renderContextContent(word, posts) { const contextBox = document.getElem
 function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title || p.data.link_title || ''}\nContent: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_completion_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
 
+
 async function extractAndValidateEntities(posts, nicheContext) {
-    const topPostsText = posts.slice(0, 50).map(p => {
-        const title = p.data.title || p.data.link_title || '';
-        const body = p.data.selftext || p.data.body || '';
-        return `Title: ${title}\nBody: ${body.substring(0, 500)}`;
+    // 1. Blacklist to prevent meta-Reddit words from appearing as brands
+    const blacklist = new Set(['redact', 'update', 'aita', 'tldr', 'edit', 'post', 'reddit', 'thread', 'link', 'comment', 'sub', 'people', 'guy', 'girl', 'year', 'month', 'today', 'day', 'time']);
+
+    const topPostsText = posts.slice(0, 60).map(p => {
+        const title = p.data.title || '';
+        const body = (p.data.selftext || p.data.body || '').substring(0, 400);
+        return `${title}\n${body}`;
     }).join('\n---\n');
 
-    const prompt = `Extract brands and product categories from the '${nicheContext}' community. Return JSON: {"brands": [], "products": []}`;
-    const openAIParams = { 
-        model: "gpt-5.4-mini", 
-        messages: [{ role: "system", content: "You are a market analyst. Output only JSON." }, { role: "user", content: prompt + "\n\nText: " + topPostsText }], 
-        temperature: 0, 
-        response_format: { "type": "json_object" } 
-    };
+    const prompt = `You are a high-level market researcher. Review these discussions from the '${nicheContext}' community. 
+    Identify the top specific Brands/Companies and Product Categories mentioned.
+    
+    RULES:
+    - Exclude generic common nouns (e.g., 'dog', 'food', 'water').
+    - Exclude Reddit-specific slang or meta-words.
+    - Group variations (e.g., 'KitchenAid' and 'Kitchen Aid' should just be 'KitchenAid').
+    - Only return brands people are actually using, discussing or complaining about.
+
+    Respond ONLY with a valid JSON object: {"brands": ["Name1", "Name2"], "products": ["Product1", "Product2"]}`;
 
     try {
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await fetch(OPENAI_PROXY_URL, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ openaiPayload: { 
+                model: "gpt-4o-mini", 
+                messages: [{ role: "system", content: "You are a meticulous market research analyst." }, { role: "user", content: prompt + "\n\nText to analyze:\n" + topPostsText }],
+                response_format: { "type": "json_object" }
+            } }) 
+        });
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
         
-        // --- FIX: DO NOT WIPE window._entityData ---
         if (!window._entityData) window._entityData = { brands: {}, products: {} };
 
         ['brands', 'products'].forEach(type => {
             if (!parsed[type]) return;
             parsed[type].forEach(name => {
-                const regex = new RegExp(`\\b${name.replace(/ /g, '\\s')}\\b`, 'gi');
+                const cleanName = name.trim();
+                // Skip if in blacklist, too short, or just a number
+                if (blacklist.has(cleanName.toLowerCase()) || cleanName.length < 3 || !isNaN(cleanName)) return;
+
+                const regex = new RegExp(`\\b${cleanName.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')}\\b`, 'gi');
                 const matches = posts.filter(p => regex.test((p.data.title || '') + " " + (p.data.selftext || p.data.body || '')));
                 
-                if (matches.length > 0) {
-                    // If we already have this brand, add the new matches to the list
-                    if (window._entityData[type][name]) {
-                        const existingIds = new Set(window._entityData[type][name].posts.map(p => p.data.id));
+                // --- THE AUTHORITY FILTER ---
+                // Only save to global data if it has 2 or more distinct mentions
+                if (matches.length >= 2) {
+                    // Merge logic: if brand exists, add posts, otherwise create new
+                    if (window._entityData[type][cleanName]) {
+                        const existingIds = new Set(window._entityData[type][cleanName].posts.map(p => p.data.id));
                         matches.forEach(m => {
-                            if (!existingIds.has(m.data.id)) window._entityData[type][name].posts.push(m);
+                            if (!existingIds.has(m.data.id)) window._entityData[type][cleanName].posts.push(m);
                         });
-                        window._entityData[type][name].count = window._entityData[type][name].posts.length;
+                        window._entityData[type][cleanName].count = window._entityData[type][cleanName].posts.length;
                     } else {
-                        // Otherwise, create a new entry
-                        window._entityData[type][name] = { count: matches.length, posts: matches };
+                        window._entityData[type][cleanName] = { count: matches.length, posts: matches };
                     }
                 }
             });
@@ -739,10 +758,11 @@ async function extractAndValidateEntities(posts, nicheContext) {
             topProducts: Object.entries(window._entityData.products).sort((a, b) => b[1].count - a[1].count).slice(0, 8)
         };
     } catch (error) {
-        console.error("Entity extraction error:", error);
+        console.error("Extraction error:", error);
         return { topBrands: [], topProducts: [] };
     }
 }
+
 
 // =================================================================================
 // === ADD THIS MISSING CORE FUNCTION TO YOUR SCRIPT ===
@@ -3108,39 +3128,35 @@ function setupGrowthKitInteraction() {
 // =================================================================================
 // === UPDATED DISCOVERY LIST RENDERER (Fills Webflow Elements) ===
 // =================================================================================
+
 function renderDiscoveryList(containerId, data, title, type) {
     const container = document.getElementById(containerId);
     if (!container) return;
+    container.innerHTML = ""; 
 
-    // 1. Find all the "slots" you built in Webflow inside this container
-    const slots = container.querySelectorAll('.discovery-list-item');
-    
-    // 2. Hide all slots first (resetting the UI)
-    slots.forEach(slot => slot.style.display = 'none');
+    if (data.length === 0) {
+        container.innerHTML = '<p style="padding:20px; opacity:0.5; font-size:14px;">Scanning for market signals...</p>';
+        return;
+    }
 
-    // 3. Loop through the AI data and fill your Webflow slots
-    data.forEach(([name, details], index) => {
-        if (slots[index]) {
-            const slot = slots[index];
-            
-            // Fill the Rank, Name, and Count elements you made in Webflow
-            const rankEl = slot.querySelector('.rank');
-            const nameEl = slot.querySelector('.name');
-            const countEl = slot.querySelector('.count');
+    container.innerHTML = data.map(([name, details], i) => {
+        // --- UX FIX: Transform low numbers into "Signal Strength" labels ---
+        let signalLabel = `${details.count} mentions`;
+        if (details.count <= 3) signalLabel = "Notable Signal";
+        if (details.count > 3 && details.count <= 8) signalLabel = "Rising Trend";
+        if (details.count > 8) signalLabel = "High Volume";
 
-            if (rankEl) rankEl.textContent = `${index + 1}.`;
-            if (nameEl) nameEl.textContent = name;
-            if (countEl) countEl.textContent = `${details.count} mentions`;
-
-            // Attach data to the slot so the script knows what to analyze if "See Brief" is clicked
-            slot.setAttribute('data-word', name);
-            slot.setAttribute('data-type', type);
-
-            // Make the slot visible (matching your Webflow layout)
-            slot.style.display = 'flex'; 
-        }
-    });
+        return `
+            <div class="discovery-list-item" data-word="${name}" data-type="${type}" style="display: flex;">
+                <div class="rank">${i + 1}.</div>
+                <div class="name">${name}</div>
+                <div class="count">${signalLabel}</div>
+                <button class="brief-button">View More</button>
+            </div>
+        `;
+    }).join('');
 }
+
 
 // =================================================================================
 // === UPDATED INTERACTIVITY (Handles Webflow-built buttons) ===

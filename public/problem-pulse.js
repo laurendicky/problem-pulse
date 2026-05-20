@@ -690,22 +690,33 @@ function showSlidingPanel(word, posts, category) { const positivePanel = documen
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title || p.data.link_title || ''}\nContent: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_completion_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
 
 async function extractAndValidateEntities(posts, nicheContext) {
-    // 1. Prepare a massive string of all text to allow for total occurrence counting
+    // 1. Prepare text for counting
     const allText = posts.map(p => 
         (p.data.title || '') + " " + (p.data.selftext || p.data.body || '')
     ).join(" [SEP] ").toLowerCase();
 
-    // 2. Sample a portion for AI to identify the "Targets"
+    // 2. Sample for AI with a stricter prompt
     const sampleText = posts.slice(0, 50).map(p => 
         `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 300)}`
     ).join('\n---\n');
 
-    const prompt = `You are a market analyst. Extract exactly 15 Brand names (proper nouns) and 15 Generic Product Categories from the '${nicheContext}' community. 
+    // THE UPDATED PROMPT: Added negative constraints and clearer definitions
+    const prompt = `You are a market research analyst for the '${nicheContext}' industry. 
+    Your task is to identify Commercial Brands and Generic Product Categories.
+
+    1. BRANDS: Extract exactly 15 Commercial Brands or specific product lines (e.g., 'Kong', 'Purina', 'Milk-Bone', 'West Paw').
+    CRITICAL: Do NOT include names of individual pets, dogs, people, or Reddit users. (e.g., ignore 'Arnold', 'Peaches', 'Bella', 'Cooper'). If it is a name of a dog, skip it.
+
+    2. PRODUCTS: Extract exactly 15 Generic Product Categories (e.g., 'Kibble', 'Harness', 'Chew Toy').
+
     Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}`;
 
     const openAIParams = { 
         model: "gpt-4o-mini", 
-        messages: [{ role: "system", content: "You are a precise JSON extractor." }, { role: "user", content: prompt + "\n\nText: " + sampleText }], 
+        messages: [
+            { role: "system", content: "You are a specialized business data extractor. You distinguish between commercial entities and personal names." }, 
+            { role: "user", content: prompt + "\n\nText to analyze:\n" + sampleText }
+        ], 
         temperature: 0, 
         response_format: { "type": "json_object" } 
     };
@@ -723,14 +734,13 @@ async function extractAndValidateEntities(posts, nicheContext) {
                 const cleanKey = name.toLowerCase().trim();
                 if (cleanKey.length < 3) return;
 
-                // Regex to find all occurrences including plurals
-                const regex = new RegExp(`\\b${cleanKey}(s|es|'s)?\\b`, 'gi');
+                // Improved Regex: Handles spaces and hyphens better for brands like Milk-Bone
+                const escapedName = cleanKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regex = new RegExp(`\\b${escapedName}(s|es|'s)?\\b`, 'gi');
                 
-                // 3. COUNT TOTAL OCCURRENCES across all text
                 const occurrenceMatch = allText.match(regex);
                 const occurrenceCount = occurrenceMatch ? occurrenceMatch.length : 0;
 
-                // 4. FIND RELEVANT POSTS (for the "See Brief" feature)
                 const relevantPosts = posts.filter(p => regex.test((p.data.title || '') + " " + (p.data.selftext || p.data.body || '')));
 
                 if (occurrenceCount > 0) {
@@ -742,10 +752,9 @@ async function extractAndValidateEntities(posts, nicheContext) {
                         };
                     }
                     
-                    // Update total occurrence count
+                    // Increment the count (useful for the comment-enhancement pass)
                     window._entityData[type][cleanKey].count += occurrenceCount;
 
-                    // Merge unique posts without duplicates
                     const existingIds = new Set(window._entityData[type][cleanKey].posts.map(p => p.data.id));
                     relevantPosts.forEach(m => {
                         if (!existingIds.has(m.data.id)) window._entityData[type][cleanKey].posts.push(m);
@@ -763,6 +772,9 @@ async function extractAndValidateEntities(posts, nicheContext) {
         return { topBrands: [], topProducts: [] };
     }
 }
+
+
+
 
 async function enhanceDiscoveryWithComments(initialPosts, nicheContext) {
     console.log("Enhancing with comments...");

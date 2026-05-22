@@ -2772,18 +2772,31 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
 }
 
 // --- MODIFIED: UPGRADED POWER PHRASES ---
+
+
+// --- POWER PHRASES: WEBFLOW POPULATOR ---
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;
 
-    // 1. Script-side identification of candidates (remains unchanged to ensure logic flow)
+    // 1. Identify your Webflow template blueprint
+    const itemTemplate = container.querySelector('.phrase-item-template');
+    if (!itemTemplate) {
+        console.error("Could not find '.phrase-item-template' inside #power-phrases");
+        return;
+    }
+
+    // Hide the blueprint so it doesn't show up empty
+    itemTemplate.style.display = 'none';
+
+    // 2. Identify candidates (Acronyms & Phrases)
     const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
     const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
     const acronymRegex = /\b[A-Z]{2,5}\b/g;
-    const acronyms = rawText.match(acronymRegex) || [];
+    const foundAcronyms = rawText.match(acronymRegex) || [];
     const acronymFreq = {};
-    acronyms.forEach(acronym => { if (!stopAcronyms.has(acronym)) { acronymFreq[acronym] = (acronymFreq[acronym] || 0) + 1; } });
-    const topAcronyms = Object.entries(acronymFreq).filter(([_, count]) => count > 2).sort((a, b) => b[1] - a[1]).slice(0, 5).map(item => item[0]);
+    foundAcronyms.forEach(a => { if (!stopAcronyms.has(a)) acronymFreq[a] = (acronymFreq[a] || 0) + 1; });
+    const topAcronyms = Object.entries(acronymFreq).filter(([_, count]) => count > 1).sort((a, b) => b[1] - a[1]).slice(0, 4).map(item => item[0]);
     
     const cleanedText = rawText.toLowerCase().replace(/[^a-z\s']/g, '').replace(/\s+/g, ' ');
     const words = cleanedText.split(' ');
@@ -2791,59 +2804,79 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const trigrams = generateNgrams(words, 3);
     const phraseFreq = {};
     [...bigrams, ...trigrams].forEach(phrase => { phraseFreq[phrase] = (phraseFreq[phrase] || 0) + 1; });
-    const topPhrases = Object.entries(phraseFreq).filter(([_, count]) => count > 1).sort((a, b) => b[1] - a[1]).slice(0, 12 - topAcronyms.length).map(item => item[0]);
+    const topPhrases = Object.entries(phraseFreq).filter(([_, count]) => count > 1).sort((a, b) => b[1] - a[1]).slice(0, 9 - topAcronyms.length).map(item => item[0]);
     
     const termsToAnalyze = [...topAcronyms, ...topPhrases];
+    const topPostsText = posts.slice(0, 15).map(p => p.data.title).join(' | ');
 
-    if (termsToAnalyze.length < 3) {
-        container.innerHTML = '<p class="placeholder-text">Not enough niche jargon found.</p>';
-        return;
-    }
+    // Clear previous results (instances), but keep our hidden blueprint
+    container.querySelectorAll('.phrase-instance').forEach(el => el.remove());
 
-    // 2. Initial render of dropdown skeletons
-    container.innerHTML = `<div class="power-phrases-list">
-        ${termsToAnalyze.map((term, i) => `
-            <details class="power-phrase-item" id="phrase-item-${i}">
-                <summary class="power-phrase-summary">${term}</summary>
-                <div class="power-phrase-content" id="phrase-content-${i}">
-                    <p class="loading-text">Analyzing usage...</p>
-                </div>
-            </details>
-        `).join('')}
-    </div>`;
+    // 3. Loop and Populate
+    termsToAnalyze.forEach(async (term, index) => {
+        // Clone the template
+        const clone = itemTemplate.cloneNode(true);
+        clone.classList.add('phrase-instance');
+        clone.classList.remove('phrase-item-template');
+        clone.id = ''; // Remove the duplicate ID
+        clone.style.display = 'flex'; // Match your Webflow flex/grid setting
 
-    // 3. Batch fetch rich definitions/quotes (Processing in batches of 4 to avoid timeouts)
-    const topPostsText = posts.slice(0, 25).map(p => p.data.title).join(' | ');
-    
-    for (let i = 0; i < termsToAnalyze.length; i++) {
-        const term = termsToAnalyze[i];
-        const prompt = `For each of these terms from the ${audienceContext} community, provide: 1) a clear 1-sentence definition, 2) a realistic short example quote showing how a community member uses it (1-2 sentences max, ideally derived from the actual posts provided), 3) a 1-sentence usage note advising a marketer on when to use this term in copy or when to avoid it. Respond ONLY as valid JSON with key 'terms', an array of objects with keys 'term', 'definition', 'example_quote', 'usage_note'. Terms to analyze: ["${term}"]. Posts for context: ${topPostsText}`;
+        // Set the Term Title (Summary) immediately
+        const termHeader = clone.querySelector('.phrase-text');
+        if (termHeader) termHeader.innerText = term;
 
-        const openAIParams = {
-            model: "gpt-5.4-mini",
-            messages: [{ role: "system", content: "You are an expert linguist who outputs only valid JSON." }, { role: "user", content: prompt }],
-            temperature: 0.1,
-            response_format: { "type": "json_object" }
-        };
+        // ACCORDION FAIL-SAFE: 
+        // If your Webflow Interaction doesn't trigger on cloned elements, this will.
+        const summaryDiv = clone.querySelector('.power-phrase-summary');
+        const contentDiv = clone.querySelector('.power-phrase-content');
+        if (summaryDiv && contentDiv) {
+            summaryDiv.style.cursor = 'pointer';
+            summaryDiv.addEventListener('click', () => {
+                const isHidden = contentDiv.style.display === 'none' || getComputedStyle(contentDiv).display === 'none';
+                contentDiv.style.display = isHidden ? 'block' : 'none';
+            });
+        }
 
-        fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) })
-            .then(res => res.json())
-            .then(data => {
-                const parsed = JSON.parse(data.openaiResponse);
-                const item = parsed.terms[0];
-                const contentDiv = document.getElementById(`phrase-content-${i}`);
-                if (contentDiv && item) {
-                    contentDiv.innerHTML = `
-                        <p class="phrase-definition">${item.definition}</p>
-                        <p class="phrase-example"><strong>Example:</strong> <em>"${item.example_quote}"</em></p>
-                        <p class="phrase-usage"><strong>Use when:</strong> ${item.usage_note}</p>
-                    `;
-                }
-            }).catch(err => console.error("Phrase enrichment failed", err));
-    }
+        // Add to the grid
+        container.appendChild(clone);
+
+        // 4. Fetch the AI details
+        try {
+            const prompt = `For the term "${term}" in the ${audienceContext} community, provide: 1) a 1-sentence definition, 2) a short example quote, 3) a 1-sentence usage note for a marketer. Respond ONLY as valid JSON with keys 'definition', 'example_quote', 'usage_note'. Context: ${topPostsText}`;
+
+            const openAIParams = {
+                model: "gpt-5.4-mini",
+                messages: [{ role: "system", content: "You are a linguist who outputs only valid JSON." }, { role: "user", content: prompt }],
+                temperature: 0.1,
+                response_format: { "type": "json_object" }
+            };
+
+            const response = await fetch(OPENAI_PROXY_URL, { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify({ openaiPayload: openAIParams }) 
+            });
+            
+            const resData = await response.json();
+            const parsed = JSON.parse(resData.openaiResponse);
+
+            // Populate the dropdown content using your classes
+            if (clone.querySelector('.phrase-definition')) 
+                clone.querySelector('.phrase-definition').innerText = parsed.definition;
+            
+            if (clone.querySelector('.phrase-example')) 
+                clone.querySelector('.phrase-example').innerText = `Example: "${parsed.example_quote}"`;
+            
+            if (clone.querySelector('.phrase-usage')) 
+                clone.querySelector('.phrase-usage').innerText = `Use when: ${parsed.usage_note}`;
+
+        } catch (err) {
+            console.error(`Failed to enrich phrase: ${term}`, err);
+        }
+    });
 }
 
-// --- NEW FUNCTION: HOOK PATTERNS ---
+
 
 
 async function generateAndRenderHookPatterns(posts, audienceContext) {

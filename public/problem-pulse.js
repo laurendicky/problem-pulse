@@ -2647,188 +2647,135 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
     });
 }
 
-
+// --- MODIFIED: UPGRADED POWER PHRASES ---
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container) return;
 
-    container.innerHTML = `<p class="loading-text">Scanning for community jargon... <span class="loader-dots"></span></p>`;
+    // 1. Script-side identification of candidates (remains unchanged to ensure logic flow)
+    const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
+    const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
+    const acronymRegex = /\b[A-Z]{2,5}\b/g;
+    const acronyms = rawText.match(acronymRegex) || [];
+    const acronymFreq = {};
+    acronyms.forEach(acronym => { if (!stopAcronyms.has(acronym)) { acronymFreq[acronym] = (acronymFreq[acronym] || 0) + 1; } });
+    const topAcronyms = Object.entries(acronymFreq).filter(([_, count]) => count > 2).sort((a, b) => b[1] - a[1]).slice(0, 5).map(item => item[0]);
+    
+    const cleanedText = rawText.toLowerCase().replace(/[^a-z\s']/g, '').replace(/\s+/g, ' ');
+    const words = cleanedText.split(' ');
+    const bigrams = generateNgrams(words, 2);
+    const trigrams = generateNgrams(words, 3);
+    const phraseFreq = {};
+    [...bigrams, ...trigrams].forEach(phrase => { phraseFreq[phrase] = (phraseFreq[phrase] || 0) + 1; });
+    const topPhrases = Object.entries(phraseFreq).filter(([_, count]) => count > 1).sort((a, b) => b[1] - a[1]).slice(0, 12 - topAcronyms.length).map(item => item[0]);
+    
+    const termsToAnalyze = [...topAcronyms, ...topPhrases];
 
-    if (!posts || posts.length === 0) {
-        container.innerHTML = `<p class="placeholder-text">No posts available to analyze.</p>`;
+    if (termsToAnalyze.length < 3) {
+        container.innerHTML = '<p class="placeholder-text">Not enough niche jargon found.</p>';
         return;
     }
 
-    // 1. ULTRA-LEAN DATA PREP: 
-    // We take 12 posts, and only the Title + first 400 characters.
-    // This reduces the data load by 70%, preventing timeouts.
-    const leanSamples = posts.slice(0, 12).map(p => {
-        const title = p.data.title || '';
-        const body = (p.data.selftext || p.data.body || '').substring(0, 400);
-        return `T: ${title}\nC: ${body}`;
-    }).join('\n---\n');
+    // 2. Initial render of dropdown skeletons
+    container.innerHTML = `<div class="power-phrases-list">
+        ${termsToAnalyze.map((term, i) => `
+            <details class="power-phrase-item" id="phrase-item-${i}">
+                <summary class="power-phrase-summary">${term}</summary>
+                <div class="power-phrase-content" id="phrase-content-${i}">
+                    <p class="loading-text">Analyzing usage...</p>
+                </div>
+            </details>
+        `).join('')}
+    </div>`;
 
-    try {
-        const prompt = `Extract 6-8 examples of niche jargon, acronyms, or cultural shorthand used by the "${audienceContext}" community on Reddit.
-
-        RULES:
-        1. ONLY use terms found in the text below.
-        2. IGNORE generic English (e.g., "thank god", "last night").
-        3. FOCUS on industry terms (e.g., SaaS: "MRR", "Churn"; Dogs: "Reactive", "Fostering").
-        4. Provide a 1-sentence definition for each.
-
-        Respond ONLY with this JSON structure: {"vernacular": [{"term": "...", "definition": "..."}] }
-
-        TEXT:
-        ${leanSamples}`;
+    // 3. Batch fetch rich definitions/quotes (Processing in batches of 4 to avoid timeouts)
+    const topPostsText = posts.slice(0, 25).map(p => p.data.title).join(' | ');
+    
+    for (let i = 0; i < termsToAnalyze.length; i++) {
+        const term = termsToAnalyze[i];
+        const prompt = `For each of these terms from the ${audienceContext} community, provide: 1) a clear 1-sentence definition, 2) a realistic short example quote showing how a community member uses it (1-2 sentences max, ideally derived from the actual posts provided), 3) a 1-sentence usage note advising a marketer on when to use this term in copy or when to avoid it. Respond ONLY as valid JSON with key 'terms', an array of objects with keys 'term', 'definition', 'example_quote', 'usage_note'. Terms to analyze: ["${term}"]. Posts for context: ${topPostsText}`;
 
         const openAIParams = {
-            model: "gpt-4o-mini", 
-            messages: [
-                { role: "system", content: "You are a data extractor. Speed is priority. Do not hallucinate." },
-                { role: "user", content: prompt }
-            ],
-            temperature: 0, 
+            model: "gpt-5.4-mini",
+            messages: [{ role: "system", content: "You are an expert linguist who outputs only valid JSON." }, { role: "user", content: prompt }],
+            temperature: 0.1,
             response_format: { "type": "json_object" }
         };
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
-
-        const response = await fetch(OPENAI_PROXY_URL, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ openaiPayload: openAIParams }),
-            signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
-        const results = parsed.vernacular || [];
-
-        if (results.length === 0) {
-            container.innerHTML = `<p class="placeholder-text">No unique jargon found in this dataset.</p>`;
-            return;
-        }
-
-        container.innerHTML = `
-            <div class="power-phrases-list">
-                ${results.map((item) => `
-                    <details class="power-phrase-item">
-                        <summary class="power-phrase-summary">
-                            <span class="phrase-text">${item.term}</span>
-                        </summary>
-                        <div class="power-phrase-content">
-                            <p class="phrase-definition">${item.definition}</p>
-                        </div>
-                    </details>
-                `).join('')}
-            </div>
-        `;
-
-    } catch (error) {
-        console.error("Power Phrases Error:", error);
-        // This will tell us if it's a timeout, a server error, or something else
-        let userMessage = "Linguistic analysis timed out.";
-        if (error.name === 'AbortError') userMessage = "Request took too long. Try a 'Quick' search.";
-        
-        container.innerHTML = `<p class="placeholder-text" style="color: #fd80c7;">${userMessage}</p>`;
+        fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) })
+            .then(res => res.json())
+            .then(data => {
+                const parsed = JSON.parse(data.openaiResponse);
+                const item = parsed.terms[0];
+                const contentDiv = document.getElementById(`phrase-content-${i}`);
+                if (contentDiv && item) {
+                    contentDiv.innerHTML = `
+                        <p class="phrase-definition">${item.definition}</p>
+                        <p class="phrase-example"><strong>Example:</strong> <em>"${item.example_quote}"</em></p>
+                        <p class="phrase-usage"><strong>Use when:</strong> ${item.usage_note}</p>
+                    `;
+                }
+            }).catch(err => console.error("Phrase enrichment failed", err));
     }
 }
 
-async function generateAndRenderToneOfVoice(posts, audienceContext) {
-    const container = document.getElementById('tone-voice-container');
+// --- NEW FUNCTION: HOOK PATTERNS ---
+async function generateAndRenderHookPatterns(posts, audienceContext) {
+    const container = document.getElementById('hook-patterns-container');
     if (!container) return;
 
-    container.innerHTML = `<p class="loading-text">Analyzing communication DNA... <span class="loader-dots"></span></p>`;
-
-    const topVoted = [...posts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 10);
-    const leanSamples = topVoted.map(p => `UPVOTES: ${p.data.ups} | TITLE: ${p.data.title}\nBODY: ${(p.data.selftext || p.data.body || '').substring(0, 300)}`).join('\n---\n');
+    container.innerHTML = `<p class="loading-text">Analyzing top hooks... <span class="loader-dots"></span></p>`;
 
     try {
-        const prompt = `Analyze the "${audienceContext}" subreddit style. 
-        Return a JSON object with EXACTLY these 4 keys:
-        1. "tone_adjectives": (array of 3 strings) e.g. ["Technical", "Wry", "Direct"]
-        2. "forbidden_words": (array of 3 strings) Niche-specific cringe terms to avoid.
-        3. "hook_syntax": (array of 2 strings) Post title templates based on top-voted data.
-        4. "vibe": (1 string) Describe the community BS-detector.
+        // Sort top 30 by upvotes
+        const topPosts = [...posts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 30);
+        const topPostsText = topPosts.map((p, i) => `${i+1}. ${p.data.title}`).join('\n');
 
-        CRITICAL: Do NOT use generic business words like "ROI", "Target Audience", or "Leverage".
-        
-        DATA:
-        ${leanSamples}`;
+        const prompt = `Analyze these top-performing posts from the ${audienceContext} community. Identify 4-6 distinct 'hook patterns' (the type of opening that drives engagement). For each pattern, provide: a category name (e.g., 'Vulnerability hook', 'Validation hook', 'Achievement hook', 'Confession hook', 'Question hook'), a short 1-sentence description of why this hook works for this audience, and 3 real example titles from the posts (use the actual titles, do not invent them). Respond ONLY as valid JSON with key 'patterns', an array of objects with keys 'category', 'why_it_works', and 'examples' (array of 3 strings). Posts: ${topPostsText}`;
 
         const openAIParams = {
-            model: "gpt-4o-mini",
+            model: "gpt-5.4-mini",
             messages: [
-                { role: "system", content: "You are a JSON-only data extractor. Use the exact keys provided: tone_adjectives, forbidden_words, hook_syntax, vibe." },
+                { role: "system", content: "You are an expert content strategist who outputs only valid JSON." },
                 { role: "user", content: prompt }
             ],
-            temperature: 0,
+            temperature: 0.2,
             response_format: { "type": "json_object" }
         };
 
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         const data = await response.json();
-        
-        if (!data || !data.openaiResponse) throw new Error("Empty response");
+        const parsed = JSON.parse(data.openaiResponse);
 
-        const parsed = JSON.parse(data.openaiResponse.replace(/```json/g, '').replace(/```/g, '').trim());
-
-        // --- FLEXIBLE KEY MAPPING ---
-        // This ensures that even if the AI slightly changes the key names, we still find the data.
-        const toneAdjectives = parsed.tone_adjectives || parsed.adjectives || [];
-        const forbiddenWords = parsed.forbidden_words || parsed.cringe || parsed.forbidden || [];
-        const hookSyntax = parsed.hook_syntax || parsed.templates || parsed.hooks || [];
-        const communityVibe = parsed.vibe || parsed.community_vibe || "Authenticity is the primary currency here.";
-
-        // --- RENDER HTML ---
         container.innerHTML = `
-            <div class="tone-voice-grid">
-                <!-- Vibe Card -->
-                <div class="tone-card">
-                    <h4 class="card-title">Community Vibe</h4>
-                    <p class="card-description">${communityVibe}</p>
-                    <div class="tag-container">
-                        ${toneAdjectives.length > 0 
-                            ? toneAdjectives.map(t => `<span class="tag">${t}</span>`).join('') 
-                            : '<span class="tag">Authentic</span><span class="tag">Direct</span>'}
-                    </div>
-                </div>
-                
-                <!-- Forbidden Card -->
-                <div class="tone-card forbidden">
-                    <h4 class="card-title">The "Niche Cringe" List</h4>
-                    <p class="card-description">Avoid these terms to stay authentic:</p>
-                    <div class="list-container">
-                        ${forbiddenWords.length > 0 
-                            ? forbiddenWords.map(w => `<div class="list-item">✕ "${w}"</div>`).join('') 
-                            : '<div class="list-item">No specific cringe found.</div>'}
-                    </div>
-                </div>
-
-                <!-- Hooks Card -->
-                <div class="tone-card hooks">
-                    <h4 class="card-title">Successful Post Templates</h4>
-                    <p class="card-description">Patterns from top-performing threads:</p>
-                    <div class="list-container">
-                        ${hookSyntax.length > 0 
-                            ? hookSyntax.map(h => `<div class="list-item">✓ ${h}</div>`).join('') 
-                            : '<div class="list-item">✓ Has anyone else dealt with [Problem]?</div>'}
-                    </div>
-                </div>
+            <h3 class="dashboard-section-title">Hook Patterns</h3>
+            <p class="dashboard-section-subtitle">Psychological triggers that drive engagement in this community</p>
+            <div class="hook-patterns-grid">
+                ${parsed.patterns.map(pattern => `
+                    <details class="hook-pattern-card">
+                        <summary class="hook-card-header">
+                            <span class="hook-category">${pattern.category}</span>
+                            <div class="hook-arrow">›</div>
+                        </summary>
+                        <div class="hook-card-content">
+                            <p class="hook-why"><strong>Strategy:</strong> ${pattern.why_it_works}</p>
+                            <div class="hook-examples-list">
+                                ${pattern.examples.map(ex => `<blockquote class="hook-example-title">"${ex}"</blockquote>`).join('')}
+                            </div>
+                        </div>
+                    </details>
+                `).join('')}
             </div>
         `;
-
     } catch (error) {
-        console.error("Tone Analysis Error:", error);
-        container.innerHTML = `<div class="tone-card"><p>Tone analysis is currently taking a coffee break. Try refreshing.</p></div>`;
+        console.error("Hook Patterns Error:", error);
+        container.innerHTML = `<p class="placeholder-text">Hook analysis temporarily unavailable.</p>`;
     }
 }
+
+// --- DELETE THE OLD generateAndRenderToneOfVoice FUNCTION FROM YOUR SCRIPT ---
+
+
 
 // --- NEW SECTION 1: VOICE PROFILE ---
 async function generateAndRenderVoiceProfile(posts, audienceContext) {
@@ -3104,10 +3051,10 @@ async function runProblemFinder(options = {}) {
         generateAndRenderHybridSentiment(filteredItems, originalGroupName);
         generateEmotionMapData(filteredItems).then(renderEmotionMap);
         renderIncludedSubreddits(selectedSubreddits);
-        generateAndRenderToneOfVoice(filteredItems, originalGroupName);
         generateAndRenderPowerPhrases(filteredItems, originalGroupName);
         generateAndRenderVoiceProfile(filteredItems, originalGroupName);
         generateAndRenderLanguageToAvoid(filteredItems, originalGroupName);
+        generateAndRenderHookPatterns(filteredItems, originalGroupName);
         generateAndRenderMindsetSummary(filteredItems, originalGroupName);
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);
         generateAndRenderAIPrompt(filteredItems, originalGroupName);

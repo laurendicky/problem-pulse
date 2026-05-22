@@ -2770,26 +2770,30 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
         }]
     });
 }
+
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
-    console.log("Linguistic Discovery: Starting analysis...");
+    console.log("Linguistic Discovery: Fetching container...");
 
-    // 1. SMART TARGETING
-    // We look for the container and template by ID OR Class just in case Webflow renamed them
-    const container = document.getElementById('power-phrases') || document.querySelector('.power-phrases-container');
-    const itemTemplate = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
-
-    // DIAGNOSTIC LOG: This will tell us exactly which one is missing in the console
-    if (!container) console.error("DEBUG: Container #power-phrases NOT found.");
-    if (!itemTemplate) console.error("DEBUG: Template #phrase-term NOT found.");
-
-    if (!container || !itemTemplate) {
-        return; // Stop here if we can't find the elements
+    // 1. Get the container
+    const container = document.getElementById('power-phrases');
+    if (!container) {
+        console.error("CRITICAL: The outer container #power-phrases was not found on this page.");
+        return;
     }
 
-    // Hide the blueprint
+    // 2. GET THE TEMPLATE (By Position instead of ID)
+    // We take the first child of the container that hasn't been added by the script yet
+    const itemTemplate = container.querySelector('.phrase-item-template') || container.children[0];
+
+    if (!itemTemplate) {
+        console.error("CRITICAL: The container #power-phrases is empty. Please ensure your template div is inside it.");
+        return;
+    }
+
+    // Hide the blueprint so it doesn't show up in the results
     itemTemplate.style.display = 'none';
 
-    // 2. Identify candidates (Acronyms & Phrases)
+    // --- Identification logic (same as before) ---
     const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
     const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
     const acronymRegex = /\b[A-Z]{2,5}\b/g;
@@ -2809,21 +2813,23 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const termsToAnalyze = [...topAcronyms, ...topPhrases];
     const topPostsText = posts.slice(0, 15).map(p => p.data.title).join(' | ');
 
-    // Clear previous results
+    // Clear previous results (instances)
     container.querySelectorAll('.phrase-instance').forEach(el => el.remove());
 
     // 3. Loop and Populate
     termsToAnalyze.forEach(async (term) => {
+        // Clone the template
         const clone = itemTemplate.cloneNode(true);
         clone.classList.add('phrase-instance');
-        clone.id = ''; 
-        clone.style.display = 'flex'; 
+        clone.classList.remove('phrase-item-template'); // Clean up classes
+        clone.id = ''; // Ensure no ID conflicts
+        clone.style.display = 'flex'; // Make it visible
 
-        // Set Title
+        // Set the Term Title
         const termHeader = clone.querySelector('.phrase-text');
         if (termHeader) termHeader.innerText = term;
 
-        // Accordion Toggle Logic
+        // Accordion Toggle logic using the classes from your screenshot
         const summaryDiv = clone.querySelector('.power-phrase-summary');
         const contentDiv = clone.querySelector('.power-phrase-content');
         if (summaryDiv && contentDiv) {
@@ -2837,6 +2843,7 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
 
         container.appendChild(clone);
 
+        // 4. Fetch the AI details
         try {
             const prompt = `For the term "${term}" in the ${audienceContext} community, provide: 1) a 1-sentence definition, 2) a short example quote, 3) a 1-sentence usage note for a marketer. Respond ONLY as valid JSON with keys 'definition', 'example_quote', 'usage_note'. Context: ${topPostsText}`;
 
@@ -2870,6 +2877,12 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
         }
     });
 }
+
+
+
+
+
+
 
 
 async function generateAndRenderHookPatterns(posts, audienceContext) {

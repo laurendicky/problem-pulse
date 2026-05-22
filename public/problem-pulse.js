@@ -685,19 +685,36 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
     renderCloud(negativeContainer, 'Negative Words & Phrases', wordFreq.negative, finalNegativePhrases, negativeColors);
 }
 
-// --- NEW SECTION 4: CLOUD INSIGHTS ---
 async function generateAndRenderCloudInsights(posts, audienceContext) {
     const posInsight = document.getElementById('positive-cloud-insight');
     const negInsight = document.getElementById('negative-cloud-insight');
-    
-    // Safety check: wait for window data or exit if not found
-    if (!window._sentimentData || !window._sentimentData.positive || !window._sentimentData.negative) return;
+    if (!posInsight || !negInsight) return;
 
-    const posWords = Object.keys(window._sentimentData.positive).slice(0, 12).join(', ');
-    const negWords = Object.entries(window._sentimentData.negative).slice(0, 12).map(([k,v]) => k).join(', ');
+    // --- POLLING LOGIC: Wait for the data to exist ---
+    let attempts = 0;
+    const maxAttempts = 20; // Will wait up to 20 seconds total
+
+    while (attempts < maxAttempts) {
+        if (window._sentimentData && window._sentimentData.positive && window._sentimentData.negative) {
+            break; // Data is ready, exit the loop and continue
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+        attempts++;
+        console.log(`Cloud Insights: Waiting for sentiment data... (Attempt ${attempts})`);
+    }
+
+    // Final safety check after polling
+    if (!window._sentimentData || !window._sentimentData.positive || !window._sentimentData.negative) {
+        console.error("Cloud Insights: Sentiment data never populated.");
+        return;
+    }
+
+    // Extract the top 12 terms from the window object
+    const posWordsList = Object.keys(window._sentimentData.positive).slice(0, 12).join(', ');
+    const negWordsList = Object.keys(window._sentimentData.negative).slice(0, 12).join(', ');
 
     try {
-        const prompt = `These are the most common positive words from the ${audienceContext} community: ${posWords}. And the most common negative words: ${negWords}. Write two 1-sentence strategic insights for a marketer: one summarizing what the positive vocabulary reveals about this audience's hopes/desires, one summarizing what the negative vocabulary reveals about their fears/frustrations. Respond ONLY as valid JSON with keys 'positive_insight' and 'negative_insight'.`;
+        const prompt = `These are the most common positive words from the ${audienceContext} community: ${posWordsList}. And the most common negative words: ${negWordsList}. Write two 1-sentence strategic insights for a marketer: one summarizing what the positive vocabulary reveals about this audience's hopes/desires, one summarizing what the negative vocabulary reveals about their fears/frustrations. Respond ONLY as valid JSON with keys 'positive_insight' and 'negative_insight'.`;
 
         const openAIParams = {
             model: "gpt-5.4-mini",
@@ -718,17 +735,18 @@ async function generateAndRenderCloudInsights(posts, audienceContext) {
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
-        if (posInsight && parsed.positive_insight) {
+        if (parsed.positive_insight) {
             posInsight.innerHTML = `<div class="cloud-insight-pill pos"><strong>Goal:</strong> ${parsed.positive_insight}</div>`;
         }
-        if (negInsight && parsed.negative_insight) {
+        if (parsed.negative_insight) {
             negInsight.innerHTML = `<div class="cloud-insight-pill neg"><strong>Fear:</strong> ${parsed.negative_insight}</div>`;
         }
 
     } catch (error) {
-        console.error("Cloud Insight Error:", error);
+        console.error("Cloud Insight AI Error:", error);
     }
 }
+
 
 // --- NEW SECTION 5: TONE MAP ---
 async function generateAndRenderToneMap(posts, audienceContext) {

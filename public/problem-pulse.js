@@ -685,6 +685,112 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
     renderCloud(negativeContainer, 'Negative Words & Phrases', wordFreq.negative, finalNegativePhrases, negativeColors);
 }
 
+// --- NEW SECTION 4: CLOUD INSIGHTS ---
+async function generateAndRenderCloudInsights(posts, audienceContext) {
+    const posInsight = document.getElementById('positive-cloud-insight');
+    const negInsight = document.getElementById('negative-cloud-insight');
+    
+    // Safety check: wait for window data or exit if not found
+    if (!window._sentimentData || !window._sentimentData.positive || !window._sentimentData.negative) return;
+
+    const posWords = Object.keys(window._sentimentData.positive).slice(0, 12).join(', ');
+    const negWords = Object.entries(window._sentimentData.negative).slice(0, 12).map(([k,v]) => k).join(', ');
+
+    try {
+        const prompt = `These are the most common positive words from the ${audienceContext} community: ${posWords}. And the most common negative words: ${negWords}. Write two 1-sentence strategic insights for a marketer: one summarizing what the positive vocabulary reveals about this audience's hopes/desires, one summarizing what the negative vocabulary reveals about their fears/frustrations. Respond ONLY as valid JSON with keys 'positive_insight' and 'negative_insight'.`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [
+                { role: "system", content: "You are a market research analyst who outputs only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.3,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        });
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        if (posInsight && parsed.positive_insight) {
+            posInsight.innerHTML = `<div class="cloud-insight-pill pos"><strong>Goal:</strong> ${parsed.positive_insight}</div>`;
+        }
+        if (negInsight && parsed.negative_insight) {
+            negInsight.innerHTML = `<div class="cloud-insight-pill neg"><strong>Fear:</strong> ${parsed.negative_insight}</div>`;
+        }
+
+    } catch (error) {
+        console.error("Cloud Insight Error:", error);
+    }
+}
+
+// --- NEW SECTION 5: TONE MAP ---
+async function generateAndRenderToneMap(posts, audienceContext) {
+    const container = document.getElementById('tone-map-container');
+    if (!container) return;
+
+    container.innerHTML = `<p class="loading-text">Mapping tonal shifts... <span class="loader-dots"></span></p>`;
+
+    try {
+        // Truncate to handle large payloads (Startup community)
+        const topPostsText = posts.slice(0, 40).map(p => 
+            `Topic: ${p.data.title || ''} - ${(p.data.selftext || p.data.body || '').substring(0, 200)}`
+        ).join('\n---\n');
+
+        const prompt = `Analyze these posts from the ${audienceContext} community. Identify 4-6 distinct topic categories this audience discusses, and for each one describe the tone they shift into when discussing it (3-5 short descriptive words). Respond ONLY as valid JSON with key 'tone_map', an array of objects with keys 'topic' and 'tone'. Posts: ${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [
+                { role: "system", content: "You are a brand strategist who outputs only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.2,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        });
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        const rowsHTML = parsed.tone_map.map(item => `
+            <div class="tone-map-row">
+                <div class="tone-map-topic">${item.topic}</div>
+                <div class="tone-map-tone">${item.tone}</div>
+            </div>
+        `).join('');
+
+        container.innerHTML = `
+            <div class="tone-map-wrapper">
+                <h3 class="dashboard-section-title">Tone Map</h3>
+                <p class="dashboard-section-subtitle">How the voice shifts by topic</p>
+                <div class="tone-map-grid">
+                    <div class="tone-map-header-row">
+                        <div class="tone-map-header">Topic</div>
+                        <div class="tone-map-header">Voice / Tone</div>
+                    </div>
+                    ${rowsHTML}
+                </div>
+            </div>
+        `;
+
+    } catch (error) {
+        console.error("Tone Map Error:", error);
+        container.innerHTML = `<p class="placeholder-text">Tone map temporarily unavailable.</p>`;
+    }
+}
+
 function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : "Snippet not available."; const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if (closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title || p.data.link_title || ''}\nContent: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_completion_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
@@ -3055,6 +3161,10 @@ async function runProblemFinder(options = {}) {
         generateAndRenderVoiceProfile(filteredItems, originalGroupName);
         generateAndRenderLanguageToAvoid(filteredItems, originalGroupName);
         generateAndRenderHookPatterns(filteredItems, originalGroupName);
+        generateAndRenderToneMap(filteredItems, originalGroupName);
+        setTimeout(() => {
+            generateAndRenderCloudInsights(filteredItems, originalGroupName);
+        }, 2000);
         generateAndRenderMindsetSummary(filteredItems, originalGroupName);
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);
         generateAndRenderAIPrompt(filteredItems, originalGroupName);

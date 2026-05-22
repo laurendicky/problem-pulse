@@ -2772,28 +2772,31 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
 }
 
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
-    console.log("Linguistic Discovery: Fetching container...");
+    console.log("Linguistic Discovery: Searching for components...");
 
-    // 1. Get the container
-    const container = document.getElementById('power-phrases');
+    // 1. Target the container
+    const container = document.getElementById('power-phrases') || document.querySelector('.power-phrases');
+    
+    // 2. Target the blueprint ANYWHERE on the page (not just inside the container)
+    const itemTemplate = document.querySelector('.phrase-item-template') || document.getElementById('phrase-term');
+
     if (!container) {
-        console.error("CRITICAL: The outer container #power-phrases was not found on this page.");
+        console.error("DEBUG: Could not find the container #power-phrases.");
         return;
     }
-
-    // 2. GET THE TEMPLATE (By Position instead of ID)
-    // We take the first child of the container that hasn't been added by the script yet
-    const itemTemplate = container.querySelector('.phrase-item-template') || container.children[0];
 
     if (!itemTemplate) {
-        console.error("CRITICAL: The container #power-phrases is empty. Please ensure your template div is inside it.");
+        console.error("DEBUG: Could not find the blueprint .phrase-item-template anywhere on the page.");
+        // Last resort: Log what is actually inside the container to see what the script "sees"
+        console.log("Container content:", container.innerHTML);
         return;
     }
 
-    // Hide the blueprint so it doesn't show up in the results
+    // 3. SUCCESS! We found them. 
+    // We "save" the blueprint into a variable and then hide the original from the user.
     itemTemplate.style.display = 'none';
 
-    // --- Identification logic (same as before) ---
+    // --- Identification logic (remains the same) ---
     const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
     const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
     const acronymRegex = /\b[A-Z]{2,5}\b/g;
@@ -2813,23 +2816,22 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const termsToAnalyze = [...topAcronyms, ...topPhrases];
     const topPostsText = posts.slice(0, 15).map(p => p.data.title).join(' | ');
 
-    // Clear previous results (instances)
+    // 4. CLEAR PREVIOUS RESULTS
+    // We only remove elements with the class 'phrase-instance'
     container.querySelectorAll('.phrase-instance').forEach(el => el.remove());
 
-    // 3. Loop and Populate
+    // 5. CLONE AND POPULATE
     termsToAnalyze.forEach(async (term) => {
-        // Clone the template
         const clone = itemTemplate.cloneNode(true);
         clone.classList.add('phrase-instance');
-        clone.classList.remove('phrase-item-template'); // Clean up classes
-        clone.id = ''; // Ensure no ID conflicts
-        clone.style.display = 'flex'; // Make it visible
+        clone.classList.remove('phrase-item-template'); // Crucial: remove template class from result
+        clone.id = ''; 
+        clone.style.display = 'flex'; 
 
-        // Set the Term Title
         const termHeader = clone.querySelector('.phrase-text');
         if (termHeader) termHeader.innerText = term;
 
-        // Accordion Toggle logic using the classes from your screenshot
+        // Accordion Logic
         const summaryDiv = clone.querySelector('.power-phrase-summary');
         const contentDiv = clone.querySelector('.power-phrase-content');
         if (summaryDiv && contentDiv) {
@@ -2843,7 +2845,6 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
 
         container.appendChild(clone);
 
-        // 4. Fetch the AI details
         try {
             const prompt = `For the term "${term}" in the ${audienceContext} community, provide: 1) a 1-sentence definition, 2) a short example quote, 3) a 1-sentence usage note for a marketer. Respond ONLY as valid JSON with keys 'definition', 'example_quote', 'usage_note'. Context: ${topPostsText}`;
 
@@ -2863,27 +2864,15 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
             const resData = await response.json();
             const parsed = JSON.parse(resData.openaiResponse);
 
-            if (clone.querySelector('.phrase-definition')) 
-                clone.querySelector('.phrase-definition').innerText = parsed.definition;
-            
-            if (clone.querySelector('.phrase-example')) 
-                clone.querySelector('.phrase-example').innerText = `Example: "${parsed.example_quote}"`;
-            
-            if (clone.querySelector('.phrase-usage')) 
-                clone.querySelector('.phrase-usage').innerText = `Use when: ${parsed.usage_note}`;
+            if (clone.querySelector('.phrase-definition')) clone.querySelector('.phrase-definition').innerText = parsed.definition;
+            if (clone.querySelector('.phrase-example')) clone.querySelector('.phrase-example').innerText = `Example: "${parsed.example_quote}"`;
+            if (clone.querySelector('.phrase-usage')) clone.querySelector('.phrase-usage').innerText = `Use when: ${parsed.usage_note}`;
 
         } catch (err) {
             console.error(`Failed to enrich phrase: ${term}`, err);
         }
     });
 }
-
-
-
-
-
-
-
 
 async function generateAndRenderHookPatterns(posts, audienceContext) {
     const container = document.getElementById('hook-patterns-container');

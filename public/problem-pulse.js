@@ -930,45 +930,8 @@ async function enhanceDiscoveryWithComments(initialPosts, nicheContext) {
     }
 }
 
-// =================================================================================
-// === ADD THIS MISSING CORE FUNCTION TO YOUR SCRIPT ===
-// =================================================================================
 
 
-async function enhanceDiscoveryWithComments(initialPosts, nicheContext) {
-    try {
-        const postIds = initialPosts.slice(0, 40).map(p => p.data.id);
-        const comments = await fetchCommentsForPosts(postIds);
-        if (comments.length < 10) return;
-
-        const uniqueComments = deduplicateByContent(comments);
-        
-        // Pass the comments through the extraction engine
-        // This will automatically update window._entityData due to the logic above
-        await extractAndValidateEntities(uniqueComments, nicheContext);
-
-        // Re-sort and Re-render using the fully combined global data
-        const finalBrands = Object.entries(window._entityData.brands)
-            .sort((a, b) => b[1].count - a[1].count)
-            .slice(0, 8)
-            .map(([id, data]) => [data.originalName, data]);
-
-        const finalProducts = Object.entries(window._entityData.products)
-            .sort((a, b) => b[1].count - a[1].count)
-            .slice(0, 8)
-            .map(([id, data]) => [data.originalName, data]);
-
-        renderDiscoveryList('top-brands-container', finalBrands, 'Top Brands', 'brands');
-        renderDiscoveryList('top-products-container', finalProducts, 'Top Products', 'products');
-
-    } catch (error) {
-        console.error("Failed to enhance discovery:", error);
-    }
-}
-
-// =================================================================================
-// === REPLACEMENT FUNCTION: renderDiscoveryList ===
-// =================================================================================
 
 
 
@@ -1523,48 +1486,6 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
     } catch (error) {
         targetPanel.innerHTML = `<div class="brief-content"><p>Error loading content.</p></div>`;
     }
-}
-
-
-
-// =================================================================================
-// === BACKGROUND CHART FETCH (Optimized for Speed) ===
-// =================================================================================
-async function fetchSentimentTrendData(brandName, subredditQueryString) {
-    let searchTerms = [`"${brandName}"`];
-    
-    // Using 3 periods instead of 4 for background speed
-    const revisedTimePeriods = [
-        { label: 'Past 6 Mos', value: '6month' },
-        { label: 'Last 30 Days', value: 'month' },
-        { label: 'Last 7 Days', value: 'week' },
-    ];
-
-    const trendData = [];
-    const fetchPromises = revisedTimePeriods.map(period =>
-        fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 25, period.value)
-    );
-    
-    const results = await Promise.allSettled(fetchPromises);
-
-    for (let i = 0; i < results.length; i++) {
-        const result = results[i];
-        if (result.status === 'fulfilled' && result.value.length > 0) {
-            const uniquePosts = deduplicatePosts(result.value);
-            const sentimentResults = await classifySentimentWithAI(uniquePosts);
-
-            const positiveMentions = sentimentResults.filter(s => s === 'Positive').length;
-            const negativeMentions = sentimentResults.filter(s => s === 'Negative').length;
-            const totalMentions = positiveMentions + negativeMentions;
-            const positivePercentage = totalMentions > 0 ? Math.round((positiveMentions / totalMentions) * 100) : 50;
-
-            trendData.push({
-                period: revisedTimePeriods[i].label,
-                positivePercentage: positivePercentage
-            });
-        }
-    }
-    return trendData;
 }
 
 
@@ -2771,82 +2692,86 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
     });
 }
 
+// --- 1. SAFE STORAGE FOR YOUR WEBFLOW DESIGN ---
+let PHRASE_BLUEPRINT = null;
+
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
-    console.log("Linguistic Discovery: Searching for components...");
-
-    // 1. Target the container
-    const container = document.getElementById('power-phrases') || document.querySelector('.power-phrases');
+    // 1. Get the container where results will go
+    const container = document.getElementById('power-phrases');
     
-    // 2. Target the blueprint ANYWHERE on the page (not just inside the container)
-    const itemTemplate = document.querySelector('.phrase-item-template') || document.getElementById('phrase-term');
+    // 2. FIND THE DESIGN (Only runs once)
+    if (!PHRASE_BLUEPRINT) {
+        // Try every possible way to find your Webflow design
+        const found = document.getElementById('phrase-term') || 
+                      document.querySelector('.phrase-item-template') ||
+                      (container && container.children[0]);
 
-    if (!container) {
-        console.error("DEBUG: Could not find the container #power-phrases.");
-        return;
+        if (!found) {
+            console.error("CRITICAL: Your Webflow design for phrases was not found. Check ID 'phrase-term' or class 'phrase-item-template'.");
+            return;
+        }
+
+        // Save a clean copy of your design into our "Safe Box"
+        PHRASE_BLUEPRINT = found.cloneNode(true);
+        PHRASE_BLUEPRINT.style.display = 'flex'; // Ensure it's set to show
+        PHRASE_BLUEPRINT.classList.remove('phrase-item-template');
+        PHRASE_BLUEPRINT.classList.add('phrase-instance');
+        PHRASE_BLUEPRINT.id = ''; // Clear ID so we don't have duplicates
+
+        // Hide the original one sitting in your Webflow Grid so it doesn't show an empty box
+        found.style.display = 'none';
     }
 
-    if (!itemTemplate) {
-        console.error("DEBUG: Could not find the blueprint .phrase-item-template anywhere on the page.");
-        // Last resort: Log what is actually inside the container to see what the script "sees"
-        console.log("Container content:", container.innerHTML);
-        return;
-    }
+    if (!container) return;
 
-    // 3. SUCCESS! We found them. 
-    // We "save" the blueprint into a variable and then hide the original from the user.
-    itemTemplate.style.display = 'none';
-
-    // --- Identification logic (remains the same) ---
+    // 3. IDENTIFY TERMS (Logic)
     const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
     const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
-    const acronymRegex = /\b[A-Z]{2,5}\b/g;
-    const foundAcronyms = rawText.match(acronymRegex) || [];
-    const acronymFreq = {};
-    foundAcronyms.forEach(a => { if (!stopAcronyms.has(a)) acronymFreq[a] = (acronymFreq[a] || 0) + 1; });
-    const topAcronyms = Object.entries(acronymFreq).filter(([_, count]) => count > 1).sort((a, b) => b[1] - a[1]).slice(0, 4).map(item => item[0]);
+    const foundAcronyms = (rawText.match(/\b[A-Z]{2,5}\b/g) || []).filter(a => !stopAcronyms.has(a));
+    const acronymCounts = {};
+    foundAcronyms.forEach(a => acronymCounts[a] = (acronymCounts[a] || 0) + 1);
+    const topAcronyms = Object.entries(acronymCounts).sort((a, b) => b[1] - a[1]).slice(0, 4).map(i => i[0]);
     
     const cleanedText = rawText.toLowerCase().replace(/[^a-z\s']/g, '').replace(/\s+/g, ' ');
     const words = cleanedText.split(' ');
-    const bigrams = generateNgrams(words, 2);
-    const trigrams = generateNgrams(words, 3);
+    const ngrams = [...generateNgrams(words, 2), ...generateNgrams(words, 3)];
     const phraseFreq = {};
-    [...bigrams, ...trigrams].forEach(phrase => { phraseFreq[phrase] = (phraseFreq[phrase] || 0) + 1; });
-    const topPhrases = Object.entries(phraseFreq).filter(([_, count]) => count > 1).sort((a, b) => b[1] - a[1]).slice(0, 9 - topAcronyms.length).map(item => item[0]);
+    ngrams.forEach(p => phraseFreq[p] = (phraseFreq[p] || 0) + 1);
+    const topPhrases = Object.entries(phraseFreq).sort((a, b) => b[1] - a[1]).slice(0, 9 - topAcronyms.length).map(i => i[0]);
     
     const termsToAnalyze = [...topAcronyms, ...topPhrases];
-    const topPostsText = posts.slice(0, 15).map(p => p.data.title).join(' | ');
+    const contextSnippet = posts.slice(0, 15).map(p => p.data.title).join(' | ');
 
-    // 4. CLEAR PREVIOUS RESULTS
-    // We only remove elements with the class 'phrase-instance'
+    // 4. CLEAR PREVIOUS SEARCH RESULTS
     container.querySelectorAll('.phrase-instance').forEach(el => el.remove());
 
-    // 5. CLONE AND POPULATE
-    termsToAnalyze.forEach(async (term) => {
-        const clone = itemTemplate.cloneNode(true);
-        clone.classList.add('phrase-instance');
-        clone.classList.remove('phrase-item-template'); // Crucial: remove template class from result
-        clone.id = ''; 
-        clone.style.display = 'flex'; 
-
-        const termHeader = clone.querySelector('.phrase-text');
+    // 5. POPULATE THE GRID
+    termsToAnalyze.forEach(async (term, index) => {
+        // Clone from our "Safe Box"
+        const clone = PHRASE_BLUEPRINT.cloneNode(true);
+        
+        // Find the Header Text
+        const termHeader = clone.querySelector('.phrase-text') || clone.querySelector('#phrase-text');
         if (termHeader) termHeader.innerText = term;
 
-        // Accordion Logic
+        // ACCORDION LOGIC
         const summaryDiv = clone.querySelector('.power-phrase-summary');
         const contentDiv = clone.querySelector('.power-phrase-content');
         if (summaryDiv && contentDiv) {
+            contentDiv.style.display = 'none'; // Ensure it starts closed
             summaryDiv.style.cursor = 'pointer';
-            contentDiv.style.display = 'none'; 
-            summaryDiv.addEventListener('click', () => {
+            summaryDiv.onclick = (e) => {
+                e.preventDefault();
                 const isHidden = contentDiv.style.display === 'none';
                 contentDiv.style.display = isHidden ? 'block' : 'none';
-            });
+            };
         }
 
         container.appendChild(clone);
 
+        // 6. FETCH AI ENRICHMENT
         try {
-            const prompt = `For the term "${term}" in the ${audienceContext} community, provide: 1) a 1-sentence definition, 2) a short example quote, 3) a 1-sentence usage note for a marketer. Respond ONLY as valid JSON with keys 'definition', 'example_quote', 'usage_note'. Context: ${topPostsText}`;
+            const prompt = `For the term "${term}" in the ${audienceContext} community, provide: 1) a 1-sentence definition, 2) a short example quote, 3) a 1-sentence usage note for a marketer. Respond ONLY as valid JSON with keys 'definition', 'example_quote', 'usage_note'. Context: ${contextSnippet}`;
 
             const openAIParams = {
                 model: "gpt-5.4-mini",
@@ -2855,24 +2780,20 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
                 response_format: { "type": "json_object" }
             };
 
-            const response = await fetch(OPENAI_PROXY_URL, { 
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json' }, 
-                body: JSON.stringify({ openaiPayload: openAIParams }) 
-            });
-            
+            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
             const resData = await response.json();
             const parsed = JSON.parse(resData.openaiResponse);
 
             if (clone.querySelector('.phrase-definition')) clone.querySelector('.phrase-definition').innerText = parsed.definition;
             if (clone.querySelector('.phrase-example')) clone.querySelector('.phrase-example').innerText = `Example: "${parsed.example_quote}"`;
             if (clone.querySelector('.phrase-usage')) clone.querySelector('.phrase-usage').innerText = `Use when: ${parsed.usage_note}`;
-
-        } catch (err) {
-            console.error(`Failed to enrich phrase: ${term}`, err);
-        }
+        } catch (err) { console.error("Phrase enrichment failed", err); }
     });
 }
+
+
+
+
 
 async function generateAndRenderHookPatterns(posts, audienceContext) {
     const container = document.getElementById('hook-patterns-container');

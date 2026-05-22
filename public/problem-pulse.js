@@ -2770,26 +2770,26 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
         }]
     });
 }
-
-
-
-// --- POWER PHRASES: WEBFLOW POPULATOR ---
-
-// --- POWER PHRASES: REVISED WEBFLOW POPULATOR ---
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
-    const container = document.getElementById('power-phrases');
-    // Targeted by the ID you provided: #phrase-term
-    const itemTemplate = document.getElementById('phrase-term'); 
+    console.log("Linguistic Discovery: Starting analysis...");
+
+    // 1. SMART TARGETING
+    // We look for the container and template by ID OR Class just in case Webflow renamed them
+    const container = document.getElementById('power-phrases') || document.querySelector('.power-phrases-container');
+    const itemTemplate = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+
+    // DIAGNOSTIC LOG: This will tell us exactly which one is missing in the console
+    if (!container) console.error("DEBUG: Container #power-phrases NOT found.");
+    if (!itemTemplate) console.error("DEBUG: Template #phrase-term NOT found.");
 
     if (!container || !itemTemplate) {
-        console.error("Linguistic Discovery: Could not find #power-phrases or #phrase-term blueprint.");
-        return;
+        return; // Stop here if we can't find the elements
     }
 
-    // Hide the blueprint immediately so it doesn't show up empty
+    // Hide the blueprint
     itemTemplate.style.display = 'none';
 
-    // 1. Identify candidates (Acronyms & Phrases)
+    // 2. Identify candidates (Acronyms & Phrases)
     const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
     const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
     const acronymRegex = /\b[A-Z]{2,5}\b/g;
@@ -2809,40 +2809,34 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const termsToAnalyze = [...topAcronyms, ...topPhrases];
     const topPostsText = posts.slice(0, 15).map(p => p.data.title).join(' | ');
 
-    // Clear previous results (instances), but leave the blueprint hidden in the DOM
+    // Clear previous results
     container.querySelectorAll('.phrase-instance').forEach(el => el.remove());
 
-    // 2. Loop and Populate
+    // 3. Loop and Populate
     termsToAnalyze.forEach(async (term) => {
-        // Clone the template
         const clone = itemTemplate.cloneNode(true);
         clone.classList.add('phrase-instance');
-        clone.id = ''; // Remove the duplicate ID from the clone
-        clone.style.display = 'flex'; // Ensure it's visible
+        clone.id = ''; 
+        clone.style.display = 'flex'; 
 
-        // Set the Term Title (Summary) immediately
+        // Set Title
         const termHeader = clone.querySelector('.phrase-text');
         if (termHeader) termHeader.innerText = term;
 
-        // ACCORDION TOGGLE: 
-        // Targeted by the classes you provided
+        // Accordion Toggle Logic
         const summaryDiv = clone.querySelector('.power-phrase-summary');
         const contentDiv = clone.querySelector('.power-phrase-content');
         if (summaryDiv && contentDiv) {
             summaryDiv.style.cursor = 'pointer';
-            // Start content as hidden
             contentDiv.style.display = 'none'; 
-            
             summaryDiv.addEventListener('click', () => {
                 const isHidden = contentDiv.style.display === 'none';
                 contentDiv.style.display = isHidden ? 'block' : 'none';
             });
         }
 
-        // Add to the grid
         container.appendChild(clone);
 
-        // 3. Fetch the AI details
         try {
             const prompt = `For the term "${term}" in the ${audienceContext} community, provide: 1) a 1-sentence definition, 2) a short example quote, 3) a 1-sentence usage note for a marketer. Respond ONLY as valid JSON with keys 'definition', 'example_quote', 'usage_note'. Context: ${topPostsText}`;
 
@@ -2862,7 +2856,6 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
             const resData = await response.json();
             const parsed = JSON.parse(resData.openaiResponse);
 
-            // Inject the data using the classes you provided
             if (clone.querySelector('.phrase-definition')) 
                 clone.querySelector('.phrase-definition').innerText = parsed.definition;
             
@@ -2877,7 +2870,6 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
         }
     });
 }
-
 
 
 async function generateAndRenderHookPatterns(posts, audienceContext) {

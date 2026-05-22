@@ -2695,25 +2695,24 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
 // --- 1. SAFE STORAGE FOR YOUR WEBFLOW DESIGN ---
 let PHRASE_BLUEPRINT = null;
 
+
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     
-    // Safety check: Ensure we have the blueprint from the ID #phrase-term
     if (!PHRASE_BLUEPRINT) {
-        const found = document.getElementById('phrase-term');
+        const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
         if (found) {
             PHRASE_BLUEPRINT = found.cloneNode(true);
             PHRASE_BLUEPRINT.style.display = 'flex';
-            PHRASE_BLUEPRINT.id = ''; // Clear ID on blueprint to avoid duplicates
+            PHRASE_BLUEPRINT.id = ''; 
         } else {
-            console.error("CRITICAL: Element with ID 'phrase-term' not found.");
             return;
         }
     }
 
     if (!container) return;
 
-    // --- Logic for selecting phrases (Top Acronyms + Top Phrases) ---
+    // --- Select the terms ---
     const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
     const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
     const foundAcronyms = (rawText.match(/\b[A-Z]{2,5}\b/g) || []).filter(a => !stopAcronyms.has(a));
@@ -2728,39 +2727,45 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const topPhrases = Object.entries(phraseFreq).sort((a, b) => b[1] - a[1]).slice(0, 9 - topAcronyms.length).map(i => i[0]);
     const termsToAnalyze = [...topAcronyms, ...topPhrases];
 
-    // 1. Clear the container (removes the initial Webflow template item)
     container.innerHTML = '';
 
-    // 2. Loop through terms and fill your template
     termsToAnalyze.forEach(async (term) => {
         const clone = PHRASE_BLUEPRINT.cloneNode(true);
         
-        // TARGETING YOUR IDs INSIDE THE CLONE
+        // 1. Identify your Elements via ID
         const headerEl = clone.querySelector('#phrase-text');
         const defEl = clone.querySelector('#phrase-definition');
         const exEl = clone.querySelector('#phrase-example');
         const useEl = clone.querySelector('#phrase-usage');
         
-        // Accordion functionality (Using your classes from the image)
+        // 2. Identify Accordion Parts via Class
         const summary = clone.querySelector('.power-phrase-summary');
         const content = clone.querySelector('.power-phrase-content');
 
+        // --- THE CRITICAL LAYOUT FIX ---
+        // This forces the card to stay small until clicked
+        if (content) {
+            content.style.display = 'none'; 
+            content.style.overflow = 'hidden';
+        }
         if (headerEl) headerEl.innerText = term;
-        if (content) content.style.display = 'none'; // Start closed
 
         if (summary && content) {
             summary.style.cursor = 'pointer';
             summary.onclick = () => {
-                const isHidden = content.style.display === 'none';
-                content.style.display = isHidden ? 'block' : 'none';
+                const isCurrentlyHidden = content.style.display === 'none';
+                content.style.display = isCurrentlyHidden ? 'block' : 'none';
             };
         }
 
         container.appendChild(clone);
 
-        // 3. AI ENRICHMENT
+        // 3. AI Enrichment
         try {
-            const prompt = `Explain the term "${term}" for the ${audienceContext} community. Provide: 1) definition, 2) example quote, 3) marketing usage. Respond ONLY in JSON.`;
+            // WE FORCE THE KEYS HERE
+            const prompt = `Explain "${term}" for the ${audienceContext} community. 
+            Return ONLY JSON with these exact keys: "definition", "example", "usage"`;
+
             const openAIParams = {
                 model: "gpt-4o-mini",
                 messages: [{ role: "system", content: "You are a linguist." }, { role: "user", content: prompt }],
@@ -2768,20 +2773,26 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
                 response_format: { "type": "json_object" }
             };
 
-            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+            const response = await fetch(OPENAI_PROXY_URL, { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify({ openaiPayload: openAIParams }) 
+            });
             const data = await response.json();
             const parsed = JSON.parse(data.openaiResponse);
 
-            // Populate the IDs with AI data
-            if (defEl) defEl.innerText = parsed.definition;
-            if (exEl) exEl.innerText = `"${parsed.example}"`;
-            if (useEl) useEl.innerText = parsed.usage;
+            // 4. MAP DATA TO IDs (Matches the forced keys above)
+            if (defEl) defEl.innerText = parsed.definition || "";
+            if (exEl) exEl.innerText = parsed.example ? `"${parsed.example}"` : "";
+            if (useEl) useEl.innerText = parsed.usage || "";
 
         } catch (err) {
-            console.error("Failed to enrich phrase:", term);
+            console.error("AI Error:", err);
         }
     });
 }
+
+
 
 async function generateAndRenderHookPatterns(posts, audienceContext) {
     const container = document.getElementById('hook-patterns-container');

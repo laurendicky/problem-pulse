@@ -1,102 +1,3717 @@
-// Copy and paste this entire block into netlify/functions/openai-proxy.js
+// =================================================================================
+// FINAL SCRIPT WITH HIGHCHARTS SPLIT PACKED BUBBLE CHART (WITH CLICK EVENT)
+// =================================================================================
 
-const OpenAI = require('openai');
+// --- 1. GLOBAL VARIABLES & CONSTANTS ---
+const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
+const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
+const HARD_MIN_SUBSCRIBERS = 1000;
+const HARD_MIN_ACTIVE_USERS = 0;
+const LENIENT_MIN_SUBSCRIBERS = 500;
+const LENIENT_MIN_ACTIVE_USERS = 0;
+let originalGroupName = '';
+let _allRankedSubreddits = [];
 
-// Define the complete whitelist of allowed domains
-const allowedOrigins = [
-  'https://minky.ai',
-  'https://www.minky.ai',
-  'https://problempop.io',
-  'https://www.problempop.io',
-  // It's a good practice to add your local dev environment too
-  'http://localhost:8888', // For `netlify dev`
-];
+const suggestions = ["Dog Lovers", "Start-up Founders", "Fitness Freaks", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Software Developers", "Brides To Be"];
+const positiveColors = ['#00a5ce', '#0090b5', '#00c0e6', '#7bd9ec', '#b3e8f3', '#006d85'];
+const negativeColors = ['#fd80c7', '#d6539d', '#ff4fa3', '#ff99d6', '#fbb6ce', '#f472b6'];
+const lemmaMap = { 'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': 'love', 'loving': 'love', 'hates': 'hate', 'wishes': 'wish', 'wishing': 'wish', 'solutions': 'solution', 'challenges': 'challenge', 'recommended': 'recommend', 'disappointed': 'disappoint', 'frustrated': 'frustrate', 'annoyed': 'annoy' };
+const positiveWords = new Set(['love', 'amazing', 'awesome', 'beautiful', 'best', 'brilliant', 'celebrate', 'charming', 'dope', 'excellent', 'excited', 'exciting', 'epic', 'fantastic', 'flawless', 'gorgeous', 'happy', 'impressed', 'incredible', 'insane', 'joy', 'keen', 'lit', 'perfect', 'phenomenal', 'proud', 'rad', 'super', 'stoked', 'thrilled', 'vibrant', 'wow', 'wonderful', 'blessed', 'calm', 'chill', 'comfortable', 'cozy', 'grateful', 'loyal', 'peaceful', 'pleased', 'relaxed', 'relieved', 'satisfied', 'secure', 'thankful', 'want', 'wish', 'hope', 'desire', 'craving', 'benefit', 'bonus', 'deal', 'hack', 'improvement', 'quality', 'solution', 'strength', 'advice', 'tip', 'trick', 'recommend']);
+const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'broken', 'hate', 'challenge', 'confused', 'crazy', 'critical', 'danger', 'desperate', 'disappoint', 'disgusted', 'dreadful', 'fear', 'frustrate', 'furious', 'horrible', 'irritated', 'jealous', 'nightmare', 'outraged', 'pain', 'panic', 'problem', 'rant', 'scared', 'shocked', 'stressful', 'terrible', 'terrified', 'trash', 'alone', 'ashamed', 'bored', 'depressed', 'discouraged', 'dull', 'empty', 'exhausted', 'failure', 'guilty', 'heartbroken', 'hopeless', 'hurt', 'insecure', 'lonely', 'miserable', 'sad', 'sorry', 'tired', 'unhappy', 'upset', 'weak', 'need', 'disadvantage', 'issue', 'flaw']);
+const emotionalIntensityScores = { 'annoy': 3, 'irritated': 3, 'bored': 2, 'issue': 3, 'sad': 4, 'bad': 3, 'confused': 4, 'tired': 3, 'upset': 5, 'unhappy': 5, 'disappoint': 6, 'frustrate': 6, 'stressful': 6, 'awful': 7, 'hate': 8, 'angry': 7, 'broken': 5, 'exhausted': 5, 'pain': 7, 'miserable': 8, 'terrible': 8, 'worst': 9, 'horrible': 8, 'furious': 9, 'outraged': 9, 'dreadful': 8, 'terrified': 10, 'nightmare': 10, 'heartbroken': 9, 'desperate': 8, 'rage': 10, 'problem': 4, 'challenge': 5, 'critical': 6, 'danger': 7, 'fear': 7, 'panic': 8, 'scared': 6, 'shocked': 7, 'trash': 5, 'alone': 4, 'ashamed': 5, 'depressed': 8, 'discouraged': 5, 'dull': 2, 'empty': 6, 'failure': 7, 'guilty': 6, 'hopeless': 8, 'insecure': 5, 'lonely': 6, 'weak': 4, 'need': 5, 'disadvantage': 4, 'flaw': 4 };
+const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
 
-exports.handler = async (event) => {
-  // Get the incoming request's origin
-  const origin = event.headers.origin;
-  
-  // --- CHANGE 1: Added logging for easier debugging ---
-  // This will show the exact origin in your Netlify function logs.
-  console.log(`[PROXY LOG] Incoming request from origin: ${origin}`);
 
-  // Prepare the response headers object.
-  const headers = {
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-  };
+// =================================================================================
+// === ADD THIS MISSING HELPER FUNCTION TO YOUR SCRIPT ===
+// =================================================================================
+function generateNgrams(words, n) {
+    const ngrams = [];
+    if (n > words.length) {
+        return ngrams;
+    }
+    for (let i = 0; i <= words.length - n; i++) {
+        // This check prevents creating phrases from common words like "is a" or "for the"
+        const ngramSlice = words.slice(i, i + n);
+        if (!ngramSlice.some(word => stopWords.includes(word))) {
+            ngrams.push(ngramSlice.join(' '));
+        }
+    }
+    return ngrams;
+}
 
-  // If the origin is in our whitelist, add the crucial ACAO header to the response
-  if (allowedOrigins.includes(origin)) {
-    headers['Access-Control-Allow-Origin'] = origin;
-    console.log(`[PROXY LOG] Origin is in whitelist. Granting access.`);
-  } else {
-    console.warn(`[PROXY LOG] Origin NOT in whitelist: ${origin}`);
-  }
+// =================================================================================
+// === NEW HELPER FUNCTION: classifySentimentWithAI (Add this to your script) ===
+// =================================================================================
+async function classifySentimentWithAI(posts) {
+    const BATCH_SIZE = 25; // Process 25 posts per AI call to stay within token limits
+    let allSentiments = [];
 
-  // Handle the browser's preflight OPTIONS request
-  if (event.httpMethod === 'OPTIONS') {
-    return {
-      statusCode: 204, // No Content
-      headers,
-      body: '',
-    };
-  }
-  
-  // Explicitly block non-whitelisted origins
-  if (!allowedOrigins.includes(origin)) {
-      // --- CHANGE 2: Added the 'headers' object to the error response ---
-      // This ensures the browser gets a proper CORS response even on failure.
-      return {
-        statusCode: 403,
-        headers, 
-        body: `Forbidden: Origin ${origin} is not allowed.`
-      };
-  }
-  
-  // Only allow POST requests for the actual work.
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, headers, body: 'Method Not Allowed' };
-  }
+    for (let i = 0; i < posts.length; i += BATCH_SIZE) {
+        const batch = posts.slice(i, i + BATCH_SIZE);
+        const postsForAI = batch.map((p, index) => ({
+            index: index,
+            text: `Title: ${p.data.title || ''}. Body: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
+        }));
 
-  try {
-    // Get the secret key from the environment.
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new Error('Server configuration error: API key not set.');
+        const prompt = `You are a sentiment analysis engine. For each post provided, classify its overall sentiment towards the main subject as "Positive", "Negative", or "Neutral". Respond ONLY with a valid JSON object with a single key "sentiments", which is an array of objects. Each object must have two keys: "post_index" and "sentiment".
+
+        Example Response:
+        { "sentiments": [ {"post_index": 0, "sentiment": "Positive"}, {"post_index": 1, "sentiment": "Negative"} ] }
+
+        Posts to analyze:
+        ${JSON.stringify(postsForAI)}`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [{ role: "system", content: "You are a precise JSON-only sentiment classifier." }, { role: "user", content: prompt }],
+            temperature: 0,
+            max_completion_tokens: 1500,
+            response_format: { "type": "json_object" }
+        };
+
+        try {
+            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+            if (response.ok) {
+                const data = await response.json();
+                const parsed = JSON.parse(data.openaiResponse);
+                if (parsed.sentiments && Array.isArray(parsed.sentiments)) {
+                    // Create a temporary map to easily align results with original batch
+                    const sentimentMap = new Map(parsed.sentiments.map(s => [s.post_index, s.sentiment]));
+                    const batchSentiments = postsForAI.map(p => sentimentMap.get(p.index) || 'Neutral');
+                    allSentiments.push(...batchSentiments);
+                }
+            } else {
+                // If AI fails for a batch, classify all as Neutral to not skew results
+                allSentiments.push(...Array(batch.length).fill('Neutral'));
+            }
+        } catch (error) {
+            console.error("AI sentiment classification batch failed:", error);
+            allSentiments.push(...Array(batch.length).fill('Neutral'));
+        }
+    }
+    return allSentiments;
+}
+// =================================================================================
+// === NEW HELPER FUNCTION: generateSentimentContextWithAI (Add this to your script) ===
+// =================================================================================
+async function generateSentimentContextWithAI(posts, brandName) {
+    // Take a representative sample of up to 25 posts for the summary
+    const samplePosts = posts.slice(0, 25);
+    if (samplePosts.length === 0) {
+        return { positive_theme: "", negative_theme: "", verdict: "No discussion found for this period." };
     }
 
-    // Get the payload sent from the frontend.
-    const { openaiPayload } = JSON.parse(event.body);
-    if (!openaiPayload) {
-      throw new Error('Request body is missing openaiPayload.');
+    const postsForAI = samplePosts.map(p => `"${(p.data.title || '')} - ${(p.data.selftext || p.data.body || '').substring(0, 250)}"`).join('\n');
+
+    const prompt = `You are a market research analyst. Below is a sample of user comments about "${brandName}".
+    Your task is to provide a brief, insightful summary of the discussion.
+
+    Respond ONLY with a valid JSON object with three keys:
+    1.  "positive_theme": A single, short sentence describing the main reason for positive sentiment. If none, return "".
+    2.  "negative_theme": A single, short sentence describing the main reason for negative sentiment. If none, return "".
+    3.  "verdict": A single concluding sentence that explains the overall sentiment balance.
+
+    User Comments:
+    ${postsForAI}`;
+
+    const openAIParams = {
+        model: "gpt-5.4-mini",
+        messages: [{ role: "system", content: "You are a concise market analyst outputting only JSON." }, { role: "user", content: prompt }],
+        temperature: 0.1,
+        max_completion_tokens: 300,
+        response_format: { "type": "json_object" }
+    };
+
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (response.ok) {
+            const data = await response.json();
+            return JSON.parse(data.openaiResponse);
+        }
+    } catch (error) {
+        console.error("AI context generation failed:", error);
+    }
+    // Return a default object on failure
+    return { positive_theme: "N/A", negative_theme: "N/A", verdict: "Could not generate context." };
+}
+
+function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
+function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
+async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all', searchInComments = false) { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const payload = { searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after }; if (searchInComments) { payload.includeComments = true; } const response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return []; } return allPosts.slice(0, totalLimit); }
+async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all', searchInComments = false) { const allResults = []; for (let i = 0; i < searchTerms.length; i += 8) { const batchTerms = searchTerms.slice(i, i + 8); const batchPromises = batchTerms.map(term => fetchRedditForTermWithPagination(niche, term, limitPerTerm, timeFilter, searchInComments)); const batchResults = await Promise.all(batchPromises); batchResults.forEach(posts => { if (Array.isArray(posts)) { allResults.push(...posts); } }); if (i + 8 < searchTerms.length) { await new Promise(resolve => setTimeout(resolve, 500)); } } return deduplicatePosts(allResults); }
+
+// =================================================================================
+// === ADD THIS NEW, AGGRESSIVE DE-DUPLICATION FUNCTION ===
+// =================================================================================
+
+/**
+ * Aggressively de-duplicates posts and comments based on their content.
+ * It creates a "signature" of the content to catch bots, copypasta, and quotes.
+ * @param {Array} items - An array of Reddit post or comment objects.
+ * @returns {Array} A new array with content-based duplicates removed.
+ */
+// =================================================================================
+// === REPLACE THE OLD FUNCTION WITH THIS NEW, HYPER-AGGRESSIVE VERSION ===
+// =================================================================================
+
+/**
+ * Aggressively de-duplicates posts and comments based on a robust content signature.
+ * This version is designed to catch bots, copypasta, and quote-replies by normalizing the text.
+ * @param {Array} items - An array of Reddit post or comment objects.
+ * @returns {Array} A new array with content-based duplicates removed.
+ */
+function deduplicateByContent(items) {
+    const seenContentSignatures = new Set();
+    const uniqueIds = new Set(); // Also track IDs to prevent accidental removal of different comments with same short content
+
+    return items.filter(item => {
+        const id = item.data.id;
+        const content = (item.data.selftext || item.data.body || '').trim();
+
+        // If there's no content or we've already seen this exact ID, filter it out.
+        if (!content || uniqueIds.has(id)) {
+            return false;
+        }
+
+        // Create a robust signature: lowercase, first 500 chars, all whitespace removed.
+        // This makes it very difficult for slightly reformatted copypasta to get through.
+        const signature = content.substring(0, 500).toLowerCase().replace(/\s+/g, '');
+
+        // We only consider very short comments (like "this" or "lol") as duplicates if they are truly identical.
+        // For longer comments, the signature is very reliable.
+        if (signature.length < 20) {
+            if (seenContentSignatures.has(content)) {
+                return false; // For short comments, require an exact match
+            }
+            seenContentSignatures.add(content);
+        } else {
+            if (seenContentSignatures.has(signature)) {
+                return false; // For longer content, the signature is enough
+            }
+            seenContentSignatures.add(signature);
+        }
+
+        uniqueIds.add(id);
+        return true;
+    });
+}
+function parseAISummary(aiResponse) { try { aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim(); const jsonMatch = aiResponse.match(/{[\s\S]*}/); if (!jsonMatch) { throw new Error("No JSON object in AI response."); } const parsed = JSON.parse(jsonMatch[0]); if (!parsed.summaries || !Array.isArray(parsed.summaries) || parsed.summaries.length < 1) { throw new Error("AI response lacks a 'summaries' array."); } parsed.summaries.forEach((summary, idx) => { const missingFields = []; if (!summary.title) missingFields.push("title"); if (!summary.body) missingFields.push("body"); if (typeof summary.count !== 'number') missingFields.push("count"); if (!summary.quotes || !Array.isArray(summary.quotes) || summary.quotes.length < 1) missingFields.push("quotes"); if (!summary.keywords || !Array.isArray(summary.keywords) || summary.keywords.length === 0) missingFields.push("keywords"); if (missingFields.length > 0) throw new Error(`Summary ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`); }); return parsed.summaries; } catch (error) { console.error("Parsing Error:", error); console.log("Raw AI Response:", aiResponse); throw new Error("Failed to parse AI response."); } }
+function parseAIAssignments(aiResponse) { try { aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim(); const jsonMatch = aiResponse.match(/{[\s\S]*}/); if (!jsonMatch) { throw new Error("No JSON object in AI response."); } const parsed = JSON.parse(jsonMatch[0]); if (!parsed.assignments || !Array.isArray(parsed.assignments)) { throw new Error("AI response lacks an 'assignments' array."); } parsed.assignments.forEach((assignment, idx) => { const missingFields = []; if (typeof assignment.postNumber !== 'number') missingFields.push("postNumber"); if (typeof assignment.finding !== 'number') missingFields.push("finding"); if (missingFields.length > 0) throw new Error(`Assignment ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`); }); return parsed.assignments; } catch (error) { console.error("Parsing Error:", error); console.log("Raw AI Response:", aiResponse); throw new Error("Failed to parse AI response."); } }
+function filterPosts(posts, minUpvotes = 20) { return posts.filter(post => { const title = (post.data.title || post.data.link_title || '').toLowerCase(); const selftext = post.data.selftext || post.data.body || ''; if (title.includes('[ad]') || title.includes('sponsored') || post.data.upvote_ratio < 0.2 || post.data.ups < minUpvotes || !selftext || selftext.length < 20) return false; const isRamblingOrNoisy = (text) => { if (!text) return false; return /&#x[0-9a-fA-F]+;/g.test(text) || /[^a-zA-Z0-9\s]{5,}/g.test(text) || /(.)\1{6,}/g.test(text); }; return !isRamblingOrNoisy(title) && !isRamblingOrNoisy(selftext); }); }
+function getTopKeywords(posts, topN = 10) { const freqMap = {}; posts.forEach(post => { const cleanedText = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.replace(/<[^>]+>/g, '').replace(/[^a-zA-Z0-9\s.,!?]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); const words = cleanedText.split(/\s+/); words.forEach(word => { if (!stopWords.includes(word) && word.length > 2) { freqMap[word] = (freqMap[word] || 0) + 1; } }); }); return Object.keys(freqMap).sort((a, b) => freqMap[b] - freqMap[a]).slice(0, topN); }
+function getFirstTwoSentences(text) { if (!text) return ''; const sentences = text.match(/[^\.!\?]+[\.!\?]+(?:\s|$)/g); return sentences ? sentences.slice(0, 2).join(' ').trim() : text; }
+
+async function assignPostsToFindings(summaries, posts) {
+    const postsForAI = posts.slice(0, 50);
+    const prompt = `You are an expert data analyst. Your task is to categorize Reddit posts into the most relevant "Finding" from a provided list.\n\nHere are the ${summaries.length} findings:\n${summaries.map((s, i) => `Finding ${i + 1}: ${s.title}`).join('\n')}\n\nHere are the ${postsForAI.length} Reddit posts:\n${postsForAI.map((p, i) => `Post ${i + 1}: ${(p.data.title || p.data.link_title || '').substring(0, 150)}`).join('\n')}\n\nINSTRUCTIONS: For each post, assign it to the most relevant Finding (from 1 to ${summaries.length}). Respond ONLY with a JSON object with a single key "assignments", which is an array of objects like {"postNumber": 1, "finding": 2}.`;
+    const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a precise data categorization engine that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_completion_tokens: 1500, response_format: { "type": "json_object" } };
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error(`OpenAI API Error for assignments: ${response.statusText}`);
+        const data = await response.json();
+        return parseAIAssignments(data.openaiResponse);
+    } catch (error) {
+        console.error("Assignment function error:", error);
+        return [];
+    }
+}
+function calculateRelevanceScore(post, finding) { let score = 0; const postTitle = (post.data.title || post.data.link_title || "").toLowerCase(); const postBody = (post.data.selftext || post.data.body || "").toLowerCase(); const findingTitleWords = finding.title.toLowerCase().split(' ').filter(word => word.length > 3 && !stopWords.includes(word)); const findingKeywords = (finding.keywords || []).map(k => k.toLowerCase()); let titleWordMatched = false, keywordMatched = false; for (const word of findingTitleWords) { const regex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'); if (regex.test(postTitle)) { score += 5; titleWordMatched = true; } if (regex.test(postBody)) { score += 2; titleWordMatched = true; } } for (const keyword of findingKeywords) { const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'); if (regex.test(postTitle)) { score += 3; keywordMatched = true; } if (regex.test(postBody)) { score += 1; keywordMatched = true; } } if (titleWordMatched && keywordMatched) { score += 10; } return score; }
+function calculateFindingMetrics(validatedSummaries, filteredPosts) { const metrics = {}; const allProblemPostIds = new Set(); validatedSummaries.forEach((finding, index) => { metrics[index] = { supportCount: 0 }; }); filteredPosts.forEach(post => { let bestFindingIndex = -1; let maxScore = 0; validatedSummaries.forEach((finding, index) => { const score = calculateRelevanceScore(post, finding); if (score > maxScore) { maxScore = score; bestFindingIndex = index; } }); if (bestFindingIndex !== -1 && maxScore > 0) { metrics[bestFindingIndex].supportCount++; allProblemPostIds.add(post.data.id); } }); metrics.totalProblemPosts = allProblemPostIds.size; return metrics; }
+
+function renderPosts(posts) {
+    const container = document.getElementById("posts-container");
+    if (!container) {
+        return;
+    }
+    container.innerHTML = posts.map(post => {
+        const content = post.data.selftext || post.data.body || 'No additional content.';
+        const title = post.data.title || post.data.link_title || 'View Comment Thread';
+        const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : '';
+
+        // All inline styles have been removed and replaced with CSS classes.
+        return `
+            <div class="insight">
+                <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" class="insight-title">
+                    ${title}
+                </a>
+                <p class="insight-content">
+                    ${content.substring(0, 200) + '...'}
+                </p>
+                <small class="insight-meta">
+                    r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)}
+                </small>
+            </div>
+        `;
+    }).join('');
+}
+
+function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
+    if (!assignments) return;
+    const finding = window._summaries[summaryIndex];
+    if (!finding) return;
+
+    let relevantPosts = [];
+    const addedPostIds = new Set();
+
+    const addPost = (post) => {
+        if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) {
+            relevantPosts.push(post);
+            addedPostIds.add(post.data.id);
+        }
+    };
+
+    const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber);
+    assignedPostNumbers.forEach(postNum => {
+        if (postNum - 1 < window._postsForAssignment.length) {
+            addPost(window._postsForAssignment[postNum - 1]);
+        }
+    });
+
+    if (relevantPosts.length < 8) {
+        const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id));
+        const scoredCandidates = candidatePool.map(post => ({
+            post: post,
+            score: calculateRelevanceScore(post, finding)
+        })).filter(item => item.score >= 4).sort((a, b) => b.score - a.score);
+
+        for (const candidate of scoredCandidates) {
+            if (relevantPosts.length >= 8) break;
+            addPost(candidate.post);
+        }
     }
 
-    // Initialize OpenAI and make the API call.
-    const openai = new OpenAI({ apiKey });
-    const chatCompletion = await openai.chat.completions.create(openaiPayload);
+    let html;
+    if (relevantPosts.length === 0) {
+        // Replaced inline style with a class
+        html = `<div class="no-posts-found">Could not find any highly relevant Reddit posts for this finding.</div>`;
+    } else {
+        const finalPosts = relevantPosts.slice(0, 8);
+        finalPosts.forEach(post => usedPostIds.add(post.data.id));
+        html = finalPosts.map(post => {
+            const content = post.data.selftext || post.data.body || 'No content.';
+            const title = post.data.title || post.data.link_title || 'View Comment';
+            const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : '';
 
-    // Send the successful response back
-    return {
-      statusCode: 200,
-      headers: {
-        ...headers,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        openaiResponse: chatCompletion.choices[0].message.content,
-      }),
+            // Note: The sample posts use a slightly different class "sample-insight"
+            // to allow for different styling than the main post list.
+            return `
+                <div class="sample-insight">
+                    <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" class="sample-insight-title">
+                        ${title}
+                    </a>
+                    <p class="sample-insight-content">
+                        ${content.substring(0, 150) + '...'}
+                    </p>
+                    <small class="sample-insight-meta">
+                        r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)}
+                    </small>
+                </div>
+            `;
+        }).join('');
+    }
+
+    const container = document.getElementById(`reddit-div${summaryIndex + 1}`);
+    if (container) {
+        container.innerHTML = `
+            <div class="reddit-samples-header">Real Stories from Reddit: "${finding.title}"</div>
+            <div class="reddit-samples-posts">${html}</div>
+        `;
+    }
+}
+
+async function getRelatedSearchTermsAI(audience) {
+    const prompt = `Given the target audience "${audience}", generate up to 5 related but distinct search terms or concepts that would help find communities for them. Think about activities, problems, life stages, and related interests. Respond ONLY with a valid JSON object with a single key "terms", which is an array of strings.`;
+    const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a creative brainstorming assistant that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0.4, max_completion_tokens: 150, response_format: { "type": "json_object" } };
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('AI keyword generation failed.');
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        return parsed.terms || [];
+    } catch (error) {
+        console.error("Error generating related search terms:", error);
+        return [];
+    }
+}
+async function findSubredditsForGroup(groupName) {
+    const relatedTerms = await getRelatedSearchTermsAI(groupName);
+    const allTerms = [groupName, ...relatedTerms];
+    const prompt = `Based on the following audience and related keywords: [${allTerms.join(', ')}], suggest up to 20 relevant and active Reddit subreddits. Prioritize a variety of communities, including both large general ones and smaller niche ones. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`;
+    const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_completion_tokens: 300, response_format: { "type": "json_object" } };
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('OpenAI API request failed.');
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array.");
+        return parsed.subreddits;
+    } catch (error) {
+        console.error("Error finding subreddits:", error);
+        alert("Sorry, I couldn't find any relevant communities. Please try another group name.");
+        return [];
+    }
+}
+async function fetchCommentsForPosts(postIds, batchSize = 5) {
+    let allComments = [];
+    console.log(`Fetching comments for ${postIds.length} posts...`);
+    for (let i = 0; i < postIds.length; i += batchSize) {
+        const batchIds = postIds.slice(i, i + batchSize);
+        const batchPromises = batchIds.map(postId => {
+            const payload = { type: 'comments', postId: postId };
+            return fetch(REDDIT_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(res => res.json()).then(data => {
+                if (Array.isArray(data) && data.length > 1 && data[1].data && data[1].data.children) {
+                    return data[1].data.children.filter(comment => comment.kind === 't1');
+                }
+                return [];
+            }).catch(err => {
+                console.error(`Failed to fetch comments for post ${postId}:`, err);
+                return [];
+            });
+        });
+        const results = await Promise.all(batchPromises);
+        results.forEach(comments => allComments.push(...comments));
+        if (i + batchSize < postIds.length) {
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+    }
+    console.log(`Successfully fetched ${allComments.length} comments.`);
+    return allComments;
+}
+function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1); return word; }
+async function generateEmotionMapData(posts) { try { const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || p.data.link_title}\nBody: ${(p.data.selftext || p.data.body).substring(0, 1000)}`).join('\n---\n'); const prompt = `You are a world-class market research analyst for '${originalGroupName}'. Analyze the following text to identify the 15 most significant problems, pain points, or key topics.\n\nFor each one, provide:\n1. "problem": A short, descriptive name for the problem (e.g., "Finding Reliable Vendors", "Budgeting Anxiety").\n2. "intensity": A score from 1 (mild) to 10 (severe) of how big a problem this is.\n3. "frequency": A score from 1 (rarely mentioned) to 10 (frequently mentioned) based on its prevalence in the text.\n\nRespond ONLY with a valid JSON object with a single key "problems", which is an array of these objects.\nExample: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequency": 9 }] }`; const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_completion_tokens: 1500, response_format: { "type": "json_object" } }; const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) { throw new Error(`AI API failed with status: ${response.status}`); } const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const aiProblems = parsed.problems || []; if (aiProblems.length >= 3) { console.log("Successfully used AI analysis for Problem Map."); const chartData = aiProblems.map(item => { if (!item.problem || typeof item.intensity !== 'number' || typeof item.frequency !== 'number') return null; return { x: item.frequency, y: item.intensity, label: item.problem }; }).filter(Boolean); return chartData.sort((a, b) => b.x - a.x); } else { console.warn("AI analysis returned too few problems. Falling back to keyword analysis."); } } catch (error) { console.error("AI analysis for Problem Map failed:", error, "Falling back to reliable keyword-based analysis."); } const emotionFreq = {}; posts.forEach(post => { const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase(); const words = text.replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { const lemma = lemmatize(rawWord); if (emotionalIntensityScores[lemma]) { emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1; } }); }); const chartData = Object.entries(emotionFreq).map(([word, freq]) => ({ x: freq, y: emotionalIntensityScores[word], label: word })); return chartData.sort((a, b) => b.x - a.x).slice(0, 25); }
+
+function renderEmotionMap(data) {
+    const container = document.getElementById('emotion-map-container');
+    if (!container) return;
+
+    if (window.myEmotionChart) {
+        window.myEmotionChart.destroy();
+    }
+
+    if (data.length < 3) {
+        container.innerHTML = `
+            <p class="chart-placeholder-text">Not enough distinct problems were found to build a map.</p>
+        `;
+        return;
+    }
+
+    // 1. REMOVED HEADER & DESCRIPTION - managing via Webflow
+    container.innerHTML = `
+        <div id="emotion-map-wrapper">
+            <div id="emotion-map">
+                <canvas id="emotion-chart-canvas"></canvas>
+            </div>
+            <button id="chart-zoom-btn"></button>
+        </div>
+    `;
+
+    const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d');
+    if (!ctx) return;
+
+    const maxFreq = Math.max(...data.map(p => p.x));
+    const allFrequencies = data.map(p => p.x);
+    const minObservedFreq = Math.min(...allFrequencies);
+    const collapsedMinX = 5;
+    const isCollapseFeatureEnabled = minObservedFreq >= collapsedMinX;
+    const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0;
+
+    window.myEmotionChart = new Chart(ctx, {
+        type: 'scatter',
+        data: {
+            datasets: [{
+                label: 'Problems/Topics',
+                data: data,
+                // 3. CIRCLE COLOUR: TEAL
+                backgroundColor: '#00a5ce', 
+                borderColor: 'rgba(255, 255, 255, 0.5)',
+                borderWidth: 1,
+                pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20,
+                pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20,
+                // 4. ENSURE CIRCLES ARE NOT CLIPPED BY AXIS LINES
+                clip: false, 
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            // 4. ADD PADDING TO EDGES SO LARGE BUBBLES DON'T CUT OFF
+            layout: {
+                padding: {
+                    top: 30,
+                    right: 35,
+                    bottom: 10,
+                    left: 10
+                }
+            },
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    mode: 'nearest',
+                    intersect: false,
+                    callbacks: {
+                        title: function (tooltipItems) {
+                            return tooltipItems[0].raw.label;
+                        },
+                        label: function (context) {
+                            return '';
+                        },
+                        afterBody: function (tooltipItems) {
+                            const point = tooltipItems[0].raw;
+                            return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`;
+                        }
+                    },
+                    displayColors: false,
+                    titleFont: {
+                        size: 14,
+                        weight: 'bold'
+                    },
+                    bodyFont: {
+                        size: 12
+                    },
+                    // 2. TOOLTIP BACKGROUND: HOT PINK
+                    backgroundColor: '#fd80c7',
+                    titleColor: '#ffffff',
+                    bodyColor: '#dddddd',
+                }
+            },
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Frequency (1-10)',
+                        color: 'white',
+                        font: {
+                            weight: 'bold'
+                        }
+                    },
+                    min: initialMinX,
+                    max: 10,
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.15)'
+                    },
+                    ticks: {
+                        color: 'white'
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'Problem Intensity (1-10)',
+                        color: 'white',
+                        font: {
+                            weight: 'bold'
+                        }
+                    },
+                    min: 0,
+                    max: 10,
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.15)'
+                    },
+                    ticks: {
+                        color: 'white'
+                    }
+                }
+            }
+        }
+    });
+
+    const zoomButton = document.getElementById('chart-zoom-btn');
+    zoomButton.style.display = 'none';
+
+    if (isCollapseFeatureEnabled) {
+        zoomButton.style.display = 'block';
+        const updateButtonText = () => {
+            const isCurrentlyCollapsed = window.myEmotionChart.options.scales.x.min !== 0;
+            zoomButton.textContent = isCurrentlyCollapsed ? 'Zoom Out to See Full Range' : 'Zoom In to High-Frequency';
+        };
+
+        zoomButton.addEventListener('click', () => {
+            const chart = window.myEmotionChart;
+            const isCurrentlyCollapsed = chart.options.scales.x.min !== 0;
+            chart.options.scales.x.min = isCurrentlyCollapsed ? 0 : collapsedMinX;
+            chart.update('none');
+            updateButtonText();
+        });
+
+        updateButtonText();
+    }
+}
+
+// =================================================================================
+// === REVISED HYBRID FUNCTION V5: DEFINITIVE UNIQUE POST COUNTING ===
+// =================================================================================
+async function generateAndRenderHybridSentiment(posts, audienceContext) {
+    const positiveContainer = document.getElementById('positive-cloud');
+    const negativeContainer = document.getElementById('negative-cloud');
+
+    if (!positiveContainer || !negativeContainer) {
+        console.error("Sentiment cloud containers not found.");
+        return;
+    }
+
+    // Set a loading state (with headers removed)
+    positiveContainer.innerHTML = `<p class="loading-text">Analyzing sentiment...</p>`;
+    negativeContainer.innerHTML = `<p class="loading-text">Analyzing sentiment...</p>`;
+
+    // --- PART 1: Word Counting (Corrected for unique posts) ---
+    let positiveCount = 0, negativeCount = 0;
+    const wordFreq = { positive: new Map(), negative: new Map() };
+
+    posts.forEach(post => {
+        const text = `${post.data.title || post.data.link_title || ''} ${post.data.
+            selftext || post.data.body || ''}`.toLowerCase();
+        const words = text.replace(/[^a-z\s']/g, '').split(/\s+/);
+
+        const uniqueWordsInPost = { positive: new Set(), negative: new Set() };
+
+        words.forEach(rawWord => {
+            if (rawWord.length < 3 || stopWords.includes(rawWord)) return;
+            const lemma = lemmatize(rawWord);
+            if (positiveWords.has(lemma)) {
+                uniqueWordsInPost.positive.add(lemma);
+            } else if (negativeWords.has(lemma)) {
+                uniqueWordsInPost.negative.add(lemma);
+            }
+        });
+
+        uniqueWordsInPost.positive.forEach(word => {
+            if (!wordFreq.positive.has(word)) wordFreq.positive.set(word, new Set());
+            wordFreq.positive.get(word).add(post);
+        });
+        uniqueWordsInPost.negative.forEach(word => {
+            if (!wordFreq.negative.has(word)) wordFreq.negative.set(word, new Set());
+            wordFreq.negative.get(word).add(post);
+        });
+    });
+
+    // Calculate total counts for the score bar based on all occurrences
+    posts.forEach(post => {
+        const words = `${post.data.title || ''} ${post.data.selftext || ''}`.toLowerCase().split(/\s+/);
+        words.forEach(word => {
+            if (positiveWords.has(word)) positiveCount++;
+            if (negativeWords.has(word)) negativeCount++;
+        });
+    });
+    renderSentimentScore(positiveCount, negativeCount);
+
+
+    // --- PART 2: SCRIPT-FIRST - Programmatically Find All Common Phrases (Corrected for unique posts) ---
+    const phraseFreq = new Map();
+    posts.forEach(post => {
+        const text = `${post.data.title || ''} ${post.data.selftext || ''}`.toLowerCase().replace(/[^a-z\s']/g, '');
+        const words = text.split(/\s+/).filter(w => w.length > 0);
+        const ngrams = [...generateNgrams(words, 2), ...generateNgrams(words, 3), ...generateNgrams(words, 4)];
+
+        // ** THE CRITICAL FIX **
+        // Get only the UNIQUE ngrams for this post before counting.
+        const uniqueNgramsInPost = new Set(ngrams);
+
+        uniqueNgramsInPost.forEach(ngram => {
+            if (!phraseFreq.has(ngram)) phraseFreq.set(ngram, new Set());
+            phraseFreq.get(ngram).add(post); // Add the post to the set for this phrase
+        });
+    });
+
+    // The value is now a Set of posts, so we use its .size property for counting
+    const candidatePhrases = Array.from(phraseFreq.entries())
+        .filter(([_, postSet]) => postSet.size >= 2) // A phrase must appear in at least 2 unique posts
+        .sort((a, b) => b[1].size - a[1].size)
+        .slice(0, 100)
+        .map(item => item[0]);
+
+    // --- PART 3: AI-FILTER (Unchanged) ---
+    let finalPositivePhrases = [], finalNegativePhrases = [];
+    if (candidatePhrases.length > 0) {
+        try {
+            const prompt = `You are a market research analyst. Below is a list of common phrases from the "${audienceContext}" community. Your task is to filter this list. Identify phrases that express clear **positive sentiment** and **negative sentiment**. Ignore neutral phrases. Respond ONLY with a valid JSON object with two keys: "positive_phrases" and "negative_phrases", holding an array of the relevant strings you selected. Candidate Phrases: ${JSON.stringify(candidatePhrases)}`;
+            const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert sentiment filter that only outputs JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_completion_tokens: 1000, response_format: { "type": "json_object" } };
+            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+            if (response.ok) {
+                const data = await response.json();
+                const parsed = JSON.parse(data.openaiResponse);
+                finalPositivePhrases = parsed.positive_phrases || [];
+                finalNegativePhrases = parsed.negative_phrases || [];
+            }
+        } catch (error) { console.error("AI phrase filtering failed, proceeding with words only.", error); }
+    }
+
+    // --- PART 4: Merge and Render (Now uses the correct counts) ---
+    const renderCloud = (container, title, wordMap, phraseList, colors) => {
+        const topWords = Array.from(wordMap.entries())
+            .map(([word, postSet]) => [word, { count: postSet.size, posts: postSet }])
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 23);
+
+        const topPhrases = phraseList.map(phrase => {
+            const postSet = phraseFreq.get(phrase);
+            return [phrase, { count: postSet.size, posts: postSet }];
+        }).filter(item => item[1]);
+
+        const combinedData = [...topWords, ...topPhrases];
+
+        const category = title.includes('Positive') ? 'positive' : 'negative';
+        window._sentimentData = window._sentimentData || {};
+        window._sentimentData[category] = Object.fromEntries(combinedData.map(([key, value]) => [key, value]));
+
+        // MODIFIED CODE (FIX)
+        container.innerHTML = ''; // Clear the "loading..." text
+        const cloudContainer = document.createElement('div');
+        container.appendChild(cloudContainer); // This will now be the only child
+
+        if (combinedData.length < 3) {
+            cloudContainer.innerHTML = `<p style="font-family: sans-serif; color: #777; padding: 1rem; text-align: center;">Not enough distinct terms found.</p>`; return;
+        }
+
+        const counts = combinedData.map(item => item[1].count);
+        const maxCount = Math.max(...counts);
+        const minCount = Math.min(...counts);
+        const minFontSize = 16, maxFontSize = 42;
+        const cloudHTML = combinedData.map(([word, data]) => {
+            const fontSize = minFontSize + ((data.count - minCount) / (maxCount - minCount || 1)) * (maxFontSize - minFontSize);
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            const rotation = Math.random() * 8 - 4;
+            return `<span class="cloud-word" data-word="${word}" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${word}</span>`;
+        }).join('');
+        cloudContainer.innerHTML = cloudHTML;
     };
-  } catch (error) {
-    console.error('Error in OpenAI proxy function:', error);
-    // Send the error response back
-    return {
-      statusCode: 500,
-      headers: {
-        ...headers,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ error: error.message }),
+
+    renderCloud(positiveContainer, 'Positive Words & Phrases', wordFreq.positive, finalPositivePhrases, positiveColors);
+    renderCloud(negativeContainer, 'Negative Words & Phrases', wordFreq.negative, finalNegativePhrases, negativeColors);
+}
+
+async function generateAndRenderCloudInsights(posts, audienceContext) {
+    const posInsight = document.getElementById('positive-cloud-insight');
+    const negInsight = document.getElementById('negative-cloud-insight');
+    if (!posInsight || !negInsight) return;
+
+    // --- POLLING LOGIC: Wait for the data to exist ---
+    let attempts = 0;
+    const maxAttempts = 20; // Will wait up to 20 seconds total
+
+    while (attempts < maxAttempts) {
+        if (window._sentimentData && window._sentimentData.positive && window._sentimentData.negative) {
+            break; // Data is ready, exit the loop and continue
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+        attempts++;
+        console.log(`Cloud Insights: Waiting for sentiment data... (Attempt ${attempts})`);
+    }
+
+    // Final safety check after polling
+    if (!window._sentimentData || !window._sentimentData.positive || !window._sentimentData.negative) {
+        console.error("Cloud Insights: Sentiment data never populated.");
+        return;
+    }
+
+    // Extract the top 12 terms from the window object
+    const posWordsList = Object.keys(window._sentimentData.positive).slice(0, 12).join(', ');
+    const negWordsList = Object.keys(window._sentimentData.negative).slice(0, 12).join(', ');
+
+    try {
+        const prompt = `These are the most common positive words from the ${audienceContext} community: ${posWordsList}. And the most common negative words: ${negWordsList}. Write two 1-sentence strategic insights for a marketer: one summarizing what the positive vocabulary reveals about this audience's hopes/desires, one summarizing what the negative vocabulary reveals about their fears/frustrations. Respond ONLY as valid JSON with keys 'positive_insight' and 'negative_insight'.`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [
+                { role: "system", content: "You are a market research analyst who outputs only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.3,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        });
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        if (parsed.positive_insight) {
+            posInsight.innerHTML = `<div class="cloud-insight-pill pos"><strong>Goal:</strong> ${parsed.positive_insight}</div>`;
+        }
+        if (parsed.negative_insight) {
+            negInsight.innerHTML = `<div class="cloud-insight-pill neg"><strong>Fear:</strong> ${parsed.negative_insight}</div>`;
+        }
+
+    } catch (error) {
+        console.error("Cloud Insight AI Error:", error);
+    }
+}
+
+
+// --- NEW SECTION 5: TONE MAP ---
+async function generateAndRenderToneMap(posts, audienceContext) {
+    const container = document.getElementById('tone-map-container');
+    if (!container) return;
+
+    container.innerHTML = `<p class="loading-text">Mapping tonal shifts... <span class="loader-dots"></span></p>`;
+
+    try {
+        // Truncate to handle large payloads (Startup community)
+        const topPostsText = posts.slice(0, 40).map(p => 
+            `Topic: ${p.data.title || ''} - ${(p.data.selftext || p.data.body || '').substring(0, 200)}`
+        ).join('\n---\n');
+
+        const prompt = `Analyze these posts from the ${audienceContext} community. Identify 4-6 distinct topic categories this audience discusses, and for each one describe the tone they shift into when discussing it (3-5 short descriptive words). Respond ONLY as valid JSON with key 'tone_map', an array of objects with keys 'topic' and 'tone'. Posts: ${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [
+                { role: "system", content: "You are a brand strategist who outputs only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.2,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        });
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        const rowsHTML = parsed.tone_map.map(item => `
+            <div class="tone-map-row">
+                <div class="tone-map-topic">${item.topic}</div>
+                <div class="tone-map-tone">${item.tone}</div>
+            </div>
+        `).join('');
+
+        container.innerHTML = `
+            <div class="tone-map-wrapper">
+                <h3 class="dashboard-section-title">Tone Map</h3>
+                <p class="dashboard-section-subtitle">How the voice shifts by topic</p>
+                <div class="tone-map-grid">
+                    <div class="tone-map-header-row">
+                        <div class="tone-map-header">Topic</div>
+                        <div class="tone-map-header">Voice / Tone</div>
+                    </div>
+                    ${rowsHTML}
+                </div>
+            </div>
+        `;
+
+    } catch (error) {
+        console.error("Tone Map Error:", error);
+        container.innerHTML = `<p class="placeholder-text">Tone map temporarily unavailable.</p>`;
+    }
+}
+
+function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : "Snippet not available."; const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if (closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
+async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title || p.data.link_title || ''}\nContent: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_completion_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
+
+async function extractAndValidateEntities(posts, nicheContext) {
+    // 1. Prepare text for counting
+    const allText = posts.map(p => 
+        (p.data.title || '') + " " + (p.data.selftext || p.data.body || '')
+    ).join(" [SEP] ").toLowerCase();
+
+    // 2. Sample for AI with a stricter prompt
+    const sampleText = posts.slice(0, 50).map(p => 
+        `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 300)}`
+    ).join('\n---\n');
+
+    // THE UPDATED PROMPT: Added negative constraints and clearer definitions
+    const prompt = `You are a market research analyst for the '${nicheContext}' industry. 
+    Your task is to identify Commercial Brands and Generic Product Categories.
+
+    1. BRANDS: Extract exactly 15 Commercial Brands or specific product lines (e.g., 'Kong', 'Purina', 'Milk-Bone', 'West Paw').
+    CRITICAL: Do NOT include names of individual pets, dogs, people, or Reddit users. (e.g., ignore 'Arnold', 'Peaches', 'Bella', 'Cooper'). If it is a name of a dog, skip it.
+
+    2. PRODUCTS: Extract exactly 15 Generic Product Categories (e.g., 'Kibble', 'Harness', 'Chew Toy').
+
+    Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}`;
+
+    const openAIParams = { 
+        model: "gpt-4o-mini", 
+        messages: [
+            { role: "system", content: "You are a specialized business data extractor. You distinguish between commercial entities and personal names." }, 
+            { role: "user", content: prompt + "\n\nText to analyze:\n" + sampleText }
+        ], 
+        temperature: 0, 
+        response_format: { "type": "json_object" } 
     };
-  }
-};
+
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        
+        if (!window._entityData) window._entityData = { brands: {}, products: {} };
+
+        ['brands', 'products'].forEach(type => {
+            if (!parsed[type]) return;
+            parsed[type].forEach(name => {
+                const cleanKey = name.toLowerCase().trim();
+                if (cleanKey.length < 3) return;
+
+                // Improved Regex: Handles spaces and hyphens better for brands like Milk-Bone
+                const escapedName = cleanKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regex = new RegExp(`\\b${escapedName}(s|es|'s)?\\b`, 'gi');
+                
+                const occurrenceMatch = allText.match(regex);
+                const occurrenceCount = occurrenceMatch ? occurrenceMatch.length : 0;
+
+                const relevantPosts = posts.filter(p => regex.test((p.data.title || '') + " " + (p.data.selftext || p.data.body || '')));
+
+                if (occurrenceCount > 0) {
+                    if (!window._entityData[type][cleanKey]) {
+                        window._entityData[type][cleanKey] = { 
+                            originalName: name, 
+                            count: 0, 
+                            posts: [] 
+                        };
+                    }
+                    
+                    // Increment the count (useful for the comment-enhancement pass)
+                    window._entityData[type][cleanKey].count += occurrenceCount;
+
+                    const existingIds = new Set(window._entityData[type][cleanKey].posts.map(p => p.data.id));
+                    relevantPosts.forEach(m => {
+                        if (!existingIds.has(m.data.id)) window._entityData[type][cleanKey].posts.push(m);
+                    });
+                }
+            });
+        });
+
+        return {
+            topBrands: Object.entries(window._entityData.brands).sort((a, b) => b[1].count - a[1].count).slice(0, 8),
+            topProducts: Object.entries(window._entityData.products).sort((a, b) => b[1].count - a[1].count).slice(0, 8)
+        };
+    } catch (error) {
+        console.error("Entity extraction error:", error);
+        return { topBrands: [], topProducts: [] };
+    }
+}
+
+
+
+
+async function enhanceDiscoveryWithComments(initialPosts, nicheContext) {
+    console.log("Enhancing with comments...");
+    try {
+        // Higher post count for comments to find those hidden brand mentions
+        const postIds = initialPosts.slice(0, 60).map(p => p.data.id);
+        const comments = await fetchCommentsForPosts(postIds);
+        if (!comments || comments.length < 5) return;
+
+        const uniqueComments = deduplicateByContent(comments);
+        
+        // Pass the comments through the updated extraction engine
+        await extractAndValidateEntities(uniqueComments, nicheContext);
+
+        // Re-render the discovery lists with the combined data
+        const finalBrands = Object.entries(window._entityData.brands)
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 8);
+
+        const finalProducts = Object.entries(window._entityData.products)
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 8);
+
+        renderDiscoveryList('top-brands-container', finalBrands, 'Top Brands', 'brands');
+        renderDiscoveryList('top-products-container', finalProducts, 'Top Products', 'products');
+
+    } catch (error) {
+        console.error("Discovery enhancement failed:", error);
+    }
+}
+
+// =================================================================================
+// === ADD THIS MISSING CORE FUNCTION TO YOUR SCRIPT ===
+// =================================================================================
+
+
+async function enhanceDiscoveryWithComments(initialPosts, nicheContext) {
+    try {
+        const postIds = initialPosts.slice(0, 40).map(p => p.data.id);
+        const comments = await fetchCommentsForPosts(postIds);
+        if (comments.length < 10) return;
+
+        const uniqueComments = deduplicateByContent(comments);
+        
+        // Pass the comments through the extraction engine
+        // This will automatically update window._entityData due to the logic above
+        await extractAndValidateEntities(uniqueComments, nicheContext);
+
+        // Re-sort and Re-render using the fully combined global data
+        const finalBrands = Object.entries(window._entityData.brands)
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 8)
+            .map(([id, data]) => [data.originalName, data]);
+
+        const finalProducts = Object.entries(window._entityData.products)
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 8)
+            .map(([id, data]) => [data.originalName, data]);
+
+        renderDiscoveryList('top-brands-container', finalBrands, 'Top Brands', 'brands');
+        renderDiscoveryList('top-products-container', finalProducts, 'Top Products', 'products');
+
+    } catch (error) {
+        console.error("Failed to enhance discovery:", error);
+    }
+}
+
+// =================================================================================
+// === REPLACEMENT FUNCTION: renderDiscoveryList ===
+// =================================================================================
+
+
+
+
+
+function renderFAQs(faqs) {
+    const container = document.getElementById('faq-container');
+    if (!container) return;
+
+    // Replaced inline style with a class
+    let faqItems = '<p class="faq-placeholder">Could not generate common questions from the text.</p>';
+
+    if (faqs.length > 0) {
+        faqItems = faqs.map((faq) => `
+            <div class="faq-item">
+                <button class="faq-question">${faq}</button>
+                <div class="faq-answer">
+                    <div class="faq-answer-content">
+                        <em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    container.innerHTML = `
+        <h3 class="dashboard-section-title">Frequently Asked Questions</h3>
+        ${faqItems}
+    `;
+
+    // REFACTORED: JS now only toggles a class. CSS handles all animation.
+    container.querySelectorAll('.faq-question').forEach(button => {
+        button.addEventListener('click', () => {
+            const faqItem = button.closest('.faq-item'); // Get the parent container
+            faqItem.classList.toggle('active');
+        });
+    });
+}
+
+// =================================================================================
+// === SUBREDDIT VALIDATION & DISPLAY FUNCTIONS ===
+// =================================================================================
+async function handleRemoveSubClick(event) {
+    const button = event.target.closest('.remove-sub-btn');
+    if (!button) return;
+
+    const card = button.closest('.subreddit-tag-detailed');
+    const destinationList = document.querySelector('#similar-subreddits-container .subreddit-tag-list');
+
+    if (card && destinationList) {
+        const actionContainer = card.querySelector('.tag-footer-action');
+        const subName = button.dataset.subname;
+        const subDetailsString = button.dataset.subDetails || '{}';
+
+        if (actionContainer && subName) {
+            const newButton = document.createElement('button');
+            newButton.className = 'add-related-sub-btn';
+            newButton.dataset.subname = subName;
+            newButton.dataset.subDetails = subDetailsString;
+            newButton.textContent = '+ Add to Analysis';
+
+            // REMOVED: The long style.cssText line is no longer needed.
+            // The button's appearance is now handled entirely by the '.add-related-sub-btn' class in your CSS.
+
+            actionContainer.replaceChild(newButton, button);
+            destinationList.prepend(card);
+        }
+    }
+
+    const subName = button.dataset.subname;
+    if (!subName) {
+        console.error("Missing subreddit name on the 'Remove' button.");
+        return;
+    }
+
+    const checkbox = document.getElementById(`sub-${subName}`);
+    if (checkbox) {
+        checkbox.checked = false;
+    }
+
+    const countHeaderDiv = document.getElementById("count-header");
+    if (countHeaderDiv) {
+        countHeaderDiv.innerHTML = 'Updating analysis... <span class="loader-dots"></span>';
+    }
+
+    await runProblemFinder({ isUpdate: true });
+}
+
+async function fetchSubredditDetails(subredditName) {
+    const MAX_RETRIES = 2;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            const payload = { type: 'about', subreddit: subredditName };
+            const response = await fetch(REDDIT_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (response.status >= 500) { throw new Error(`Server error: ${response.status}`); }
+            if (!response.ok) {
+                console.warn(`Subreddit r/${subredditName} not found or failed to load. Status: ${response.status}`);
+                return null;
+            }
+            const data = await response.json();
+            return data && data.data ? data.data : null;
+        } catch (error) {
+            console.error(`Attempt ${attempt} failed for r/${subredditName}:`, error.message);
+            if (attempt === MAX_RETRIES) { return null; }
+            await new Promise(r => setTimeout(r, 200 * attempt));
+        }
+    }
+    return null;
+}
+function formatMemberCount(num) {
+    if (num === null || num === undefined) return 'N/A';
+    if (num >= 1000000) { return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'm'; }
+    if (num >= 1000) { return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'k'; }
+    return num.toLocaleString();
+}
+function getActivityLabel(activeUsers, totalMembers) {
+    if (!totalMembers || totalMembers === 0 || activeUsers === null || activeUsers === undefined) { return '💤 Cool'; }
+    const ratio = activeUsers / totalMembers;
+    if (activeUsers > 5000 || (ratio > 0.01 && totalMembers > 1000)) { return '🔥 Hot'; }
+    if (activeUsers < 10 || (totalMembers > 20000 && activeUsers < 50)) { return '💤 Cool'; }
+    return '🌤️ Warm';
+}
+async function fetchAndRankSubreddits(subredditNames) {
+    console.log(`AI suggested ${subredditNames.length} subreddits. Validating and ranking in batches...`);
+    const BATCH_SIZE = 5;
+    let allDetails = [];
+    for (let i = 0; i < subredditNames.length; i += BATCH_SIZE) {
+        const batchNames = subredditNames.slice(i, i + BATCH_SIZE);
+        const batchPromises = batchNames.map(name => fetchSubredditDetails(name));
+        const batchResults = await Promise.all(batchPromises);
+        allDetails.push(...batchResults.filter(Boolean));
+    }
+    const mapDetails = (details) => ({
+        name: details.display_name,
+        members: details.subscribers,
+        activityLabel: getActivityLabel(details.active_user_count, details.subscribers),
+        description: details.public_description || ''
+    });
+    let strictResults = allDetails.filter(d => d.subscribers >= HARD_MIN_SUBSCRIBERS && (d.active_user_count || 0) >= HARD_MIN_ACTIVE_USERS).map(mapDetails);
+    if (strictResults.length < 10) {
+        console.log(`Strict filter yielded only ${strictResults.length} subs. Running lenient filter as a safety net.`);
+        const lenientResults = allDetails.filter(d => d.subscribers >= LENIENT_MIN_SUBSCRIBERS && (d.active_user_count || 0) >= LENIENT_MIN_ACTIVE_USERS).map(mapDetails);
+        const strictResultNames = new Set(strictResults.map(r => r.name));
+        lenientResults.forEach(lenientSub => {
+            if (!strictResultNames.has(lenientSub.name)) {
+                strictResults.push(lenientSub);
+            }
+        });
+    }
+    const finalResults = strictResults.sort((a, b) => b.members - a.members);
+    console.log(`Found ${finalResults.length} valid communities. Ready to display.`);
+    return finalResults;
+}
+function renderSubredditChoicesHTML(subreddits) {
+    // The color logic has been moved to CSS. These objects are no longer needed.
+    return subreddits.map(sub => {
+        // Extract the key word (e.g., "Hot", "Warm", "Cool") from the label.
+        const activityState = sub.activityLabel.split(' ')[1];
+
+        return `
+            <div class="subreddit-choice">
+                <input type="checkbox" id="sub-${sub.name}" value="${sub.name}" checked>
+                <label for="sub-${sub.name}">
+                    <span class="sub-name">r/${sub.name}</span>
+                    <span class="sub-pills">
+                        <span class="pill members-pill">${formatMemberCount(sub.members)}</span>
+                        
+                        <!-- The inline style is replaced with a data-attribute -->
+                        <span class="pill activity-pill" data-activity="${activityState}">
+                            ${sub.activityLabel}
+                        </span>
+                    </span>
+                </label>
+            </div>
+        `;
+    }).join('');
+}
+function displaySubredditChoices(rankedSubreddits) {
+    const choicesDiv = document.getElementById('subreddit-choices');
+    const loadMoreContainer = document.getElementById('load-more-container');
+    if (!choicesDiv || !loadMoreContainer) return;
+
+    loadMoreContainer.innerHTML = '';
+    _allRankedSubreddits = rankedSubreddits;
+
+    if (_allRankedSubreddits.length === 0) {
+        // The class 'loading-text' is already used, which is good.
+        // We will provide a specific style for it in the CSS.
+        choicesDiv.innerHTML = '<p class="loading-text">No suitable communities found. Try a different group.</p>';
+        return;
+    }
+
+    const initialToShow = _allRankedSubreddits.slice(0, 8);
+    choicesDiv.innerHTML = renderSubredditChoicesHTML(initialToShow);
+
+    if (_allRankedSubreddits.length > 8) {
+        const loadMoreBtn = document.createElement('button');
+        loadMoreBtn.id = 'load-more-subs-btn';
+        loadMoreBtn.className = 'load-more-button'; // Added a class for styling
+        loadMoreBtn.textContent = 'Load More Communities';
+
+        // REMOVED: The style.cssText line is now handled by the .load-more-button class in CSS.
+
+        loadMoreBtn.onclick = loadMoreSubreddits;
+        loadMoreContainer.appendChild(loadMoreBtn);
+    }
+}
+
+function loadMoreSubreddits() {
+    const choicesDiv = document.getElementById('subreddit-choices');
+    const loadMoreBtn = document.getElementById('load-more-subs-btn');
+    if (!choicesDiv || !loadMoreBtn) return;
+    const currentlyShownCount = choicesDiv.querySelectorAll('.subreddit-choice').length;
+    const nextBatch = _allRankedSubreddits.slice(currentlyShownCount, currentlyShownCount + 8);
+    if (nextBatch.length > 0) {
+        const newChoicesHTML = renderSubredditChoicesHTML(nextBatch);
+        choicesDiv.insertAdjacentHTML('beforeend', newChoicesHTML);
+    }
+    const newTotalShown = choicesDiv.querySelectorAll('.subreddit-choice').length;
+    if (newTotalShown >= _allRankedSubreddits.length) {
+        loadMoreBtn.remove();
+    }
+}
+async function renderIncludedSubreddits(subreddits) {
+    const container = document.getElementById('included-subreddits-container');
+    if (!container) return;
+
+    // The initial loading state now uses CSS classes
+    container.innerHTML = `
+        <h3 class="dashboard-section-title">Analysis Based On</h3>
+        <div class="subreddit-tag-list">
+            <p class="placeholder-text">Loading community details...</p>
+        </div>
+    `;
+
+    try {
+        const detailPromises = subreddits.map(sub => fetchSubredditDetails(sub));
+        const detailsArray = await Promise.all(detailPromises);
+        const tagsHTML = detailsArray.map((details, index) => {
+            const subName = subreddits[index];
+            const detailsString = details ? JSON.stringify(details).replace(/'/g, "&apos;") : "{}";
+
+            if (!details) {
+                // The error card now uses a modifier class for its unique styles
+                return `
+                    <div class="subreddit-tag-detailed subreddit-tag-detailed--error">
+                        <div class="tag-header">r/${subName}</div>
+                        <div class="tag-body">Details could not be loaded.</div>
+                    </div>
+                `;
+            }
+
+            const description = details.public_description || 'No public description available.';
+            const members = formatMemberCount(details.subscribers);
+            const [activityEmoji, activityText] = getActivityLabel(details.active_user_count, details.subscribers).split(' ');
+
+            return `
+                <div class="subreddit-tag-detailed">
+                    <div>
+                        <div class="tag-header">
+                            <span class="tag-name">r/${subName}</span>
+                            <span class="tag-activity">${activityEmoji} ${activityText}</span>
+                        </div>
+                        <p class="tag-description">
+                            ${description.substring(0, 150)}${description.length > 150 ? '...' : ''}
+                        </p>
+                        <div class="tag-footer">
+                            <span class="tag-members"><strong>${members}</strong> members</span>
+                        </div>
+                    </div>
+                    <div class="tag-footer-action">
+                        <button class="remove-sub-btn" data-subname="${subName}" data-sub-details='${detailsString}'>
+                            Remove
+                        </button>
+                        <a href="https://www.reddit.com/r/${subName}" target="_blank" rel="noopener noreferrer" class="view-sub-btn">
+                            View on Reddit
+                        </a>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Analysis Based On</h3>
+            <div class="subreddit-tag-list">${tagsHTML}</div>
+        `;
+    } catch (error) {
+        console.error("Error rendering subreddit details:", error);
+        const tags = subreddits.map(sub => `<div class="subreddit-tag">r/${sub}</div>`).join('');
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Analysis Based On</h3>
+            <div class="subreddit-tag-list">
+                ${tags}
+                <p class="error-message">Could not load community details.</p>
+            </div>
+        `;
+    }
+}
+async function findRelatedSubredditsAI(analyzedSubsData, audienceContext) {
+    const subNames = analyzedSubsData.map(d => d.name).join(', ');
+    const prompt = `You are a Reddit discovery expert. A user is analyzing communities for the audience "${audienceContext}", including: ${subNames}. Your task is to suggest up to 20 NEW, related subreddits that explore NICHE or ADJACENT topics. Think outside the box. For example, if the user is analyzing 'weddingplanning', suggest 'bridezillas', 'weddingdress', 'honeymoons', or 'UKweddings' instead of just another general wedding sub. CRITICAL: Do NOT include any of the original subreddits in your suggestions: ${subNames}. Provide your response ONLY as a JSON object with a single key "subreddits", containing an array of subreddit names (without "r/").`;
+    const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.4, max_completion_tokens: 300, response_format: { "type": "json_object" } };
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('OpenAI related subreddits request failed.');
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) { throw new Error("AI response for related subs did not contain a 'subreddits' array."); }
+        return parsed.subreddits;
+    } catch (error) {
+        console.error("Error finding related subreddits via AI:", error);
+        return [];
+    }
+}
+async function handleAddRelatedSubClick(event) {
+    if (!event.target.classList.contains('add-related-sub-btn')) return;
+
+    const button = event.target;
+    const subName = button.dataset.subname;
+    const subDetailsJSON = button.dataset.subDetails;
+
+    if (!subName || !subDetailsJSON) {
+        console.error("Missing subreddit data on the 'Add' button.");
+        return;
+    }
+
+    const card = button.closest('.subreddit-tag-detailed');
+    const destinationList = document.querySelector('#included-subreddits-container .subreddit-tag-list');
+
+    if (card && destinationList) {
+        const actionContainer = card.querySelector('.tag-footer-action');
+        if (actionContainer) {
+            const newButton = document.createElement('button');
+            newButton.className = 'remove-sub-btn';
+            newButton.dataset.subname = subName;
+            newButton.dataset.subDetails = subDetailsJSON;
+            newButton.textContent = 'Remove';
+
+            // REMOVED: The long style.cssText line is no longer needed.
+            // The button's appearance is now handled entirely by the '.remove-sub-btn' class in your CSS.
+
+            actionContainer.replaceChild(newButton, button);
+            destinationList.prepend(card);
+        }
+    }
+
+    try {
+        const countHeaderDiv = document.getElementById("count-header");
+        if (countHeaderDiv) {
+            countHeaderDiv.innerHTML = 'Adding new audiences... <span class="loader-dots"></span>';
+        }
+
+        const currentSubTags = document.querySelectorAll('#included-subreddits-container .tag-name');
+        const currentSubs = Array.from(currentSubTags).map(tag => tag.textContent.replace('r/', '').trim());
+        const newSubList = [...new Set([...currentSubs, subName])];
+
+        const choicesDiv = document.getElementById('subreddit-choices');
+        let checkbox = document.getElementById(`sub-${subName}`);
+        if (!checkbox && choicesDiv) {
+            const subDetails = JSON.parse(subDetailsJSON);
+            const newChoiceHTML = renderSubredditChoicesHTML([subDetails]);
+            choicesDiv.insertAdjacentHTML('beforeend', newChoiceHTML);
+        }
+
+        const allCheckboxes = document.querySelectorAll('#subreddit-choices input[type="checkbox"]');
+        allCheckboxes.forEach(cb => {
+            cb.checked = newSubList.includes(cb.value);
+        });
+
+        await runProblemFinder({
+            isUpdate: true
+        });
+    } catch (error) {
+        console.error("Failed to add related sub and re-run analysis:", error);
+        alert("An error occurred while adding the community. Please try again.");
+    }
+}
+async function renderAndHandleRelatedSubreddits(analyzedSubs) {
+    const container = document.getElementById('similar-subreddits-container');
+    if (!container) return;
+
+    // The initial loading state now uses CSS classes
+    container.innerHTML = `
+        <h3 class="dashboard-section-title related-communities-title">Related Communities to Explore</h3>
+        <div class="subreddit-tag-list">
+            <p class="placeholder-text">Finding similar communities...</p>
+        </div>
+    `;
+
+    container.removeEventListener('click', handleAddRelatedSubClick);
+    container.addEventListener('click', handleAddRelatedSubClick);
+
+    try {
+        const detailPromises = analyzedSubs.map(sub => fetchSubredditDetails(sub));
+        const detailsArray = await Promise.all(detailPromises);
+        const validDetails = detailsArray.filter(Boolean).map(d => ({ name: d.display_name, description: d.public_description || '' }));
+        if (validDetails.length === 0) throw new Error("Could not get details for source subreddits.");
+
+        const relatedSubNames = await findRelatedSubredditsAI(validDetails, originalGroupName);
+        const newSubNames = relatedSubNames.filter(name => !analyzedSubs.some(s => s.toLowerCase() === name.toLowerCase()));
+
+        if (newSubNames.length === 0) {
+            container.querySelector('.subreddit-tag-list').innerHTML = `<p class="placeholder-text">No new related communities were found.</p>`;
+            return;
+        }
+
+        const rankedRelatedSubs = await fetchAndRankSubreddits(newSubNames);
+        if (rankedRelatedSubs.length === 0) {
+            container.querySelector('.subreddit-tag-list').innerHTML = `<p class="placeholder-text">No suitable communities found after validation.</p>`;
+            return;
+        }
+
+        const tagsHTML = rankedRelatedSubs.slice(0, 10).map(sub => {
+            const subDetailsString = JSON.stringify(sub).replace(/'/g, "&apos;");
+            const members = formatMemberCount(sub.members);
+            const [activityEmoji, activityText] = sub.activityLabel.split(' ');
+            const description = sub.description.trim() ? sub.description : `A community for discussions and content related to r/${sub.name}.`;
+
+            return `
+                <div class="subreddit-tag-detailed">
+                    <div>
+                        <div class="tag-header">
+                            <span class="tag-name">r/${sub.name}</span>
+                            <span class="tag-activity">${activityEmoji} ${activityText}</span>
+                        </div>
+                        <p class="tag-description">
+                            ${description.substring(0, 150)}${description.length > 150 ? '...' : ''}
+                        </p>
+                        <div class="tag-footer">
+                            <span class="tag-members"><strong>${members}</strong> members</span>
+                        </div>
+                    </div>
+                    <div class="tag-footer-action">
+                        <button class="add-related-sub-btn" data-subname="${sub.name}" data-sub-details='${subDetailsString}'>
+                            + Add to Analysis
+                        </button>
+                        <a href="https://www.reddit.com/r/${sub.name}" target="_blank" rel="noopener noreferrer" class="view-sub-btn">
+                            View on Reddit
+                        </a>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        container.querySelector('.subreddit-tag-list').innerHTML = tagsHTML;
+    } catch (error) {
+        console.error("Error in renderAndHandleRelatedSubreddits:", error);
+        container.querySelector('.subreddit-tag-list').innerHTML = `<p class="error-message">Could not load related community suggestions.</p>`;
+    }
+}
+
+const briefCache = new Map();
+
+
+// =================================================================================
+// === OPTIMIZED: DETACHED LOADING (Text first, Chart later) ===
+// =================================================================================
+
+
+async function generateAndRenderBrandBrief(itemName, itemType) {
+    const isBrand = itemType === 'brands';
+    const targetPanel = document.getElementById(isBrand ? 'brand-detail-panel' : 'product-detail-panel');
+
+    if (!targetPanel) return;
+
+    // 1. Loading state (No close button added here)
+    targetPanel.innerHTML = '<div class="brief-content"><p class="loading-text">Building brief... <span class="loader-dots"></span></p></div>';
+
+    if (briefCache.has(itemName)) {
+        targetPanel.innerHTML = briefCache.get(itemName);
+        if (isBrand && targetPanel.querySelector('#brand-momentum-chart-data')) {
+             const cachedTrend = JSON.parse(targetPanel.querySelector('#brand-momentum-chart-data').textContent);
+             if (cachedTrend) renderBrandMomentumChart(cachedTrend);
+        }
+        return;
+    }
+    
+    const postsForAnalysis = (window._entityData?.[itemType]?.[itemName]?.posts || []);
+    const top50Posts = postsForAnalysis.slice(0, 50);
+    const topPostsText = top50Posts.map(p => `"${p.data.title || ''} - ${p.data.selftext || p.data.body || ''}"`).join('\n');
+
+    try {
+        const prompt = isBrand ?
+            `Analyze "${itemName}" based on: ${topPostsText}. Return JSON with: what_it_is, use_case, loves (array), hates (array), verdict.` :
+            `Analyze category "${itemName}" based on: ${topPostsText}. Return JSON with: what_it_is, job_to_be_done, table_stakes (array), disruption_opportunities (array).`;
+
+        const openAIParams = { 
+            model: "gpt-5.4-mini", 
+            messages: [{ role: "system", content: "You are a fast market analyst. Output JSON." }, { role: "user", content: prompt }], 
+            temperature: 0.1, 
+            response_format: { "type": "json_object" } 
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        // --- REMOVED THE CLOSE BUTTON FROM THE STRINGS BELOW ---
+        let htmlContent = '';
+        if (isBrand) {
+            htmlContent = `
+                <div class="brief-content">
+                    <h3 class="brief-header">${itemName}</h3>
+                    <div class="brief-section"><h4 class="brief-section-title">What It Is</h4><p class="brief-text">${parsed.what_it_is}</p></div>
+                    
+                    <div class="brief-section">
+                        <h4 class="brief-section-title">Momentum Trend</h4>
+                        <div id="brand-momentum-chart" style="height:200px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.03); border-radius:8px; font-size:12px; color:#888;">
+                            <span class="loader-dots">Crunching historical mentions...</span>
+                        </div>
+                    </div>
+
+                    <div class="brief-section"><h4>Use Case</h4><p class="brief-text">${parsed.use_case}</p></div>
+                    <div class="brief-section"><h4>Strengths</h4><ul class="brief-list">${parsed.loves.map(i => `<li>${i}</li>`).join('')}</ul></div>
+                    <div class="brief-section"><h4>Pain Points</h4><ul class="brief-list">${parsed.hates.map(i => `<li>${i}</li>`).join('')}</ul></div>
+                    <div class="brief-verdict" style="background:rgba(0,165,206,0.1); padding:15px; border-radius:8px;"><p><strong>Verdict:</strong> ${parsed.verdict}</p></div>
+                </div>`;
+        } else {
+            htmlContent = `
+                <div class="brief-content">
+                    <h3 class="brief-header">${itemName}</h3>
+                    <div class="brief-section"><h4>Category Info</h4><p>${parsed.what_it_is}</p></div>
+                    <div class="brief-section"><h4>Job to be Done</h4><p>${parsed.job_to_be_done}</p></div>
+                    <div class="brief-section"><h4>Table Stakes</h4><ul>${parsed.table_stakes.map(i => `<li>${i}</li>`).join('')}</ul></div>
+                </div>`;
+        }
+
+        targetPanel.innerHTML = htmlContent;
+        briefCache.set(itemName, htmlContent);
+
+        if (isBrand) {
+            const selectedSubreddits = Array.from(document.querySelectorAll('#subreddit-choices input:checked')).map(cb => cb.value);
+            const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
+            
+            fetchSentimentTrendData(itemName, subredditQueryString).then(trendResult => {
+                if (trendResult && trendResult.length > 0) {
+                    renderBrandMomentumChart(trendResult);
+                    const s = document.createElement('script');
+                    s.id = 'brand-momentum-chart-data';
+                    s.type = 'application/json';
+                    s.textContent = JSON.stringify(trendResult);
+                    targetPanel.querySelector('.brief-content').appendChild(s);
+                } else {
+                    document.getElementById('brand-momentum-chart').innerHTML = '<span>Not enough data.</span>';
+                }
+            });
+        }
+    } catch (error) {
+        targetPanel.innerHTML = `<div class="brief-content"><p>Error loading content.</p></div>`;
+    }
+}
+
+
+
+// =================================================================================
+// === BACKGROUND CHART FETCH (Optimized for Speed) ===
+// =================================================================================
+async function fetchSentimentTrendData(brandName, subredditQueryString) {
+    let searchTerms = [`"${brandName}"`];
+    
+    // Using 3 periods instead of 4 for background speed
+    const revisedTimePeriods = [
+        { label: 'Past 6 Mos', value: '6month' },
+        { label: 'Last 30 Days', value: 'month' },
+        { label: 'Last 7 Days', value: 'week' },
+    ];
+
+    const trendData = [];
+    const fetchPromises = revisedTimePeriods.map(period =>
+        fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 25, period.value)
+    );
+    
+    const results = await Promise.allSettled(fetchPromises);
+
+    for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        if (result.status === 'fulfilled' && result.value.length > 0) {
+            const uniquePosts = deduplicatePosts(result.value);
+            const sentimentResults = await classifySentimentWithAI(uniquePosts);
+
+            const positiveMentions = sentimentResults.filter(s => s === 'Positive').length;
+            const negativeMentions = sentimentResults.filter(s => s === 'Negative').length;
+            const totalMentions = positiveMentions + negativeMentions;
+            const positivePercentage = totalMentions > 0 ? Math.round((positiveMentions / totalMentions) * 100) : 50;
+
+            trendData.push({
+                period: revisedTimePeriods[i].label,
+                positivePercentage: positivePercentage
+            });
+        }
+    }
+    return trendData;
+}
+
+
+
+// =================================================================================
+// === REPLACEMENT FUNCTION: renderBrandMomentumChart (V2 - With Contextual Tooltip) ===
+// =================================================================================
+function renderBrandMomentumChart(data) {
+    if (typeof Highcharts === 'undefined' || !data || data.length === 0) {
+        const chartContainer = document.getElementById('brand-momentum-chart');
+        if (chartContainer) chartContainer.innerHTML = '<p>Not enough data.</p>';
+        return;
+    }
+
+    Highcharts.chart('brand-momentum-chart', {
+        chart: { type: 'line', backgroundColor: 'transparent' },
+        title: { text: null },
+        credits: { enabled: false },
+        xAxis: { categories: data.map(d => d.period), labels: { style: { color: '#888' } } },
+        yAxis: { title: { text: null }, min: 0, max: 100, labels: { style: { color: '#888' } } },
+        legend: { enabled: false },
+        series: [{
+            name: '% Positive',
+            data: data.map(d => ({ y: d.positivePercentage, context: d.context })),
+            color: '#00a5ce'
+        }],
+        tooltip: {
+            useHTML: true,
+            outside: true, // FIX: Tooltip won't be cut off by graph edges
+            backgroundColor: '#FFFFFF',
+            borderColor: '#E0E0E0',
+            borderWidth: 1,
+            padding: 16, // FIX: Added internal padding for breathability
+            borderRadius: 10,
+            shadow: true,
+            style: { 
+                fontSize: '14px', 
+                zIndex: 9999 
+            },
+            formatter: function () {
+                const context = this.point.options.context;
+                let html = `<div style="min-width: 220px; max-width: 280px; white-space: normal; line-height: 1.4;">`;
+                html += `<b>${this.key}</b><br/>`;
+                html += `<span style="color:${this.series.color}">●</span> Positive: <b>${this.y}%</b>`;
+                
+                if (context) {
+                    html += `<hr style="margin: 8px 0; border: 0; border-top: 1px solid #eee;">`;
+                    if (context.positive_theme) html += `<div style="margin-bottom:4px"><span style="color:#28a745">🟢</span> ${context.positive_theme}</div>`;
+                    if (context.negative_theme) html += `<div style="margin-bottom:8px"><span style="color:#dc3545">🔴</span> ${context.negative_theme}</div>`;
+                    html += `<div style="font-size:12px; font-style:italic; color:#666;">${context.verdict}</div>`;
+                }
+
+                html += `</div>`;
+                return html;
+            }
+        }
+    });
+}
+
+function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if (!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
+
+// =================================================================================
+// === REPLACEMENT FUNCTION: fetchSentimentTrendData (V4 - With Context & Corrected Axis) ===
+// =================================================================================
+async function fetchSentimentTrendData(brandName, subredditQueryString) {
+    let searchTerms = [`"${brandName}"`];
+    if (brandName.toLowerCase() === 'openai') {
+        searchTerms.push('"gpt-4o"', '"chatgpt"', '"gpt-5"');
+    }
+
+    const revisedTimePeriods = [
+        { label: 'Past 6 Mos', value: '6month' },
+        { label: 'Past 3 Mos', value: '3month' },
+        { label: 'Last 30 Days', value: 'month' },
+        { label: 'Last 7 Days', value: 'week' },
+    ];
+
+    const fetchPromises = revisedTimePeriods.map(period =>
+        fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 50, period.value)
+    );
+    const results = await Promise.allSettled(fetchPromises);
+
+    const trendData = [];
+
+    for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        const periodLabel = revisedTimePeriods[i].label;
+
+        if (result.status === 'fulfilled' && result.value.length > 0) {
+            const uniquePosts = deduplicatePosts(result.value);
+            const sentimentResults = await classifySentimentWithAI(uniquePosts);
+
+            // --- KEY CHANGE 1: Generate context for this time period ---
+            const contextSummary = await generateSentimentContextWithAI(uniquePosts, brandName);
+
+            const positiveMentions = sentimentResults.filter(s => s === 'Positive').length;
+            const negativeMentions = sentimentResults.filter(s => s === 'Negative').length;
+            const totalMentions = positiveMentions + negativeMentions;
+            const positivePercentage = totalMentions > 0 ? Math.round((positiveMentions / totalMentions) * 100) : 50;
+
+            trendData.push({
+                period: periodLabel,
+                positivePercentage: positivePercentage,
+                context: contextSummary // Attach the context to the data point
+            });
+        } else {
+            console.warn(`Could not fetch data for period: ${periodLabel}`);
+        }
+    }
+
+    // --- KEY CHANGE 2: REMOVED .reverse() TO FIX X-AXIS ORDER ---
+    // The data is now naturally ordered from oldest to newest.
+    return trendData;
+}
+
+async function generateAndRenderConstellation(items) {
+    console.log("[Highcharts] Starting full generation process with batching strategy...");
+    const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 60);
+    console.log(`[Highcharts] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
+
+    const BATCH_SIZE = 10;
+    const batchPromises = [];
+
+    for (let i = 0; i < prioritizedItems.length; i += BATCH_SIZE) {
+        const batch = prioritizedItems.slice(i, i + BATCH_SIZE);
+        const batchStartIndex = i;
+
+        const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 5 quotes that express a strong purchase intent, an unsolved problem, or a significant pain point. Focus ONLY on phrases that directly mention: Willingness to pay, Frustration with a lack of a tool, A specific, unmet need, Mentions of high cost, Comparisons to other products, or A sense of urgency. CRITICAL: IGNORE general complaints or non-commercial emotional support. Here are the comments:\n${batch.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}\nRespond ONLY with a valid JSON object: {"signals": [{"quote": "The extracted quote.", "source_index": 4}]}`;
+
+        const apiCallPromise = fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                openaiPayload: {
+                    model: "gpt-5.4-mini",
+                    messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: extractionPrompt }],
+                    temperature: 0.1,
+                    max_completion_tokens: 1500,
+                    response_format: { "type": "json_object" }
+                }
+            })
+        }).then(response => {
+            if (!response.ok) throw new Error(`Batch from index ${batchStartIndex} failed.`);
+            return response.json();
+        }).then(data => {
+            const parsedExtraction = JSON.parse(data.openaiResponse);
+            if (parsedExtraction.signals && Array.isArray(parsedExtraction.signals)) {
+                return parsedExtraction.signals.map(signal => ({
+                    quote: signal.quote,
+                    sourceItem: prioritizedItems[batchStartIndex + signal.source_index]
+                })).filter(s => s.sourceItem);
+            }
+            return [];
+        }).catch(error => {
+            console.error(`[Highcharts] Error processing batch starting at index ${batchStartIndex}:`, error);
+            return [];
+        });
+        batchPromises.push(apiCallPromise);
+    }
+
+    const results = await Promise.allSettled(batchPromises);
+    let rawSignals = [];
+    results.forEach(result => {
+        if (result.status === 'fulfilled' && Array.isArray(result.value)) {
+            rawSignals.push(...result.value);
+        }
+    });
+
+    console.log(`[Highcharts] AI extracted a total of ${rawSignals.length} high-quality signals from all batches.`);
+    if (rawSignals.length === 0) {
+        renderHighchartsBubbleChart([]);
+        return;
+    }
+
+    const enrichedSignals = [];
+    const validCategories = ["DemandSignals", "WillingnessToPay", "Frustration", "SubstituteComparisons", "Urgency", "CostConcerns"];
+    for (const rawSignal of rawSignals) {
+        try {
+            const enrichmentPrompt = `You are a market research analyst. For the quote below, provide a short summary of the user's core problem and classify it into the MOST relevant category. Here are the categories: [${validCategories.join(', ')}]. Quote: "${rawSignal.quote}" Provide a JSON object with: 1. "problem_theme": A short, 4-5 word summary of the core problem. 2. "category": Classify into ONE of the categories. Respond ONLY with a valid JSON object.`;
+            const enrichmentResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_completion_tokens: 250, response_format: { "type": "json_object" } } }) });
+            if (enrichmentResponse.ok) {
+                const enrichmentData = await enrichmentResponse.json();
+                const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse);
+                if (parsedEnrichment.problem_theme && parsedEnrichment.category) {
+                    enrichedSignals.push({ ...rawSignal, ...parsedEnrichment, source: rawSignal.sourceItem.data });
+                } else { console.warn("Skipping a signal due to missing fields in AI enrichment response:", parsedEnrichment); }
+            } else { console.warn(`Failed to enrich a signal. Status: ${enrichmentResponse.status}`); }
+        } catch (error) { console.error("CRITICAL ERROR during individual signal enrichment:", error); }
+    }
+
+    console.log(`[Highcharts] AI successfully enriched ${enrichedSignals.length} signals. Rendering chart.`);
+    renderHighchartsBubbleChart(enrichedSignals);
+}
+
+async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
+    console.log("--- Starting Delayed Highcharts Chart Analysis (in background) ---");
+    try {
+        const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false);
+        const postIds = demandSignalPosts.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id);
+        const highIntentComments = await fetchCommentsForPosts(postIds);
+        const allItems = [...demandSignalPosts, ...highIntentComments];
+        await generateAndRenderConstellation(allItems);
+    } catch (error) {
+        console.error("Highcharts analysis failed in the background:", error);
+        renderHighchartsBubbleChart([]);
+    } finally {
+        console.log("--- Highcharts Analysis Complete. ---");
+    }
+}
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.getElementById('bubble-content'); // Use the new ID
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#FFFFFF',
+            borderColor: '#E0E0E0',
+            borderWidth: 1,
+            shadow: {
+                color: 'rgba(0, 0, 0, 0.15)',
+                offsetX: 0,
+                offsetY: 3,
+                opacity: 1,
+                width: 10
+            },
+            style: {
+                color: '#333333',
+                fontFamily: "'Plus Jakarta Sans', sans-serif"
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid #E0E0E0; padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #555555; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '35%',
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false,
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: "'Plus Jakarta Sans', sans-serif",
+                        textAlign: 'center'
+                    },
+                    formatter: function () {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                            return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                },
+                // --- NEW FEATURE: Click Event Handler ---
+                point: {
+                    events: {
+                        click: function () {
+                            // isParentNode is true for the large category bubbles
+                            if (!this.isParentNode) {
+                                const bubbleContent = document.getElementById('bubble-content');
+                                if (bubbleContent) {
+                                    const { name, quote, source } = this.options;
+                                    bubbleContent.innerHTML = `
+                                    <h4 class="bubble-detail-title">${name}</h4>
+                                    <p class="bubble-detail-quote">“${quote}”</p>
+                                    
+                                    <!-- This is the new element for the metadata -->
+                                    <p class="bubble-detail-meta">r/${source.subreddit} | 👍 ${source.ups.toLocaleString()}</p>
+                                    
+                                    <!-- This is the modified link with only the button text -->
+                                    <a href="https://www.reddit.com${source.permalink}" target="_blank" rel="noopener noreferrer" class="bubble-detail-source">
+                                        View on Reddit
+                                    </a>
+                                `;
+
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Click a bubble to see details.</div>`;
+    }
+}
+
+// =================================================================================
+// === REVISED FUNCTION V2: AI MINDSET SUMMARY WITH DESCRIPTIVE POINTS ===
+// =================================================================================
+
+async function generateAndRenderMindsetSummary(posts, audienceContext) {
+    // --- Find all your target Webflow elements ---
+    const container = document.getElementById('mindset-summary-container');
+    const archetypeHeadingEl = document.getElementById('archetype-heading');
+    const archetypeDescEl = document.getElementById('archetype-d');
+    const characteristicsEl = document.getElementById('characteristics-d');
+    const rejectsEl = document.getElementById('reject-d');
+
+    // Exit if the required elements aren't on the page
+    if (!container || !archetypeHeadingEl || !archetypeDescEl || !characteristicsEl || !rejectsEl) {
+        console.error("One or more target mindset elements are missing from the page. Aborting render.");
+        if (container) container.innerHTML = '';
+        return;
+    }
+
+    // --- Set a loading state ---
+    archetypeHeadingEl.textContent = 'Analyzing...';
+    archetypeDescEl.textContent = '';
+    characteristicsEl.innerHTML = '<p class="loading-text">Extracting core values...</p>';
+    rejectsEl.innerHTML = '<p class="loading-text">Identifying dislikes...</p>';
+
+    try {
+        const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+
+        // --- 1. THE NEW PROMPT ---
+        // This prompt now asks for an array of objects, each with a "title" and a "description".
+        const prompt = `You are an expert market psychologist specializing in the "${audienceContext}" community. Analyze the following Reddit posts to create a concise "Audience Mindset" summary.
+
+        Respond ONLY with a valid JSON object with the following keys:
+        1. "archetype": A short, 2-3 word evocative name for this audience (e.g., "The Pragmatic Dreamer").
+        2. "summary": A 1-2 sentence summary explaining the core motivation of this archetype.
+        3. "values": An array of 3 objects. Each object must have two keys: "title" (a short, 3-4 word summary of the value) and "description" (a single sentence explaining the title).
+        4. "rejects": An array of 3 objects. Each object must have two keys: "title" (a short, 3-4 word summary of the rejection) and "description" (a single sentence explaining the title).
+
+        Example for "values" format:
+        "values": [
+            { "title": "Value in Action, Not Theory", "description": "They respect builders, not just talkers, valuing demonstrable progress over ideas." },
+            { "title": "Authenticity is Currency", "description": "They value transparent accounts of failure as much as stories of success." }
+        ]
+
+        Posts:
+        ${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-4o",
+            messages: [
+                { role: "system", content: "You are an expert market psychologist who provides structured analysis of audience mindsets in a strict JSON format." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.3,
+            max_completion_tokens: 600,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+
+        if (!response.ok) throw new Error('Mindset analysis API call failed.');
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        const { archetype, summary, values, rejects } = parsed;
+
+        // --- 2. THE NEW RENDERING LOGIC ---
+        // This now populates the elements based on the new "title" and "description" structure.
+        archetypeHeadingEl.textContent = archetype;
+        archetypeDescEl.textContent = summary;
+
+        if (values && values.length > 0) {
+            // Create a list item for each object, making the title bold.
+            const characteristicsHTML = '<ul>' + values.map(item =>
+                `<li><strong>${item.title}:</strong> ${item.description}</li>`
+            ).join('') + '</ul>';
+            characteristicsEl.innerHTML = characteristicsHTML;
+        } else {
+            characteristicsEl.innerHTML = '<p>Could not identify key characteristics.</p>';
+        }
+
+        if (rejects && rejects.length > 0) {
+            const rejectsHTML = '<ul>' + rejects.map(item =>
+                `<li><strong>${item.title}:</strong> ${item.description}</li>`
+            ).join('') + '</ul>';
+            rejectsEl.innerHTML = rejectsHTML;
+        } else {
+            rejectsEl.innerHTML = '<p>Could not identify dislikes.</p>';
+        }
+
+    } catch (error) {
+        console.error("Mindset summary generation error:", error);
+        archetypeHeadingEl.textContent = 'Analysis Failed';
+        archetypeDescEl.textContent = 'Could not generate the audience mindset summary. Please try again.';
+        characteristicsEl.innerHTML = '';
+        rejectsEl.innerHTML = '';
+    }
+}
+// =================================================================================
+// === NEW FUNCTION: AI STRATEGIC PILLARS (GOALS & FEARS) ===
+// ================================================================================
+async function generateAndRenderStrategicPillars(posts, audienceContext) {
+    const goalsContainer = document.getElementById('goals-pillar');
+    const fearsContainer = document.getElementById('fears-pillar');
+    if (!goalsContainer || !fearsContainer) return;
+
+    // Set initial loading states
+    goalsContainer.innerHTML = `<p class="placeholder-text">Analyzing goals...</p>`;
+    fearsContainer.innerHTML = `<p class="placeholder-text">Analyzing fears...</p>`;
+
+    try {
+        const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}
+\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+
+        const prompt = `You are an expert market psychologist specializing in the "${audienceContext}" community. Based on the following user posts, identify their 3 core "Ultimate Goals" and their 3 "Greatest Fears". Respond ONLY with a valid JSON object with two keys: "goals" and "fears", holding an array of 3 short, insightful strings. Posts:\n${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [{
+                role: "system",
+                content: "You are an expert market psychologist providing concise lists of audience goals and fears in strict JSON format."
+            }, {
+                role: "user",
+                content: prompt
+            }],
+            temperature: 0.3,
+            max_completion_tokens: 400,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        });
+
+        if (!response.ok) throw new Error('Strategic pillars API call failed.');
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        const { goals, fears } = parsed;
+
+        const createCustomListHTML = (items) => {
+            if (!items || items.length === 0) return '';
+            return items.map((item, index) => {
+                const isLastItem = index === items.length - 1;
+                return `
+                    <div class="pillar-item">
+                        <p class="pillar-item-text">${item}</p>
+                        ${!isLastItem ? '<div class="pillar-separator"></div>' : ''}
+                    </div>
+                `;
+            }).join('');
+        };
+
+        // Render Goals
+        if (goals && goals.length > 0) {
+            goalsContainer.innerHTML = createCustomListHTML(goals);
+        } else {
+            goalsContainer.innerHTML = `<p class="placeholder-text">Could not identify distinct goals.</p>`;
+        }
+
+        // Render Fears
+        if (fears && fears.length > 0) {
+            fearsContainer.innerHTML = createCustomListHTML(fears);
+        } else {
+            fearsContainer.innerHTML = `<p class="placeholder-text">Could not identify distinct fears.</p>`;
+        }
+
+    } catch (error) {
+        console.error("Strategic pillars generation error:", error);
+        // Replaced inline style with a dedicated error class
+        goalsContainer.innerHTML = `<p class="placeholder-text placeholder-text--error">Analysis failed.</p>`;
+        fearsContainer.innerHTML = `<p class="placeholder-text placeholder-text--error">Analysis failed.</p>`;
+    }
+}
+// =================================================================================
+// === NEW FUNCTION: AI GENERATIVE PROMPT ===
+// =================================================================================
+
+async function generateAndRenderAIPrompt(posts, audienceContext) {
+    const container = document.getElementById('ai-prompt-container');
+    if (!container) return;
+
+    container.innerHTML = `<h3 class="dashboard-section-title">Generative AI Prompt</h3><p class="loading-text">Crafting a tone of voice prompt...</p>`;
+
+    try {
+        const topPostsText = posts.slice(0, 30).map(p => `"${p.data.title || ''} ${getFirstTwoSentences(p.data.selftext || p.data.body || '')}"`).join('\n');
+
+        const prompt = `You are a world-class brand strategist and copywriter. Analyze the following sample of posts from the "${audienceContext}" community. Your task is to create a "Generative AI Prompt" that a marketer could use to write content in the authentic voice of this audience.
+
+        Based on the text, identify the following:
+        - **tone:** 3-4 descriptive adjectives for the overall emotional tone.
+        - **vocabulary:** 3-5 key slang words, acronyms, or insider phrases they use.
+        - **style:** 2-3 bullet points describing their writing style (e.g., sentence structure, use of humor, etc.).
+        - **sentiment:** 1 sentence describing their general outlook (e.g., are they generally optimistic, critical, helpful?).
+
+        Respond ONLY with a valid JSON object with the keys "tone", "vocabulary", "style", and "sentiment".
+
+        Sample Posts:\n${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [
+                { role: "system", content: "You are a brand strategist who creates structured JSON output for AI prompts." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.2,
+            max_completion_tokens: 500,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+
+        if (!response.ok) throw new Error('AI prompt generation API call failed.');
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        const promptText = `Write a blog post about [YOUR TOPIC] for an audience of ${audienceContext}.
+
+Your writing should adopt the following characteristics:
+
+**TONE:**
+- ${parsed.tone.join('\n- ')}
+
+**VOCABULARY:**
+- Use terms like: ${parsed.vocabulary.join(', ')}
+
+**STYLE:**
+- ${parsed.style.join('\n- ')}
+
+**SENTIMENT:**
+- ${parsed.sentiment}
+`;
+
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Generative AI Prompt</h3>
+            <div class="ai-prompt-content" id="ai-prompt-text">${promptText}</div>
+        `;
+
+    } catch (error) {
+        console.error("AI prompt generation error:", error);
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Generative AI Prompt</h3>
+            <p class="loading-text" style="color: red;">Could not generate AI prompt.</p>
+        `;
+    }
+}
+// =================================================================================
+// === NEW FUNCTION: AI KEYWORD OPPORTUNITIES ===
+// =================================================================================
+
+async function generateAndRenderKeywords(posts, audienceContext) {
+    const container = document.getElementById('keyword-opportunities-container');
+    if (!container) return;
+
+    container.innerHTML = `<h3 class="dashboard-section-title">Keyword Opportunities</h3><p class="loading-text">Extracting high-intent keywords...</p>`;
+
+    try {
+        const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+
+        const prompt = `You are an expert SEO strategist specializing in identifying user intent from raw text for the "${audienceContext}" audience.
+        Analyze the following user posts and extract up to 15 high-value keywords and phrases. Categorize them into three distinct groups based on user intent:
+
+        1.  "problem_aware": Keywords used by people who know they have a problem but are seeking information or understanding. (e.g., "how to fix...", "why is my...", "is it normal...")
+        2.  "solution_seeking": Keywords used by people actively looking for and comparing types of solutions. (e.g., "best software for...", "alternatives to...", "[product category] reviews")
+        3.  "purchase_intent": Keywords used by people close to making a purchase, often including brand names or commercial terms. (e.g., "[Brand A] vs [Brand B]", "[Product] pricing", "is [Brand] worth it")
+
+        Respond ONLY with a valid JSON object with three keys: "problem_aware", "solution_seeking", and "purchase_intent", each holding an array of up to 5 relevant keyword strings.
+
+        Posts:\n${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [
+                { role: "system", content: "You are an SEO strategist who outputs structured JSON with keyword categories." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.1,
+            max_completion_tokens: 600,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+
+        if (!response.ok) throw new Error('Keyword analysis API call failed.');
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        const { problem_aware, solution_seeking, purchase_intent } = parsed;
+
+        const renderCluster = (title, icon, description, keywords) => {
+            if (!keywords || keywords.length === 0) return '';
+            const keywordList = keywords.map(kw => `<li>${kw}</li>`).join('');
+            return `
+                <div class="keyword-cluster">
+                    <div class="keyword-cluster-header">
+                        <span class="keyword-cluster-icon">${icon}</span>
+                        <div>
+                            <h4 class="keyword-cluster-title">${title}</h4>
+                            <p class="keyword-cluster-description">${description}</p>
+                        </div>
+                    </div>
+                    <ul class="keyword-list">${keywordList}</ul>
+                </div>
+            `;
+        };
+
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Keyword Opportunities</h3>
+            <div class="keyword-clusters-grid">
+                ${renderCluster('Problem-Aware', '🤔', 'For blog posts & guides', problem_aware)}
+                ${renderCluster('Solution-Seeking', '🔍', 'For comparisons & reviews', solution_seeking)}
+                ${renderCluster('Purchase-Intent', '💳', 'For landing pages & ads', purchase_intent)}
+            </div>
+        `;
+
+    } catch (error) {
+        console.error("Keyword generation error:", error);
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Keyword Opportunities</h3>
+            <p class="loading-text" style="color: red;">Could not generate keyword opportunities.</p>
+        `;
+    }
+}
+// =================================================================================
+// === UPGRADED FUNCTION: Action Cards with Strategic Logic & Master Toggle ===
+// =================================================================================
+function generateAndRenderActionCards(seoPlan, audienceContext) {
+    const container = document.getElementById('keyword-opportunities-container');
+    if (!container) return;
+
+    // --- A. Flatten the complex SEO plan into a simple list of content ideas (No changes here) ---
+    const allContentIdeas = [];
+    ['problem_aware', 'solution_seeking', 'purchase_intent'].forEach(intent => {
+        if (!seoPlan[intent]) return;
+        seoPlan[intent].forEach(primary => {
+            (primary.secondary_keywords || []).forEach(secondary => {
+                (secondary.long_tail_keywords || []).forEach(longtail => {
+                    (longtail.content_examples || []).forEach(content => {
+                        allContentIdeas.push({
+                            title: content.title,
+                            intent: intent,
+                            primaryKeyword: primary.keyword,
+                            primaryVolume: primary.searchVolume,
+                            secondaryKeyword: secondary.keyword,
+                            secondaryVolume: secondary.searchVolume,
+                            longTailKeyword: longtail.keyword,
+                            longTailVolume: longtail.searchVolume,
+                        });
+                    });
+                });
+            });
+        });
+    });
+
+    if (allContentIdeas.length === 0) {
+        container.innerHTML = '';
+        return;
+    }
+
+    // --- B. Curate the content for each of the 4 cards (REVISED STRATEGIC LOGIC) ---
+
+    // Card 1 & 2: Traffic Drivers & Conversion Boosters (No changes here)
+    const trafficDrivers = allContentIdeas.filter(idea => idea.intent === 'problem_aware').sort((a, b) => b.primaryVolume - a.primaryVolume).slice(0, 4);
+    const conversionBoosters = allContentIdeas.filter(idea => idea.intent === 'purchase_intent').sort((a, b) => b.primaryVolume - a.primaryVolume).slice(0, 4);
+
+    // Card 3: Quick Wins (Logic slightly improved to be more reliable)
+    const quickWins = [...allContentIdeas].sort((a, b) => a.longTailVolume - b.longTailVolume).slice(0, 4);
+
+    // Card 4: The Shortlist (NEW STRATEGIC CURATION)
+    const shortlist = [];
+    let candidates = [...allContentIdeas];
+
+    // 1. Pick the single best "Purchase Intent" idea (highest volume)
+    const topPurchase = candidates.filter(c => c.intent === 'purchase_intent').sort((a, b) => b.primaryVolume - a.primaryVolume)[0];
+    if (topPurchase) {
+        shortlist.push(topPurchase);
+        candidates = candidates.filter(c => c.title !== topPurchase.title); // Remove from pool
+    }
+
+    // 2. Pick the single best "Solution Seeking" idea
+    const topSolution = candidates.filter(c => c.intent === 'solution_seeking').sort((a, b) => b.primaryVolume - a.primaryVolume)[0];
+    if (topSolution) {
+        shortlist.push(topSolution);
+        candidates = candidates.filter(c => c.title !== topSolution.title);
+    }
+
+    // 3. Pick the single best "Problem Aware" traffic driver
+    const topProblem = candidates.filter(c => c.intent === 'problem_aware').sort((a, b) => b.primaryVolume - a.primaryVolume)[0];
+    if (topProblem) {
+        shortlist.push(topProblem);
+        candidates = candidates.filter(c => c.title !== topProblem.title);
+    }
+
+    // 4. Fill remaining spots with the highest "overall score" ideas from what's left
+    const intentWeights = { purchase_intent: 3, solution_seeking: 2, problem_aware: 1 };
+    while (shortlist.length < 4 && candidates.length > 0) {
+        const bestRemaining = candidates.map(idea => ({
+            ...idea,
+            score: (idea.primaryVolume * 0.7 + idea.longTailVolume * 0.3) * (intentWeights[idea.intent] || 1)
+        })).sort((a, b) => b.score - a.score)[0];
+
+        if (bestRemaining) {
+            shortlist.push(bestRemaining);
+            candidates = candidates.filter(c => c.title !== bestRemaining.title);
+        } else {
+            break; // No more candidates
+        }
+    }
+
+
+    // --- C. Render the HTML, including the new toggle button ---
+    container.innerHTML = `
+        <div class="card-toggle-wrapper">
+            <button id="toggle-all-cards-btn" class="card-toggle-button">Expand All</button>
+        </div>
+        <div class="action-cards-grid">
+            ${renderActionCardHTML('Traffic Drivers', 'High-volume, top-of-funnel content', trafficDrivers, (idea) => `This content targets the high-volume keyword "${idea.primaryKeyword}". It's designed to attract a broad audience early in their journey, maximizing site traffic and brand awareness for ${audienceContext}.`)}
+            ${renderActionCardHTML('Conversion Boosters', 'Content for a ready-to-buy audience', conversionBoosters, (idea) => `This targets users showing clear purchase intent for ${audienceContext}. Answering these questions directly can lead to conversions, as the audience is actively evaluating solutions like yours.`)}
+            ${renderActionCardHTML('Quick Wins', 'Low-competition, high-relevance topics', quickWins, (idea) => `Targeting the low-volume, specific keyword "${idea.longTailKeyword}" can lead to faster search ranking results. It's a way to build authority and capture highly-qualified traffic with less competition.`)}
+            ${renderActionCardHTML('The Shortlist', 'Our top strategic content recommendations', shortlist, (idea) => `This idea was selected for its strong balance of search volume (${idea.primaryVolume.toLocaleString()}) and high-value user intent (${idea.intent.replace('_', '-')}). It represents a prime opportunity to capture a strategic audience segment for ${audienceContext}.`)}
+        </div>
+    `;
+
+    // --- D. Add Event Listener for the new toggle button ---
+    const toggleBtn = document.getElementById('toggle-all-cards-btn');
+    const allCards = document.querySelectorAll('.action-cards-grid .action-card');
+    if (toggleBtn && allCards.length > 0) {
+        toggleBtn.addEventListener('click', () => {
+            // Check if ANY card is closed. If so, the action is to open all.
+            const shouldOpen = Array.from(allCards).some(card => !card.open);
+            allCards.forEach(card => card.open = shouldOpen);
+            toggleBtn.textContent = shouldOpen ? 'Collapse All' : 'Expand All';
+        });
+    }
+}
+// =================================================================================
+// === UPGRADED FUNCTION: Renders a single COLLAPSIBLE Action Card ===
+// =================================================================================
+function renderActionCardHTML(title, subtitle, ideas, whyItMattersGenerator) {
+    if (!ideas || ideas.length === 0) return '';
+
+    const blogTitlesHTML = ideas.map((idea, index) => {
+        return `
+            <details class="action-item-dropdown">
+                <summary class="action-item-summary">
+                    <span class="action-item-icon">📝</span>
+                    ${idea.title}
+                </summary>
+                <div class="action-item-context">
+                    <div class="context-item primary"><span class="context-label">Primary Keyword</span><span class="context-value">${idea.primaryKeyword}</span></div>
+                    <div class="context-item secondary"><span class="context-label">Secondary Keyword</span><span class="context-value">${idea.secondaryKeyword}</span></div>
+                    <div class="context-item longtail"><span class="context-label">Long-Tail Keyword</span><span class="context-value">${idea.longTailKeyword}</span></div>
+                    <div class="context-item why"><span class="context-label">Why It Matters</span><p class="context-prose">${whyItMattersGenerator(idea)}</p></div>
+                </div>
+            </details>
+        `;
+    }).join('');
+
+    // The main card is now a <details> element
+    return `
+    <details class="action-card">
+    <summary class="action-card-summary">
+                <div class="action-card-header">
+                    <h3 class="action-card-title">${title}</h3>
+                    <p class="action-card-subtitle">${subtitle}</p>
+                </div>
+                <div class="action-card-arrow">›</div>
+            </summary>
+            <div class="action-item-list">
+                ${blogTitlesHTML}
+            </div>
+        </details>
+    `;
+}
+async function generateAndRenderSeoSunburst(posts, audienceContext) {
+    const container = document.getElementById('keyword-sunburst');
+    if (!container) {
+        console.error('Sunburst container div "keyword-sunburst" not found.');
+        return;
+    }
+
+    container.innerHTML = '<p class="loading-text">Building data-driven SEO plan...</p>';
+
+    try {
+        const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+
+        // *** CHANGE 1: The AI prompt is updated to match the new node count rules. ***
+        const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Create a comprehensive, multi-level SEO plan based on the provided text.
+
+        Structure your response as a single, valid JSON object.
+
+        For each of the three intents (problem_aware, solution_seeking, purchase_intent), provide an array of 2-5 primary keywords.
+
+        - For EACH primary keyword, provide an array of 2-4 "secondary_keywords".
+        - For EACH secondary keyword, provide an array of 2-3 "long_tail_keywords".
+        - For EACH long-tail keyword, provide an array of 1-2 "content_examples".
+
+        CRITICAL: Every keyword object (primary, secondary, long_tail) MUST contain:
+        - "keyword": The keyword phrase.
+        - "searchVolume": A realistic monthly search volume (integer).
+
+        Each "content_examples" item should be an object with a single key: "title".
+
+        Example JSON Structure:
+        {
+          "problem_aware": [
+            {
+              "keyword": "primary keyword A", "searchVolume": 5000,
+              "secondary_keywords": [
+                {
+                  "keyword": "secondary keyword A1", "searchVolume": 1200,
+                  "long_tail_keywords": [
+                    {
+                      "keyword": "long-tail keyword A1a", "searchVolume": 300,
+                      "content_examples": [ { "title": "Example Blog Title 1" } ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "solution_seeking": [ ... ], "purchase_intent": [ ... ]
+        }`;
+
+        const openAIParams = {
+            model: "gpt-4o",
+            messages: [{ role: "system", content: "You are a JSON-only SEO strategist." }, { role: "user", content: prompt }],
+            temperature: 0.2,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('AI SEO plan generation failed.');
+
+        const aiResult = await response.json();
+        const seoPlan = JSON.parse(aiResult.openaiResponse);
+        generateAndRenderActionCards(seoPlan, audienceContext);
+
+        // Data transformation logic remains the same - it's robust enough for the new structure.
+        // In generateAndRenderSeoSunburst...
+
+        // =========================================================================
+        // === STEP 1: CORRECTED DATA GENERATION ===================================
+        // =========================================================================
+
+        // Data transformation logic
+        const sunburstData = [{
+            id: 'root', parent: '', name: 'SEO Plan',
+            levelName: 'SEO Plan' // <-- FLATTENED PROPERTY
+        }, {
+            id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF',
+            levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
+        }, {
+            id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF',
+            levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
+        }, {
+            id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8',
+            levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
+        }];
+
+        const processIntent = (intentId, intentName, intentData) => {
+            if (!intentData || !Array.isArray(intentData)) return;
+
+            // Level 3: Primary Keywords
+            intentData.forEach((primary, i) => {
+                const primaryId = `${intentId}_p_${i}`;
+                sunburstData.push({
+                    id: primaryId,
+                    parent: intentId,
+                    name: primary.keyword,
+                    // NO 'extra' OBJECT. Properties are added directly.
+                    intentName: intentName,
+                    levelName: 'Primary keyword',
+                    searchVolume: primary.searchVolume
+                });
+
+                // Level 4: Secondary Keywords
+                (primary.secondary_keywords || []).forEach((secondary, j) => {
+                    const secondaryId = `${primaryId}_s_${j}`;
+                    sunburstData.push({
+                        id: secondaryId,
+                        parent: primaryId,
+                        name: secondary.keyword,
+                        intentName: intentName,
+                        levelName: 'Secondary keyword',
+                        searchVolume: secondary.searchVolume
+                    });
+
+                    // Level 5: Long-tail Keywords
+                    (secondary.long_tail_keywords || []).forEach((longtail, k) => {
+                        const longtailId = `${secondaryId}_l_${k}`;
+                        sunburstData.push({
+                            id: longtailId,
+                            parent: secondaryId,
+                            name: longtail.keyword,
+                            intentName: intentName,
+                            levelName: 'Long-tail keyword',
+                            searchVolume: longtail.searchVolume
+                        });
+
+                        // Level 6: Content Examples
+                        (longtail.content_examples || []).forEach((content, l) => {
+                            const value = longtail.searchVolume / (longtail.content_examples.length || 1);
+                            sunburstData.push({
+                                id: `${longtailId}_c_${l}`,
+                                parent: longtailId,
+                                name: content.title,
+                                value: Math.max(value, 1),
+                                intentName: intentName,
+                                levelName: 'Content example',
+                                searchVolume: longtail.searchVolume // Storing the parent's volume
+                            });
+                        });
+                    });
+                });
+            });
+        };
+
+
+        processIntent('pa', 'Problem-Aware', seoPlan.problem_aware);
+        processIntent('ss', 'Solution-Seeking', seoPlan.solution_seeking);
+        processIntent('pi', 'Purchase-Intent', seoPlan.purchase_intent);
+
+        const seriesName = sunburstData.find(d => d.id === 'root')?.name || 'SEO Plan';
+
+        // =========================================================================
+        // === START: COPY AND REPLACE THIS ENTIRE BLOCK ===========================
+        // =========================================================================
+
+        Highcharts.chart(container, {
+            chart: { type: 'sunburst', height: '650px', backgroundColor: null },
+            title: { text: null },
+            credits: { enabled: false },
+
+            // THIS IS THE KEY FIX for removing "Series 1" and enabling CSS control
+            breadcrumbs: {
+                showFullPath: false, // <-- This removes the "Series 1" prefix
+                useHTML: true        // <-- This allows our CSS to control wrapping
+            },
+
+            plotOptions: {
+                sunburst: {
+                    animation: { duration: 1000 },
+                    borderColor: '#FFFFFF',
+                    borderWidth: 1
+                }
+            },
+
+            series: [{
+                type: 'sunburst',
+                name: seriesName,
+                data: sunburstData,
+                allowDrillToNode: true,
+                cursor: 'pointer',
+                dataLabels: {
+                    format: '{point.name}',
+                    filter: { property: 'innerArcLength', operator: '>', value: 20 },
+                    rotationMode: 'circular',
+                    style: {
+                        color: '#FFFFFF',
+                        textOutline: 'none',
+                        fontWeight: '400'
+                    }
+                },
+                levels: [{
+                    level: 1,
+                    levelIsConstant: false,
+                    dataLabels: {
+                        enabled: true,
+                        filter: { property: 'value', operator: '>', value: -1 },
+                        style: {
+                            fontSize: '1.1em',
+                            fontWeight: '400',
+                            color: '#FFFFFF',
+                            textOutline: 'none'
+                        }
+                    }
+                }, { level: 2, colorByPoint: true }, { level: 3, colorVariation: { key: 'brightness', to: -0.25 } }, { level: 4, colorVariation: { key: 'brightness', to: 0.25 } }, { level: 5, colorVariation: { key: 'brightness', to: -0.45 } }, { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }]
+            }],
+
+            tooltip: {
+                useHTML: true,
+                headerFormat: '',
+                pointFormatter: function () {
+                    const point = this;
+                    let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
+
+                    // THIS IS THE FIX for the bold and capitalized name in the tooltip
+                    const capitalizedName = point.name.replace(/(^\w{1})|(\s+\w{1})/g, letter => letter.toUpperCase());
+                    html += `<b>Name:</b> <b>${capitalizedName}</b><br/>`; // <-- MODIFIED LINE
+
+                    if (point.levelName) {
+                        html += `<b>Level:</b> ${point.levelName}<br/>`;
+                    }
+                    if (point.intentName) {
+                        html += `<b>Intent:</b> ${point.intentName}<br/>`;
+                    }
+                    if (point.searchVolume !== undefined) {
+                        html += `<b>Search volume:</b> ${point.searchVolume.toLocaleString()}<br/>`;
+                    }
+                    html += `</div>`;
+                    return html;
+                }
+            },
+
+            exporting: { enabled: true },
+            accessibility: { enabled: true },
+        });
+
+        // =========================================================================
+        // === END OF BLOCK TO REPLACE =============================================
+        // =========================================================================
+    } catch (error) {
+        console.error("Failed to generate or render SEO Sunburst chart:", error);
+        container.innerHTML = `<p class="error-message">Could not generate the visual SEO plan.</p>`;
+    }
+}
+// =================================================================================
+// === NEW SOLUTION: PROBLEM/OFFER SANKEY DIAGRAM ==================================
+// =================================================================================
+
+async function generateProblemOfferPairsAI(summaries) {
+    if (!summaries || summaries.length === 0) return [];
+
+    const problemTitles = summaries.map(s => s.title);
+    const prompt = `You are a startup advisor. For each customer problem provided for the audience "${originalGroupName}", generate a single, concise "offer angle" or "solution".
+    
+    Respond ONLY with a valid JSON object with a single key "pairs". The value should be an array of objects, where each object has two keys: "problem" and "offer". 
+    
+    CRITICAL: Ensure there is one object for each problem provided, and that neither the "problem" nor the "offer" value is an empty string.
+
+    Example Response:
+    { "pairs": [ { "problem": "Models take forever to train", "offer": "Cut training time by 60%" } ] }
+
+    Problems to solve:
+    ${JSON.stringify(problemTitles)}
+    `;
+
+    const openAIParams = {
+        model: "gpt-4o",
+        messages: [{ role: "system", content: "You are a startup advisor creating problem-solution pairs in strict JSON format." }, { role: "user", content: prompt }],
+        temperature: 0.6,
+        max_completion_tokens: 2000,
+        response_format: { "type": "json_object" }
+    };
+
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        });
+        if (!response.ok) throw new Error(`OpenAI API Error for pairs: ${response.statusText}`);
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        if (parsed.pairs && Array.isArray(parsed.pairs)) return parsed.pairs;
+        else throw new Error("AI response did not contain a valid 'pairs' array.");
+    } catch (error) {
+        console.error("Problem/Offer pair generation failed:", error);
+        return [];
+    }
+}
+
+// =================================================================================
+// === PASTE THIS ENTIRE CORRECTED FUNCTION ========================================
+// =================================================================================
+async function generateAndRenderValueSankey(audienceName, summaries) {
+    const container = document.getElementById('value-tree');
+    if (!container) return;
+
+    container.innerHTML = '<p class="loading-text">Generating AI value propositions... <span class="loader-dots"></span></p>';
+
+    const pairs = await generateProblemOfferPairsAI(summaries);
+    const validatedPairs = pairs.filter(p => p.problem && p.offer && p.problem.trim() !== "" && p.offer.trim() !== "");
+
+    if (validatedPairs.length === 0) {
+        container.innerHTML = '<p class="placeholder-text">Could not generate any offer angles.</p>';
+        return;
+    }
+
+    const sankeyData = [];
+    const sankeyNodes = [];
+    const addedNodes = new Set();
+
+    validatedPairs.forEach(pair => {
+        // Create the link from problem to offer
+        sankeyData.push([pair.problem, pair.offer, 1]); // Weight of 1 for uniform lines
+
+        // Add the problem node if it doesn't exist
+        if (!addedNodes.has(pair.problem)) {
+            // --- THIS IS THE FIX: Add the 'name' property ---
+            sankeyNodes.push({ id: pair.problem, name: pair.problem, column: 0, type: 'problem' });
+            addedNodes.add(pair.problem);
+        }
+        // Add the offer node if it doesn't exist
+        if (!addedNodes.has(pair.offer)) {
+            // --- THIS IS THE FIX: Add the 'name' property ---
+            sankeyNodes.push({ id: pair.offer, name: pair.offer, column: 1, type: 'offer' });
+            addedNodes.add(pair.offer);
+        }
+    });
+    // =================================================================================
+    // === PASTE THIS ENTIRE FINAL CHART CONFIGURATION =================================
+    // =================================================================================
+    Highcharts.chart('value-tree', {
+        chart: {
+            type: 'sankey',
+            backgroundColor: 'transparent',
+            margin: [20, 20, 20, 20] // Added slightly more margin
+        },
+        title: { text: null },
+        credits: { enabled: false },
+        tooltip: { enabled: false },
+        series: [{
+            keys: ['from', 'to', 'weight'],
+            data: sankeyData,
+            nodes: sankeyNodes,
+            nodePadding: 25, // Vertical space between nodes
+
+            // Link styling
+            link: {
+                color: 'rgba(94, 209, 216, 0.6)',
+                linkOpacity: 0.6
+            },
+
+            // --- THIS IS THE DEFINITIVE FIX ---
+            // We use the standard 'formatter' and remove all conflicting properties.
+            dataLabels: {
+                enabled: true,
+                useHTML: true,
+                formatter: function () {
+                    // 'this.point' correctly refers to the node data
+                    const point = this.point;
+                    const className = point.type === 'problem' ? 'sankey-problem' : 'sankey-offer';
+                    // Return the custom HTML div, which will now be rendered correctly
+                    return `<div class="sankey-label ${className}">${point.name}</div>`;
+                }
+            },
+        }]
+    });
+}
+
+// --- MODIFIED: UPGRADED POWER PHRASES ---
+
+
+// --- POWER PHRASES: WEBFLOW POPULATOR ---
+async function generateAndRenderPowerPhrases(posts, audienceContext) {
+    const container = document.getElementById('power-phrases');
+    if (!container) return;
+
+    // 1. Identify your Webflow template blueprint
+    const itemTemplate = container.querySelector('.phrase-item-template');
+    if (!itemTemplate) {
+        console.error("Could not find '.phrase-item-template' inside #power-phrases");
+        return;
+    }
+
+    // Hide the blueprint so it doesn't show up empty
+    itemTemplate.style.display = 'none';
+
+    // 2. Identify candidates (Acronyms & Phrases)
+    const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
+    const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
+    const acronymRegex = /\b[A-Z]{2,5}\b/g;
+    const foundAcronyms = rawText.match(acronymRegex) || [];
+    const acronymFreq = {};
+    foundAcronyms.forEach(a => { if (!stopAcronyms.has(a)) acronymFreq[a] = (acronymFreq[a] || 0) + 1; });
+    const topAcronyms = Object.entries(acronymFreq).filter(([_, count]) => count > 1).sort((a, b) => b[1] - a[1]).slice(0, 4).map(item => item[0]);
+    
+    const cleanedText = rawText.toLowerCase().replace(/[^a-z\s']/g, '').replace(/\s+/g, ' ');
+    const words = cleanedText.split(' ');
+    const bigrams = generateNgrams(words, 2);
+    const trigrams = generateNgrams(words, 3);
+    const phraseFreq = {};
+    [...bigrams, ...trigrams].forEach(phrase => { phraseFreq[phrase] = (phraseFreq[phrase] || 0) + 1; });
+    const topPhrases = Object.entries(phraseFreq).filter(([_, count]) => count > 1).sort((a, b) => b[1] - a[1]).slice(0, 9 - topAcronyms.length).map(item => item[0]);
+    
+    const termsToAnalyze = [...topAcronyms, ...topPhrases];
+    const topPostsText = posts.slice(0, 15).map(p => p.data.title).join(' | ');
+
+    // Clear previous results (instances), but keep our hidden blueprint
+    container.querySelectorAll('.phrase-instance').forEach(el => el.remove());
+
+    // 3. Loop and Populate
+    termsToAnalyze.forEach(async (term, index) => {
+        // Clone the template
+        const clone = itemTemplate.cloneNode(true);
+        clone.classList.add('phrase-instance');
+        clone.classList.remove('phrase-item-template');
+        clone.id = ''; // Remove the duplicate ID
+        clone.style.display = 'flex'; // Match your Webflow flex/grid setting
+
+        // Set the Term Title (Summary) immediately
+        const termHeader = clone.querySelector('.phrase-text');
+        if (termHeader) termHeader.innerText = term;
+
+        // ACCORDION FAIL-SAFE: 
+        // If your Webflow Interaction doesn't trigger on cloned elements, this will.
+        const summaryDiv = clone.querySelector('.power-phrase-summary');
+        const contentDiv = clone.querySelector('.power-phrase-content');
+        if (summaryDiv && contentDiv) {
+            summaryDiv.style.cursor = 'pointer';
+            summaryDiv.addEventListener('click', () => {
+                const isHidden = contentDiv.style.display === 'none' || getComputedStyle(contentDiv).display === 'none';
+                contentDiv.style.display = isHidden ? 'block' : 'none';
+            });
+        }
+
+        // Add to the grid
+        container.appendChild(clone);
+
+        // 4. Fetch the AI details
+        try {
+            const prompt = `For the term "${term}" in the ${audienceContext} community, provide: 1) a 1-sentence definition, 2) a short example quote, 3) a 1-sentence usage note for a marketer. Respond ONLY as valid JSON with keys 'definition', 'example_quote', 'usage_note'. Context: ${topPostsText}`;
+
+            const openAIParams = {
+                model: "gpt-5.4-mini",
+                messages: [{ role: "system", content: "You are a linguist who outputs only valid JSON." }, { role: "user", content: prompt }],
+                temperature: 0.1,
+                response_format: { "type": "json_object" }
+            };
+
+            const response = await fetch(OPENAI_PROXY_URL, { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify({ openaiPayload: openAIParams }) 
+            });
+            
+            const resData = await response.json();
+            const parsed = JSON.parse(resData.openaiResponse);
+
+            // Populate the dropdown content using your classes
+            if (clone.querySelector('.phrase-definition')) 
+                clone.querySelector('.phrase-definition').innerText = parsed.definition;
+            
+            if (clone.querySelector('.phrase-example')) 
+                clone.querySelector('.phrase-example').innerText = `Example: "${parsed.example_quote}"`;
+            
+            if (clone.querySelector('.phrase-usage')) 
+                clone.querySelector('.phrase-usage').innerText = `Use when: ${parsed.usage_note}`;
+
+        } catch (err) {
+            console.error(`Failed to enrich phrase: ${term}`, err);
+        }
+    });
+}
+
+
+
+
+async function generateAndRenderHookPatterns(posts, audienceContext) {
+    const container = document.getElementById('hook-patterns-container');
+    if (!container) return;
+
+    container.innerHTML = `<p class="loading-text">Analyzing top hooks and social proof... <span class="loader-dots"></span></p>`;
+
+    try {
+        // 1. Get top 30 by upvotes
+        const topPosts = [...posts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 30);
+        
+        // 2. Prepare text for AI, giving each post a temporary ID
+        const topPostsForAI = topPosts.map((p, i) => `ID: ${i} | UPS: ${p.data.ups} | TITLE: ${p.data.title}`).join('\n');
+
+        const prompt = `Analyze these top-performing posts from the ${audienceContext} community. Identify 4-6 distinct 'hook patterns' (the type of opening that drives engagement). 
+        
+        For each pattern, provide:
+        - category: (e.g., 'Vulnerability hook')
+        - why_it_works: (1 sentence)
+        - example_ids: (An array of the 3 "ID" numbers from the list provided that best fit this pattern).
+
+        Respond ONLY as valid JSON with key 'patterns'. Posts:
+        ${topPostsForAI}`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [
+                { role: "system", content: "You are an expert content strategist who outputs only valid JSON. You identify patterns by ID." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.1,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        // 3. Render HTML with real links and badges
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Hook Patterns</h3>
+            <p class="dashboard-section-subtitle">Psychological triggers proven to drive massive engagement</p>
+            <div class="hook-patterns-grid">
+                ${parsed.patterns.map(pattern => {
+                    // Map the IDs back to our actual post data
+                    const validExamples = (pattern.example_ids || [])
+                        .map(id => topPosts[parseInt(id)])
+                        .filter(Boolean); // Ensure post exists
+
+                    return `
+                        <details class="hook-pattern-card">
+                            <summary class="hook-card-header">
+                                <span class="hook-category">${pattern.category}</span>
+                                <div class="hook-arrow">›</div>
+                            </summary>
+                            <div class="hook-card-content">
+                                <p class="hook-why"><strong>Strategy:</strong> ${pattern.why_it_works}</p>
+                                <div class="hook-examples-list">
+                                    ${validExamples.map(post => `
+                                        <div class="hook-proof-item">
+                                            <a href="https://reddit.com${post.data.permalink}" target="_blank" class="hook-proof-title">
+                                                "${post.data.title}"
+                                            </a>
+                                            <div class="hook-proof-meta">
+                                                <span class="proof-badge upvotes">👍 ${post.data.ups.toLocaleString()}</span>
+                                                <span class="proof-badge comments">💬 ${post.data.num_comments.toLocaleString()}</span>
+                                                <span class="proof-link-text">Read Post ↗</span>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
+                            </div>
+                        </details>
+                    `;
+                }).join('')}
+            </div>
+        `;
+    } catch (error) {
+        console.error("Hook Patterns Error:", error);
+        container.innerHTML = `<p class="placeholder-text">Hook analysis temporarily unavailable.</p>`;
+    }
+}
+
+
+// --- NEW SECTION 1: VOICE PROFILE ---
+async function generateAndRenderVoiceProfile(posts, audienceContext) {
+    const container = document.getElementById('voice-profile-container');
+    if (!container) return;
+
+    container.innerHTML = `<p class="loading-text">Crafting voice profile... <span class="loader-dots"></span></p>`;
+
+    try {
+        const topPostsText = posts.slice(0, 40).map(p => 
+            `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
+        ).join('\n---\n');
+
+        const prompt = `Based on these posts from the ${audienceContext} community, write a 2-3 sentence tone-of-voice description that a copywriter could use as a brief, plus 5-7 adjectives describing the voice. Respond ONLY as valid JSON with keys 'tone_description' and 'voice_adjectives'. Posts: ${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [
+                { role: "system", content: "You are a brand strategist who outputs only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.3,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        });
+
+        if (!response.ok) throw new Error('Voice Profile API call failed.');
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        container.innerHTML = `
+            <div class="voice-profile-wrapper">
+                <h3 class="dashboard-section-title">Voice Profile</h3>
+                <p class="dashboard-section-subtitle">A copywriter's brief for this audience</p>
+                <blockquote class="voice-tone-quote">
+                    "${parsed.tone_description}"
+                </blockquote>
+                <div class="voice-adjective-tags">
+                    ${parsed.voice_adjectives.map(adj => `<span class="voice-pill">${adj}</span>`).join('')}
+                </div>
+            </div>
+        `;
+
+    } catch (error) {
+        console.error("Voice Profile Error:", error);
+        container.innerHTML = `<p class="placeholder-text">Voice profile analysis temporarily unavailable.</p>`;
+    }
+}
+
+// --- NEW SECTION 2: LANGUAGE TO AVOID ---
+async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
+    const container = document.getElementById('language-to-avoid-container');
+    if (!container) return;
+
+    container.innerHTML = `<p class="loading-text">Identifying inauthentic terms... <span class="loader-dots"></span></p>`;
+
+    try {
+        const topPostsText = posts.slice(0, 40).map(p => 
+            `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
+        ).join('\n---\n');
+
+        const prompt = `Analyze the ${audienceContext} community based on these posts. Identify 4-6 inauthentic or cringey terms that outsiders might use but this audience rejects, and for each one provide an authentic alternative this community would actually use. Respond ONLY as valid JSON with key 'pairs', where each item has keys 'avoid' and 'instead'. Posts: ${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [
+                { role: "system", content: "You are a brand strategist who outputs only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.3,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        });
+
+        if (!response.ok) throw new Error('Language to Avoid API call failed.');
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        const pairsHTML = parsed.pairs.map(pair => `
+            <div class="avoid-instead-row">
+                <span class="term-avoid">${pair.avoid}</span>
+                <span class="term-arrow">→</span>
+                <span class="term-instead">${pair.instead}</span>
+            </div>
+        `).join('');
+
+        container.innerHTML = `
+            <div class="language-avoid-wrapper">
+                <h3 class="dashboard-section-title">Language to Avoid</h3>
+                <p class="dashboard-section-subtitle">Swap these terms to sound authentic</p>
+                <div class="avoid-instead-list">
+                    ${pairsHTML}
+                </div>
+            </div>
+        `;
+
+    } catch (error) {
+        console.error("Language Avoid Error:", error);
+        container.innerHTML = `<p class="placeholder-text">Language analysis temporarily unavailable.</p>`;
+    }
+}
+
+
+// =================================================================================
+// === NEW FUNCTION: AI AUDIENCE OVERVIEW (DEMOGRAPHICS) ===
+// =================================================================================
+
+
+
+async function generateAndRenderOverview(posts, audienceContext) {
+    const container = document.getElementById('overview-div');
+    if (!container) return;
+
+    container.innerHTML = `<p class="loading-text">Calculating demographic proportions...</p>`;
+
+    try {
+        const topPostsText = posts.slice(0, 50).map(p =>
+            `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 600)
+        ).join('\n---\n');
+
+        const prompt = `You are a data analyst. Based on the language, slang, and life experiences mentioned in these Reddit posts for "${audienceContext}", provide a specific demographic estimate.
+
+        CRITICAL: You must provide numerical percentages. Even if they are estimates, they must be specific.
+
+        Respond ONLY with a valid JSON object with these keys:
+        1. "male_pct": (Integer) Estimated % of males.
+        2. "female_pct": (Integer) Estimated % of females.
+        3. "age_18_24": (Integer) Estimated % aged 18-24.
+        4. "age_25_45": (Integer) Estimated % aged 25-45.
+        5. "age_45_plus": (Integer) Estimated % aged 45+.
+        6. "top_life_stage": (String) 3-4 words (e.g. "Young Professionals", "Parents of Teens").
+
+        Text: ${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [{ role: "system", content: "You are a precise demographic estimator." }, { role: "user", content: prompt }],
+            temperature: 0.1, // Lower temperature makes it more consistent
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        });
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        container.innerHTML = `
+            <div style="background: #111; padding: 24px; border-radius: 12px; border: 1px solid #333; color: white; font-family: sans-serif;">
+                <h3 style="margin: 0 0 20px 0; font-size: 18px; color: #00a5ce;">Audience Demographics</h3>
+                
+                <!-- Gender Section -->
+                <div style="margin-bottom: 25px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
+                        <span>Male: <strong>${parsed.male_pct}%</strong></span>
+                        <span>Female: <strong>${parsed.female_pct}%</strong></span>
+                    </div>
+                    <div style="width: 100%; height: 8px; background: #333; border-radius: 4px; display: flex; overflow: hidden;">
+                        <div style="width: ${parsed.male_pct}%; background: #00a5ce; height: 100%;"></div>
+                        <div style="width: ${parsed.female_pct}%; background: #fd80c7; height: 100%;"></div>
+                    </div>
+                </div>
+
+                <!-- Age Section -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px; text-align: center;">
+                    <div style="background: #1a1a1a; padding: 10px; border-radius: 8px;">
+                        <div style="font-size: 11px; color: #888; text-transform: uppercase;">18-24</div>
+                        <div style="font-size: 18px; font-weight: bold;">${parsed.age_18_24}%</div>
+                    </div>
+                    <div style="background: #1a1a1a; padding: 10px; border-radius: 8px; border: 1px solid #00a5ce;">
+                        <div style="font-size: 11px; color: #888; text-transform: uppercase;">25-45</div>
+                        <div style="font-size: 18px; font-weight: bold;">${parsed.age_25_45}%</div>
+                    </div>
+                    <div style="background: #1a1a1a; padding: 10px; border-radius: 8px;">
+                        <div style="font-size: 11px; color: #888; text-transform: uppercase;">45+</div>
+                        <div style="font-size: 18px; font-weight: bold;">${parsed.age_45_plus}%</div>
+                    </div>
+                </div>
+
+                <!-- Life Stage -->
+                <div style="border-top: 1px solid #333; padding-top: 15px; font-size: 14px;">
+                    <span style="color: #888;">Primary Life Stage:</span> 
+                    <span style="margin-left: 5px; color: #00a5ce; font-weight: 500;">${parsed.top_life_stage}</span>
+                </div>
+            </div>
+        `;
+
+    } catch (error) {
+        console.error("Overview error:", error);
+        container.innerHTML = "Error analyzing detailed demographics.";
+    }
+}
+
+
+async function runProblemFinder(options = {}) {
+
+    console.log("CHECKPOINT 2: Inside runProblemFinder. The audience is:", originalGroupName);
+
+    const { isUpdate = false } = options;
+
+    const growthHeaderPrefix = document.getElementById('growth-header-prefix');
+    if (growthHeaderPrefix) {
+        growthHeaderPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${originalGroupName}</span> struggling with`;
+    }
+    const searchButton = document.getElementById('search-selected-btn');
+    if (!searchButton) { console.error("Could not find button."); return; }
+    const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked');
+    if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
+    const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
+
+    const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
+    if (!isUpdate) {
+        searchButton.classList.add('is-loading');
+        searchButton.disabled = true;
+    }
+    const problemTerms = ["problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for"];
+    const deepProblemTerms = ["struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent"];
+    const demandSignalTerms = ["i'd pay good money for", "buy it in a second", "i'd subscribe to", "throw money at it", "where can i buy", "happily pay", "shut up and take my money", "sick of doing this manually", "can't find anything that", "waste so much time on", "has to be a better way", "shouldn't be this hard", "why is there no tool for", "why is there no app for", "tried everything and nothing works", "tool almost did what i wanted", "it's missing", "tried", "gave up on it", "if only there was an app", "i wish someone would build", "why hasn't anyone made", "waste hours every week", "such a timesuck", "pay just to not have to think", "rather pay than do this myself"];
+    const resultsWrapper = document.getElementById('results-wrapper-b');
+    const resultsMessageDiv = document.getElementById("results-message");
+    const countHeaderDiv = document.getElementById("count-header");
+    if (!isUpdate) {
+        if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
+        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "overview-div", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases", "value-tree"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+        if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
+        for (let i = 1; i <= 5; i++) {
+            const block = document.getElementById(`findings-block${i}`);
+            if (block) {
+                block.style.display = 'none';
+                const prevalenceWrapper = block.querySelector('.prevalence-container-wrapper');
+                if (prevalenceWrapper) {
+                    prevalenceWrapper.innerHTML = "<p class='loading-text' style='text-align: center; padding: 2rem;'>Brewing insights...</p>";
+                }
+            }
+        }
+    }
+    try {
+        console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
+        const panelContent = document.getElementById('bubble-content');
+        if (panelContent) {
+            panelContent.innerHTML = `<div class="panel-placeholder">Loading purchase signals... <span class="loader-dots"></span></div>`;
+        }
+        const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
+        let generalSearchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms] : problemTerms;
+        let limitPerTerm = (searchDepth === 'deep') ? 75 : 40;
+        const selectedTimeRaw = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
+        const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
+        const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
+        const selectedTime = timeMap[selectedTimeRaw] || "all";
+        const problemItems = await fetchMultipleRedditDataBatched(subredditQueryString, generalSearchTerms, limitPerTerm, selectedTime, false);
+        const allItems = deduplicatePosts(problemItems);
+        if (allItems.length === 0) throw new Error("No initial problem posts found. Try different communities or a broader search.");
+        const filteredItems = filterPosts(allItems, selectedMinUpvotes);
+        if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
+        window._filteredPosts = filteredItems;
+        generateAndRenderOverview(filteredItems, originalGroupName);
+        renderPosts(filteredItems);
+        generateAndRenderHybridSentiment(filteredItems, originalGroupName);
+        generateEmotionMapData(filteredItems).then(renderEmotionMap);
+        renderIncludedSubreddits(selectedSubreddits);
+        generateAndRenderPowerPhrases(filteredItems, originalGroupName);
+        generateAndRenderVoiceProfile(filteredItems, originalGroupName);
+        generateAndRenderLanguageToAvoid(filteredItems, originalGroupName);
+        generateAndRenderHookPatterns(filteredItems, originalGroupName);
+        generateAndRenderToneMap(filteredItems, originalGroupName);
+        setTimeout(() => {
+            generateAndRenderCloudInsights(filteredItems, originalGroupName);
+        }, 2000);
+        generateAndRenderMindsetSummary(filteredItems, originalGroupName);
+        generateAndRenderStrategicPillars(filteredItems, originalGroupName);
+        generateAndRenderAIPrompt(filteredItems, originalGroupName);
+        generateAndRenderSeoSunburst(filteredItems, originalGroupName);
+        extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
+        generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
+        if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }
+        const topKeywords = getTopKeywords(filteredItems, 10);
+        const topPosts = filteredItems.slice(0, 30);
+        const combinedTexts = topPosts.map(post => `${post.data.title || post.data.link_title || ''}. ${getFirstTwoSentences(post.data.selftext || post.data.body || '')}`).join("\n\n");
+        const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". CRITICAL RULES FOR QUOTES: The "quotes" array must contain exactly 3 strings, and each string MUST be 63 characters or less. Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["A short quote under 63 chars.", "Another quote under 63 chars.", "A final quote under 63 chars."], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_completion_tokens: 1500, response_format: { "type": "json_object" } };
+        const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!openAIResponse.ok) throw new Error('OpenAI summary generation failed.');
+        const openAIData = await openAIResponse.json();
+        const summaries = parseAISummary(openAIData.openaiResponse);
+        const validatedSummaries = summaries.filter(finding => filteredItems.filter(post => calculateRelevanceScore(post, finding) > 0).length >= 3);
+        if (validatedSummaries.length === 0) {
+            console.warn("AI generated summaries, but none met the validation threshold of 3 supporting posts.");
+            throw new Error("While posts were found, no clear, common problems emerged after analysis.");
+        }
+        const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
+        const sortedFindings = validatedSummaries.map((summary, index) => ({
+            summary,
+            prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100),
+            supportCount: metrics[index].supportCount
+        })).sort((a, b) => b.prevalence - a.prevalence);
+
+        console.log("CHECKPOINT A: Analysis is complete. Found these findings:", sortedFindings);
+        const problemTitles = sortedFindings.map(finding => finding.summary.title);
+        updateGrowthHeaderDropdown(problemTitles);
+        console.log("CHECKPOINT B: The dropdown should now be updated.");
+        if (problemTitles.length > 0) {
+            const headerLabel = document.getElementById('growth-header-label');
+            if (headerLabel) {
+                headerLabel.textContent = problemTitles[0];
+            }
+        }
+        window._summaries = sortedFindings.map(item => item.summary);
+
+        for (let i = 1; i <= 5; i++) {
+            const block = document.getElementById(`findings-block${i}`);
+            if (block) block.style.display = "none";
+        }
+        sortedFindings.forEach((findingData, index) => {
+            const displayIndex = index + 1;
+            if (displayIndex > 5) return;
+            const block = document.getElementById(`findings-block${displayIndex}`);
+            if (!block) return;
+            const content = document.getElementById(`findings-${displayIndex}`);
+            const btn = block.querySelector('.sample-posts-button');
+            block.style.display = "flex";
+            if (content) {
+                const { summary, prevalence, supportCount } = findingData;
+                const titleEl = content.querySelector('.section-title');
+                if (titleEl) titleEl.textContent = summary.title;
+                const teaserEl = content.querySelector('.summary-teaser');
+                const fullEl = content.querySelector('.summary-full');
+                const seeMoreBtn = content.querySelector('.see-more-btn');
+                if (teaserEl && fullEl && seeMoreBtn) {
+                    if (summary.body.length > 95) {
+                        teaserEl.textContent = summary.body.substring(0, 95) + "…";
+                        fullEl.textContent = summary.body;
+                        teaserEl.style.display = 'inline';
+                        fullEl.style.display = 'none';
+                        seeMoreBtn.style.display = 'inline-block';
+                        seeMoreBtn.textContent = 'See more';
+                        const newBtn = seeMoreBtn.cloneNode(true);
+                        seeMoreBtn.parentNode.replaceChild(newBtn, seeMoreBtn);
+                        newBtn.addEventListener('click', function () {
+                            const isHidden = teaserEl.style.display !== 'none';
+                            teaserEl.style.display = isHidden ? 'none' : 'inline';
+                            fullEl.style.display = isHidden ? 'inline' : 'none';
+                            newBtn.textContent = isHidden ? 'See less' : 'See more';
+                        });
+                    } else {
+                        teaserEl.textContent = summary.body;
+                        teaserEl.style.display = 'inline';
+                        fullEl.style.display = 'none';
+                        seeMoreBtn.style.display = 'none';
+                    }
+                }
+                const quotesContainer = content.querySelector('.quotes-container');
+                if (quotesContainer) {
+                    const quoteElements = quotesContainer.querySelectorAll('.quote');
+                    summary.quotes.forEach((quoteText, i) => {
+                        if (quoteElements[i]) {
+                            if (quoteText) {
+                                quoteElements[i].textContent = `"${quoteText}"`;
+                                quoteElements[i].style.display = 'block';
+                            } else {
+                                quoteElements[i].style.display = 'none';
+                            }
+                        }
+                    });
+                }
+                const metricsWrapper = content.querySelector('.prevalence-container-wrapper');
+                if (metricsWrapper) {
+                    metricsWrapper.innerHTML = (sortedFindings.length === 1) ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
+                }
+            }
+            if (btn) {
+                btn.onclick = () => showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds);
+            }
+        });
+        try {
+            window._postsForAssignment = filteredItems.slice(0, 75);
+            window._usedPostIds = new Set();
+            const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment);
+            window._assignments = assignments;
+            for (let i = 0; i < window._summaries.length; i++) {
+                if (i >= 5) break;
+                showSamplePosts(i, assignments, filteredItems, window._usedPostIds);
+            }
+        } catch (err) {
+            console.error("CRITICAL (but isolated): Failed to assign posts to findings.", err);
+            for (let i = 1; i <= 5; i++) { const redditDiv = document.getElementById(`reddit-div${i}`); if (redditDiv) { redditDiv.innerHTML = `<div style="font-style: italic; color: #999;">Could not load sample posts.</div>`; } }
+        }
+
+        // This is the single, correct call for the new mind map
+        generateAndRenderValueSankey(originalGroupName, window._summaries);
+
+        if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
+            if (resultsWrapper) {
+                resultsWrapper.style.setProperty('display', 'flex', 'important');
+                setTimeout(() => {
+                    if (resultsWrapper) {
+                        resultsWrapper.style.opacity = '1';
+                        if (!isUpdate) {
+                            resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            const fullHeader = document.getElementById('full-header');
+                            if (fullHeader) {
+                                fullHeader.classList.add('header-hidden');
+                                fullHeader.addEventListener('transitionend', () => {
+                                    fullHeader.style.display = 'none';
+                                }, { once: true });
+                            }
+                        }
+                    }
+                }, 50);
+            }
+        }
+        setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
+        setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
+        setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
+    } catch (err) {
+        console.error("!!!!!!!! A FATAL ERROR STOPPED THE ANALYSIS !!!!!!!!", err);
+        alert("An error occurred during analysis. Please check the console for details. Error: " + err.message);
+        if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
+        if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); resultsWrapper.style.opacity = '1'; }
+    } finally {
+        if (!isUpdate) {
+            searchButton.classList.remove('is-loading');
+            searchButton.disabled = false;
+        }
+    }
+}
+
+
+
+
+
+function updateGrowthHeaderDropdown(problemTitles) {
+    console.log("CHECKPOINT 1: Entering updateGrowthHeaderDropdown function with these titles:", problemTitles);
+
+    const dropdownList = document.querySelector('#growth-header-dropdown .w-dropdown-list');
+
+    if (!dropdownList) {
+        console.error("DEBUGGING ERROR: Could not find the dropdown list element with selector '#growth-header-dropdown .w-dropdown-list'. Check your Webflow element's ID and class.");
+        return;
+    }
+
+    console.log("CHECKPOINT 2: Successfully found the dropdown list element. Clearing it now.");
+    dropdownList.innerHTML = ''; // Clear defaults
+
+    // Create "Broad Problems" link which acts as our "View All"
+    const viewAllLink = document.createElement('a');
+    viewAllLink.className = 'w-dropdown-link';
+    viewAllLink.textContent = 'broad problems';
+    viewAllLink.setAttribute('data-problem', 'all');
+    dropdownList.appendChild(viewAllLink);
+
+    // Create a link for each specific problem
+    problemTitles.forEach(title => {
+        const problemLink = document.createElement('a');
+        problemLink.className = 'w-dropdown-link';
+        problemLink.textContent = title;
+        problemLink.setAttribute('data-problem', title);
+        dropdownList.appendChild(problemLink);
+    });
+
+    console.log("CHECKPOINT 3: Finished populating the dropdown with new links.");
+}
+
+function setupGrowthKitInteraction() {
+    // Find the key elements of the dropdown header
+    const audienceName = window.originalGroupName || 'your audience';
+    const headerPrefix = document.getElementById('growth-header-prefix');
+    const headerLabel = document.getElementById('growth-header-label');
+    const dropdownList = document.querySelector('#growth-header-dropdown .w-dropdown-list');
+
+    // Set the default state for the header when the tool first loads
+    if (headerPrefix) {
+        headerPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${audienceName}</span> struggling with`;
+    }
+    if (headerLabel) {
+        headerLabel.textContent = 'broad problems';
+    }
+
+    // This function will be called when a user clicks a problem
+    function filterGrowthPlan(problemTitle) {
+        if (!headerPrefix || !headerLabel) return;
+
+        const currentAudience = window.originalGroupName || 'your audience';
+        headerPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${currentAudience}</span> struggling with`;
+
+        if (problemTitle === 'all') {
+            headerLabel.textContent = 'broad problems';
+            // In the future, you can add code here to SHOW ALL growth items
+        } else {
+            headerLabel.textContent = problemTitle;
+            // In the future, you can add code here to FILTER growth items
+        }
+    }
+
+    // --- Listen for clicks on the "Generate Growth Plan" buttons on the problem cards ---
+    document.addEventListener('click', function (event) {
+        const clickedButton = event.target.closest('.generate-growth-btn');
+        if (!clickedButton) return;
+
+        const parentCard = clickedButton.closest('.findings-block');
+        const problemTitleElement = parentCard ? parentCard.querySelector('.section-title') : null;
+        const growthTabLink = document.getElementById('growth-tab-link');
+
+        if (problemTitleElement && growthTabLink) {
+            const title = problemTitleElement.textContent.trim();
+            filterGrowthPlan(title); // Update the header text
+            growthTabLink.click();   // Switch to the Growth Plan tab
+        }
+    });
+
+    // --- Listen for clicks inside the Dropdown Header itself ---
+    if (dropdownList) {
+        dropdownList.addEventListener('click', function (event) {
+            const clickedLink = event.target.closest('.w-dropdown-link');
+            if (!clickedLink) return;
+
+            event.preventDefault();
+            const selectedProblem = clickedLink.getAttribute('data-problem');
+            filterGrowthPlan(selectedProblem);
+
+            // This is a common way to programmatically close a Webflow dropdown
+            const dropdownToggle = document.querySelector('#growth-header-dropdown .w-dropdown-toggle');
+            if (dropdownToggle && dropdownToggle.getAttribute('aria-expanded') === 'true') {
+                dropdownToggle.click();
+            }
+        });
+    }
+}
+
+// =================================================================================
+// === UPDATED DISCOVERY LIST RENDERER (Fills Webflow Elements) ===
+// =================================================================================
+function renderDiscoveryList(containerId, data, title, type) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const slots = container.querySelectorAll('.discovery-list-item');
+    
+    // Reset state: Hide everything first
+    slots.forEach(slot => {
+        slot.style.display = 'none';
+        slot.style.opacity = '0'; // For your Webflow animations
+    });
+
+    if (!data || data.length === 0) {
+        // Optional: show a placeholder if a list is totally empty
+        return;
+    }
+
+    data.forEach(([name, details], index) => {
+        if (slots[index]) {
+            const slot = slots[index];
+            const rankEl = slot.querySelector('.rank');
+            const nameEl = slot.querySelector('.name');
+            const countEl = slot.querySelector('.count');
+
+            if (rankEl) rankEl.textContent = `${index + 1}.`;
+            if (nameEl) nameEl.textContent = name;
+            if (countEl) countEl.textContent = `${details.count} mentions`;
+
+            slot.setAttribute('data-word', name);
+            slot.setAttribute('data-type', type);
+
+            // Trigger visibility
+            slot.style.display = 'flex';
+            // Use a small timeout to allow Webflow interactions to trigger on opacity
+            setTimeout(() => { slot.style.opacity = '1'; }, index * 50);
+        }
+    });
+}
+
+// =================================================================================
+// === UPDATED INTERACTIVITY (Handles Webflow-built buttons) ===
+// =================================================================================
+function initializeDashboardInteractivity() {
+    document.addEventListener('click', (e) => {
+        // 1. Handle Back Button
+        const backButton = e.target.closest('#back-to-step1-btn');
+        if (backButton) {
+            location.reload();
+            return;
+        }
+
+        // 2. Handle "See Brief" Button (The one you built in Webflow)
+        const briefBtn = e.target.closest('.brief-button');
+        if (briefBtn) {
+            const parentSlot = briefBtn.closest('.discovery-list-item');
+            if (parentSlot) {
+                const word = parentSlot.getAttribute('data-word');
+                const type = parentSlot.getAttribute('data-type');
+                
+                // Trigger AI data fetch. 
+                // (Visibility/Animation is handled by your Webflow Interaction)
+                generateAndRenderBrandBrief(word, type);
+            }
+            return;
+        }
+
+        // 3. Handle Word Cloud Clicks
+        const cloudWordEl = e.target.closest('.cloud-word');
+        if (cloudWordEl) {
+            const word = cloudWordEl.dataset.word;
+            const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
+            const postsData = window._sentimentData?.[category]?.[word]?.posts;
+            if (postsData) { showSlidingPanel(word, Array.from(postsData), category); }
+            return;
+        }
+
+        // 4. Handle Subreddit Remove Buttons
+        const removeBtnEl = e.target.closest('.remove-sub-btn');
+        if (removeBtnEl) {
+            handleRemoveSubClick(e);
+            return;
+        }
+    });
+}
+
+// =================================================================================
+// === CORE INITIALIZATION TOOL ===
+// =================================================================================
+function initializeProblemFinderTool() {
+    const style = document.createElement('style');
+    style.textContent = `
+        .sankey-label {
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            font-size: 15px;
+            font-weight: 500;
+            white-space: normal !important;
+            word-break: break-word !important;
+            text-align: center;
+            line-height: 1.4;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+        }
+        .sankey-problem { background-color: #e0f2fe; color: #0c4a6e; }
+        .sankey-offer { background-color: #ede9fe; color: #5b21b6; }
+    `;
+    document.head.appendChild(style);
+
+    console.log("Problem Finder elements found. Initializing...");
+    const welcomeDiv = document.getElementById('welcome-div');
+    const pillsContainer = document.getElementById('pf-suggestion-pills');
+    const groupInput = document.getElementById('group-input');
+    const findCommunitiesBtn = document.getElementById('find-communities-btn');
+    const searchSelectedBtn = document.getElementById('search-selected-btn');
+    const step1Container = document.getElementById('step-1-container');
+    const step2Container = document.getElementById('subreddit-selection-container');
+    const inspireButton = document.getElementById('inspire-me-button');
+    const choicesContainer = document.getElementById('subreddit-choices');
+    const audienceTitle = document.getElementById('pf-audience-title');
+
+    if (!findCommunitiesBtn || !searchSelectedBtn || !choicesContainer) {
+        console.error("Critical error: A key UI element was not found.");
+        return;
+    }
+
+    const transitionToStep2 = () => {
+        if (step2Container.classList.contains('visible')) return;
+        if (welcomeDiv) { welcomeDiv.style.display = 'none'; }
+        step1Container.classList.add('hidden');
+        step2Container.classList.add('visible');
+        choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>';
+        if(audienceTitle) audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`;
+    };
+    
+    if (pillsContainer) {
+        pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
+        pillsContainer.addEventListener('click', (event) => {
+            if (event.target.classList.contains('pf-suggestion-pill')) {
+                groupInput.value = event.target.getAttribute('data-value');
+                findCommunitiesBtn.click();
+            }
+        });
+    }
+
+    if (inspireButton) {
+        inspireButton.addEventListener('click', () => {
+            if(pillsContainer) pillsContainer.classList.toggle('visible');
+        });
+    }
+
+    findCommunitiesBtn.addEventListener("click", async (event) => {
+        event.preventDefault();
+        const groupName = groupInput.value.trim();
+        if (!groupName) {
+            alert("Please enter a group of people or select a suggestion.");
+            return;
+        }
+        originalGroupName = groupName;
+        transitionToStep2();
+        try {
+            const initialSuggestions = await findSubredditsForGroup(groupName);
+            const rankedSubreddits = await fetchAndRankSubreddits(initialSuggestions);
+            displaySubredditChoices(rankedSubreddits);
+        } catch (error) {
+            console.error("Failed subreddit validation:", error);
+            displaySubredditChoices([]);
+        }
+    });
+
+    searchSelectedBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        runProblemFinder();
+    });
+    
+    choicesContainer.addEventListener('click', (event) => {
+        const choiceDiv = event.target.closest('.subreddit-choice');
+        if (choiceDiv) {
+            const checkbox = choiceDiv.querySelector('input[type="checkbox"]');
+            if (checkbox && event.target !== checkbox) checkbox.checked = !checkbox.checked;
+        }
+    });
+
+    // Initialize logic
+    initializeDashboardInteractivity();
+    setupGrowthKitInteraction();
+
+    console.log("Problem Finder tool successfully initialized.");
+}
+
+function waitForElementAndInit() {
+    const keyElementId = 'find-communities-btn';
+    let retries = 0;
+    const maxRetries = 50;
+    const intervalId = setInterval(() => {
+        const keyElement = document.getElementById(keyElementId);
+        if (keyElement) {
+            clearInterval(intervalId);
+            initializeProblemFinderTool();
+        } else {
+            retries++;
+            if (retries > maxRetries) {
+                clearInterval(intervalId);
+                console.error(`Initialization FAILED. Element "#${keyElementId}" not found.`);
+            }
+        }
+    }, 100);
+}
+
+document.addEventListener('DOMContentLoaded', waitForElementAndInit);

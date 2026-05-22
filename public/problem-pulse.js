@@ -2844,26 +2844,38 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
 }
 
 // --- NEW FUNCTION: HOOK PATTERNS ---
+
+
 async function generateAndRenderHookPatterns(posts, audienceContext) {
     const container = document.getElementById('hook-patterns-container');
     if (!container) return;
 
-    container.innerHTML = `<p class="loading-text">Analyzing top hooks... <span class="loader-dots"></span></p>`;
+    container.innerHTML = `<p class="loading-text">Analyzing top hooks and social proof... <span class="loader-dots"></span></p>`;
 
     try {
-        // Sort top 30 by upvotes
+        // 1. Get top 30 by upvotes
         const topPosts = [...posts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 30);
-        const topPostsText = topPosts.map((p, i) => `${i+1}. ${p.data.title}`).join('\n');
+        
+        // 2. Prepare text for AI, giving each post a temporary ID
+        const topPostsForAI = topPosts.map((p, i) => `ID: ${i} | UPS: ${p.data.ups} | TITLE: ${p.data.title}`).join('\n');
 
-        const prompt = `Analyze these top-performing posts from the ${audienceContext} community. Identify 4-6 distinct 'hook patterns' (the type of opening that drives engagement). For each pattern, provide: a category name (e.g., 'Vulnerability hook', 'Validation hook', 'Achievement hook', 'Confession hook', 'Question hook'), a short 1-sentence description of why this hook works for this audience, and 3 real example titles from the posts (use the actual titles, do not invent them). Respond ONLY as valid JSON with key 'patterns', an array of objects with keys 'category', 'why_it_works', and 'examples' (array of 3 strings). Posts: ${topPostsText}`;
+        const prompt = `Analyze these top-performing posts from the ${audienceContext} community. Identify 4-6 distinct 'hook patterns' (the type of opening that drives engagement). 
+        
+        For each pattern, provide:
+        - category: (e.g., 'Vulnerability hook')
+        - why_it_works: (1 sentence)
+        - example_ids: (An array of the 3 "ID" numbers from the list provided that best fit this pattern).
+
+        Respond ONLY as valid JSON with key 'patterns'. Posts:
+        ${topPostsForAI}`;
 
         const openAIParams = {
             model: "gpt-5.4-mini",
             messages: [
-                { role: "system", content: "You are an expert content strategist who outputs only valid JSON." },
+                { role: "system", content: "You are an expert content strategist who outputs only valid JSON. You identify patterns by ID." },
                 { role: "user", content: prompt }
             ],
-            temperature: 0.2,
+            temperature: 0.1,
             response_format: { "type": "json_object" }
         };
 
@@ -2871,24 +2883,43 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
+        // 3. Render HTML with real links and badges
         container.innerHTML = `
             <h3 class="dashboard-section-title">Hook Patterns</h3>
-            <p class="dashboard-section-subtitle">Psychological triggers that drive engagement in this community</p>
+            <p class="dashboard-section-subtitle">Psychological triggers proven to drive massive engagement</p>
             <div class="hook-patterns-grid">
-                ${parsed.patterns.map(pattern => `
-                    <details class="hook-pattern-card">
-                        <summary class="hook-card-header">
-                            <span class="hook-category">${pattern.category}</span>
-                            <div class="hook-arrow">›</div>
-                        </summary>
-                        <div class="hook-card-content">
-                            <p class="hook-why"><strong>Strategy:</strong> ${pattern.why_it_works}</p>
-                            <div class="hook-examples-list">
-                                ${pattern.examples.map(ex => `<blockquote class="hook-example-title">"${ex}"</blockquote>`).join('')}
+                ${parsed.patterns.map(pattern => {
+                    // Map the IDs back to our actual post data
+                    const validExamples = (pattern.example_ids || [])
+                        .map(id => topPosts[parseInt(id)])
+                        .filter(Boolean); // Ensure post exists
+
+                    return `
+                        <details class="hook-pattern-card">
+                            <summary class="hook-card-header">
+                                <span class="hook-category">${pattern.category}</span>
+                                <div class="hook-arrow">›</div>
+                            </summary>
+                            <div class="hook-card-content">
+                                <p class="hook-why"><strong>Strategy:</strong> ${pattern.why_it_works}</p>
+                                <div class="hook-examples-list">
+                                    ${validExamples.map(post => `
+                                        <div class="hook-proof-item">
+                                            <a href="https://reddit.com${post.data.permalink}" target="_blank" class="hook-proof-title">
+                                                "${post.data.title}"
+                                            </a>
+                                            <div class="hook-proof-meta">
+                                                <span class="proof-badge upvotes">👍 ${post.data.ups.toLocaleString()}</span>
+                                                <span class="proof-badge comments">💬 ${post.data.num_comments.toLocaleString()}</span>
+                                                <span class="proof-link-text">Read Post ↗</span>
+                                            </div>
+                                        </div>
+                                    `).join('')}
+                                </div>
                             </div>
-                        </div>
-                    </details>
-                `).join('')}
+                        </details>
+                    `;
+                }).join('')}
             </div>
         `;
     } catch (error) {
@@ -2896,9 +2927,6 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
         container.innerHTML = `<p class="placeholder-text">Hook analysis temporarily unavailable.</p>`;
     }
 }
-
-// --- DELETE THE OLD generateAndRenderToneOfVoice FUNCTION FROM YOUR SCRIPT ---
-
 
 
 // --- NEW SECTION 1: VOICE PROFILE ---

@@ -2771,25 +2771,25 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
     });
 }
 
-// --- MODIFIED: UPGRADED POWER PHRASES ---
 
 
 // --- POWER PHRASES: WEBFLOW POPULATOR ---
+
+// --- POWER PHRASES: REVISED WEBFLOW POPULATOR ---
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
-    if (!container) return;
+    // Targeted by the ID you provided: #phrase-term
+    const itemTemplate = document.getElementById('phrase-term'); 
 
-    // 1. Identify your Webflow template blueprint
-    const itemTemplate = container.querySelector('.phrase-item-template');
-    if (!itemTemplate) {
-        console.error("Could not find '.phrase-item-template' inside #power-phrases");
+    if (!container || !itemTemplate) {
+        console.error("Linguistic Discovery: Could not find #power-phrases or #phrase-term blueprint.");
         return;
     }
 
-    // Hide the blueprint so it doesn't show up empty
+    // Hide the blueprint immediately so it doesn't show up empty
     itemTemplate.style.display = 'none';
 
-    // 2. Identify candidates (Acronyms & Phrases)
+    // 1. Identify candidates (Acronyms & Phrases)
     const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
     const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
     const acronymRegex = /\b[A-Z]{2,5}\b/g;
@@ -2809,30 +2809,32 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const termsToAnalyze = [...topAcronyms, ...topPhrases];
     const topPostsText = posts.slice(0, 15).map(p => p.data.title).join(' | ');
 
-    // Clear previous results (instances), but keep our hidden blueprint
+    // Clear previous results (instances), but leave the blueprint hidden in the DOM
     container.querySelectorAll('.phrase-instance').forEach(el => el.remove());
 
-    // 3. Loop and Populate
-    termsToAnalyze.forEach(async (term, index) => {
+    // 2. Loop and Populate
+    termsToAnalyze.forEach(async (term) => {
         // Clone the template
         const clone = itemTemplate.cloneNode(true);
         clone.classList.add('phrase-instance');
-        clone.classList.remove('phrase-item-template');
-        clone.id = ''; // Remove the duplicate ID
-        clone.style.display = 'flex'; // Match your Webflow flex/grid setting
+        clone.id = ''; // Remove the duplicate ID from the clone
+        clone.style.display = 'flex'; // Ensure it's visible
 
         // Set the Term Title (Summary) immediately
         const termHeader = clone.querySelector('.phrase-text');
         if (termHeader) termHeader.innerText = term;
 
-        // ACCORDION FAIL-SAFE: 
-        // If your Webflow Interaction doesn't trigger on cloned elements, this will.
+        // ACCORDION TOGGLE: 
+        // Targeted by the classes you provided
         const summaryDiv = clone.querySelector('.power-phrase-summary');
         const contentDiv = clone.querySelector('.power-phrase-content');
         if (summaryDiv && contentDiv) {
             summaryDiv.style.cursor = 'pointer';
+            // Start content as hidden
+            contentDiv.style.display = 'none'; 
+            
             summaryDiv.addEventListener('click', () => {
-                const isHidden = contentDiv.style.display === 'none' || getComputedStyle(contentDiv).display === 'none';
+                const isHidden = contentDiv.style.display === 'none';
                 contentDiv.style.display = isHidden ? 'block' : 'none';
             });
         }
@@ -2840,7 +2842,7 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
         // Add to the grid
         container.appendChild(clone);
 
-        // 4. Fetch the AI details
+        // 3. Fetch the AI details
         try {
             const prompt = `For the term "${term}" in the ${audienceContext} community, provide: 1) a 1-sentence definition, 2) a short example quote, 3) a 1-sentence usage note for a marketer. Respond ONLY as valid JSON with keys 'definition', 'example_quote', 'usage_note'. Context: ${topPostsText}`;
 
@@ -2860,7 +2862,7 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
             const resData = await response.json();
             const parsed = JSON.parse(resData.openaiResponse);
 
-            // Populate the dropdown content using your classes
+            // Inject the data using the classes you provided
             if (clone.querySelector('.phrase-definition')) 
                 clone.querySelector('.phrase-definition').innerText = parsed.definition;
             
@@ -2875,7 +2877,6 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
         }
     });
 }
-
 
 
 

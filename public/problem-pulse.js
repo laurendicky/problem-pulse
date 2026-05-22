@@ -2830,7 +2830,118 @@ async function generateAndRenderToneOfVoice(posts, audienceContext) {
     }
 }
 
+// --- NEW SECTION 1: VOICE PROFILE ---
+async function generateAndRenderVoiceProfile(posts, audienceContext) {
+    const container = document.getElementById('voice-profile-container');
+    if (!container) return;
 
+    container.innerHTML = `<p class="loading-text">Crafting voice profile... <span class="loader-dots"></span></p>`;
+
+    try {
+        const topPostsText = posts.slice(0, 40).map(p => 
+            `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
+        ).join('\n---\n');
+
+        const prompt = `Based on these posts from the ${audienceContext} community, write a 2-3 sentence tone-of-voice description that a copywriter could use as a brief, plus 5-7 adjectives describing the voice. Respond ONLY as valid JSON with keys 'tone_description' and 'voice_adjectives'. Posts: ${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [
+                { role: "system", content: "You are a brand strategist who outputs only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.3,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        });
+
+        if (!response.ok) throw new Error('Voice Profile API call failed.');
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        container.innerHTML = `
+            <div class="voice-profile-wrapper">
+                <h3 class="dashboard-section-title">Voice Profile</h3>
+                <p class="dashboard-section-subtitle">A copywriter's brief for this audience</p>
+                <blockquote class="voice-tone-quote">
+                    "${parsed.tone_description}"
+                </blockquote>
+                <div class="voice-adjective-tags">
+                    ${parsed.voice_adjectives.map(adj => `<span class="voice-pill">${adj}</span>`).join('')}
+                </div>
+            </div>
+        `;
+
+    } catch (error) {
+        console.error("Voice Profile Error:", error);
+        container.innerHTML = `<p class="placeholder-text">Voice profile analysis temporarily unavailable.</p>`;
+    }
+}
+
+// --- NEW SECTION 2: LANGUAGE TO AVOID ---
+async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
+    const container = document.getElementById('language-to-avoid-container');
+    if (!container) return;
+
+    container.innerHTML = `<p class="loading-text">Identifying inauthentic terms... <span class="loader-dots"></span></p>`;
+
+    try {
+        const topPostsText = posts.slice(0, 40).map(p => 
+            `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
+        ).join('\n---\n');
+
+        const prompt = `Analyze the ${audienceContext} community based on these posts. Identify 4-6 inauthentic or cringey terms that outsiders might use but this audience rejects, and for each one provide an authentic alternative this community would actually use. Respond ONLY as valid JSON with key 'pairs', where each item has keys 'avoid' and 'instead'. Posts: ${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [
+                { role: "system", content: "You are a brand strategist who outputs only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.3,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        });
+
+        if (!response.ok) throw new Error('Language to Avoid API call failed.');
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        const pairsHTML = parsed.pairs.map(pair => `
+            <div class="avoid-instead-row">
+                <span class="term-avoid">${pair.avoid}</span>
+                <span class="term-arrow">→</span>
+                <span class="term-instead">${pair.instead}</span>
+            </div>
+        `).join('');
+
+        container.innerHTML = `
+            <div class="language-avoid-wrapper">
+                <h3 class="dashboard-section-title">Language to Avoid</h3>
+                <p class="dashboard-section-subtitle">Swap these terms to sound authentic</p>
+                <div class="avoid-instead-list">
+                    ${pairsHTML}
+                </div>
+            </div>
+        `;
+
+    } catch (error) {
+        console.error("Language Avoid Error:", error);
+        container.innerHTML = `<p class="placeholder-text">Language analysis temporarily unavailable.</p>`;
+    }
+}
 
 
 // =================================================================================
@@ -2995,6 +3106,8 @@ async function runProblemFinder(options = {}) {
         renderIncludedSubreddits(selectedSubreddits);
         generateAndRenderToneOfVoice(filteredItems, originalGroupName);
         generateAndRenderPowerPhrases(filteredItems, originalGroupName);
+        generateAndRenderVoiceProfile(filteredItems, originalGroupName);
+        generateAndRenderLanguageToAvoid(filteredItems, originalGroupName);
         generateAndRenderMindsetSummary(filteredItems, originalGroupName);
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);
         generateAndRenderAIPrompt(filteredItems, originalGroupName);

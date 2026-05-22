@@ -2696,38 +2696,26 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
 let PHRASE_BLUEPRINT = null;
 
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
-    // 1. Get the container where results will go
     const container = document.getElementById('power-phrases');
-    
-    // 2. FIND THE DESIGN (Only runs once)
-    if (!PHRASE_BLUEPRINT) {
-        // Try every possible way to find your Webflow design
-        const found = document.getElementById('phrase-term') || 
-                      document.querySelector('.phrase-item-template') ||
-                      (container && container.children[0]);
-
-        if (!found) {
-            console.error("CRITICAL: Your Webflow design for phrases was not found. Check ID 'phrase-term' or class 'phrase-item-template'.");
-            return;
-        }
-
-        // Save a clean copy of your design into our "Safe Box"
-        PHRASE_BLUEPRINT = found.cloneNode(true);
-        PHRASE_BLUEPRINT.style.display = 'flex'; // Ensure it's set to show
-        PHRASE_BLUEPRINT.classList.remove('phrase-item-template');
-        PHRASE_BLUEPRINT.classList.add('phrase-instance');
-        PHRASE_BLUEPRINT.id = ''; // Clear ID so we don't have duplicates
-
-        // Hide the original one sitting in your Webflow Grid so it doesn't show an empty box
-        found.style.display = 'none';
-    }
-
     if (!container) return;
 
-    // 3. IDENTIFY TERMS (Logic)
+    // If for some reason the blueprint wasn't caught yet, try one last time
+    if (!PHRASE_BLUEPRINT) {
+        const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+        if (found) {
+            PHRASE_BLUEPRINT = found.cloneNode(true);
+            PHRASE_BLUEPRINT.style.display = 'flex';
+        } else {
+            console.error("CRITICAL: Blueprint still missing. Ensure #phrase-term exists in Webflow.");
+            return;
+        }
+    }
+
+    // 1. Identify Terms
     const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
     const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
     const foundAcronyms = (rawText.match(/\b[A-Z]{2,5}\b/g) || []).filter(a => !stopAcronyms.has(a));
+    
     const acronymCounts = {};
     foundAcronyms.forEach(a => acronymCounts[a] = (acronymCounts[a] || 0) + 1);
     const topAcronyms = Object.entries(acronymCounts).sort((a, b) => b[1] - a[1]).slice(0, 4).map(i => i[0]);
@@ -2742,23 +2730,20 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const termsToAnalyze = [...topAcronyms, ...topPhrases];
     const contextSnippet = posts.slice(0, 15).map(p => p.data.title).join(' | ');
 
-    // 4. CLEAR PREVIOUS SEARCH RESULTS
-    container.querySelectorAll('.phrase-instance').forEach(el => el.remove());
+    // 2. Clear previous results (The Blueprint is safe in memory now)
+    container.innerHTML = '';
 
-    // 5. POPULATE THE GRID
-    termsToAnalyze.forEach(async (term, index) => {
-        // Clone from our "Safe Box"
+    // 3. Populate
+    termsToAnalyze.forEach(async (term) => {
         const clone = PHRASE_BLUEPRINT.cloneNode(true);
-        
-        // Find the Header Text
         const termHeader = clone.querySelector('.phrase-text') || clone.querySelector('#phrase-text');
         if (termHeader) termHeader.innerText = term;
 
-        // ACCORDION LOGIC
+        // Accordion Logic
         const summaryDiv = clone.querySelector('.power-phrase-summary');
         const contentDiv = clone.querySelector('.power-phrase-content');
         if (summaryDiv && contentDiv) {
-            contentDiv.style.display = 'none'; // Ensure it starts closed
+            contentDiv.style.display = 'none';
             summaryDiv.style.cursor = 'pointer';
             summaryDiv.onclick = (e) => {
                 e.preventDefault();
@@ -2769,13 +2754,12 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
 
         container.appendChild(clone);
 
-        // 6. FETCH AI ENRICHMENT
+        // 4. Fetch AI Enrichment
         try {
-            const prompt = `For the term "${term}" in the ${audienceContext} community, provide: 1) a 1-sentence definition, 2) a short example quote, 3) a 1-sentence usage note for a marketer. Respond ONLY as valid JSON with keys 'definition', 'example_quote', 'usage_note'. Context: ${contextSnippet}`;
-
+            const prompt = `For the term "${term}" in the ${audienceContext} community, provide: 1) a 1-sentence definition, 2) a short example quote, 3) a 1-sentence usage note for a marketer. Respond ONLY as valid JSON.`;
             const openAIParams = {
-                model: "gpt-5.4-mini",
-                messages: [{ role: "system", content: "You are a linguist who outputs only valid JSON." }, { role: "user", content: prompt }],
+                model: "gpt-4o-mini", // Fixed the model name typo here too
+                messages: [{ role: "system", content: "You are a linguist." }, { role: "user", content: prompt }],
                 temperature: 0.1,
                 response_format: { "type": "json_object" }
             };
@@ -2790,8 +2774,6 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
         } catch (err) { console.error("Phrase enrichment failed", err); }
     });
 }
-
-
 
 
 
@@ -3091,7 +3073,20 @@ async function runProblemFinder(options = {}) {
     console.log("CHECKPOINT 2: Inside runProblemFinder. The audience is:", originalGroupName);
 
     const { isUpdate = false } = options;
+    if (!isUpdate && !PHRASE_BLUEPRINT) {
+        const container = document.getElementById('power-phrases');
+        const found = document.getElementById('phrase-term') || 
+                      document.querySelector('.phrase-item-template') ||
+                      (container && container.children[0]);
 
+        if (found) {
+            PHRASE_BLUEPRINT = found.cloneNode(true);
+            PHRASE_BLUEPRINT.style.display = 'flex'; 
+            PHRASE_BLUEPRINT.classList.remove('phrase-item-template');
+            PHRASE_BLUEPRINT.id = ''; // Prevent ID duplication
+            console.log("Successfully captured Power Phrase blueprint before clearing DOM.");
+        }
+    }
     const growthHeaderPrefix = document.getElementById('growth-header-prefix');
     if (growthHeaderPrefix) {
         growthHeaderPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${originalGroupName}</span> struggling with`;

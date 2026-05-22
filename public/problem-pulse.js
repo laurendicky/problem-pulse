@@ -2695,24 +2695,11 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
 // --- 1. SAFE STORAGE FOR YOUR WEBFLOW DESIGN ---
 let PHRASE_BLUEPRINT = null;
 
-
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
-    
-    if (!PHRASE_BLUEPRINT) {
-        const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
-        if (found) {
-            PHRASE_BLUEPRINT = found.cloneNode(true);
-            PHRASE_BLUEPRINT.style.display = 'flex';
-            PHRASE_BLUEPRINT.id = ''; 
-        } else {
-            return;
-        }
-    }
+    if (!container || !PHRASE_BLUEPRINT) return;
 
-    if (!container) return;
-
-    // --- Select the terms ---
+    // 1. Logic for choosing terms (Remains the same)
     const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
     const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
     const foundAcronyms = (rawText.match(/\b[A-Z]{2,5}\b/g) || []).filter(a => !stopAcronyms.has(a));
@@ -2727,45 +2714,45 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const topPhrases = Object.entries(phraseFreq).sort((a, b) => b[1] - a[1]).slice(0, 9 - topAcronyms.length).map(i => i[0]);
     const termsToAnalyze = [...topAcronyms, ...topPhrases];
 
+    // 2. Wipe the container
     container.innerHTML = '';
 
+    // 3. Loop and Populate
     termsToAnalyze.forEach(async (term) => {
         const clone = PHRASE_BLUEPRINT.cloneNode(true);
         
-        // 1. Identify your Elements via ID
+        // Find your elements by ID
         const headerEl = clone.querySelector('#phrase-text');
         const defEl = clone.querySelector('#phrase-definition');
         const exEl = clone.querySelector('#phrase-example');
         const useEl = clone.querySelector('#phrase-usage');
         
-        // 2. Identify Accordion Parts via Class
+        // Find your accordion parts by CLASS (from your Navigator image)
         const summary = clone.querySelector('.power-phrase-summary');
         const content = clone.querySelector('.power-phrase-content');
 
-        // --- THE CRITICAL LAYOUT FIX ---
-        // This forces the card to stay small until clicked
-        if (content) {
-            content.style.display = 'none'; 
-            content.style.overflow = 'hidden';
-        }
+        // Set the Term Title
         if (headerEl) headerEl.innerText = term;
 
+        // Ensure the content div is hidden by default (so it doesn't look like shit on load)
+        if (content) content.style.display = 'none';
+
+        // Set up the click to toggle
         if (summary && content) {
             summary.style.cursor = 'pointer';
             summary.onclick = () => {
-                const isCurrentlyHidden = content.style.display === 'none';
-                content.style.display = isCurrentlyHidden ? 'block' : 'none';
+                const isHidden = content.style.display === 'none';
+                content.style.display = isHidden ? 'block' : 'none';
+                // Note: We are NOT touching arrows or images here. 
+                // We are letting your Webflow styles stay as they are.
             };
         }
 
         container.appendChild(clone);
 
-        // 3. AI Enrichment
+        // 4. AI data fetch
         try {
-            // WE FORCE THE KEYS HERE
-            const prompt = `Explain "${term}" for the ${audienceContext} community. 
-            Return ONLY JSON with these exact keys: "definition", "example", "usage"`;
-
+            const prompt = `Explain "${term}" for the ${audienceContext} community. Use keys: "definition", "example", "usage".`;
             const openAIParams = {
                 model: "gpt-4o-mini",
                 messages: [{ role: "system", content: "You are a linguist." }, { role: "user", content: prompt }],
@@ -2773,26 +2760,18 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
                 response_format: { "type": "json_object" }
             };
 
-            const response = await fetch(OPENAI_PROXY_URL, { 
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json' }, 
-                body: JSON.stringify({ openaiPayload: openAIParams }) 
-            });
+            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
             const data = await response.json();
             const parsed = JSON.parse(data.openaiResponse);
 
-            // 4. MAP DATA TO IDs (Matches the forced keys above)
             if (defEl) defEl.innerText = parsed.definition || "";
             if (exEl) exEl.innerText = parsed.example ? `"${parsed.example}"` : "";
             if (useEl) useEl.innerText = parsed.usage || "";
-
         } catch (err) {
             console.error("AI Error:", err);
         }
     });
 }
-
-
 
 async function generateAndRenderHookPatterns(posts, audienceContext) {
     const container = document.getElementById('hook-patterns-container');
@@ -3090,20 +3069,124 @@ async function runProblemFinder(options = {}) {
     console.log("CHECKPOINT 2: Inside runProblemFinder. The audience is:", originalGroupName);
 
     const { isUpdate = false } = options;
-    if (!isUpdate && !PHRASE_BLUEPRINT) {
-        const container = document.getElementById('power-phrases');
-        const found = document.getElementById('phrase-term') || 
-                      document.querySelector('.phrase-item-template') ||
-                      (container && container.children[0]);
-
-        if (found) {
-            PHRASE_BLUEPRINT = found.cloneNode(true);
-            PHRASE_BLUEPRINT.style.display = 'flex'; 
-            PHRASE_BLUEPRINT.classList.remove('phrase-item-template');
-            PHRASE_BLUEPRINT.id = ''; // Prevent ID duplication
-            console.log("Successfully captured Power Phrase blueprint before clearing DOM.");
-        }
+   if (!isUpdate && !PHRASE_BLUEPRINT) {
+    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+    if (found) {
+        PHRASE_BLUEPRINT = found.cloneNode(true);
+        // We do NOT set .style.display here. We let Webflow handle the CSS.
+        PHRASE_BLUEPRINT.id = ''; 
+        console.log("Blueprint captured exactly as styled in Webflow.");
     }
+}
+   if (!isUpdate && !PHRASE_BLUEPRINT) {
+    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+    if (found) {
+        PHRASE_BLUEPRINT = found.cloneNode(true);
+        // We do NOT set .style.display here. We let Webflow handle the CSS.
+        PHRASE_BLUEPRINT.id = ''; 
+        console.log("Blueprint captured exactly as styled in Webflow.");
+    }
+}
+   if (!isUpdate && !PHRASE_BLUEPRINT) {
+    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+    if (found) {
+        PHRASE_BLUEPRINT = found.cloneNode(true);
+        // We do NOT set .style.display here. We let Webflow handle the CSS.
+        PHRASE_BLUEPRINT.id = ''; 
+        console.log("Blueprint captured exactly as styled in Webflow.");
+    }
+}
+   if (!isUpdate && !PHRASE_BLUEPRINT) {
+    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+    if (found) {
+        PHRASE_BLUEPRINT = found.cloneNode(true);
+        // We do NOT set .style.display here. We let Webflow handle the CSS.
+        PHRASE_BLUEPRINT.id = ''; 
+        console.log("Blueprint captured exactly as styled in Webflow.");
+    }
+}
+   if (!isUpdate && !PHRASE_BLUEPRINT) {
+    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+    if (found) {
+        PHRASE_BLUEPRINT = found.cloneNode(true);
+        // We do NOT set .style.display here. We let Webflow handle the CSS.
+        PHRASE_BLUEPRINT.id = ''; 
+        console.log("Blueprint captured exactly as styled in Webflow.");
+    }
+}
+
+   if (!isUpdate && !PHRASE_BLUEPRINT) {
+    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+    if (found) {
+        PHRASE_BLUEPRINT = found.cloneNode(true);
+        // We do NOT set .style.display here. We let Webflow handle the CSS.
+        PHRASE_BLUEPRINT.id = ''; 
+        console.log("Blueprint captured exactly as styled in Webflow.");
+    }
+}
+   if (!isUpdate && !PHRASE_BLUEPRINT) {
+    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+    if (found) {
+        PHRASE_BLUEPRINT = found.cloneNode(true);
+        // We do NOT set .style.display here. We let Webflow handle the CSS.
+        PHRASE_BLUEPRINT.id = ''; 
+        console.log("Blueprint captured exactly as styled in Webflow.");
+    }
+}
+   if (!isUpdate && !PHRASE_BLUEPRINT) {
+    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+    if (found) {
+        PHRASE_BLUEPRINT = found.cloneNode(true);
+        // We do NOT set .style.display here. We let Webflow handle the CSS.
+        PHRASE_BLUEPRINT.id = ''; 
+        console.log("Blueprint captured exactly as styled in Webflow.");
+    }
+}
+   if (!isUpdate && !PHRASE_BLUEPRINT) {
+    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+    if (found) {
+        PHRASE_BLUEPRINT = found.cloneNode(true);
+        // We do NOT set .style.display here. We let Webflow handle the CSS.
+        PHRASE_BLUEPRINT.id = ''; 
+        console.log("Blueprint captured exactly as styled in Webflow.");
+    }
+}
+   if (!isUpdate && !PHRASE_BLUEPRINT) {
+    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+    if (found) {
+        PHRASE_BLUEPRINT = found.cloneNode(true);
+        // We do NOT set .style.display here. We let Webflow handle the CSS.
+        PHRASE_BLUEPRINT.id = ''; 
+        console.log("Blueprint captured exactly as styled in Webflow.");
+    }
+}
+   if (!isUpdate && !PHRASE_BLUEPRINT) {
+    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+    if (found) {
+        PHRASE_BLUEPRINT = found.cloneNode(true);
+        // We do NOT set .style.display here. We let Webflow handle the CSS.
+        PHRASE_BLUEPRINT.id = ''; 
+        console.log("Blueprint captured exactly as styled in Webflow.");
+    }
+}
+   if (!isUpdate && !PHRASE_BLUEPRINT) {
+    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+    if (found) {
+        PHRASE_BLUEPRINT = found.cloneNode(true);
+        // We do NOT set .style.display here. We let Webflow handle the CSS.
+        PHRASE_BLUEPRINT.id = ''; 
+        console.log("Blueprint captured exactly as styled in Webflow.");
+    }
+}
+   if (!isUpdate && !PHRASE_BLUEPRINT) {
+    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+    if (found) {
+        PHRASE_BLUEPRINT = found.cloneNode(true);
+        // We do NOT set .style.display here. We let Webflow handle the CSS.
+        PHRASE_BLUEPRINT.id = ''; 
+        console.log("Blueprint captured exactly as styled in Webflow.");
+    }
+}
     const growthHeaderPrefix = document.getElementById('growth-header-prefix');
     if (growthHeaderPrefix) {
         growthHeaderPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${originalGroupName}</span> struggling with`;

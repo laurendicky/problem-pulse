@@ -2699,7 +2699,7 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container || !PHRASE_BLUEPRINT) return;
 
-    // 1. Logic for choosing terms (Remains the same)
+    // 1. Analyze for Terms
     const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
     const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
     const foundAcronyms = (rawText.match(/\b[A-Z]{2,5}\b/g) || []).filter(a => !stopAcronyms.has(a));
@@ -2714,64 +2714,78 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const topPhrases = Object.entries(phraseFreq).sort((a, b) => b[1] - a[1]).slice(0, 9 - topAcronyms.length).map(i => i[0]);
     const termsToAnalyze = [...topAcronyms, ...topPhrases];
 
-    // 2. Wipe the container
+    // 2. Clear previous results
     container.innerHTML = '';
 
-    // 3. Loop and Populate
-    termsToAnalyze.forEach(async (term) => {
+    // 3. Process each term
+    for (const term of termsToAnalyze) {
         const clone = PHRASE_BLUEPRINT.cloneNode(true);
         
-        // Find your elements by ID
-        const headerEl = clone.querySelector('#phrase-text');
-        const defEl = clone.querySelector('#phrase-definition');
-        const exEl = clone.querySelector('#phrase-example');
-        const useEl = clone.querySelector('#phrase-usage');
-        
-        // Find your accordion parts by CLASS (from your Navigator image)
+        // Helper to find elements by ID or Class (More reliable)
+        const find = (selector) => clone.querySelector(`#${selector}`) || clone.querySelector(`.${selector}`);
+
+        const headerEl = find('phrase-text');
+        const defEl = find('phrase-definition');
+        const exEl = find('phrase-example');
+        const useEl = find('phrase-usage');
         const summary = clone.querySelector('.power-phrase-summary');
         const content = clone.querySelector('.power-phrase-content');
 
-        // Set the Term Title
+        // Set the visible Header immediately
         if (headerEl) headerEl.innerText = term;
+        
+        // Set placeholders so you know the script "caught" the elements
+        if (defEl) defEl.innerText = "Analyzing term...";
+        if (exEl) exEl.innerText = "";
+        if (useEl) useEl.innerText = "";
 
-        // Ensure the content div is hidden by default (so it doesn't look like shit on load)
+        // Force hidden state for layout
         if (content) content.style.display = 'none';
 
-        // Set up the click to toggle
         if (summary && content) {
             summary.style.cursor = 'pointer';
             summary.onclick = () => {
                 const isHidden = content.style.display === 'none';
                 content.style.display = isHidden ? 'block' : 'none';
-                // Note: We are NOT touching arrows or images here. 
-                // We are letting your Webflow styles stay as they are.
             };
         }
 
+        // Add the card to the page
         container.appendChild(clone);
 
-        // 4. AI data fetch
-        try {
-            const prompt = `Explain "${term}" for the ${audienceContext} community. Use keys: "definition", "example", "usage".`;
-            const openAIParams = {
-                model: "gpt-4o-mini",
-                messages: [{ role: "system", content: "You are a linguist." }, { role: "user", content: prompt }],
-                temperature: 0.1,
-                response_format: { "type": "json_object" }
-            };
+        // 4. Fetch AI Content and Update the card we just added
+        (async () => {
+            try {
+                const prompt = `Explain "${term}" for the ${audienceContext} community. Use these JSON keys: "definition", "example", "usage".`;
+                const openAIParams = {
+                    model: "gpt-4o-mini",
+                    messages: [{ role: "system", content: "You are a linguist." }, { role: "user", content: prompt }],
+                    temperature: 0.1,
+                    response_format: { "type": "json_object" }
+                };
 
-            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-            const data = await response.json();
-            const parsed = JSON.parse(data.openaiResponse);
+                const response = await fetch(OPENAI_PROXY_URL, { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify({ openaiPayload: openAIParams }) 
+                });
+                
+                const data = await response.json();
+                const parsed = JSON.parse(data.openaiResponse);
 
-            if (defEl) defEl.innerText = parsed.definition || "";
-            if (exEl) exEl.innerText = parsed.example ? `"${parsed.example}"` : "";
-            if (useEl) useEl.innerText = parsed.usage || "";
-        } catch (err) {
-            console.error("AI Error:", err);
-        }
-    });
+                // Update text using the AI results
+                if (defEl) defEl.innerText = parsed.definition || "No definition available.";
+                if (exEl) exEl.innerText = parsed.example ? `"${parsed.example}"` : "No example found.";
+                if (useEl) useEl.innerText = parsed.usage || "No usage notes.";
+
+            } catch (err) {
+                if (defEl) defEl.innerText = "Error loading details.";
+                console.error("AI Enrichment Error:", err);
+            }
+        })();
+    }
 }
+
 
 async function generateAndRenderHookPatterns(posts, audienceContext) {
     const container = document.getElementById('hook-patterns-container');

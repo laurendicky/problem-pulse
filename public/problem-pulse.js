@@ -2679,6 +2679,8 @@ let PILLAR_BLUEPRINT = null;
 let VOICE_PILL_BLUEPRINT = null;
 let HOOK_CARD_BLUEPRINT = null;
 let HOOK_ITEM_BLUEPRINT = null;
+let MINDSET_ITEM_BLUEPRINT = null; // ADD THIS
+let AVOID_SWAP_BLUEPRINT = null;   // ADD THIS
 
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
@@ -3132,6 +3134,23 @@ if (!HOOK_CARD_BLUEPRINT) {
         }
         
         console.log("Hook Card & Item blueprints captured.");
+    }
+}
+// Capture Mindset Item Blueprint
+if (!MINDSET_ITEM_BLUEPRINT) {
+    const foundMindset = document.querySelector('.mindset-item-template');
+    if (foundMindset) {
+        MINDSET_ITEM_BLUEPRINT = foundMindset.cloneNode(true);
+        console.log("Mindset Item blueprint captured.");
+    }
+}
+
+// Capture Language Avoid Blueprint
+if (!AVOID_SWAP_BLUEPRINT) {
+    const foundSwap = document.querySelector('.avoid-instead-row'); // Match your Webflow class
+    if (foundSwap) {
+        AVOID_SWAP_BLUEPRINT = foundSwap.cloneNode(true);
+        console.log("Language Avoid blueprint captured.");
     }
 }
     const growthHeaderPrefix = document.getElementById('growth-header-prefix');

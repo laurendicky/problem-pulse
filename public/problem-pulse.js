@@ -2684,90 +2684,90 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
     if (!container || !PHRASE_BLUEPRINT) return;
 
-    // 1. Analyze for Terms
-    const rawText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
-    const stopAcronyms = new Set(['AITA', 'TLDR', 'IIRC', 'IMO', 'IMHO', 'LOL', 'LMAO', 'ROFL', 'NSFW', 'OP']);
-    const foundAcronyms = (rawText.match(/\b[A-Z]{2,5}\b/g) || []).filter(a => !stopAcronyms.has(a));
-    const acronymCounts = {};
-    foundAcronyms.forEach(a => acronymCounts[a] = (acronymCounts[a] || 0) + 1);
-    const topAcronyms = Object.entries(acronymCounts).sort((a, b) => b[1] - a[1]).slice(0, 4).map(i => i[0]);
-    const cleanedText = rawText.toLowerCase().replace(/[^a-z\s']/g, '').replace(/\s+/g, ' ');
-    const words = cleanedText.split(' ');
-    const ngrams = [...generateNgrams(words, 2), ...generateNgrams(words, 3)];
-    const phraseFreq = {};
-    ngrams.forEach(p => phraseFreq[p] = (phraseFreq[p] || 0) + 1);
-    const topPhrases = Object.entries(phraseFreq).sort((a, b) => b[1] - a[1]).slice(0, 9 - topAcronyms.length).map(i => i[0]);
-    const termsToAnalyze = [...topAcronyms, ...topPhrases];
+    // 1. Loading State
+    container.innerHTML = '<p class="loading-text">Identifying community jargon...</p>';
 
-    // 2. Clear previous results
-    container.innerHTML = '';
+    try {
+        // Prepare a sample of the most relevant text
+        const textSample = posts.slice(0, 40).map(p => 
+            `${p.data.title} ${(p.data.selftext || '').substring(0, 200)}`
+        ).join('\n---\n');
 
-    // 3. Process each term
-    for (const term of termsToAnalyze) {
-        const clone = PHRASE_BLUEPRINT.cloneNode(true);
+        const prompt = `You are a linguist specializing in Reddit subcultures for the "${audienceContext}" niche. 
+        Analyze the text provided and identify 6-9 "Power Phrases" or "Insider Terms."
         
-        // Helper to find elements by ID or Class (More reliable)
-        const find = (selector) => clone.querySelector(`#${selector}`) || clone.querySelector(`.${selector}`);
+        CRITICAL RULES:
+        - Focus ONLY on niche-specific jargon (e.g., if the niche is fitness, find "PR", "cut", "hypertrophy").
+        - IGNORE generic Reddit terms (AITA, OP, TLDR, "anyone else", "right now", "every time").
+        - IGNORE common English verbs/phrases (e.g., "started offering", "working on").
+        - Find terms that an OUTSIDER wouldn't immediately understand, but an INSIDER uses daily.
 
-        const headerEl = find('phrase-text');
-        const defEl = find('phrase-definition');
-        const exEl = find('phrase-example');
-        const useEl = find('phrase-usage');
-        const summary = clone.querySelector('.power-phrase-summary');
-        const content = clone.querySelector('.power-phrase-content');
+        Respond ONLY as valid JSON with a key "terms", which is an array of objects:
+        {"terms": [{"word": "...", "definition": "...", "example": "...", "usage": "..."}]}
 
-        // Set the visible Header immediately
-        if (headerEl) headerEl.innerText = term;
+        Text to analyze:
+        ${textSample}`;
+
+        const openAIParams = {
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You are a specialized jargon extractor who outputs only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.1, // Low temperature for high accuracy
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        });
         
-        // Set placeholders so you know the script "caught" the elements
-        if (defEl) defEl.innerText = "Analyzing term...";
-        if (exEl) exEl.innerText = "";
-        if (useEl) useEl.innerText = "";
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
 
-        // Force hidden state for layout
-        if (content) content.style.display = 'none';
+        // 2. Clear and Render
+        container.innerHTML = '';
 
-        if (summary && content) {
-            summary.style.cursor = 'pointer';
-            summary.onclick = () => {
-                const isHidden = content.style.display === 'none';
-                content.style.display = isHidden ? 'block' : 'none';
-            };
+        if (!parsed.terms || parsed.terms.length === 0) {
+            container.innerHTML = '<p>No unique community jargon found in this sample.</p>';
+            return;
         }
 
-        // Add the card to the page
-        container.appendChild(clone);
+        parsed.terms.forEach(item => {
+            const clone = PHRASE_BLUEPRINT.cloneNode(true);
+            
+            // Map the AI data to your Webflow Blueprint IDs/Classes
+            const find = (selector) => clone.querySelector(`#${selector}`) || clone.querySelector(`.${selector}`);
 
-        // 4. Fetch AI Content and Update the card we just added
-        (async () => {
-            try {
-                const prompt = `Explain "${term}" for the ${audienceContext} community. Use these JSON keys: "definition", "example", "usage".`;
-                const openAIParams = {
-                    model: "gpt-4o-mini",
-                    messages: [{ role: "system", content: "You are a linguist." }, { role: "user", content: prompt }],
-                    temperature: 0.1,
-                    response_format: { "type": "json_object" }
+            const headerEl = find('phrase-text');
+            const defEl = find('phrase-definition');
+            const exEl = find('phrase-example');
+            const useEl = find('phrase-usage');
+            const summary = clone.querySelector('.power-phrase-summary');
+            const content = clone.querySelector('.power-phrase-content');
+
+            if (headerEl) headerEl.innerText = item.word;
+            if (defEl) defEl.innerText = item.definition;
+            if (exEl) exEl.innerText = item.example ? `"${item.example}"` : "";
+            if (useEl) useEl.innerText = item.usage;
+
+            // Handle the toggle behavior (Accordion)
+            if (content) content.style.display = 'none';
+            if (summary) {
+                summary.onclick = () => {
+                    const isHidden = content.style.display === 'none';
+                    content.style.display = isHidden ? 'block' : 'none';
                 };
-
-                const response = await fetch(OPENAI_PROXY_URL, { 
-                    method: 'POST', 
-                    headers: { 'Content-Type': 'application/json' }, 
-                    body: JSON.stringify({ openaiPayload: openAIParams }) 
-                });
-                
-                const data = await response.json();
-                const parsed = JSON.parse(data.openaiResponse);
-
-                // Update text using the AI results
-                if (defEl) defEl.innerText = parsed.definition || "No definition available.";
-                if (exEl) exEl.innerText = parsed.example ? `"${parsed.example}"` : "No example found.";
-                if (useEl) useEl.innerText = parsed.usage || "No usage notes.";
-
-            } catch (err) {
-                if (defEl) defEl.innerText = "Error loading details.";
-                console.error("AI Enrichment Error:", err);
             }
-        })();
+
+            container.appendChild(clone);
+        });
+
+    } catch (err) {
+        console.error("Power Phrase AI Error:", err);
+        container.innerHTML = '<p>Failed to load community phrases.</p>';
     }
 }
 
@@ -2778,46 +2778,36 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
     wrapper.innerHTML = '<p class="loading-text">Analyzing modern engagement patterns...</p>';
 
     try {
-        // --- NEW: RECENCY FILTER ---
         const now = Math.floor(Date.now() / 1000);
         const eighteenMonthsAgo = now - (18 * 30 * 24 * 60 * 60);
 
-        // 1. Separate "Modern" posts from "Old" posts
         const modernPosts = posts.filter(p => p.data.created_utc > eighteenMonthsAgo);
         const olderPosts = posts.filter(p => p.data.created_utc <= eighteenMonthsAgo);
 
-        // 2. Prioritize modern posts, then fill remaining slots with top older posts if needed
-        // We want a pool of 40 posts for the AI to see patterns
         let topPosts = [...modernPosts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0));
-        
         if (topPosts.length < 30) {
-            const fillCount = 30 - topPosts.length;
-            const topOldOnes = [...olderPosts]
-                .sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0))
-                .slice(0, fillCount);
-            topPosts = topPosts.concat(topOldOnes);
+            topPosts = topPosts.concat([...olderPosts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 30 - topPosts.length));
         } else {
             topPosts = topPosts.slice(0, 40);
         }
 
-        // 3. Prepare text for AI (including the year so AI can see context)
         const topPostsForAI = topPosts.map((p, i) => {
             const year = new Date(p.data.created_utc * 1000).getFullYear();
             return `ID: ${i} | YEAR: ${year} | UPS: ${p.data.ups} | TITLE: ${p.data.title}`;
         }).join('\n');
 
-        const prompt = `Analyze these top posts for ${audienceContext}. Identify 4-6 MODERN hook patterns (engagement styles working right now). 
-        CRITICAL: Skew heavily toward recent posts (2023-2024). Ignore outdated "clickbait" styles from older years.
-        Respond ONLY as valid JSON with key 'patterns', each having: category, why_it_works, and example_ids (array of 3 IDs from the list).
+        // --- UPDATED PROMPT FOR CLEANER CONTENT ---
+        const prompt = `Analyze these top posts for ${audienceContext}. Identify 4-6 MODERN hook patterns. 
+        Respond ONLY as valid JSON with key 'patterns', each having:
+        1. "category": (e.g., 'Contrarian Truth')
+        2. "short_summary": (A 1-sentence, 10-word max description of the hook style)
+        3. "strategy": (A 1-sentence, 20-word max explanation of why it works)
+        4. "example_ids": (Array of 3 IDs).
         Posts: ${topPostsForAI}`;
 
-
         const openAIParams = {
-            model: "gpt-5.4-mini",
-            messages: [
-                { role: "system", content: "You are a content strategist who outputs only valid JSON." },
-                { role: "user", content: prompt }
-            ],
+            model: "gpt-4o-mini",
+            messages: [{ role: "system", content: "You are a content strategist. You are brief and punchy." }, { role: "user", content: prompt }],
             temperature: 0.1,
             response_format: { "type": "json_object" }
         };
@@ -2831,28 +2821,23 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
-        if (!parsed.patterns || !Array.isArray(parsed.patterns)) throw new Error("Invalid AI Response");
-
-        wrapper.innerHTML = ''; // Clear loading text
+        wrapper.innerHTML = '';
 
         parsed.patterns.forEach(pattern => {
             const card = HOOK_CARD_BLUEPRINT.cloneNode(true);
             
-            // 1. Fill Card Header
             const categoryEl = card.querySelector('.hook-category');
             const whyEl = card.querySelector('.hook-why');
+            const reasonEl = card.querySelector('.why-reason'); // THE NEW ELEMENT
             const listContainer = card.querySelector('.hook-examples-list');
 
             if (categoryEl) categoryEl.innerText = pattern.category;
-            if (whyEl) whyEl.innerText = pattern.why_it_works;
+            if (whyEl) whyEl.innerText = pattern.short_summary;
+            if (reasonEl) reasonEl.innerText = pattern.strategy;
             
-            // 2. Fill Example Items
             if (listContainer) {
-                listContainer.innerHTML = ''; // Clear dummy items
-
-                const validExamples = (pattern.example_ids || [])
-                    .map(id => topPosts[parseInt(id)])
-                    .filter(Boolean);
+                listContainer.innerHTML = '';
+                const validExamples = (pattern.example_ids || []).map(id => topPosts[parseInt(id)]).filter(Boolean);
 
                 validExamples.forEach(post => {
                     const item = HOOK_ITEM_BLUEPRINT.cloneNode(true);
@@ -2861,17 +2846,15 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
                     const upvoteEl = item.querySelector('.proof-badge-upvotes');
                     const commentEl = item.querySelector('.proof-badge-comments');
 
-                    // Limit the title to 140 chars and add an ellipsis if it's too long
-if (titleEl) {
-    const rawTitle = post.data.title;
-    titleEl.innerText = rawTitle.length > 140 
-        ? rawTitle.substring(0, 137) + "..." 
-        : rawTitle;
-}
+                    // --- TRUNCATION ADDED HERE ---
+                    if (titleEl) {
+                        const rawTitle = post.data.title;
+                        titleEl.innerText = rawTitle.length > 130 ? rawTitle.substring(0, 127) + "..." : rawTitle;
+                    }
+
                     if (upvoteEl) upvoteEl.innerText = `👍 ${post.data.ups.toLocaleString()}`;
                     if (commentEl) commentEl.innerText = `💬 ${post.data.num_comments.toLocaleString()}`;
 
-                    // Set the Link
                     const linkTarget = item.tagName === 'A' ? item : item.querySelector('a');
                     if (linkTarget) {
                         linkTarget.href = `https://reddit.com${post.data.permalink}`;
@@ -2884,14 +2867,9 @@ if (titleEl) {
             wrapper.appendChild(card);
         });
     } catch (error) {
-        console.error("Hook Patterns Detailed Error:", error);
-        wrapper.innerHTML = `<p>Hook analysis failed. check console.</p>`;
+        console.error("Hook Patterns Error:", error);
     }
 }
-
-
-
-
 
 // --- NEW SECTION 1: VOICE PROFILE ---
 async function generateAndRenderVoiceProfile(posts, audienceContext) {

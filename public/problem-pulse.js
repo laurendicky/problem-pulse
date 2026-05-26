@@ -2677,6 +2677,8 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
 let PHRASE_BLUEPRINT = null;
 let PILLAR_BLUEPRINT = null;
 let VOICE_PILL_BLUEPRINT = null;
+let HOOK_CARD_BLUEPRINT = null;
+let HOOK_ITEM_BLUEPRINT = null;
 
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
@@ -2771,86 +2773,75 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
 
 
 async function generateAndRenderHookPatterns(posts, audienceContext) {
-    const container = document.getElementById('hook-patterns-container');
-    if (!container) return;
+    const wrapper = document.getElementById('hook-wrapper'); // Your ID
+    if (!wrapper || !HOOK_CARD_BLUEPRINT || !HOOK_ITEM_BLUEPRINT) return;
 
-    container.innerHTML = `<p class="loading-text">Analyzing top hooks and social proof... <span class="loader-dots"></span></p>`;
+    wrapper.innerHTML = ''; // Clear test content
 
     try {
-        // 1. Get top 30 by upvotes
         const topPosts = [...posts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 30);
-        
-        // 2. Prepare text for AI, giving each post a temporary ID
         const topPostsForAI = topPosts.map((p, i) => `ID: ${i} | UPS: ${p.data.ups} | TITLE: ${p.data.title}`).join('\n');
 
-        const prompt = `Analyze these top-performing posts from the ${audienceContext} community. Identify 4-6 distinct 'hook patterns' (the type of opening that drives engagement). 
-        
-        For each pattern, provide:
-        - category: (e.g., 'Vulnerability hook')
-        - why_it_works: (1 sentence)
-        - example_ids: (An array of the 3 "ID" numbers from the list provided that best fit this pattern).
+        const prompt = `Identify 4-6 hook patterns from these posts for ${audienceContext}. JSON: {"patterns": [{"category": "...", "why_it_works": "...", "example_ids": [0, 1, 2]}]}`;
 
-        Respond ONLY as valid JSON with key 'patterns'. Posts:
-        ${topPostsForAI}`;
-
-        const openAIParams = {
-            model: "gpt-5.4-mini",
-            messages: [
-                { role: "system", content: "You are an expert content strategist who outputs only valid JSON. You identify patterns by ID." },
-                { role: "user", content: prompt }
-            ],
-            temperature: 0.1,
-            response_format: { "type": "json_object" }
-        };
-
+        // ... Standard Fetch Logic (omitted for brevity, keep your existing fetch) ...
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
-        // 3. Render HTML with real links and badges
-        container.innerHTML = `
-            <h3 class="dashboard-section-title">Hook Patterns</h3>
-            <p class="dashboard-section-subtitle">Psychological triggers proven to drive massive engagement</p>
-            <div class="hook-patterns-grid">
-                ${parsed.patterns.map(pattern => {
-                    // Map the IDs back to our actual post data
-                    const validExamples = (pattern.example_ids || [])
-                        .map(id => topPosts[parseInt(id)])
-                        .filter(Boolean); // Ensure post exists
+        parsed.patterns.forEach(pattern => {
+            const card = HOOK_CARD_BLUEPRINT.cloneNode(true);
+            
+            // Set Card Text
+            const categoryEl = card.querySelector('.hook-category');
+            const whyEl = card.querySelector('.hook-why');
+            const listContainer = card.querySelector('.hook-examples-list');
 
-                    return `
-                        <details class="hook-pattern-card">
-                            <summary class="hook-card-header">
-                                <span class="hook-category">${pattern.category}</span>
-                                <div class="hook-arrow">›</div>
-                            </summary>
-                            <div class="hook-card-content">
-                                <p class="hook-why"><strong>Strategy:</strong> ${pattern.why_it_works}</p>
-                                <div class="hook-examples-list">
-                                    ${validExamples.map(post => `
-                                        <div class="hook-proof-item">
-                                            <a href="https://reddit.com${post.data.permalink}" target="_blank" class="hook-proof-title">
-                                                "${post.data.title}"
-                                            </a>
-                                            <div class="hook-proof-meta">
-                                                <span class="proof-badge upvotes">👍 ${post.data.ups.toLocaleString()}</span>
-                                                <span class="proof-badge comments">💬 ${post.data.num_comments.toLocaleString()}</span>
-                                                <span class="proof-link-text">Read Post ↗</span>
-                                            </div>
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            </div>
-                        </details>
-                    `;
-                }).join('')}
-            </div>
-        `;
+            if (categoryEl) categoryEl.innerText = pattern.category;
+            if (whyEl) whyEl.innerText = pattern.why_it_works;
+            
+            if (listContainer) {
+                listContainer.innerHTML = ''; // Clear dummy list items
+
+                // Loop through the example IDs and clone the styled link design
+                const validExamples = (pattern.example_ids || []).map(id => topPosts[parseInt(id)]).filter(Boolean);
+
+                validExamples.forEach(post => {
+                    const item = HOOK_ITEM_BLUEPRINT.cloneNode(true);
+                    
+                    const titleEl = item.querySelector('.hook-proof-title');
+                    const upvoteEl = item.querySelector('.proof-badge-upvotes');
+                    const commentEl = item.querySelector('.proof-badge-comments');
+
+                    if (titleEl) titleEl.innerText = post.data.title;
+                    if (upvoteEl) upvoteEl.innerText = `👍 ${post.data.ups.toLocaleString()}`;
+                    if (commentEl) commentEl.innerText = `💬 ${post.data.num_comments.toLocaleString()}`;
+
+                    // If your proof-item is a Link Block, set the href
+                    if (item.tagName === 'A' || item.getAttribute('href') !== null) {
+                        item.href = `https://reddit.com${post.data.permalink}`;
+                        item.target = "_blank";
+                    } else {
+                        // If it's a div, look for a link inside it
+                        const link = item.querySelector('a');
+                        if (link) {
+                            link.href = `https://reddit.com${post.data.permalink}`;
+                            link.target = "_blank";
+                        }
+                    }
+
+                    listContainer.appendChild(item);
+                });
+            }
+            wrapper.appendChild(card);
+        });
     } catch (error) {
         console.error("Hook Patterns Error:", error);
-        container.innerHTML = `<p class="placeholder-text">Hook analysis temporarily unavailable.</p>`;
     }
 }
+
+
+
 
 
 // --- NEW SECTION 1: VOICE PROFILE ---
@@ -3099,6 +3090,21 @@ if (!VOICE_PILL_BLUEPRINT) {
             VOICE_PILL_BLUEPRINT = foundPill.cloneNode(true);
             console.log("Voice Pill blueprint captured.");
         }
+    }
+}
+// Capture Hook Card Blueprint
+if (!HOOK_CARD_BLUEPRINT) {
+    const foundCard = document.querySelector('.hook-pattern-card');
+    if (foundCard) {
+        HOOK_CARD_BLUEPRINT = foundCard.cloneNode(true);
+        
+        // Inside that card, capture the individual example item design
+        const foundItem = HOOK_CARD_BLUEPRINT.querySelector('.hook-proof-item');
+        if (foundItem) {
+            HOOK_ITEM_BLUEPRINT = foundItem.cloneNode(true);
+        }
+        
+        console.log("Hook Card & Item blueprints captured.");
     }
 }
     const growthHeaderPrefix = document.getElementById('growth-header-prefix');

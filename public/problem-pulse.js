@@ -2676,6 +2676,7 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
 // --- 1. SAFE STORAGE FOR YOUR WEBFLOW DESIGN ---
 let PHRASE_BLUEPRINT = null;
 let PILLAR_BLUEPRINT = null;
+let VOICE_PILL_BLUEPRINT = null;
 
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
@@ -2854,20 +2855,26 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
 
 // --- NEW SECTION 1: VOICE PROFILE ---
 async function generateAndRenderVoiceProfile(posts, audienceContext) {
+    // 1. Target your Webflow Elements
     const container = document.getElementById('voice-profile-container');
     if (!container) return;
 
-    container.innerHTML = `<p class="loading-text">Crafting voice profile... <span class="loader-dots"></span></p>`;
+    const quoteEl = container.querySelector('.voice-tone-quote');
+    const tagsContainer = container.querySelector('.voice-adjective-tags');
+
+    // 2. Set initial loading state on the quote
+    if (quoteEl) quoteEl.innerText = "Analyzing community voice...";
+    if (tagsContainer) tagsContainer.innerHTML = ""; // Clear your Webflow dummy tags
 
     try {
         const topPostsText = posts.slice(0, 40).map(p => 
             `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
         ).join('\n---\n');
 
-        const prompt = `Based on these posts from the ${audienceContext} community, write a 2-3 sentence tone-of-voice description that a copywriter could use as a brief, plus 5-7 adjectives describing the voice. Respond ONLY as valid JSON with keys 'tone_description' and 'voice_adjectives'. Posts: ${topPostsText}`;
+        const prompt = `Based on these posts from the ${audienceContext} community, write a 2-3 sentence tone-of-voice description that a copywriter could use as a brief, plus 6 adjectives describing the voice. Respond ONLY as valid JSON with keys 'tone_description' and 'voice_adjectives'. Posts: ${topPostsText}`;
 
         const openAIParams = {
-            model: "gpt-5.4-mini",
+            model: "gpt-4o-mini", // Optimized for speed
             messages: [
                 { role: "system", content: "You are a brand strategist who outputs only valid JSON." },
                 { role: "user", content: prompt }
@@ -2882,29 +2889,27 @@ async function generateAndRenderVoiceProfile(posts, audienceContext) {
             body: JSON.stringify({ openaiPayload: openAIParams }) 
         });
 
-        if (!response.ok) throw new Error('Voice Profile API call failed.');
-
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
-        container.innerHTML = `
-            <div class="voice-profile-wrapper">
-                <h3 class="dashboard-section-title">Voice Profile</h3>
-                <p class="dashboard-section-subtitle">A copywriter's brief for this audience</p>
-                <blockquote class="voice-tone-quote">
-                    "${parsed.tone_description}"
-                </blockquote>
-                <div class="voice-adjective-tags">
-                    ${parsed.voice_adjectives.map(adj => `<span class="voice-pill">${adj}</span>`).join('')}
-                </div>
-            </div>
-        `;
+        // 3. Inject the Description/Quote
+        if (quoteEl) quoteEl.innerText = `"${parsed.tone_description}"`;
+
+        // 4. Inject the Adjectives using your Blueprint
+        if (tagsContainer && VOICE_PILL_BLUEPRINT) {
+            parsed.voice_adjectives.forEach(adj => {
+                const pill = VOICE_PILL_BLUEPRINT.cloneNode(true);
+                pill.innerText = adj;
+                tagsContainer.appendChild(pill);
+            });
+        }
 
     } catch (error) {
         console.error("Voice Profile Error:", error);
-        container.innerHTML = `<p class="placeholder-text">Voice profile analysis temporarily unavailable.</p>`;
+        if (quoteEl) quoteEl.innerText = "Voice profile analysis temporarily unavailable.";
     }
 }
+
 
 // --- NEW SECTION 2: LANGUAGE TO AVOID ---
 async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
@@ -3082,6 +3087,18 @@ if (!isUpdate && !PILLAR_BLUEPRINT) {
     if (found) {
         PILLAR_BLUEPRINT = found.cloneNode(true);
         console.log("Strategic Pillar blueprint captured.");
+    }
+}
+// Capture Voice Pill Blueprint
+if (!VOICE_PILL_BLUEPRINT) {
+    const container = document.querySelector('.voice-adjective-tags');
+    if (container) {
+        // Grab the first text element inside the container to use as our "pill" design
+        const foundPill = container.querySelector('.voice-adjective-tags'); 
+        if (foundPill) {
+            VOICE_PILL_BLUEPRINT = foundPill.cloneNode(true);
+            console.log("Voice Pill blueprint captured.");
+        }
     }
 }
     const growthHeaderPrefix = document.getElementById('growth-header-prefix');

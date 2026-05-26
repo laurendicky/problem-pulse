@@ -2773,26 +2773,54 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
 
 
 async function generateAndRenderHookPatterns(posts, audienceContext) {
-    const wrapper = document.getElementById('hook-wrapper'); // Your ID
-    if (!wrapper || !HOOK_CARD_BLUEPRINT || !HOOK_ITEM_BLUEPRINT) return;
+    const wrapper = document.getElementById('hook-wrapper');
+    // Basic safety check
+    if (!wrapper) {
+        console.error("Hook Error: #hook-wrapper not found in DOM.");
+        return;
+    }
+    if (!HOOK_CARD_BLUEPRINT || !HOOK_ITEM_BLUEPRINT) {
+        console.error("Hook Error: Blueprints not captured. Check if .hook-pattern-card exists on page load.");
+        return;
+    }
 
-    wrapper.innerHTML = ''; // Clear test content
+    wrapper.innerHTML = '<p class="loading-text">Analyzing patterns...</p>';
 
     try {
         const topPosts = [...posts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 30);
         const topPostsForAI = topPosts.map((p, i) => `ID: ${i} | UPS: ${p.data.ups} | TITLE: ${p.data.title}`).join('\n');
 
-        const prompt = `Identify 4-6 hook patterns from these posts for ${audienceContext}. JSON: {"patterns": [{"category": "...", "why_it_works": "...", "example_ids": [0, 1, 2]}]}`;
+        const prompt = `Analyze these top posts for ${audienceContext}. Identify 4-6 distinct 'hook patterns'. 
+        Respond ONLY as valid JSON with key 'patterns', each having: category, why_it_works, and example_ids (array of 3 IDs from the list).
+        Posts: ${topPostsForAI}`;
 
-        // ... Standard Fetch Logic (omitted for brevity, keep your existing fetch) ...
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const openAIParams = {
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You are a content strategist who outputs only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.1,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        });
+
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
+
+        if (!parsed.patterns || !Array.isArray(parsed.patterns)) throw new Error("Invalid AI Response");
+
+        wrapper.innerHTML = ''; // Clear loading text
 
         parsed.patterns.forEach(pattern => {
             const card = HOOK_CARD_BLUEPRINT.cloneNode(true);
             
-            // Set Card Text
+            // 1. Fill Card Header
             const categoryEl = card.querySelector('.hook-category');
             const whyEl = card.querySelector('.hook-why');
             const listContainer = card.querySelector('.hook-examples-list');
@@ -2800,11 +2828,13 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
             if (categoryEl) categoryEl.innerText = pattern.category;
             if (whyEl) whyEl.innerText = pattern.why_it_works;
             
+            // 2. Fill Example Items
             if (listContainer) {
-                listContainer.innerHTML = ''; // Clear dummy list items
+                listContainer.innerHTML = ''; // Clear dummy items
 
-                // Loop through the example IDs and clone the styled link design
-                const validExamples = (pattern.example_ids || []).map(id => topPosts[parseInt(id)]).filter(Boolean);
+                const validExamples = (pattern.example_ids || [])
+                    .map(id => topPosts[parseInt(id)])
+                    .filter(Boolean);
 
                 validExamples.forEach(post => {
                     const item = HOOK_ITEM_BLUEPRINT.cloneNode(true);
@@ -2817,17 +2847,11 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
                     if (upvoteEl) upvoteEl.innerText = `👍 ${post.data.ups.toLocaleString()}`;
                     if (commentEl) commentEl.innerText = `💬 ${post.data.num_comments.toLocaleString()}`;
 
-                    // If your proof-item is a Link Block, set the href
-                    if (item.tagName === 'A' || item.getAttribute('href') !== null) {
-                        item.href = `https://reddit.com${post.data.permalink}`;
-                        item.target = "_blank";
-                    } else {
-                        // If it's a div, look for a link inside it
-                        const link = item.querySelector('a');
-                        if (link) {
-                            link.href = `https://reddit.com${post.data.permalink}`;
-                            link.target = "_blank";
-                        }
+                    // Set the Link
+                    const linkTarget = item.tagName === 'A' ? item : item.querySelector('a');
+                    if (linkTarget) {
+                        linkTarget.href = `https://reddit.com${post.data.permalink}`;
+                        linkTarget.target = "_blank";
                     }
 
                     listContainer.appendChild(item);
@@ -2836,7 +2860,8 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
             wrapper.appendChild(card);
         });
     } catch (error) {
-        console.error("Hook Patterns Error:", error);
+        console.error("Hook Patterns Detailed Error:", error);
+        wrapper.innerHTML = `<p>Hook analysis failed. check console.</p>`;
     }
 }
 

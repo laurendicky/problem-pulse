@@ -1920,18 +1920,18 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
 
         if (values && values.length > 0) {
             // Create a list item for each object, making the title bold.
-            const characteristicsHTML = '<ul>' + values.map(item =>
+            const characteristicsHTML = '<ol>' + values.map(item =>
                 `<li><strong>${item.title}:</strong> ${item.description}</li>`
-            ).join('') + '</ul>';
+            ).join('') + '</ol>';
             characteristicsEl.innerHTML = characteristicsHTML;
         } else {
             characteristicsEl.innerHTML = '<p>Could not identify key characteristics.</p>';
         }
 
         if (rejects && rejects.length > 0) {
-            const rejectsHTML = '<ul>' + rejects.map(item =>
+            const rejectsHTML = '<ol>' + rejects.map(item =>
                 `<li><strong>${item.title}:</strong> ${item.description}</li>`
-            ).join('') + '</ul>';
+            ).join('') + '</ol>';
             rejectsEl.innerHTML = rejectsHTML;
         } else {
             rejectsEl.innerHTML = '<p>Could not identify dislikes.</p>';
@@ -1948,81 +1948,62 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
 // =================================================================================
 // === NEW FUNCTION: AI STRATEGIC PILLARS (GOALS & FEARS) ===
 // ================================================================================
+
 async function generateAndRenderStrategicPillars(posts, audienceContext) {
     const goalsContainer = document.getElementById('goals-pillar');
     const fearsContainer = document.getElementById('fears-pillar');
-    if (!goalsContainer || !fearsContainer) return;
+    
+    if (!goalsContainer || !fearsContainer || !PILLAR_BLUEPRINT) return;
 
-    // Set initial loading states
-    goalsContainer.innerHTML = `<p class="placeholder-text">Analyzing goals...</p>`;
-    fearsContainer.innerHTML = `<p class="placeholder-text">Analyzing fears...</p>`;
+    // 1. Clear the containers
+    goalsContainer.innerHTML = '';
+    fearsContainer.innerHTML = '';
 
     try {
-        const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}
-\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+        const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        const prompt = `You are an expert market psychologist specializing in the "${audienceContext}" community. Based on the following user posts, identify their 3 core "Ultimate Goals" and their 3 "Greatest Fears". Respond ONLY with a valid JSON object with two keys: "goals" and "fears", holding an array of 3 short, insightful strings. Posts:\n${topPostsText}`;
+        const prompt = `Identify 3 core "Ultimate Goals" and 3 "Greatest Fears" for the ${audienceContext} community. Respond ONLY with JSON: {"goals": ["goal1", "goal2", "goal3"], "fears": ["fear1", "fear2", "fear3"]}`;
 
         const openAIParams = {
-            model: "gpt-5.4-mini",
-            messages: [{
-                role: "system",
-                content: "You are an expert market psychologist providing concise lists of audience goals and fears in strict JSON format."
-            }, {
-                role: "user",
-                content: prompt
-            }],
+            model: "gpt-4o-mini",
+            messages: [{ role: "system", content: "You are a market psychologist." }, { role: "user", content: prompt }],
             temperature: 0.3,
-            max_completion_tokens: 400,
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: openAIParams })
+        const response = await fetch(OPENAI_PROXY_URL, { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ openaiPayload: openAIParams }) 
         });
-
-        if (!response.ok) throw new Error('Strategic pillars API call failed.');
 
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
-        const { goals, fears } = parsed;
 
-        const createCustomListHTML = (items) => {
-            if (!items || items.length === 0) return '';
-            return items.map((item, index) => {
-                const isLastItem = index === items.length - 1;
-                return `
-                    <div class="pillar-item">
-                        <p class="pillar-item-text">${item}</p>
-                        ${!isLastItem ? '<div class="pillar-separator"></div>' : ''}
-                    </div>
-                `;
-            }).join('');
+        // 2. Helper function to clone and populate
+        const populatePillars = (container, items) => {
+            items.forEach(text => {
+                const clone = PILLAR_BLUEPRINT.cloneNode(true);
+                // Look for the text element inside the clone
+                const textNode = clone.querySelector('#pillar-item-text') || clone.querySelector('.pillar-item-text');
+                if (textNode) {
+                    textNode.innerText = text;
+                }
+                container.appendChild(clone);
+            });
         };
 
-        // Render Goals
-        if (goals && goals.length > 0) {
-            goalsContainer.innerHTML = createCustomListHTML(goals);
-        } else {
-            goalsContainer.innerHTML = `<p class="placeholder-text">Could not identify distinct goals.</p>`;
-        }
-
-        // Render Fears
-        if (fears && fears.length > 0) {
-            fearsContainer.innerHTML = createCustomListHTML(fears);
-        } else {
-            fearsContainer.innerHTML = `<p class="placeholder-text">Could not identify distinct fears.</p>`;
-        }
+        // 3. Render the lists using your Webflow design
+        if (parsed.goals) populatePillars(goalsContainer, parsed.goals);
+        if (parsed.fears) populatePillars(fearsContainer, parsed.fears);
 
     } catch (error) {
         console.error("Strategic pillars generation error:", error);
-        // Replaced inline style with a dedicated error class
-        goalsContainer.innerHTML = `<p class="placeholder-text placeholder-text--error">Analysis failed.</p>`;
-        fearsContainer.innerHTML = `<p class="placeholder-text placeholder-text--error">Analysis failed.</p>`;
     }
 }
+
+
+
 // =================================================================================
 // === NEW FUNCTION: AI GENERATIVE PROMPT ===
 // =================================================================================
@@ -2694,6 +2675,7 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
 
 // --- 1. SAFE STORAGE FOR YOUR WEBFLOW DESIGN ---
 let PHRASE_BLUEPRINT = null;
+let PILLAR_BLUEPRINT = null;
 
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
@@ -3092,113 +3074,14 @@ async function runProblemFinder(options = {}) {
         console.log("Blueprint captured exactly as styled in Webflow.");
     }
 }
-   if (!isUpdate && !PHRASE_BLUEPRINT) {
-    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+ 
+ 
+// Add this near where you capture PHRASE_BLUEPRINT
+if (!isUpdate && !PILLAR_BLUEPRINT) {
+    const found = document.querySelector('.pillar-item-template');
     if (found) {
-        PHRASE_BLUEPRINT = found.cloneNode(true);
-        // We do NOT set .style.display here. We let Webflow handle the CSS.
-        PHRASE_BLUEPRINT.id = ''; 
-        console.log("Blueprint captured exactly as styled in Webflow.");
-    }
-}
-   if (!isUpdate && !PHRASE_BLUEPRINT) {
-    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
-    if (found) {
-        PHRASE_BLUEPRINT = found.cloneNode(true);
-        // We do NOT set .style.display here. We let Webflow handle the CSS.
-        PHRASE_BLUEPRINT.id = ''; 
-        console.log("Blueprint captured exactly as styled in Webflow.");
-    }
-}
-   if (!isUpdate && !PHRASE_BLUEPRINT) {
-    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
-    if (found) {
-        PHRASE_BLUEPRINT = found.cloneNode(true);
-        // We do NOT set .style.display here. We let Webflow handle the CSS.
-        PHRASE_BLUEPRINT.id = ''; 
-        console.log("Blueprint captured exactly as styled in Webflow.");
-    }
-}
-   if (!isUpdate && !PHRASE_BLUEPRINT) {
-    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
-    if (found) {
-        PHRASE_BLUEPRINT = found.cloneNode(true);
-        // We do NOT set .style.display here. We let Webflow handle the CSS.
-        PHRASE_BLUEPRINT.id = ''; 
-        console.log("Blueprint captured exactly as styled in Webflow.");
-    }
-}
-
-   if (!isUpdate && !PHRASE_BLUEPRINT) {
-    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
-    if (found) {
-        PHRASE_BLUEPRINT = found.cloneNode(true);
-        // We do NOT set .style.display here. We let Webflow handle the CSS.
-        PHRASE_BLUEPRINT.id = ''; 
-        console.log("Blueprint captured exactly as styled in Webflow.");
-    }
-}
-   if (!isUpdate && !PHRASE_BLUEPRINT) {
-    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
-    if (found) {
-        PHRASE_BLUEPRINT = found.cloneNode(true);
-        // We do NOT set .style.display here. We let Webflow handle the CSS.
-        PHRASE_BLUEPRINT.id = ''; 
-        console.log("Blueprint captured exactly as styled in Webflow.");
-    }
-}
-   if (!isUpdate && !PHRASE_BLUEPRINT) {
-    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
-    if (found) {
-        PHRASE_BLUEPRINT = found.cloneNode(true);
-        // We do NOT set .style.display here. We let Webflow handle the CSS.
-        PHRASE_BLUEPRINT.id = ''; 
-        console.log("Blueprint captured exactly as styled in Webflow.");
-    }
-}
-   if (!isUpdate && !PHRASE_BLUEPRINT) {
-    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
-    if (found) {
-        PHRASE_BLUEPRINT = found.cloneNode(true);
-        // We do NOT set .style.display here. We let Webflow handle the CSS.
-        PHRASE_BLUEPRINT.id = ''; 
-        console.log("Blueprint captured exactly as styled in Webflow.");
-    }
-}
-   if (!isUpdate && !PHRASE_BLUEPRINT) {
-    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
-    if (found) {
-        PHRASE_BLUEPRINT = found.cloneNode(true);
-        // We do NOT set .style.display here. We let Webflow handle the CSS.
-        PHRASE_BLUEPRINT.id = ''; 
-        console.log("Blueprint captured exactly as styled in Webflow.");
-    }
-}
-   if (!isUpdate && !PHRASE_BLUEPRINT) {
-    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
-    if (found) {
-        PHRASE_BLUEPRINT = found.cloneNode(true);
-        // We do NOT set .style.display here. We let Webflow handle the CSS.
-        PHRASE_BLUEPRINT.id = ''; 
-        console.log("Blueprint captured exactly as styled in Webflow.");
-    }
-}
-   if (!isUpdate && !PHRASE_BLUEPRINT) {
-    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
-    if (found) {
-        PHRASE_BLUEPRINT = found.cloneNode(true);
-        // We do NOT set .style.display here. We let Webflow handle the CSS.
-        PHRASE_BLUEPRINT.id = ''; 
-        console.log("Blueprint captured exactly as styled in Webflow.");
-    }
-}
-   if (!isUpdate && !PHRASE_BLUEPRINT) {
-    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
-    if (found) {
-        PHRASE_BLUEPRINT = found.cloneNode(true);
-        // We do NOT set .style.display here. We let Webflow handle the CSS.
-        PHRASE_BLUEPRINT.id = ''; 
-        console.log("Blueprint captured exactly as styled in Webflow.");
+        PILLAR_BLUEPRINT = found.cloneNode(true);
+        console.log("Strategic Pillar blueprint captured.");
     }
 }
     const growthHeaderPrefix = document.getElementById('growth-header-prefix');

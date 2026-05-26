@@ -2771,31 +2771,49 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
     }
 }
 
-
 async function generateAndRenderHookPatterns(posts, audienceContext) {
     const wrapper = document.getElementById('hook-wrapper');
-    // Basic safety check
-    if (!wrapper) {
-        console.error("Hook Error: #hook-wrapper not found in DOM.");
-        return;
-    }
-    if (!HOOK_CARD_BLUEPRINT || !HOOK_ITEM_BLUEPRINT) {
-        console.error("Hook Error: Blueprints not captured. Check if .hook-pattern-card exists on page load.");
-        return;
-    }
+    if (!wrapper || !HOOK_CARD_BLUEPRINT || !HOOK_ITEM_BLUEPRINT) return;
 
-    wrapper.innerHTML = '<p class="loading-text">Analyzing patterns...</p>';
+    wrapper.innerHTML = '<p class="loading-text">Analyzing modern engagement patterns...</p>';
 
     try {
-        const topPosts = [...posts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 30);
-        const topPostsForAI = topPosts.map((p, i) => `ID: ${i} | UPS: ${p.data.ups} | TITLE: ${p.data.title}`).join('\n');
+        // --- NEW: RECENCY FILTER ---
+        const now = Math.floor(Date.now() / 1000);
+        const eighteenMonthsAgo = now - (18 * 30 * 24 * 60 * 60);
 
-        const prompt = `Analyze these top posts for ${audienceContext}. Identify 4-6 distinct 'hook patterns'. 
+        // 1. Separate "Modern" posts from "Old" posts
+        const modernPosts = posts.filter(p => p.data.created_utc > eighteenMonthsAgo);
+        const olderPosts = posts.filter(p => p.data.created_utc <= eighteenMonthsAgo);
+
+        // 2. Prioritize modern posts, then fill remaining slots with top older posts if needed
+        // We want a pool of 40 posts for the AI to see patterns
+        let topPosts = [...modernPosts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0));
+        
+        if (topPosts.length < 30) {
+            const fillCount = 30 - topPosts.length;
+            const topOldOnes = [...olderPosts]
+                .sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0))
+                .slice(0, fillCount);
+            topPosts = topPosts.concat(topOldOnes);
+        } else {
+            topPosts = topPosts.slice(0, 40);
+        }
+
+        // 3. Prepare text for AI (including the year so AI can see context)
+        const topPostsForAI = topPosts.map((p, i) => {
+            const year = new Date(p.data.created_utc * 1000).getFullYear();
+            return `ID: ${i} | YEAR: ${year} | UPS: ${p.data.ups} | TITLE: ${p.data.title}`;
+        }).join('\n');
+
+        const prompt = `Analyze these top posts for ${audienceContext}. Identify 4-6 MODERN hook patterns (engagement styles working right now). 
+        CRITICAL: Skew heavily toward recent posts (2023-2024). Ignore outdated "clickbait" styles from older years.
         Respond ONLY as valid JSON with key 'patterns', each having: category, why_it_works, and example_ids (array of 3 IDs from the list).
         Posts: ${topPostsForAI}`;
 
+
         const openAIParams = {
-            model: "gpt-4o-mini",
+            model: "gpt-5.4-mini",
             messages: [
                 { role: "system", content: "You are a content strategist who outputs only valid JSON." },
                 { role: "user", content: prompt }
@@ -2843,7 +2861,13 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
                     const upvoteEl = item.querySelector('.proof-badge-upvotes');
                     const commentEl = item.querySelector('.proof-badge-comments');
 
-                    if (titleEl) titleEl.innerText = post.data.title;
+                    // Limit the title to 140 chars and add an ellipsis if it's too long
+if (titleEl) {
+    const rawTitle = post.data.title;
+    titleEl.innerText = rawTitle.length > 140 
+        ? rawTitle.substring(0, 137) + "..." 
+        : rawTitle;
+}
                     if (upvoteEl) upvoteEl.innerText = `👍 ${post.data.ups.toLocaleString()}`;
                     if (commentEl) commentEl.innerText = `💬 ${post.data.num_comments.toLocaleString()}`;
 

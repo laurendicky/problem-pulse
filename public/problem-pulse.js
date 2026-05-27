@@ -12,7 +12,7 @@ const LENIENT_MIN_ACTIVE_USERS = 0;
 let originalGroupName = '';
 let _allRankedSubreddits = [];
 
-const suggestions = ["Dog Lovers", "Start-up Founders", "Fitness Freaks", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Software Developers", "Brides To Be"];
+const suggestions = ["Dog Lovers", "Start-up Founders", "Sneaker Buyers", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Software Developers", "Brides To Be"];
 const positiveColors = ['#00a5ce', '#0090b5', '#00c0e6', '#7bd9ec', '#b3e8f3', '#006d85'];
 const negativeColors = ['#fd80c7', '#d6539d', '#ff4fa3', '#ff99d6', '#fbb6ce', '#f472b6'];
 const lemmaMap = { 'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': 'love', 'loving': 'love', 'hates': 'hate', 'wishes': 'wish', 'wishing': 'wish', 'solutions': 'solution', 'challenges': 'challenge', 'recommended': 'recommend', 'disappointed': 'disappoint', 'frustrated': 'frustrate', 'annoyed': 'annoy' };
@@ -626,21 +626,39 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
         .map(item => item[0]);
 
     // --- PART 3: AI-FILTER (Unchanged) ---
-    let finalPositivePhrases = [], finalNegativePhrases = [];
+   
+    // --- PART 3: AI-FILTER (Updated to include Vibe Sentence) ---
+    let finalPositivePhrases = [], finalNegativePhrases = [], vibeSentence = "";
     if (candidatePhrases.length > 0) {
         try {
-            const prompt = `You are a market research analyst. Below is a list of common phrases from the "${audienceContext}" community. Your task is to filter this list. Identify phrases that express clear **positive sentiment** and **negative sentiment**. Ignore neutral phrases. Respond ONLY with a valid JSON object with two keys: "positive_phrases" and "negative_phrases", holding an array of the relevant strings you selected. Candidate Phrases: ${JSON.stringify(candidatePhrases)}`;
-            const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert sentiment filter that only outputs JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_completion_tokens: 1000, response_format: { "type": "json_object" } };
+            const prompt = `You are a market research analyst. Analyze these common phrases from the "${audienceContext}" community: ${JSON.stringify(candidatePhrases)}.
+            
+            1. Identify phrases with clear Positive vs Negative sentiment.
+            2. Write a single, short (max 15 words) "vibe sentence" summarizing the emotional state and how they respond to content (e.g., "Mostly frustrated and seeking solutions, but responds well to practical guidance").
+
+            Respond ONLY with a valid JSON object:
+            {"positive_phrases": [], "negative_phrases": [], "vibe_sentence": "..."}`;
+
+            const openAIParams = { 
+                model: "gpt-4o-mini", 
+                messages: [{ role: "system", content: "You are an expert sentiment analyst who outputs only JSON." }, { role: "user", content: prompt }], 
+                temperature: 0.1, 
+                response_format: { "type": "json_object" } 
+            };
+
             const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
             if (response.ok) {
                 const data = await response.json();
                 const parsed = JSON.parse(data.openaiResponse);
                 finalPositivePhrases = parsed.positive_phrases || [];
                 finalNegativePhrases = parsed.negative_phrases || [];
+                vibeSentence = parsed.vibe_sentence || "";
             }
-        } catch (error) { console.error("AI phrase filtering failed, proceeding with words only.", error); }
+        } catch (error) { console.error("AI sentiment filtering failed", error); }
     }
 
+    // Call the renderer with the new vibe sentence
+    renderSentimentScore(positiveCount, negativeCount, vibeSentence);
     // --- PART 4: Merge and Render (Now uses the correct counts) ---
     const renderCloud = (container, title, wordMap, phraseList, colors) => {
         const topWords = Array.from(wordMap.entries())
@@ -1556,7 +1574,52 @@ function renderBrandMomentumChart(data) {
     });
 }
 
-function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if (!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
+
+function renderSentimentScore(positiveCount, negativeCount, vibeSentence) {
+    const container = document.getElementById('sentiment-score-container');
+    if (!container) return;
+
+    // 1. Math
+    const total = positiveCount + negativeCount;
+    if (total === 0) return;
+    const positivePercent = Math.round((positiveCount / total) * 100);
+    const negativePercent = 100 - positivePercent;
+
+    // 2. SCOPING: Find the Parent Segments first
+    const posSegment = container.querySelector('.is-positive');
+    const negSegment = container.querySelector('.is-negative');
+    
+    // 3. TARGETING: Look INSIDE each parent for the text block
+    // This is how we distinguish between the two identical '.score-value' classes
+    if (posSegment) {
+        const posLabel = posSegment.querySelector('.score-value');
+        posSegment.style.width = `${positivePercent}%`;
+        if (posLabel) posLabel.innerText = `${positivePercent}% Positive`;
+    }
+
+    if (negSegment) {
+        const negLabel = negSegment.querySelector('.score-value');
+        negSegment.style.width = `${negativePercent}%`;
+        if (negLabel) negLabel.innerText = `${negativePercent}% Negative`;
+    }
+
+    // 4. Update the Webflow Text Blocks for Insights
+    const vibeLabelEl = container.querySelector('.sentiment-vibe-label');
+    const benchmarkEl = container.querySelector('.sentiment-benchmark-text');
+
+    if (vibeLabelEl) {
+        vibeLabelEl.innerText = vibeSentence || "Analyzing community sentiment profile...";
+    }
+    
+    if (benchmarkEl) {
+        const baseline = 55;
+        const diff = positivePercent - baseline;
+        benchmarkEl.innerText = diff >= 0 
+            ? `${diff}% more positive than the Reddit average.` 
+            : `${Math.abs(diff)}% more critical than the Reddit average.`;
+    }
+}
+
 
 // =================================================================================
 // === REPLACEMENT FUNCTION: fetchSentimentTrendData (V4 - With Context & Corrected Axis) ===

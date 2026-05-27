@@ -3053,6 +3053,7 @@ async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
         console.error("Language Avoid Error:", error);
         rowContainer.innerHTML = `<p class="placeholder-text">Language analysis timed out. Try a smaller search.</p>`;
     }
+}
 
     // =================================================================================
     // === NEW FUNCTION: AI AUDIENCE OVERVIEW (DEMOGRAPHICS) ===
@@ -3328,17 +3329,21 @@ async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
                     title: "General Insights",
                     body: `Community members in ${originalGroupName} are discussing various topics. View the raw posts below for details.`,
                     count: filteredItems.length,
-                    quotes: ["Look at raw posts for details"],
+                    quotes: ["Look at raw posts for details", "No specific quotes found", "Check the posts below"],
                     keywords: ["Discussion"]
                 }];
             }
 
+            // FIX: We must define validatedSummaries before calculating metrics
+            const validatedSummaries = summaries.filter(finding => 
+                filteredItems.filter(post => calculateRelevanceScore(post, finding) > 0).length >= 1
+            );
 
+            // Use the fallback if the AI summaries didn't match any posts
+            const finalSummaries = validatedSummaries.length > 0 ? validatedSummaries : summaries;
 
-
-
-
-            const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
+            const metrics = calculateFindingMetrics(finalSummaries, filteredItems);
+    
             const sortedFindings = validatedSummaries.map((summary, index) => ({
                 summary,
                 prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100),

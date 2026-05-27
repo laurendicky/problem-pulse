@@ -196,7 +196,29 @@ function deduplicateByContent(items) {
         return true;
     });
 }
-function parseAISummary(aiResponse) { try { aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim(); const jsonMatch = aiResponse.match(/{[\s\S]*}/); if (!jsonMatch) { throw new Error("No JSON object in AI response."); } const parsed = JSON.parse(jsonMatch[0]); if (!parsed.summaries || !Array.isArray(parsed.summaries) || parsed.summaries.length < 1) { throw new Error("AI response lacks a 'summaries' array."); } parsed.summaries.forEach((summary, idx) => { const missingFields = []; if (!summary.title) missingFields.push("title"); if (!summary.body) missingFields.push("body"); if (typeof summary.count !== 'number') missingFields.push("count"); if (!summary.quotes || !Array.isArray(summary.quotes) || summary.quotes.length < 1) missingFields.push("quotes"); if (!summary.keywords || !Array.isArray(summary.keywords) || summary.keywords.length === 0) missingFields.push("keywords"); if (missingFields.length > 0) throw new Error(`Summary ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`); }); return parsed.summaries; } catch (error) { console.error("Parsing Error:", error); console.log("Raw AI Response:", aiResponse); throw new Error("Failed to parse AI response."); } }
+function parseAISummary(aiResponse) {
+    try {
+        // CRITICAL FIX: If aiResponse is missing, don't try to use .replace()
+        if (!aiResponse) {
+            throw new Error("AI Response was empty or undefined.");
+        }
+
+        aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim();
+        const jsonMatch = aiResponse.match(/{[\s\S]*}/);
+        if (!jsonMatch) {
+            throw new Error("No JSON object in AI response.");
+        }
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (!parsed.summaries || !Array.isArray(parsed.summaries) || parsed.summaries.length < 1) {
+            throw new Error("AI response lacks a 'summaries' array.");
+        }
+        return parsed.summaries;
+    } catch (error) {
+        console.error("Parsing Error:", error);
+        // Return an empty array instead of crashing the whole site
+        return [];
+    }
+}
 function parseAIAssignments(aiResponse) { try { aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim(); const jsonMatch = aiResponse.match(/{[\s\S]*}/); if (!jsonMatch) { throw new Error("No JSON object in AI response."); } const parsed = JSON.parse(jsonMatch[0]); if (!parsed.assignments || !Array.isArray(parsed.assignments)) { throw new Error("AI response lacks an 'assignments' array."); } parsed.assignments.forEach((assignment, idx) => { const missingFields = []; if (typeof assignment.postNumber !== 'number') missingFields.push("postNumber"); if (typeof assignment.finding !== 'number') missingFields.push("finding"); if (missingFields.length > 0) throw new Error(`Assignment ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`); }); return parsed.assignments; } catch (error) { console.error("Parsing Error:", error); console.log("Raw AI Response:", aiResponse); throw new Error("Failed to parse AI response."); } }
 function filterPosts(posts, minUpvotes = 20) { return posts.filter(post => { const title = (post.data.title || post.data.link_title || '').toLowerCase(); const selftext = post.data.selftext || post.data.body || ''; if (title.includes('[ad]') || title.includes('sponsored') || post.data.upvote_ratio < 0.2 || post.data.ups < minUpvotes || !selftext || selftext.length < 20) return false; const isRamblingOrNoisy = (text) => { if (!text) return false; return /&#x[0-9a-fA-F]+;/g.test(text) || /[^a-zA-Z0-9\s]{5,}/g.test(text) || /(.)\1{6,}/g.test(text); }; return !isRamblingOrNoisy(title) && !isRamblingOrNoisy(selftext); }); }
 function getTopKeywords(posts, topN = 10) { const freqMap = {}; posts.forEach(post => { const cleanedText = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.replace(/<[^>]+>/g, '').replace(/[^a-zA-Z0-9\s.,!?]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); const words = cleanedText.split(/\s+/); words.forEach(word => { if (!stopWords.includes(word) && word.length > 2) { freqMap[word] = (freqMap[word] || 0) + 1; } }); }); return Object.keys(freqMap).sort((a, b) => freqMap[b] - freqMap[a]).slice(0, topN); }
@@ -427,13 +449,13 @@ function renderEmotionMap(data) {
                 label: 'Problems/Topics',
                 data: data,
                 // 3. CIRCLE COLOUR: TEAL
-                backgroundColor: '#00a5ce', 
+                backgroundColor: '#00a5ce',
                 borderColor: 'rgba(255, 255, 255, 0.5)',
                 borderWidth: 1,
                 pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20,
                 pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20,
                 // 4. ENSURE CIRCLES ARE NOT CLIPPED BY AXIS LINES
-                clip: false, 
+                clip: false,
             }]
         },
         options: {
@@ -726,10 +748,10 @@ async function generateAndRenderCloudInsights(posts, audienceContext) {
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
         });
 
         const data = await response.json();
@@ -754,7 +776,7 @@ async function generateAndRenderToneMap(posts, audienceContext) {
     container.innerHTML = '<p class="loading-text">Performing deep tonal analysis...</p>';
 
     try {
-        const topPostsText = posts.slice(0, 40).map(p => 
+        const topPostsText = posts.slice(0, 40).map(p =>
             `Topic: ${p.data.title || ''} - ${(p.data.selftext || p.data.body || '').substring(0, 200)}`
         ).join('\n---\n');
 
@@ -774,10 +796,10 @@ async function generateAndRenderToneMap(posts, audienceContext) {
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
         });
 
         const data = await response.json();
@@ -787,7 +809,7 @@ async function generateAndRenderToneMap(posts, audienceContext) {
 
         parsed.tone_analysis.forEach(item => {
             const card = TONE_CARD_BLUEPRINT.cloneNode(true);
-            
+
             // 1. Fill Card Basics
             card.querySelector('.tone-topic-title').innerText = item.topic;
             card.querySelector('.tone-what-means').innerText = item.meaning;
@@ -800,13 +822,13 @@ async function generateAndRenderToneMap(posts, audienceContext) {
             item.traits.forEach(trait => {
                 const traitRow = TONE_TRAIT_BLUEPRINT.cloneNode(true);
                 traitRow.querySelector('.tone-trait-name').innerText = trait.name || trait.adjective || trait.word;
-                
+
                 // Drive the Webflow bar width via JS
                 const fillBar = traitRow.querySelector('.tone-bar-fill');
                 if (fillBar) {
                     fillBar.style.width = `${trait.score}%`;
                 }
-                
+
                 traitsContainer.appendChild(traitRow);
             });
 
@@ -826,12 +848,12 @@ async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map
 
 async function extractAndValidateEntities(posts, nicheContext) {
     // 1. Prepare text for counting
-    const allText = posts.map(p => 
+    const allText = posts.map(p =>
         (p.data.title || '') + " " + (p.data.selftext || p.data.body || '')
     ).join(" [SEP] ").toLowerCase();
 
     // 2. Sample for AI with a stricter prompt
-    const sampleText = posts.slice(0, 50).map(p => 
+    const sampleText = posts.slice(0, 50).map(p =>
         `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 300)}`
     ).join('\n---\n');
 
@@ -846,21 +868,21 @@ async function extractAndValidateEntities(posts, nicheContext) {
 
     Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}`;
 
-    const openAIParams = { 
-        model: "gpt-4o-mini", 
+    const openAIParams = {
+        model: "gpt-4o-mini",
         messages: [
-            { role: "system", content: "You are a specialized business data extractor. You distinguish between commercial entities and personal names." }, 
+            { role: "system", content: "You are a specialized business data extractor. You distinguish between commercial entities and personal names." },
             { role: "user", content: prompt + "\n\nText to analyze:\n" + sampleText }
-        ], 
-        temperature: 0, 
-        response_format: { "type": "json_object" } 
+        ],
+        temperature: 0,
+        response_format: { "type": "json_object" }
     };
 
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
-        
+
         if (!window._entityData) window._entityData = { brands: {}, products: {} };
 
         ['brands', 'products'].forEach(type => {
@@ -872,7 +894,7 @@ async function extractAndValidateEntities(posts, nicheContext) {
                 // Improved Regex: Handles spaces and hyphens better for brands like Milk-Bone
                 const escapedName = cleanKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                 const regex = new RegExp(`\\b${escapedName}(s|es|'s)?\\b`, 'gi');
-                
+
                 const occurrenceMatch = allText.match(regex);
                 const occurrenceCount = occurrenceMatch ? occurrenceMatch.length : 0;
 
@@ -880,13 +902,13 @@ async function extractAndValidateEntities(posts, nicheContext) {
 
                 if (occurrenceCount > 0) {
                     if (!window._entityData[type][cleanKey]) {
-                        window._entityData[type][cleanKey] = { 
-                            originalName: name, 
-                            count: 0, 
-                            posts: [] 
+                        window._entityData[type][cleanKey] = {
+                            originalName: name,
+                            count: 0,
+                            posts: []
                         };
                     }
-                    
+
                     // Increment the count (useful for the comment-enhancement pass)
                     window._entityData[type][cleanKey].count += occurrenceCount;
 
@@ -920,7 +942,7 @@ async function enhanceDiscoveryWithComments(initialPosts, nicheContext) {
         if (!comments || comments.length < 5) return;
 
         const uniqueComments = deduplicateByContent(comments);
-        
+
         // Pass the comments through the updated extraction engine
         await extractAndValidateEntities(uniqueComments, nicheContext);
 
@@ -1418,12 +1440,12 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
     if (briefCache.has(itemName)) {
         targetPanel.innerHTML = briefCache.get(itemName);
         if (isBrand && targetPanel.querySelector('#brand-momentum-chart-data')) {
-             const cachedTrend = JSON.parse(targetPanel.querySelector('#brand-momentum-chart-data').textContent);
-             if (cachedTrend) renderBrandMomentumChart(cachedTrend);
+            const cachedTrend = JSON.parse(targetPanel.querySelector('#brand-momentum-chart-data').textContent);
+            if (cachedTrend) renderBrandMomentumChart(cachedTrend);
         }
         return;
     }
-    
+
     const postsForAnalysis = (window._entityData?.[itemType]?.[itemName]?.posts || []);
     const top50Posts = postsForAnalysis.slice(0, 50);
     const topPostsText = top50Posts.map(p => `"${p.data.title || ''} - ${p.data.selftext || p.data.body || ''}"`).join('\n');
@@ -1433,11 +1455,11 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
             `Analyze "${itemName}" based on: ${topPostsText}. Return JSON with: what_it_is, use_case, loves (array), hates (array), verdict.` :
             `Analyze category "${itemName}" based on: ${topPostsText}. Return JSON with: what_it_is, job_to_be_done, table_stakes (array), disruption_opportunities (array).`;
 
-        const openAIParams = { 
-            model: "gpt-5.4-mini", 
-            messages: [{ role: "system", content: "You are a fast market analyst. Output JSON." }, { role: "user", content: prompt }], 
-            temperature: 0.1, 
-            response_format: { "type": "json_object" } 
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [{ role: "system", content: "You are a fast market analyst. Output JSON." }, { role: "user", content: prompt }],
+            temperature: 0.1,
+            response_format: { "type": "json_object" }
         };
 
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
@@ -1480,7 +1502,7 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         if (isBrand) {
             const selectedSubreddits = Array.from(document.querySelectorAll('#subreddit-choices input:checked')).map(cb => cb.value);
             const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
-            
+
             fetchSentimentTrendData(itemName, subredditQueryString).then(trendResult => {
                 if (trendResult && trendResult.length > 0) {
                     renderBrandMomentumChart(trendResult);
@@ -1532,16 +1554,16 @@ function renderBrandMomentumChart(data) {
             padding: 16, // FIX: Added internal padding for breathability
             borderRadius: 10,
             shadow: true,
-            style: { 
-                fontSize: '14px', 
-                zIndex: 9999 
+            style: {
+                fontSize: '14px',
+                zIndex: 9999
             },
             formatter: function () {
                 const context = this.point.options.context;
                 let html = `<div style="min-width: 220px; max-width: 280px; white-space: normal; line-height: 1.4;">`;
                 html += `<b>${this.key}</b><br/>`;
                 html += `<span style="color:${this.series.color}">●</span> Positive: <b>${this.y}%</b>`;
-                
+
                 if (context) {
                     html += `<hr style="margin: 8px 0; border: 0; border-top: 1px solid #eee;">`;
                     if (context.positive_theme) html += `<div style="margin-bottom:4px"><span style="color:#28a745">🟢</span> ${context.positive_theme}</div>`;
@@ -1643,9 +1665,9 @@ async function generateAndRenderConstellation(items) {
             });
 
             if (!response.ok) throw new Error(`Batch from index ${batchStartIndex} failed.`);
-            
+
             const data = await response.json();
-            
+
             // FIX 2: Safely check if openaiResponse exists before parsing
             if (!data || !data.openaiResponse) {
                 throw new Error("Proxy timed out or returned invalid format.");
@@ -1657,7 +1679,7 @@ async function generateAndRenderConstellation(items) {
                     quote: signal.quote,
                     sourceItem: prioritizedItems[batchStartIndex + signal.source_index]
                 })).filter(s => s.sourceItem);
-                
+
                 rawSignals.push(...validSignals);
             }
         } catch (error) {
@@ -1678,29 +1700,29 @@ async function generateAndRenderConstellation(items) {
 
     const enrichedSignals = [];
     const validCategories = ["DemandSignals", "WillingnessToPay", "Frustration", "SubstituteComparisons", "Urgency", "CostConcerns"];
-    
+
     for (const rawSignal of rawSignals) {
         try {
             const enrichmentPrompt = `You are a market research analyst. For the quote below, provide a short summary of the user's core problem and classify it into the MOST relevant category. Here are the categories: [${validCategories.join(', ')}]. Quote: "${rawSignal.quote}" Provide a JSON object with: 1. "problem_theme": A short, 4-5 word summary of the core problem. 2. "category": Classify into ONE of the categories. Respond ONLY with a valid JSON object.`;
             const enrichmentResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_completion_tokens: 250, response_format: { "type": "json_object" } } }) });
-            
+
             if (enrichmentResponse.ok) {
                 const enrichmentData = await enrichmentResponse.json();
-                
+
                 // FIX 3: Safety check on enrichment payload
                 if (enrichmentData && enrichmentData.openaiResponse) {
                     const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse);
                     if (parsedEnrichment.problem_theme && parsedEnrichment.category) {
                         enrichedSignals.push({ ...rawSignal, ...parsedEnrichment, source: rawSignal.sourceItem.data });
-                    } else { 
-                        console.warn("Skipping a signal due to missing fields in AI enrichment response:", parsedEnrichment); 
+                    } else {
+                        console.warn("Skipping a signal due to missing fields in AI enrichment response:", parsedEnrichment);
                     }
                 }
-            } else { 
-                console.warn(`Failed to enrich a signal. Status: ${enrichmentResponse.status}`); 
+            } else {
+                console.warn(`Failed to enrich a signal. Status: ${enrichmentResponse.status}`);
             }
-        } catch (error) { 
-            console.error("CRITICAL ERROR during individual signal enrichment:", error.message); 
+        } catch (error) {
+            console.error("CRITICAL ERROR during individual signal enrichment:", error.message);
         }
     }
 
@@ -1980,7 +2002,7 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
 async function generateAndRenderStrategicPillars(posts, audienceContext) {
     const goalsContainer = document.getElementById('goals-pillar');
     const fearsContainer = document.getElementById('fears-pillar');
-    
+
     if (!goalsContainer || !fearsContainer || !PILLAR_BLUEPRINT) return;
 
     // 1. Clear the containers
@@ -1999,10 +2021,10 @@ async function generateAndRenderStrategicPillars(posts, audienceContext) {
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
         });
 
         const data = await response.json();
@@ -2394,16 +2416,16 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         if (!response.ok) throw new Error('AI SEO plan generation failed.');
 
         const aiResult = await response.json();
-        
+
         // FIX: Verify openaiResponse actually exists to prevent "undefined is not valid JSON"
         if (!aiResult || !aiResult.openaiResponse) {
             throw new Error("AI Proxy failed to return a valid response (possible server timeout).");
         }
-        
+
         const seoPlan = JSON.parse(aiResult.openaiResponse);
         generateAndRenderActionCards(seoPlan, audienceContext);
 
-      
+
         // =========================================================================
         // === STEP 1: CORRECTED DATA GENERATION ===================================
         // =========================================================================
@@ -2726,7 +2748,7 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
 
     try {
         // Prepare a sample of the most relevant text
-        const textSample = posts.slice(0, 40).map(p => 
+        const textSample = posts.slice(0, 40).map(p =>
             `${p.data.title} ${(p.data.selftext || '').substring(0, 200)}`
         ).join('\n---\n');
 
@@ -2755,12 +2777,12 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
         });
-        
+
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
@@ -2774,7 +2796,7 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
 
         parsed.terms.forEach(item => {
             const clone = PHRASE_BLUEPRINT.cloneNode(true);
-            
+
             // Map the AI data to your Webflow Blueprint IDs/Classes
             const find = (selector) => clone.querySelector(`#${selector}`) || clone.querySelector(`.${selector}`);
 
@@ -2849,10 +2871,10 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
         });
 
         const data = await response.json();
@@ -2862,7 +2884,7 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
 
         parsed.patterns.forEach(pattern => {
             const card = HOOK_CARD_BLUEPRINT.cloneNode(true);
-            
+
             const categoryEl = card.querySelector('.hook-category');
             const whyEl = card.querySelector('.hook-why');
             const reasonEl = card.querySelector('.why-reason'); // THE NEW ELEMENT
@@ -2871,14 +2893,14 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
             if (categoryEl) categoryEl.innerText = pattern.category;
             if (whyEl) whyEl.innerText = pattern.short_summary;
             if (reasonEl) reasonEl.innerText = pattern.strategy;
-            
+
             if (listContainer) {
                 listContainer.innerHTML = '';
                 const validExamples = (pattern.example_ids || []).map(id => topPosts[parseInt(id)]).filter(Boolean);
 
                 validExamples.forEach(post => {
                     const item = HOOK_ITEM_BLUEPRINT.cloneNode(true);
-                    
+
                     const titleEl = item.querySelector('.hook-proof-title');
                     const upvoteEl = item.querySelector('.proof-badge-upvotes');
                     const commentEl = item.querySelector('.proof-badge-comments');
@@ -2922,7 +2944,7 @@ async function generateAndRenderVoiceProfile(posts, audienceContext) {
     if (tagsContainer) tagsContainer.innerHTML = ""; // Clear your Webflow dummy tags
 
     try {
-        const topPostsText = posts.slice(0, 40).map(p => 
+        const topPostsText = posts.slice(0, 40).map(p =>
             `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
         ).join('\n---\n');
 
@@ -2938,10 +2960,10 @@ async function generateAndRenderVoiceProfile(posts, audienceContext) {
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
         });
 
         const data = await response.json();
@@ -2982,7 +3004,7 @@ async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
     rowContainer.innerHTML = '';
 
     try {
-        const topPostsText = posts.slice(0, 40).map(p => 
+        const topPostsText = posts.slice(0, 40).map(p =>
             `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
         ).join('\n---\n');
 
@@ -2998,55 +3020,58 @@ async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ openaiPayload: openAIParams }) 
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
         });
 
         if (!response.ok) throw new Error('Language Avoid API call failed.');
 
         const data = await response.json();
+
+        // CRITICAL FIX: Check if openaiResponse exists before parsing
+        if (!data || !data.openaiResponse) {
+            throw new Error("Proxy returned empty response.");
+        }
+
         const parsed = JSON.parse(data.openaiResponse);
 
         // 4. Loop through AI results and clone your Webflow design
-        parsed.pairs.forEach(pair => {
-            const clone = LANGUAGE_ITEM_BLUEPRINT.cloneNode(true);
-            
-            const avoidEl = clone.querySelector('.term-avoid');
-            const insteadEl = clone.querySelector('.term-instead');
-
-            if (avoidEl) avoidEl.innerText = pair.avoid;
-            if (insteadEl) insteadEl.innerText = pair.instead;
-
-            rowContainer.appendChild(clone);
-        });
+        if (parsed.pairs && Array.isArray(parsed.pairs)) {
+            parsed.pairs.forEach(pair => {
+                const clone = LANGUAGE_ITEM_BLUEPRINT.cloneNode(true);
+                const avoidEl = clone.querySelector('.term-avoid');
+                const insteadEl = clone.querySelector('.term-instead');
+                if (avoidEl) avoidEl.innerText = pair.avoid;
+                if (insteadEl) insteadEl.innerText = pair.instead;
+                rowContainer.appendChild(clone);
+            });
+        }
 
     } catch (error) {
         console.error("Language Avoid Error:", error);
-        rowContainer.innerHTML = `<p class="placeholder-text">Language analysis temporarily unavailable.</p>`;
+        rowContainer.innerHTML = `<p class="placeholder-text">Language analysis timed out. Try a smaller search.</p>`;
     }
-}
 
-
-// =================================================================================
-// === NEW FUNCTION: AI AUDIENCE OVERVIEW (DEMOGRAPHICS) ===
-// =================================================================================
+    // =================================================================================
+    // === NEW FUNCTION: AI AUDIENCE OVERVIEW (DEMOGRAPHICS) ===
+    // =================================================================================
 
 
 
-async function generateAndRenderOverview(posts, audienceContext) {
-    const container = document.getElementById('overview-div');
-    if (!container) return;
+    async function generateAndRenderOverview(posts, audienceContext) {
+        const container = document.getElementById('overview-div');
+        if (!container) return;
 
-    container.innerHTML = `<p class="loading-text">Calculating demographic proportions...</p>`;
+        container.innerHTML = `<p class="loading-text">Calculating demographic proportions...</p>`;
 
-    try {
-        const topPostsText = posts.slice(0, 50).map(p =>
-            `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 600)
-        ).join('\n---\n');
+        try {
+            const topPostsText = posts.slice(0, 50).map(p =>
+                `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 600)
+            ).join('\n---\n');
 
-        const prompt = `You are a data analyst. Based on the language, slang, and life experiences mentioned in these Reddit posts for "${audienceContext}", provide a specific demographic estimate.
+            const prompt = `You are a data analyst. Based on the language, slang, and life experiences mentioned in these Reddit posts for "${audienceContext}", provide a specific demographic estimate.
 
         CRITICAL: You must provide numerical percentages. Even if they are estimates, they must be specific.
 
@@ -3060,23 +3085,23 @@ async function generateAndRenderOverview(posts, audienceContext) {
 
         Text: ${topPostsText}`;
 
-        const openAIParams = {
-            model: "gpt-5.4-mini",
-            messages: [{ role: "system", content: "You are a precise demographic estimator." }, { role: "user", content: prompt }],
-            temperature: 0.1, // Lower temperature makes it more consistent
-            response_format: { "type": "json_object" }
-        };
+            const openAIParams = {
+                model: "gpt-5.4-mini",
+                messages: [{ role: "system", content: "You are a precise demographic estimator." }, { role: "user", content: prompt }],
+                temperature: 0.1, // Lower temperature makes it more consistent
+                response_format: { "type": "json_object" }
+            };
 
-        const response = await fetch(OPENAI_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: openAIParams })
-        });
+            const response = await fetch(OPENAI_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ openaiPayload: openAIParams })
+            });
 
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
+            const data = await response.json();
+            const parsed = JSON.parse(data.openaiResponse);
 
-        container.innerHTML = `
+            container.innerHTML = `
             <div style="background: #111; padding: 24px; border-radius: 12px; border: 1px solid #333; color: white; font-family: sans-serif;">
                 <h3 style="margin: 0 0 20px 0; font-size: 18px; color: #00a5ce;">Audience Demographics</h3>
                 
@@ -3116,519 +3141,536 @@ async function generateAndRenderOverview(posts, audienceContext) {
             </div>
         `;
 
-    } catch (error) {
-        console.error("Overview error:", error);
-        container.innerHTML = "Error analyzing detailed demographics.";
-    }
-}
-
-
-async function runProblemFinder(options = {}) {
-
-    console.log("CHECKPOINT 2: Inside runProblemFinder. The audience is:", originalGroupName);
-
-    const { isUpdate = false } = options;
-   if (!isUpdate && !PHRASE_BLUEPRINT) {
-    const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
-    if (found) {
-        PHRASE_BLUEPRINT = found.cloneNode(true);
-        // We do NOT set .style.display here. We let Webflow handle the CSS.
-        PHRASE_BLUEPRINT.id = ''; 
-        console.log("Blueprint captured exactly as styled in Webflow.");
-    }
-}
- 
- 
-// Add this near where you capture PHRASE_BLUEPRINT
-if (!isUpdate && !PILLAR_BLUEPRINT) {
-    const found = document.querySelector('.pillar-item-template');
-    if (found) {
-        PILLAR_BLUEPRINT = found.cloneNode(true);
-        console.log("Strategic Pillar blueprint captured.");
-    }
-}
-// Capture Voice Pill Blueprint
-if (!VOICE_PILL_BLUEPRINT) {
-    const container = document.querySelector('.voice-adjective-tags');
-    if (container) {
-        // Grab the first text element inside the container to use as our "pill" design
-        const foundPill = container.querySelector('.voice-adjective-tags'); 
-        if (foundPill) {
-            VOICE_PILL_BLUEPRINT = foundPill.cloneNode(true);
-            console.log("Voice Pill blueprint captured.");
+        } catch (error) {
+            console.error("Overview error:", error);
+            container.innerHTML = "Error analyzing detailed demographics.";
         }
     }
-}
-// Capture Hook Card Blueprint
-if (!HOOK_CARD_BLUEPRINT) {
-    const foundCard = document.querySelector('.hook-pattern-card');
-    if (foundCard) {
-        HOOK_CARD_BLUEPRINT = foundCard.cloneNode(true);
-        
-        // Inside that card, capture the individual example item design
-        const foundItem = HOOK_CARD_BLUEPRINT.querySelector('.hook-proof-item');
-        if (foundItem) {
-            HOOK_ITEM_BLUEPRINT = foundItem.cloneNode(true);
+
+
+    async function runProblemFinder(options = {}) {
+
+        console.log("CHECKPOINT 2: Inside runProblemFinder. The audience is:", originalGroupName);
+
+        const { isUpdate = false } = options;
+        if (!isUpdate && !PHRASE_BLUEPRINT) {
+            const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+            if (found) {
+                PHRASE_BLUEPRINT = found.cloneNode(true);
+                // We do NOT set .style.display here. We let Webflow handle the CSS.
+                PHRASE_BLUEPRINT.id = '';
+                console.log("Blueprint captured exactly as styled in Webflow.");
+            }
         }
-        
-        console.log("Hook Card & Item blueprints captured.");
-    }
-}
-// Capture Mindset Item Blueprint
-if (!MINDSET_ITEM_BLUEPRINT) {
-    const foundMindset = document.querySelector('.mindset-item-template');
-    if (foundMindset) {
-        MINDSET_ITEM_BLUEPRINT = foundMindset.cloneNode(true);
-        console.log("Mindset Item blueprint captured.");
-    }
-}
 
-// Capture Language Avoid Blueprint
-if (!AVOID_SWAP_BLUEPRINT) {
-    const foundSwap = document.querySelector('.avoid-instead-row'); // Match your Webflow class
-    if (foundSwap) {
-        AVOID_SWAP_BLUEPRINT = foundSwap.cloneNode(true);
-        console.log("Language Avoid blueprint captured.");
-    }
-}
-// Capture Language Avoid Item Blueprint
-if (!LANGUAGE_ITEM_BLUEPRINT) {
-    const foundLanguageItem = document.querySelector('.avoid-instead-list');
-    if (foundLanguageItem) {
-        LANGUAGE_ITEM_BLUEPRINT = foundLanguageItem.cloneNode(true);
-        console.log("Language Item blueprint captured.");
-    }
-}
-// Capture Tone Card & Trait Blueprints
-if (!TONE_CARD_BLUEPRINT) {
-    const card = document.querySelector('.tone-card-blueprint');
-    if (card) {
-        TONE_CARD_BLUEPRINT = card.cloneNode(true);
-        TONE_TRAIT_BLUEPRINT = card.querySelector('.tone-trait-row').cloneNode(true);
-        console.log("Tone Deep Dive blueprints captured.");
-    }
-}
-    const growthHeaderPrefix = document.getElementById('growth-header-prefix');
-    if (growthHeaderPrefix) {
-        growthHeaderPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${originalGroupName}</span> struggling with`;
-    }
-    const searchButton = document.getElementById('search-selected-btn');
-    if (!searchButton) { console.error("Could not find button."); return; }
-    const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked');
-    if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
-    const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
 
-    const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
-    if (!isUpdate) {
-        searchButton.classList.add('is-loading');
-        searchButton.disabled = true;
-    }
-    const problemTerms = ["problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for"];
-    const deepProblemTerms = ["struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent"];
-    const demandSignalTerms = ["i'd pay good money for", "buy it in a second", "i'd subscribe to", "throw money at it", "where can i buy", "happily pay", "shut up and take my money", "sick of doing this manually", "can't find anything that", "waste so much time on", "has to be a better way", "shouldn't be this hard", "why is there no tool for", "why is there no app for", "tried everything and nothing works", "tool almost did what i wanted", "it's missing", "tried", "gave up on it", "if only there was an app", "i wish someone would build", "why hasn't anyone made", "waste hours every week", "such a timesuck", "pay just to not have to think", "rather pay than do this myself"];
-    const resultsWrapper = document.getElementById('results-wrapper-b');
-    const resultsMessageDiv = document.getElementById("results-message");
-    const countHeaderDiv = document.getElementById("count-header");
-    if (!isUpdate) {
-        if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "overview-div", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases", "value-tree"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
-        if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
-        for (let i = 1; i <= 5; i++) {
-            const block = document.getElementById(`findings-block${i}`);
-            if (block) {
-                block.style.display = 'none';
-                const prevalenceWrapper = block.querySelector('.prevalence-container-wrapper');
-                if (prevalenceWrapper) {
-                    prevalenceWrapper.innerHTML = "<p class='loading-text' style='text-align: center; padding: 2rem;'>Brewing insights...</p>";
+        // Add this near where you capture PHRASE_BLUEPRINT
+        if (!isUpdate && !PILLAR_BLUEPRINT) {
+            const found = document.querySelector('.pillar-item-template');
+            if (found) {
+                PILLAR_BLUEPRINT = found.cloneNode(true);
+                console.log("Strategic Pillar blueprint captured.");
+            }
+        }
+        // Capture Voice Pill Blueprint
+        if (!VOICE_PILL_BLUEPRINT) {
+            const container = document.querySelector('.voice-adjective-tags');
+            if (container) {
+                // Grab the first text element inside the container to use as our "pill" design
+                const foundPill = container.querySelector('.voice-adjective-tags');
+                if (foundPill) {
+                    VOICE_PILL_BLUEPRINT = foundPill.cloneNode(true);
+                    console.log("Voice Pill blueprint captured.");
                 }
             }
         }
-    }
-    try {
-        console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
-        const panelContent = document.getElementById('bubble-content');
-        if (panelContent) {
-            panelContent.innerHTML = `<div class="panel-placeholder">Loading purchase signals... <span class="loader-dots"></span></div>`;
-        }
-        const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
-        let generalSearchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms] : problemTerms;
-        let limitPerTerm = (searchDepth === 'deep') ? 75 : 40;
-        const selectedTimeRaw = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
-        const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
-        const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
-        const selectedTime = timeMap[selectedTimeRaw] || "all";
-        const problemItems = await fetchMultipleRedditDataBatched(subredditQueryString, generalSearchTerms, limitPerTerm, selectedTime, false);
-        const allItems = deduplicatePosts(problemItems);
-        if (allItems.length === 0) throw new Error("No initial problem posts found. Try different communities or a broader search.");
-        const filteredItems = filterPosts(allItems, selectedMinUpvotes);
-        if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
-        window._filteredPosts = filteredItems;
-        generateAndRenderOverview(filteredItems, originalGroupName);
-        renderPosts(filteredItems);
-        generateAndRenderHybridSentiment(filteredItems, originalGroupName);
-        generateEmotionMapData(filteredItems).then(renderEmotionMap);
-        renderIncludedSubreddits(selectedSubreddits);
-        generateAndRenderPowerPhrases(filteredItems, originalGroupName);
-        generateAndRenderVoiceProfile(filteredItems, originalGroupName);
-        generateAndRenderLanguageToAvoid(filteredItems, originalGroupName);
-        generateAndRenderHookPatterns(filteredItems, originalGroupName);
-        generateAndRenderToneMap(filteredItems, originalGroupName);
-        setTimeout(() => {
-            generateAndRenderCloudInsights(filteredItems, originalGroupName);
-        }, 2000);
-        generateAndRenderMindsetSummary(filteredItems, originalGroupName);
-        generateAndRenderStrategicPillars(filteredItems, originalGroupName);
-        generateAndRenderAIPrompt(filteredItems, originalGroupName);
-        generateAndRenderSeoSunburst(filteredItems, originalGroupName);
-        extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
-        generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
-        if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }
-        const topKeywords = getTopKeywords(filteredItems, 10);
-        const topPosts = filteredItems.slice(0, 30);
-        const combinedTexts = topPosts.map(post => `${post.data.title || post.data.link_title || ''}. ${getFirstTwoSentences(post.data.selftext || post.data.body || '')}`).join("\n\n");
-        const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". CRITICAL RULES FOR QUOTES: The "quotes" array must contain exactly 3 strings, and each string MUST be 63 characters or less. Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["A short quote under 63 chars.", "Another quote under 63 chars.", "A final quote under 63 chars."], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_completion_tokens: 1500, response_format: { "type": "json_object" } };
-        const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        if (!openAIResponse.ok) throw new Error('OpenAI summary generation failed.');
-        const openAIData = await openAIResponse.json();
-        const summaries = parseAISummary(openAIData.openaiResponse);
-        const validatedSummaries = summaries.filter(finding => filteredItems.filter(post => calculateRelevanceScore(post, finding) > 0).length >= 3);
-        if (validatedSummaries.length === 0) {
-            console.warn("AI generated summaries, but none met the validation threshold of 3 supporting posts.");
-            throw new Error("While posts were found, no clear, common problems emerged after analysis.");
-        }
-        const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
-        const sortedFindings = validatedSummaries.map((summary, index) => ({
-            summary,
-            prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100),
-            supportCount: metrics[index].supportCount
-        })).sort((a, b) => b.prevalence - a.prevalence);
+        // Capture Hook Card Blueprint
+        if (!HOOK_CARD_BLUEPRINT) {
+            const foundCard = document.querySelector('.hook-pattern-card');
+            if (foundCard) {
+                HOOK_CARD_BLUEPRINT = foundCard.cloneNode(true);
 
-        console.log("CHECKPOINT A: Analysis is complete. Found these findings:", sortedFindings);
-        const problemTitles = sortedFindings.map(finding => finding.summary.title);
-        updateGrowthHeaderDropdown(problemTitles);
-        console.log("CHECKPOINT B: The dropdown should now be updated.");
-        if (problemTitles.length > 0) {
-            const headerLabel = document.getElementById('growth-header-label');
-            if (headerLabel) {
-                headerLabel.textContent = problemTitles[0];
-            }
-        }
-        window._summaries = sortedFindings.map(item => item.summary);
-
-        for (let i = 1; i <= 5; i++) {
-            const block = document.getElementById(`findings-block${i}`);
-            if (block) block.style.display = "none";
-        }
-        sortedFindings.forEach((findingData, index) => {
-            const displayIndex = index + 1;
-            if (displayIndex > 5) return;
-            const block = document.getElementById(`findings-block${displayIndex}`);
-            if (!block) return;
-            const content = document.getElementById(`findings-${displayIndex}`);
-            const btn = block.querySelector('.sample-posts-button');
-            block.style.display = "flex";
-            if (content) {
-                const { summary, prevalence, supportCount } = findingData;
-                const titleEl = content.querySelector('.section-title');
-                if (titleEl) titleEl.textContent = summary.title;
-                const teaserEl = content.querySelector('.summary-teaser');
-                const fullEl = content.querySelector('.summary-full');
-                const seeMoreBtn = content.querySelector('.see-more-btn');
-                if (teaserEl && fullEl && seeMoreBtn) {
-                    if (summary.body.length > 95) {
-                        teaserEl.textContent = summary.body.substring(0, 95) + "…";
-                        fullEl.textContent = summary.body;
-                        teaserEl.style.display = 'inline';
-                        fullEl.style.display = 'none';
-                        seeMoreBtn.style.display = 'inline-block';
-                        seeMoreBtn.textContent = 'See more';
-                        const newBtn = seeMoreBtn.cloneNode(true);
-                        seeMoreBtn.parentNode.replaceChild(newBtn, seeMoreBtn);
-                        newBtn.addEventListener('click', function () {
-                            const isHidden = teaserEl.style.display !== 'none';
-                            teaserEl.style.display = isHidden ? 'none' : 'inline';
-                            fullEl.style.display = isHidden ? 'inline' : 'none';
-                            newBtn.textContent = isHidden ? 'See less' : 'See more';
-                        });
-                    } else {
-                        teaserEl.textContent = summary.body;
-                        teaserEl.style.display = 'inline';
-                        fullEl.style.display = 'none';
-                        seeMoreBtn.style.display = 'none';
-                    }
+                // Inside that card, capture the individual example item design
+                const foundItem = HOOK_CARD_BLUEPRINT.querySelector('.hook-proof-item');
+                if (foundItem) {
+                    HOOK_ITEM_BLUEPRINT = foundItem.cloneNode(true);
                 }
-                const quotesContainer = content.querySelector('.quotes-container');
-                if (quotesContainer) {
-                    const quoteElements = quotesContainer.querySelectorAll('.quote');
-                    summary.quotes.forEach((quoteText, i) => {
-                        if (quoteElements[i]) {
-                            if (quoteText) {
-                                quoteElements[i].textContent = `"${quoteText}"`;
-                                quoteElements[i].style.display = 'block';
-                            } else {
-                                quoteElements[i].style.display = 'none';
-                            }
-                        }
-                    });
-                }
-                const metricsWrapper = content.querySelector('.prevalence-container-wrapper');
-                if (metricsWrapper) {
-                    metricsWrapper.innerHTML = (sortedFindings.length === 1) ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
-                }
-            }
-            if (btn) {
-                btn.onclick = () => showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds);
-            }
-        });
-        try {
-            window._postsForAssignment = filteredItems.slice(0, 75);
-            window._usedPostIds = new Set();
-            const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment);
-            window._assignments = assignments;
-            for (let i = 0; i < window._summaries.length; i++) {
-                if (i >= 5) break;
-                showSamplePosts(i, assignments, filteredItems, window._usedPostIds);
-            }
-        } catch (err) {
-            console.error("CRITICAL (but isolated): Failed to assign posts to findings.", err);
-            for (let i = 1; i <= 5; i++) { const redditDiv = document.getElementById(`reddit-div${i}`); if (redditDiv) { redditDiv.innerHTML = `<div style="font-style: italic; color: #999;">Could not load sample posts.</div>`; } }
-        }
 
-        // This is the single, correct call for the new mind map
-        generateAndRenderValueSankey(originalGroupName, window._summaries);
-
-        if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
-            if (resultsWrapper) {
-                resultsWrapper.style.setProperty('display', 'flex', 'important');
-                setTimeout(() => {
-                    if (resultsWrapper) {
-                        resultsWrapper.style.opacity = '1';
-                        if (!isUpdate) {
-                            resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
-                            const fullHeader = document.getElementById('full-header');
-                            if (fullHeader) {
-                                fullHeader.classList.add('header-hidden');
-                                fullHeader.addEventListener('transitionend', () => {
-                                    fullHeader.style.display = 'none';
-                                }, { once: true });
-                            }
-                        }
-                    }
-                }, 50);
+                console.log("Hook Card & Item blueprints captured.");
             }
         }
-        setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
-        setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
-        setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
-    } catch (err) {
-        console.error("!!!!!!!! A FATAL ERROR STOPPED THE ANALYSIS !!!!!!!!", err);
-        alert("An error occurred during analysis. Please check the console for details. Error: " + err.message);
-        if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
-        if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); resultsWrapper.style.opacity = '1'; }
-    } finally {
+        // Capture Mindset Item Blueprint
+        if (!MINDSET_ITEM_BLUEPRINT) {
+            const foundMindset = document.querySelector('.mindset-item-template');
+            if (foundMindset) {
+                MINDSET_ITEM_BLUEPRINT = foundMindset.cloneNode(true);
+                console.log("Mindset Item blueprint captured.");
+            }
+        }
+
+        // Capture Language Avoid Blueprint
+        if (!AVOID_SWAP_BLUEPRINT) {
+            const foundSwap = document.querySelector('.avoid-instead-row'); // Match your Webflow class
+            if (foundSwap) {
+                AVOID_SWAP_BLUEPRINT = foundSwap.cloneNode(true);
+                console.log("Language Avoid blueprint captured.");
+            }
+        }
+        // Capture Language Avoid Item Blueprint
+        if (!LANGUAGE_ITEM_BLUEPRINT) {
+            const foundLanguageItem = document.querySelector('.avoid-instead-list');
+            if (foundLanguageItem) {
+                LANGUAGE_ITEM_BLUEPRINT = foundLanguageItem.cloneNode(true);
+                console.log("Language Item blueprint captured.");
+            }
+        }
+        // Capture Tone Card & Trait Blueprints
+        if (!TONE_CARD_BLUEPRINT) {
+            const card = document.querySelector('.tone-card-blueprint');
+            if (card) {
+                TONE_CARD_BLUEPRINT = card.cloneNode(true);
+                TONE_TRAIT_BLUEPRINT = card.querySelector('.tone-trait-row').cloneNode(true);
+                console.log("Tone Deep Dive blueprints captured.");
+            }
+        }
+        const growthHeaderPrefix = document.getElementById('growth-header-prefix');
+        if (growthHeaderPrefix) {
+            growthHeaderPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${originalGroupName}</span> struggling with`;
+        }
+        const searchButton = document.getElementById('search-selected-btn');
+        if (!searchButton) { console.error("Could not find button."); return; }
+        const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked');
+        if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
+        const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
+
+        const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
         if (!isUpdate) {
-            searchButton.classList.remove('is-loading');
-            searchButton.disabled = false;
+            searchButton.classList.add('is-loading');
+            searchButton.disabled = true;
+        }
+        const problemTerms = ["problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for"];
+        const deepProblemTerms = ["struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent"];
+        const demandSignalTerms = ["i'd pay good money for", "buy it in a second", "i'd subscribe to", "throw money at it", "where can i buy", "happily pay", "shut up and take my money", "sick of doing this manually", "can't find anything that", "waste so much time on", "has to be a better way", "shouldn't be this hard", "why is there no tool for", "why is there no app for", "tried everything and nothing works", "tool almost did what i wanted", "it's missing", "tried", "gave up on it", "if only there was an app", "i wish someone would build", "why hasn't anyone made", "waste hours every week", "such a timesuck", "pay just to not have to think", "rather pay than do this myself"];
+        const resultsWrapper = document.getElementById('results-wrapper-b');
+        const resultsMessageDiv = document.getElementById("results-message");
+        const countHeaderDiv = document.getElementById("count-header");
+        if (!isUpdate) {
+            if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
+            ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "overview-div", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases", "value-tree"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+            if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
+            for (let i = 1; i <= 5; i++) {
+                const block = document.getElementById(`findings-block${i}`);
+                if (block) {
+                    block.style.display = 'none';
+                    const prevalenceWrapper = block.querySelector('.prevalence-container-wrapper');
+                    if (prevalenceWrapper) {
+                        prevalenceWrapper.innerHTML = "<p class='loading-text' style='text-align: center; padding: 2rem;'>Brewing insights...</p>";
+                    }
+                }
+            }
+        }
+        try {
+            console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
+            const panelContent = document.getElementById('bubble-content');
+            if (panelContent) {
+                panelContent.innerHTML = `<div class="panel-placeholder">Loading purchase signals... <span class="loader-dots"></span></div>`;
+            }
+            const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
+            let generalSearchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms] : problemTerms;
+            let limitPerTerm = (searchDepth === 'deep') ? 75 : 40;
+            const selectedTimeRaw = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
+            const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
+            const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
+            const selectedTime = timeMap[selectedTimeRaw] || "all";
+            const problemItems = await fetchMultipleRedditDataBatched(subredditQueryString, generalSearchTerms, limitPerTerm, selectedTime, false);
+            const allItems = deduplicatePosts(problemItems);
+            if (allItems.length === 0) throw new Error("No initial problem posts found. Try different communities or a broader search.");
+            const filteredItems = filterPosts(allItems, selectedMinUpvotes);
+            if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
+            window._filteredPosts = filteredItems;
+            generateAndRenderOverview(filteredItems, originalGroupName);
+            renderPosts(filteredItems);
+            generateAndRenderHybridSentiment(filteredItems, originalGroupName);
+            generateEmotionMapData(filteredItems).then(renderEmotionMap);
+            renderIncludedSubreddits(selectedSubreddits);
+            generateAndRenderPowerPhrases(filteredItems, originalGroupName);
+            generateAndRenderVoiceProfile(filteredItems, originalGroupName);
+            generateAndRenderLanguageToAvoid(filteredItems, originalGroupName);
+            generateAndRenderHookPatterns(filteredItems, originalGroupName);
+            generateAndRenderToneMap(filteredItems, originalGroupName);
+            setTimeout(() => {
+                generateAndRenderCloudInsights(filteredItems, originalGroupName);
+            }, 2000);
+            generateAndRenderMindsetSummary(filteredItems, originalGroupName);
+            generateAndRenderStrategicPillars(filteredItems, originalGroupName);
+            generateAndRenderAIPrompt(filteredItems, originalGroupName);
+            generateAndRenderSeoSunburst(filteredItems, originalGroupName);
+            extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
+            generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
+            if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }
+            const topKeywords = getTopKeywords(filteredItems, 10);
+            const topPosts = filteredItems.slice(0, 30);
+            const combinedTexts = topPosts.map(post => `${post.data.title || post.data.link_title || ''}. ${getFirstTwoSentences(post.data.selftext || post.data.body || '')}`).join("\n\n");
+            const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". CRITICAL RULES FOR QUOTES: The "quotes" array must contain exactly 3 strings, and each string MUST be 63 characters or less. Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["A short quote under 63 chars.", "Another quote under 63 chars.", "A final quote under 63 chars."], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_completion_tokens: 1500, response_format: { "type": "json_object" } };
+            const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+
+            let summaries = [];
+            if (openAIResponse.ok) {
+                const openAIData = await openAIResponse.json();
+                // This now uses our "Crash Proof" parser from Step 1
+                summaries = parseAISummary(openAIData.openaiResponse);
+            }
+
+            // If AI failed or returned nothing, we create a "Fallback" summary so the UI doesn't break
+            if (summaries.length === 0) {
+                console.warn("AI failed to generate summaries. Using fallback.");
+                summaries = [{
+                    title: "General Insights",
+                    body: `Community members in ${originalGroupName} are discussing various topics. View the raw posts below for details.`,
+                    count: filteredItems.length,
+                    quotes: ["Look at raw posts for details"],
+                    keywords: ["Discussion"]
+                }];
+            }
+
+
+
+
+
+
+            const metrics = calculateFindingMetrics(validatedSummaries, filteredItems);
+            const sortedFindings = validatedSummaries.map((summary, index) => ({
+                summary,
+                prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100),
+                supportCount: metrics[index].supportCount
+            })).sort((a, b) => b.prevalence - a.prevalence);
+
+            console.log("CHECKPOINT A: Analysis is complete. Found these findings:", sortedFindings);
+            const problemTitles = sortedFindings.map(finding => finding.summary.title);
+            updateGrowthHeaderDropdown(problemTitles);
+            console.log("CHECKPOINT B: The dropdown should now be updated.");
+            if (problemTitles.length > 0) {
+                const headerLabel = document.getElementById('growth-header-label');
+                if (headerLabel) {
+                    headerLabel.textContent = problemTitles[0];
+                }
+            }
+            window._summaries = sortedFindings.map(item => item.summary);
+
+            for (let i = 1; i <= 5; i++) {
+                const block = document.getElementById(`findings-block${i}`);
+                if (block) block.style.display = "none";
+            }
+            sortedFindings.forEach((findingData, index) => {
+                const displayIndex = index + 1;
+                if (displayIndex > 5) return;
+                const block = document.getElementById(`findings-block${displayIndex}`);
+                if (!block) return;
+                const content = document.getElementById(`findings-${displayIndex}`);
+                const btn = block.querySelector('.sample-posts-button');
+                block.style.display = "flex";
+                if (content) {
+                    const { summary, prevalence, supportCount } = findingData;
+                    const titleEl = content.querySelector('.section-title');
+                    if (titleEl) titleEl.textContent = summary.title;
+                    const teaserEl = content.querySelector('.summary-teaser');
+                    const fullEl = content.querySelector('.summary-full');
+                    const seeMoreBtn = content.querySelector('.see-more-btn');
+                    if (teaserEl && fullEl && seeMoreBtn) {
+                        if (summary.body.length > 95) {
+                            teaserEl.textContent = summary.body.substring(0, 95) + "…";
+                            fullEl.textContent = summary.body;
+                            teaserEl.style.display = 'inline';
+                            fullEl.style.display = 'none';
+                            seeMoreBtn.style.display = 'inline-block';
+                            seeMoreBtn.textContent = 'See more';
+                            const newBtn = seeMoreBtn.cloneNode(true);
+                            seeMoreBtn.parentNode.replaceChild(newBtn, seeMoreBtn);
+                            newBtn.addEventListener('click', function () {
+                                const isHidden = teaserEl.style.display !== 'none';
+                                teaserEl.style.display = isHidden ? 'none' : 'inline';
+                                fullEl.style.display = isHidden ? 'inline' : 'none';
+                                newBtn.textContent = isHidden ? 'See less' : 'See more';
+                            });
+                        } else {
+                            teaserEl.textContent = summary.body;
+                            teaserEl.style.display = 'inline';
+                            fullEl.style.display = 'none';
+                            seeMoreBtn.style.display = 'none';
+                        }
+                    }
+                    const quotesContainer = content.querySelector('.quotes-container');
+                    if (quotesContainer) {
+                        const quoteElements = quotesContainer.querySelectorAll('.quote');
+                        summary.quotes.forEach((quoteText, i) => {
+                            if (quoteElements[i]) {
+                                if (quoteText) {
+                                    quoteElements[i].textContent = `"${quoteText}"`;
+                                    quoteElements[i].style.display = 'block';
+                                } else {
+                                    quoteElements[i].style.display = 'none';
+                                }
+                            }
+                        });
+                    }
+                    const metricsWrapper = content.querySelector('.prevalence-container-wrapper');
+                    if (metricsWrapper) {
+                        metricsWrapper.innerHTML = (sortedFindings.length === 1) ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
+                    }
+                }
+                if (btn) {
+                    btn.onclick = () => showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds);
+                }
+            });
+            try {
+                window._postsForAssignment = filteredItems.slice(0, 75);
+                window._usedPostIds = new Set();
+                const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment);
+                window._assignments = assignments;
+                for (let i = 0; i < window._summaries.length; i++) {
+                    if (i >= 5) break;
+                    showSamplePosts(i, assignments, filteredItems, window._usedPostIds);
+                }
+            } catch (err) {
+                console.error("CRITICAL (but isolated): Failed to assign posts to findings.", err);
+                for (let i = 1; i <= 5; i++) { const redditDiv = document.getElementById(`reddit-div${i}`); if (redditDiv) { redditDiv.innerHTML = `<div style="font-style: italic; color: #999;">Could not load sample posts.</div>`; } }
+            }
+
+            // This is the single, correct call for the new mind map
+            generateAndRenderValueSankey(originalGroupName, window._summaries);
+
+            if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
+                if (resultsWrapper) {
+                    resultsWrapper.style.setProperty('display', 'flex', 'important');
+                    setTimeout(() => {
+                        if (resultsWrapper) {
+                            resultsWrapper.style.opacity = '1';
+                            if (!isUpdate) {
+                                resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                const fullHeader = document.getElementById('full-header');
+                                if (fullHeader) {
+                                    fullHeader.classList.add('header-hidden');
+                                    fullHeader.addEventListener('transitionend', () => {
+                                        fullHeader.style.display = 'none';
+                                    }, { once: true });
+                                }
+                            }
+                        }
+                    }, 50);
+                }
+            }
+            setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
+            setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
+            setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
+        } catch (err) {
+            console.error("!!!!!!!! A FATAL ERROR STOPPED THE ANALYSIS !!!!!!!!", err);
+            alert("An error occurred during analysis. Please check the console for details. Error: " + err.message);
+            if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
+            if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); resultsWrapper.style.opacity = '1'; }
+        } finally {
+            if (!isUpdate) {
+                searchButton.classList.remove('is-loading');
+                searchButton.disabled = false;
+            }
         }
     }
-}
 
 
 
 
 
-function updateGrowthHeaderDropdown(problemTitles) {
-    console.log("CHECKPOINT 1: Entering updateGrowthHeaderDropdown function with these titles:", problemTitles);
+    function updateGrowthHeaderDropdown(problemTitles) {
+        console.log("CHECKPOINT 1: Entering updateGrowthHeaderDropdown function with these titles:", problemTitles);
 
-    const dropdownList = document.querySelector('#growth-header-dropdown .w-dropdown-list');
+        const dropdownList = document.querySelector('#growth-header-dropdown .w-dropdown-list');
 
-    if (!dropdownList) {
-        console.error("DEBUGGING ERROR: Could not find the dropdown list element with selector '#growth-header-dropdown .w-dropdown-list'. Check your Webflow element's ID and class.");
-        return;
+        if (!dropdownList) {
+            console.error("DEBUGGING ERROR: Could not find the dropdown list element with selector '#growth-header-dropdown .w-dropdown-list'. Check your Webflow element's ID and class.");
+            return;
+        }
+
+        console.log("CHECKPOINT 2: Successfully found the dropdown list element. Clearing it now.");
+        dropdownList.innerHTML = ''; // Clear defaults
+
+        // Create "Broad Problems" link which acts as our "View All"
+        const viewAllLink = document.createElement('a');
+        viewAllLink.className = 'w-dropdown-link';
+        viewAllLink.textContent = 'broad problems';
+        viewAllLink.setAttribute('data-problem', 'all');
+        dropdownList.appendChild(viewAllLink);
+
+        // Create a link for each specific problem
+        problemTitles.forEach(title => {
+            const problemLink = document.createElement('a');
+            problemLink.className = 'w-dropdown-link';
+            problemLink.textContent = title;
+            problemLink.setAttribute('data-problem', title);
+            dropdownList.appendChild(problemLink);
+        });
+
+        console.log("CHECKPOINT 3: Finished populating the dropdown with new links.");
     }
 
-    console.log("CHECKPOINT 2: Successfully found the dropdown list element. Clearing it now.");
-    dropdownList.innerHTML = ''; // Clear defaults
+    function setupGrowthKitInteraction() {
+        // Find the key elements of the dropdown header
+        const audienceName = window.originalGroupName || 'your audience';
+        const headerPrefix = document.getElementById('growth-header-prefix');
+        const headerLabel = document.getElementById('growth-header-label');
+        const dropdownList = document.querySelector('#growth-header-dropdown .w-dropdown-list');
 
-    // Create "Broad Problems" link which acts as our "View All"
-    const viewAllLink = document.createElement('a');
-    viewAllLink.className = 'w-dropdown-link';
-    viewAllLink.textContent = 'broad problems';
-    viewAllLink.setAttribute('data-problem', 'all');
-    dropdownList.appendChild(viewAllLink);
-
-    // Create a link for each specific problem
-    problemTitles.forEach(title => {
-        const problemLink = document.createElement('a');
-        problemLink.className = 'w-dropdown-link';
-        problemLink.textContent = title;
-        problemLink.setAttribute('data-problem', title);
-        dropdownList.appendChild(problemLink);
-    });
-
-    console.log("CHECKPOINT 3: Finished populating the dropdown with new links.");
-}
-
-function setupGrowthKitInteraction() {
-    // Find the key elements of the dropdown header
-    const audienceName = window.originalGroupName || 'your audience';
-    const headerPrefix = document.getElementById('growth-header-prefix');
-    const headerLabel = document.getElementById('growth-header-label');
-    const dropdownList = document.querySelector('#growth-header-dropdown .w-dropdown-list');
-
-    // Set the default state for the header when the tool first loads
-    if (headerPrefix) {
-        headerPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${audienceName}</span> struggling with`;
-    }
-    if (headerLabel) {
-        headerLabel.textContent = 'broad problems';
-    }
-
-    // This function will be called when a user clicks a problem
-    function filterGrowthPlan(problemTitle) {
-        if (!headerPrefix || !headerLabel) return;
-
-        const currentAudience = window.originalGroupName || 'your audience';
-        headerPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${currentAudience}</span> struggling with`;
-
-        if (problemTitle === 'all') {
+        // Set the default state for the header when the tool first loads
+        if (headerPrefix) {
+            headerPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${audienceName}</span> struggling with`;
+        }
+        if (headerLabel) {
             headerLabel.textContent = 'broad problems';
-            // In the future, you can add code here to SHOW ALL growth items
-        } else {
-            headerLabel.textContent = problemTitle;
-            // In the future, you can add code here to FILTER growth items
+        }
+
+        // This function will be called when a user clicks a problem
+        function filterGrowthPlan(problemTitle) {
+            if (!headerPrefix || !headerLabel) return;
+
+            const currentAudience = window.originalGroupName || 'your audience';
+            headerPrefix.innerHTML = `Growth Plan to target <span class="audience-highlight">${currentAudience}</span> struggling with`;
+
+            if (problemTitle === 'all') {
+                headerLabel.textContent = 'broad problems';
+                // In the future, you can add code here to SHOW ALL growth items
+            } else {
+                headerLabel.textContent = problemTitle;
+                // In the future, you can add code here to FILTER growth items
+            }
+        }
+
+        // --- Listen for clicks on the "Generate Growth Plan" buttons on the problem cards ---
+        document.addEventListener('click', function (event) {
+            const clickedButton = event.target.closest('.generate-growth-btn');
+            if (!clickedButton) return;
+
+            const parentCard = clickedButton.closest('.findings-block');
+            const problemTitleElement = parentCard ? parentCard.querySelector('.section-title') : null;
+            const growthTabLink = document.getElementById('growth-tab-link');
+
+            if (problemTitleElement && growthTabLink) {
+                const title = problemTitleElement.textContent.trim();
+                filterGrowthPlan(title); // Update the header text
+                growthTabLink.click();   // Switch to the Growth Plan tab
+            }
+        });
+
+        // --- Listen for clicks inside the Dropdown Header itself ---
+        if (dropdownList) {
+            dropdownList.addEventListener('click', function (event) {
+                const clickedLink = event.target.closest('.w-dropdown-link');
+                if (!clickedLink) return;
+
+                event.preventDefault();
+                const selectedProblem = clickedLink.getAttribute('data-problem');
+                filterGrowthPlan(selectedProblem);
+
+                // This is a common way to programmatically close a Webflow dropdown
+                const dropdownToggle = document.querySelector('#growth-header-dropdown .w-dropdown-toggle');
+                if (dropdownToggle && dropdownToggle.getAttribute('aria-expanded') === 'true') {
+                    dropdownToggle.click();
+                }
+            });
         }
     }
 
-    // --- Listen for clicks on the "Generate Growth Plan" buttons on the problem cards ---
-    document.addEventListener('click', function (event) {
-        const clickedButton = event.target.closest('.generate-growth-btn');
-        if (!clickedButton) return;
+    // =================================================================================
+    // === UPDATED DISCOVERY LIST RENDERER (Fills Webflow Elements) ===
+    // =================================================================================
+    function renderDiscoveryList(containerId, data, title, type) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
 
-        const parentCard = clickedButton.closest('.findings-block');
-        const problemTitleElement = parentCard ? parentCard.querySelector('.section-title') : null;
-        const growthTabLink = document.getElementById('growth-tab-link');
+        const slots = container.querySelectorAll('.discovery-list-item');
 
-        if (problemTitleElement && growthTabLink) {
-            const title = problemTitleElement.textContent.trim();
-            filterGrowthPlan(title); // Update the header text
-            growthTabLink.click();   // Switch to the Growth Plan tab
+        // Reset state: Hide everything first
+        slots.forEach(slot => {
+            slot.style.display = 'none';
+            slot.style.opacity = '0'; // For your Webflow animations
+        });
+
+        if (!data || data.length === 0) {
+            // Optional: show a placeholder if a list is totally empty
+            return;
         }
-    });
 
-    // --- Listen for clicks inside the Dropdown Header itself ---
-    if (dropdownList) {
-        dropdownList.addEventListener('click', function (event) {
-            const clickedLink = event.target.closest('.w-dropdown-link');
-            if (!clickedLink) return;
+        data.forEach(([name, details], index) => {
+            if (slots[index]) {
+                const slot = slots[index];
+                const rankEl = slot.querySelector('.rank');
+                const nameEl = slot.querySelector('.name');
+                const countEl = slot.querySelector('.count');
 
-            event.preventDefault();
-            const selectedProblem = clickedLink.getAttribute('data-problem');
-            filterGrowthPlan(selectedProblem);
+                if (rankEl) rankEl.textContent = `${index + 1}.`;
+                if (nameEl) nameEl.textContent = name;
+                if (countEl) countEl.textContent = `${details.count} mentions`;
 
-            // This is a common way to programmatically close a Webflow dropdown
-            const dropdownToggle = document.querySelector('#growth-header-dropdown .w-dropdown-toggle');
-            if (dropdownToggle && dropdownToggle.getAttribute('aria-expanded') === 'true') {
-                dropdownToggle.click();
+                slot.setAttribute('data-word', name);
+                slot.setAttribute('data-type', type);
+
+                // Trigger visibility
+                slot.style.display = 'flex';
+                // Use a small timeout to allow Webflow interactions to trigger on opacity
+                setTimeout(() => { slot.style.opacity = '1'; }, index * 50);
             }
         });
     }
-}
 
-// =================================================================================
-// === UPDATED DISCOVERY LIST RENDERER (Fills Webflow Elements) ===
-// =================================================================================
-function renderDiscoveryList(containerId, data, title, type) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
+    // =================================================================================
+    // === UPDATED INTERACTIVITY (Handles Webflow-built buttons) ===
+    // =================================================================================
+    function initializeDashboardInteractivity() {
+        document.addEventListener('click', (e) => {
+            // 1. Handle Back Button
+            const backButton = e.target.closest('#back-to-step1-btn');
+            if (backButton) {
+                location.reload();
+                return;
+            }
 
-    const slots = container.querySelectorAll('.discovery-list-item');
-    
-    // Reset state: Hide everything first
-    slots.forEach(slot => {
-        slot.style.display = 'none';
-        slot.style.opacity = '0'; // For your Webflow animations
-    });
+            // 2. Handle "See Brief" Button (The one you built in Webflow)
+            const briefBtn = e.target.closest('.brief-button');
+            if (briefBtn) {
+                const parentSlot = briefBtn.closest('.discovery-list-item');
+                if (parentSlot) {
+                    const word = parentSlot.getAttribute('data-word');
+                    const type = parentSlot.getAttribute('data-type');
 
-    if (!data || data.length === 0) {
-        // Optional: show a placeholder if a list is totally empty
-        return;
+                    // Trigger AI data fetch. 
+                    // (Visibility/Animation is handled by your Webflow Interaction)
+                    generateAndRenderBrandBrief(word, type);
+                }
+                return;
+            }
+
+            // 3. Handle Word Cloud Clicks
+            const cloudWordEl = e.target.closest('.cloud-word');
+            if (cloudWordEl) {
+                const word = cloudWordEl.dataset.word;
+                const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
+                const postsData = window._sentimentData?.[category]?.[word]?.posts;
+                if (postsData) { showSlidingPanel(word, Array.from(postsData), category); }
+                return;
+            }
+
+            // 4. Handle Subreddit Remove Buttons
+            const removeBtnEl = e.target.closest('.remove-sub-btn');
+            if (removeBtnEl) {
+                handleRemoveSubClick(e);
+                return;
+            }
+        });
     }
 
-    data.forEach(([name, details], index) => {
-        if (slots[index]) {
-            const slot = slots[index];
-            const rankEl = slot.querySelector('.rank');
-            const nameEl = slot.querySelector('.name');
-            const countEl = slot.querySelector('.count');
-
-            if (rankEl) rankEl.textContent = `${index + 1}.`;
-            if (nameEl) nameEl.textContent = name;
-            if (countEl) countEl.textContent = `${details.count} mentions`;
-
-            slot.setAttribute('data-word', name);
-            slot.setAttribute('data-type', type);
-
-            // Trigger visibility
-            slot.style.display = 'flex';
-            // Use a small timeout to allow Webflow interactions to trigger on opacity
-            setTimeout(() => { slot.style.opacity = '1'; }, index * 50);
-        }
-    });
-}
-
-// =================================================================================
-// === UPDATED INTERACTIVITY (Handles Webflow-built buttons) ===
-// =================================================================================
-function initializeDashboardInteractivity() {
-    document.addEventListener('click', (e) => {
-        // 1. Handle Back Button
-        const backButton = e.target.closest('#back-to-step1-btn');
-        if (backButton) {
-            location.reload();
-            return;
-        }
-
-        // 2. Handle "See Brief" Button (The one you built in Webflow)
-        const briefBtn = e.target.closest('.brief-button');
-        if (briefBtn) {
-            const parentSlot = briefBtn.closest('.discovery-list-item');
-            if (parentSlot) {
-                const word = parentSlot.getAttribute('data-word');
-                const type = parentSlot.getAttribute('data-type');
-                
-                // Trigger AI data fetch. 
-                // (Visibility/Animation is handled by your Webflow Interaction)
-                generateAndRenderBrandBrief(word, type);
-            }
-            return;
-        }
-
-        // 3. Handle Word Cloud Clicks
-        const cloudWordEl = e.target.closest('.cloud-word');
-        if (cloudWordEl) {
-            const word = cloudWordEl.dataset.word;
-            const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
-            const postsData = window._sentimentData?.[category]?.[word]?.posts;
-            if (postsData) { showSlidingPanel(word, Array.from(postsData), category); }
-            return;
-        }
-
-        // 4. Handle Subreddit Remove Buttons
-        const removeBtnEl = e.target.closest('.remove-sub-btn');
-        if (removeBtnEl) {
-            handleRemoveSubClick(e);
-            return;
-        }
-    });
-}
-
-// =================================================================================
-// === CORE INITIALIZATION TOOL ===
-// =================================================================================
-function initializeProblemFinderTool() {
-    const style = document.createElement('style');
-    style.textContent = `
+    // =================================================================================
+    // === CORE INITIALIZATION TOOL ===
+    // =================================================================================
+    function initializeProblemFinderTool() {
+        const style = document.createElement('style');
+        style.textContent = `
         .sankey-label {
             padding: 12px 16px;
             border-radius: 12px;
@@ -3644,106 +3686,106 @@ function initializeProblemFinderTool() {
         .sankey-problem { background-color: #e0f2fe; color: #0c4a6e; }
         .sankey-offer { background-color: #ede9fe; color: #5b21b6; }
     `;
-    document.head.appendChild(style);
+        document.head.appendChild(style);
 
-    console.log("Problem Finder elements found. Initializing...");
-    const welcomeDiv = document.getElementById('welcome-div');
-    const pillsContainer = document.getElementById('pf-suggestion-pills');
-    const groupInput = document.getElementById('group-input');
-    const findCommunitiesBtn = document.getElementById('find-communities-btn');
-    const searchSelectedBtn = document.getElementById('search-selected-btn');
-    const step1Container = document.getElementById('step-1-container');
-    const step2Container = document.getElementById('subreddit-selection-container');
-    const inspireButton = document.getElementById('inspire-me-button');
-    const choicesContainer = document.getElementById('subreddit-choices');
-    const audienceTitle = document.getElementById('pf-audience-title');
+        console.log("Problem Finder elements found. Initializing...");
+        const welcomeDiv = document.getElementById('welcome-div');
+        const pillsContainer = document.getElementById('pf-suggestion-pills');
+        const groupInput = document.getElementById('group-input');
+        const findCommunitiesBtn = document.getElementById('find-communities-btn');
+        const searchSelectedBtn = document.getElementById('search-selected-btn');
+        const step1Container = document.getElementById('step-1-container');
+        const step2Container = document.getElementById('subreddit-selection-container');
+        const inspireButton = document.getElementById('inspire-me-button');
+        const choicesContainer = document.getElementById('subreddit-choices');
+        const audienceTitle = document.getElementById('pf-audience-title');
 
-    if (!findCommunitiesBtn || !searchSelectedBtn || !choicesContainer) {
-        console.error("Critical error: A key UI element was not found.");
-        return;
-    }
-
-    const transitionToStep2 = () => {
-        if (step2Container.classList.contains('visible')) return;
-        if (welcomeDiv) { welcomeDiv.style.display = 'none'; }
-        step1Container.classList.add('hidden');
-        step2Container.classList.add('visible');
-        choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>';
-        if(audienceTitle) audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`;
-    };
-    
-    if (pillsContainer) {
-        pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
-        pillsContainer.addEventListener('click', (event) => {
-            if (event.target.classList.contains('pf-suggestion-pill')) {
-                groupInput.value = event.target.getAttribute('data-value');
-                findCommunitiesBtn.click();
-            }
-        });
-    }
-
-    if (inspireButton) {
-        inspireButton.addEventListener('click', () => {
-            if(pillsContainer) pillsContainer.classList.toggle('visible');
-        });
-    }
-
-    findCommunitiesBtn.addEventListener("click", async (event) => {
-        event.preventDefault();
-        const groupName = groupInput.value.trim();
-        if (!groupName) {
-            alert("Please enter a group of people or select a suggestion.");
+        if (!findCommunitiesBtn || !searchSelectedBtn || !choicesContainer) {
+            console.error("Critical error: A key UI element was not found.");
             return;
         }
-        originalGroupName = groupName;
-        transitionToStep2();
-        try {
-            const initialSuggestions = await findSubredditsForGroup(groupName);
-            const rankedSubreddits = await fetchAndRankSubreddits(initialSuggestions);
-            displaySubredditChoices(rankedSubreddits);
-        } catch (error) {
-            console.error("Failed subreddit validation:", error);
-            displaySubredditChoices([]);
+
+        const transitionToStep2 = () => {
+            if (step2Container.classList.contains('visible')) return;
+            if (welcomeDiv) { welcomeDiv.style.display = 'none'; }
+            step1Container.classList.add('hidden');
+            step2Container.classList.add('visible');
+            choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>';
+            if (audienceTitle) audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`;
+        };
+
+        if (pillsContainer) {
+            pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
+            pillsContainer.addEventListener('click', (event) => {
+                if (event.target.classList.contains('pf-suggestion-pill')) {
+                    groupInput.value = event.target.getAttribute('data-value');
+                    findCommunitiesBtn.click();
+                }
+            });
         }
-    });
 
-    searchSelectedBtn.addEventListener("click", (event) => {
-        event.preventDefault();
-        runProblemFinder();
-    });
-    
-    choicesContainer.addEventListener('click', (event) => {
-        const choiceDiv = event.target.closest('.subreddit-choice');
-        if (choiceDiv) {
-            const checkbox = choiceDiv.querySelector('input[type="checkbox"]');
-            if (checkbox && event.target !== checkbox) checkbox.checked = !checkbox.checked;
+        if (inspireButton) {
+            inspireButton.addEventListener('click', () => {
+                if (pillsContainer) pillsContainer.classList.toggle('visible');
+            });
         }
-    });
 
-    // Initialize logic
-    initializeDashboardInteractivity();
-    setupGrowthKitInteraction();
-
-    console.log("Problem Finder tool successfully initialized.");
-}
-
-function waitForElementAndInit() {
-    const keyElementId = 'find-communities-btn';
-    let retries = 0;
-    const maxRetries = 50;
-    const intervalId = setInterval(() => {
-        const keyElement = document.getElementById(keyElementId);
-        if (keyElement) {
-            clearInterval(intervalId);
-            initializeProblemFinderTool();
-        } else {
-            retries++;
-            if (retries > maxRetries) {
-                clearInterval(intervalId);
-                console.error(`Initialization FAILED. Element "#${keyElementId}" not found.`);
+        findCommunitiesBtn.addEventListener("click", async (event) => {
+            event.preventDefault();
+            const groupName = groupInput.value.trim();
+            if (!groupName) {
+                alert("Please enter a group of people or select a suggestion.");
+                return;
             }
-        }
-    }, 100);
-}
+            originalGroupName = groupName;
+            transitionToStep2();
+            try {
+                const initialSuggestions = await findSubredditsForGroup(groupName);
+                const rankedSubreddits = await fetchAndRankSubreddits(initialSuggestions);
+                displaySubredditChoices(rankedSubreddits);
+            } catch (error) {
+                console.error("Failed subreddit validation:", error);
+                displaySubredditChoices([]);
+            }
+        });
 
-document.addEventListener('DOMContentLoaded', waitForElementAndInit);
+        searchSelectedBtn.addEventListener("click", (event) => {
+            event.preventDefault();
+            runProblemFinder();
+        });
+
+        choicesContainer.addEventListener('click', (event) => {
+            const choiceDiv = event.target.closest('.subreddit-choice');
+            if (choiceDiv) {
+                const checkbox = choiceDiv.querySelector('input[type="checkbox"]');
+                if (checkbox && event.target !== checkbox) checkbox.checked = !checkbox.checked;
+            }
+        });
+
+        // Initialize logic
+        initializeDashboardInteractivity();
+        setupGrowthKitInteraction();
+
+        console.log("Problem Finder tool successfully initialized.");
+    }
+
+    function waitForElementAndInit() {
+        const keyElementId = 'find-communities-btn';
+        let retries = 0;
+        const maxRetries = 50;
+        const intervalId = setInterval(() => {
+            const keyElement = document.getElementById(keyElementId);
+            if (keyElement) {
+                clearInterval(intervalId);
+                initializeProblemFinderTool();
+            } else {
+                retries++;
+                if (retries > maxRetries) {
+                    clearInterval(intervalId);
+                    console.error(`Initialization FAILED. Element "#${keyElementId}" not found.`);
+                }
+            }
+        }, 100);
+    }
+
+    document.addEventListener('DOMContentLoaded', waitForElementAndInit);

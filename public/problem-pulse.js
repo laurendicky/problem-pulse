@@ -747,78 +747,54 @@ async function generateAndRenderCloudInsights(posts, audienceContext) {
     }
 }
 
+
 async function generateAndRenderToneMap(posts, audienceContext) {
     const container = document.getElementById('tone-map-container');
-    if (!container || !TONE_CARD_BLUEPRINT) return;
+    if (!container) return;
 
-    container.innerHTML = '<p class="loading-text">Performing deep tonal analysis...</p>';
+    if (!TONE_CARD_BLUEPRINT) {
+        console.warn("⚠️ TONE_CARD_BLUEPRINT not found. Check Webflow class '.tone-card-blueprint'");
+        return;
+    }
+
+    container.innerHTML = '<p class="loading-text">Analyzing tone...</p>';
 
     try {
-        const topPostsText = posts.slice(0, 40).map(p => 
-            `Topic: ${p.data.title || ''} - ${(p.data.selftext || p.data.body || '').substring(0, 200)}`
-        ).join('\n---\n');
-
-        const prompt = `Analyze the ${audienceContext} community. Identify 4 distinct conversation topics.
-        For each topic, provide:
-        1. "topic": Short title.
-        2. "traits": Array of 4 adjectives, each with a "score" from 10-100 (intensity).
-        3. "meaning": 2-sentence strategic insight.
-        4. "level": Overall intensity (LOW, MEDIUM, or HIGH).
-        
-        Respond ONLY as valid JSON with key 'tone_analysis'. Posts: ${topPostsText}`;
-
-        const openAIParams = {
-            model: "gpt-4o-mini",
-            messages: [{ role: "system", content: "You are a brand psychologist who outputs only valid JSON." }, { role: "user", content: prompt }],
-            temperature: 0.2,
-            response_format: { "type": "json_object" }
-        };
+        // KEPT AT 40 POSTS AS REQUESTED
+        const topPostsText = posts.slice(0, 40).map(p => `Topic: ${p.data.title || ''} - ${(p.data.selftext || p.data.body || '').substring(0, 400)}`).join('\n---\n');
+        const prompt = `Analyze ${audienceContext}. Identify 4 topics. For each: topic, traits (4 adjectives with scores 10-100), meaning, level (LOW/MED/HIGH). JSON only.`;
 
         const response = await fetch(OPENAI_PROXY_URL, { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ openaiPayload: openAIParams }) 
+            body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "user", content: prompt }], response_format: { "type": "json_object" } } }) 
         });
 
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
-
-        container.innerHTML = ''; // Clear loading
+        container.innerHTML = '';
 
         parsed.tone_analysis.forEach(item => {
             const card = TONE_CARD_BLUEPRINT.cloneNode(true);
-            
-            // 1. Fill Card Basics
             card.querySelector('.tone-topic-title').innerText = item.topic;
             card.querySelector('.tone-what-means').innerText = item.meaning;
             card.querySelector('.tone-intensity-label').innerText = `INTENSITY: ${item.level}`;
-
-            // 2. Clear dummy rows and fill Traits
             const traitsContainer = card.querySelector('.tone-traits-container');
             traitsContainer.innerHTML = '';
-
             item.traits.forEach(trait => {
                 const traitRow = TONE_TRAIT_BLUEPRINT.cloneNode(true);
                 traitRow.querySelector('.tone-trait-name').innerText = trait.name || trait.adjective || trait.word;
-                
-                // Drive the Webflow bar width via JS
-                const fillBar = traitRow.querySelector('.tone-bar-fill');
-                if (fillBar) {
-                    fillBar.style.width = `${trait.score}%`;
-                }
-                
+                traitRow.querySelector('.tone-bar-fill').style.width = `${trait.score}%`;
                 traitsContainer.appendChild(traitRow);
             });
-
             container.appendChild(card);
         });
-
+        console.log("✅ Tone Map Rendered");
     } catch (error) {
-        console.error("Tone Map Error:", error);
-        container.innerHTML = `<p>Tonal analysis unavailable.</p>`;
+        console.error("❌ Tone Map Error:", error);
+        container.innerHTML = '<p>Analysis timed out.</p>';
     }
 }
-
 
 function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : "Snippet not available."; const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if (closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
@@ -1963,56 +1939,48 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
 async function generateAndRenderStrategicPillars(posts, audienceContext) {
     const goalsContainer = document.getElementById('goals-pillar');
     const fearsContainer = document.getElementById('fears-pillar');
-    
-    if (!goalsContainer || !fearsContainer || !PILLAR_BLUEPRINT) return;
+    if (!goalsContainer || !fearsContainer) return;
 
-    // 1. Clear the containers
-    goalsContainer.innerHTML = '';
-    fearsContainer.innerHTML = '';
+    if (!PILLAR_BLUEPRINT) {
+        console.warn("⚠️ PILLAR_BLUEPRINT not found. Check Webflow class '.pillar-item-template'");
+        return;
+    }
+
+    goalsContainer.innerHTML = '<p class="loading-text">Analyzing goals...</p>';
 
     try {
+        // KEPT AT 40 POSTS AS REQUESTED
         const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
-
         const prompt = `Identify 3 core "Ultimate Goals" and 3 "Greatest Fears" for the ${audienceContext} community. Respond ONLY with JSON: {"goals": ["goal1", "goal2", "goal3"], "fears": ["fear1", "fear2", "fear3"]}`;
-
-        const openAIParams = {
-            model: "gpt-4o-mini",
-            messages: [{ role: "system", content: "You are a market psychologist." }, { role: "user", content: prompt }],
-            temperature: 0.3,
-            response_format: { "type": "json_object" }
-        };
 
         const response = await fetch(OPENAI_PROXY_URL, { 
             method: 'POST', 
             headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ openaiPayload: openAIParams }) 
+            body: JSON.stringify({ openaiPayload: { model: "gpt-4o-mini", messages: [{ role: "user", content: prompt }], response_format: { "type": "json_object" } } }) 
         });
 
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
-        // 2. Helper function to clone and populate
-        const populatePillars = (container, items) => {
+        goalsContainer.innerHTML = '';
+        fearsContainer.innerHTML = '';
+
+        const populate = (container, items) => {
             items.forEach(text => {
                 const clone = PILLAR_BLUEPRINT.cloneNode(true);
-                // Look for the text element inside the clone
                 const textNode = clone.querySelector('#pillar-item-text') || clone.querySelector('.pillar-item-text');
-                if (textNode) {
-                    textNode.innerText = text;
-                }
+                if (textNode) textNode.innerText = text;
                 container.appendChild(clone);
             });
         };
-
-        // 3. Render the lists using your Webflow design
-        if (parsed.goals) populatePillars(goalsContainer, parsed.goals);
-        if (parsed.fears) populatePillars(fearsContainer, parsed.fears);
-
+        populate(goalsContainer, parsed.goals);
+        populate(fearsContainer, parsed.fears);
+        console.log("✅ Strategic Pillars Rendered");
     } catch (error) {
-        console.error("Strategic pillars generation error:", error);
+        console.error("❌ Strategic Pillars Error:", error);
+        goalsContainer.innerHTML = '<p>Analysis timed out.</p>';
     }
 }
-
 
 
 // =================================================================================
@@ -3244,51 +3212,50 @@ if (!TONE_CARD_BLUEPRINT) {
         window._filteredPosts = filteredItems;
        // --- THE COMPLETE STAGGERED TIMELINE (ALL FUNCTIONS INCLUDED) ---
 
-        // 1. FASTEST & CORE UI (Run immediately)
+       // --- 40-POST COMPATIBLE TIMELINE ---
+
+        // 1. IMMEDIATE (Fast UI)
         generateAndRenderOverview(filteredItems, originalGroupName);
         renderPosts(filteredItems);
         renderIncludedSubreddits(selectedSubreddits);
-        
-        // These are usually fast and help populate the "Discovery" and "FAQ" sections early
+        generateFAQs(filteredItems).then(renderFAQs);
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { 
-            renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); 
-            renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); 
+            renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands', 'brands'); 
+            renderDiscoveryList('top-products-container', entities.topProducts, 'Top Products', 'products'); 
         });
-        generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
 
-        // 2. WAIT 2 SECONDS (Lighter AI tasks & Word Clouds)
+        // 2. WAIT 2 SECONDS (Lighter tasks)
         setTimeout(() => {
             generateAndRenderHybridSentiment(filteredItems, originalGroupName);
             generateAndRenderPowerPhrases(filteredItems, originalGroupName);
-            generateAndRenderVoiceProfile(filteredItems, originalGroupName);
             generateAndRenderLanguageToAvoid(filteredItems, originalGroupName);
             generateEmotionMapData(filteredItems).then(renderEmotionMap);
-            
-            // This needs to run AFTER HybridSentiment has had a head start
-            generateAndRenderCloudInsights(filteredItems, originalGroupName);
         }, 2000);
 
-        // 3. WAIT 5 SECONDS (The "Heaviest" AI Tasks - Tone, SEO, Mindset)
+        // 3. WAIT 6 SECONDS (First Heavy Task: Tone Map)
         setTimeout(() => {
             generateAndRenderToneMap(filteredItems, originalGroupName);
+        }, 6000);
+
+        // 4. WAIT 15 SECONDS (Second Heavy Task: SEO Sunburst)
+        setTimeout(() => {
             generateAndRenderSeoSunburst(filteredItems, originalGroupName);
+        }, 15000);
+
+        // 5. WAIT 25 SECONDS (Third Heavy Task: Mindset & Pillars)
+        setTimeout(() => {
             generateAndRenderMindsetSummary(filteredItems, originalGroupName);
             generateAndRenderStrategicPillars(filteredItems, originalGroupName);
             generateAndRenderAIPrompt(filteredItems, originalGroupName);
             generateAndRenderHookPatterns(filteredItems, originalGroupName);
-        }, 5000);
+        }, 25000);
 
-        // 4. WAIT 8 SECONDS (Background analysis & Discovery)
-        // These are moved to the end of the try block
+        // 6. WAIT 35 SECONDS (Final Background Tasks)
         setTimeout(() => {
             runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime);
             renderAndHandleRelatedSubreddits(selectedSubreddits);
-        }, 8000);
+        }, 35000);
 
-        // 5. WAIT 12 SECONDS (Deep comment enhancement)
-        setTimeout(() => {
-            enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName);
-        }, 12000);
         if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }
         const topKeywords = getTopKeywords(filteredItems, 10);
         const topPosts = filteredItems.slice(0, 30);

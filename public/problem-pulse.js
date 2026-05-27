@@ -2681,6 +2681,7 @@ let HOOK_CARD_BLUEPRINT = null;
 let HOOK_ITEM_BLUEPRINT = null;
 let MINDSET_ITEM_BLUEPRINT = null; // ADD THIS
 let AVOID_SWAP_BLUEPRINT = null;   // ADD THIS
+let LANGUAGE_ITEM_BLUEPRINT = null;
 
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
@@ -2932,21 +2933,29 @@ async function generateAndRenderVoiceProfile(posts, audienceContext) {
 
 
 // --- NEW SECTION 2: LANGUAGE TO AVOID ---
-async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
-    const container = document.getElementById('language-to-avoid-container');
-    if (!container) return;
 
-    container.innerHTML = `<p class="loading-text">Identifying inauthentic terms... <span class="loader-dots"></span></p>`;
+
+async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
+    // 1. Target the main wrapper by ID
+    const moduleWrapper = document.getElementById('language-to-avoid-container');
+    if (!moduleWrapper || !LANGUAGE_ITEM_BLUEPRINT) return;
+
+    // 2. Find the inner container where rows are listed
+    const rowContainer = moduleWrapper.querySelector('.avoid-instead-row');
+    if (!rowContainer) return;
+
+    // 3. Clear existing Webflow dummy items
+    rowContainer.innerHTML = '';
 
     try {
         const topPostsText = posts.slice(0, 40).map(p => 
             `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
         ).join('\n---\n');
 
-        const prompt = `Analyze the ${audienceContext} community based on these posts. Identify 4-6 inauthentic or cringey terms that outsiders might use but this audience rejects, and for each one provide an authentic alternative this community would actually use. Respond ONLY as valid JSON with key 'pairs', where each item has keys 'avoid' and 'instead'. Posts: ${topPostsText}`;
+        const prompt = `Analyze the ${audienceContext} community. Identify 4-6 inauthentic terms insiders reject, and provide the authentic alternative they use instead. Respond ONLY as valid JSON with key 'pairs', where each item has keys 'avoid' and 'instead'. Posts: ${topPostsText}`;
 
         const openAIParams = {
-            model: "gpt-5.4-mini",
+            model: "gpt-4o-mini",
             messages: [
                 { role: "system", content: "You are a brand strategist who outputs only valid JSON." },
                 { role: "user", content: prompt }
@@ -2961,32 +2970,27 @@ async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
             body: JSON.stringify({ openaiPayload: openAIParams }) 
         });
 
-        if (!response.ok) throw new Error('Language to Avoid API call failed.');
+        if (!response.ok) throw new Error('Language Avoid API call failed.');
 
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
-        const pairsHTML = parsed.pairs.map(pair => `
-            <div class="avoid-instead-row">
-                <span class="term-avoid">${pair.avoid}</span>
-                <span class="term-arrow">→</span>
-                <span class="term-instead">${pair.instead}</span>
-            </div>
-        `).join('');
+        // 4. Loop through AI results and clone your Webflow design
+        parsed.pairs.forEach(pair => {
+            const clone = LANGUAGE_ITEM_BLUEPRINT.cloneNode(true);
+            
+            const avoidEl = clone.querySelector('.term-avoid');
+            const insteadEl = clone.querySelector('.term-instead');
 
-        container.innerHTML = `
-            <div class="language-avoid-wrapper">
-                <h3 class="dashboard-section-title">Language to Avoid</h3>
-                <p class="dashboard-section-subtitle">Swap these terms to sound authentic</p>
-                <div class="avoid-instead-list">
-                    ${pairsHTML}
-                </div>
-            </div>
-        `;
+            if (avoidEl) avoidEl.innerText = pair.avoid;
+            if (insteadEl) insteadEl.innerText = pair.instead;
+
+            rowContainer.appendChild(clone);
+        });
 
     } catch (error) {
         console.error("Language Avoid Error:", error);
-        container.innerHTML = `<p class="placeholder-text">Language analysis temporarily unavailable.</p>`;
+        rowContainer.innerHTML = `<p class="placeholder-text">Language analysis temporarily unavailable.</p>`;
     }
 }
 
@@ -3151,6 +3155,14 @@ if (!AVOID_SWAP_BLUEPRINT) {
     if (foundSwap) {
         AVOID_SWAP_BLUEPRINT = foundSwap.cloneNode(true);
         console.log("Language Avoid blueprint captured.");
+    }
+}
+// Capture Language Avoid Item Blueprint
+if (!LANGUAGE_ITEM_BLUEPRINT) {
+    const foundLanguageItem = document.querySelector('.avoid-instead-list');
+    if (foundLanguageItem) {
+        LANGUAGE_ITEM_BLUEPRINT = foundLanguageItem.cloneNode(true);
+        console.log("Language Item blueprint captured.");
     }
 }
     const growthHeaderPrefix = document.getElementById('growth-header-prefix');

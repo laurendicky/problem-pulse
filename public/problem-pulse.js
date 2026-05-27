@@ -12,7 +12,7 @@ const LENIENT_MIN_ACTIVE_USERS = 0;
 let originalGroupName = '';
 let _allRankedSubreddits = [];
 
-const suggestions = ["Dog Lovers", "Sneaker Buyers", "Fitness Freaks", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Software Developers", "Brides To Be"];
+const suggestions = ["Dog Lovers", "Start-up Founders", "Fitness Freaks", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Software Developers", "Brides To Be"];
 const positiveColors = ['#00a5ce', '#0090b5', '#00c0e6', '#7bd9ec', '#b3e8f3', '#006d85'];
 const negativeColors = ['#fd80c7', '#d6539d', '#ff4fa3', '#ff99d6', '#fbb6ce', '#f472b6'];
 const lemmaMap = { 'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': 'love', 'loving': 'love', 'hates': 'hate', 'wishes': 'wish', 'wishing': 'wish', 'solutions': 'solution', 'challenges': 'challenge', 'recommended': 'recommend', 'disappointed': 'disappoint', 'frustrated': 'frustrate', 'annoyed': 'annoy' };
@@ -625,45 +625,22 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
         .slice(0, 100)
         .map(item => item[0]);
 
-   
-    // --- PART 3: AI-FILTER (Updated to include Vibe Sentence) ---
-  
-    let finalPositivePhrases = [], finalNegativePhrases = [], vibeSentence = "";
-    
+    // --- PART 3: AI-FILTER (Unchanged) ---
+    let finalPositivePhrases = [], finalNegativePhrases = [];
     if (candidatePhrases.length > 0) {
         try {
-            const prompt = `Analyze these phrases from the "${audienceContext}" community: ${JSON.stringify(candidatePhrases.slice(0,50))}. 
-            1. Identify phrases with Positive vs Negative sentiment.
-            2. Write a single, short (max 15 words) "vibe sentence" summarizing their emotional state (e.g. "Mostly frustrated and seeking solutions, but responds well to practical guidance").
-            Respond ONLY with JSON: {"positive_phrases": [], "negative_phrases": [], "vibe_sentence": "..."}`;
-
-            const response = await fetch(OPENAI_PROXY_URL, { 
-                method: 'POST', 
-                headers: { 'Content-Type': 'application/json' }, 
-                body: JSON.stringify({ openaiPayload: { 
-                    model: "gpt-4o-mini", // Use gpt-4o-mini here
-                    messages: [{role: "system", content: "You are an expert sentiment analyst."}, {role: "user", content: prompt}],
-                    response_format: { "type": "json_object" } 
-                } }) 
-            });
-
+            const prompt = `You are a market research analyst. Below is a list of common phrases from the "${audienceContext}" community. Your task is to filter this list. Identify phrases that express clear **positive sentiment** and **negative sentiment**. Ignore neutral phrases. Respond ONLY with a valid JSON object with two keys: "positive_phrases" and "negative_phrases", holding an array of the relevant strings you selected. Candidate Phrases: ${JSON.stringify(candidatePhrases)}`;
+            const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert sentiment filter that only outputs JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_completion_tokens: 1000, response_format: { "type": "json_object" } };
+            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
             if (response.ok) {
                 const data = await response.json();
                 const parsed = JSON.parse(data.openaiResponse);
-                
                 finalPositivePhrases = parsed.positive_phrases || [];
                 finalNegativePhrases = parsed.negative_phrases || [];
-                vibeSentence = parsed.vibe_sentence || "";
-                
-                console.log("AI Vibe Sentence:", vibeSentence); // CHECK YOUR CONSOLE FOR THIS
             }
-        } catch (error) { 
-            console.error("AI sentiment filtering failed", error); 
-        }
+        } catch (error) { console.error("AI phrase filtering failed, proceeding with words only.", error); }
     }
 
-    // Call the renderer with the new vibe sentence
-    renderSentimentScore(positiveCount, negativeCount, vibeSentence);
     // --- PART 4: Merge and Render (Now uses the correct counts) ---
     const renderCloud = (container, title, wordMap, phraseList, colors) => {
         const topWords = Array.from(wordMap.entries())
@@ -1579,67 +1556,7 @@ function renderBrandMomentumChart(data) {
     });
 }
 
-
-
-function renderSentimentScore(positiveCount, negativeCount, vibeSentence) {
-    const container = document.getElementById('sentiment-score-container');
-    if (!container) {
-        console.warn("⚠️ Sentiment Error: #sentiment-score-container not found.");
-        return;
-    }
-
-    const total = positiveCount + negativeCount;
-    // If no data yet, show loading in the vibe label
-    const vibeLabelEl = container.querySelector('.sentiment-vibe-label');
-    if (total === 0) {
-        if (vibeLabelEl) vibeLabelEl.innerText = "Crunching sentiment data...";
-        return;
-    }
-
-    const positivePercent = Math.round((positiveCount / total) * 100);
-    const negativePercent = 100 - positivePercent;
-
-    console.log(`📊 Rendering Bar: ${positivePercent}% Pos / ${negativePercent}% Neg`);
-
-    // 1. Target the Bar Segments
-    const posSegment = container.querySelector('.is-positive');
-    const negSegment = container.querySelector('.is-negative');
-    
-    const updateLabel = (percent, segment, labelText) => {
-        if (!segment) {
-            console.warn(`⚠️ Sentiment Error: Missing segment for ${labelText}`);
-            return;
-        }
-        const labelEl = segment.querySelector('.score-value');
-        
-        // Update width
-        segment.style.width = `${percent}%`;
-
-        // Content logic for small bars
-        if (labelEl) {
-            if (percent > 20) labelEl.innerText = `${percent}% ${labelText}`;
-            else if (percent > 10) labelEl.innerText = `${percent}%`;
-            else labelEl.innerText = ""; // Hide if tiny
-        }
-    };
-
-    updateLabel(positivePercent, posSegment, "Positive");
-    updateLabel(negativePercent, negSegment, "Negative");
-
-    // 2. Target the Sentiment Vibe Label (Your Overview Sentence)
-    if (vibeLabelEl && vibeSentence) {
-        vibeLabelEl.innerText = vibeSentence;
-    }
-    
-    // 3. Target the Benchmark
-    const benchmarkEl = container.querySelector('.sentiment-benchmark-text');
-    if (benchmarkEl) {
-        const diff = positivePercent - 55; // 55% is average community baseline
-        benchmarkEl.innerText = diff >= 0 
-            ? `${diff}% more positive than the Reddit average.` 
-            : `${Math.abs(diff)}% more critical than the Reddit average.`;
-    }
-}
+function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if (!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
 // =================================================================================
 // === REPLACEMENT FUNCTION: fetchSentimentTrendData (V4 - With Context & Corrected Axis) ===
@@ -3325,25 +3242,53 @@ if (!TONE_CARD_BLUEPRINT) {
         const filteredItems = filterPosts(allItems, selectedMinUpvotes);
         if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
         window._filteredPosts = filteredItems;
+       // --- THE COMPLETE STAGGERED TIMELINE (ALL FUNCTIONS INCLUDED) ---
+
+        // 1. FASTEST & CORE UI (Run immediately)
         generateAndRenderOverview(filteredItems, originalGroupName);
         renderPosts(filteredItems);
-        generateAndRenderHybridSentiment(filteredItems, originalGroupName);
-        generateEmotionMapData(filteredItems).then(renderEmotionMap);
         renderIncludedSubreddits(selectedSubreddits);
-        generateAndRenderPowerPhrases(filteredItems, originalGroupName);
-        generateAndRenderVoiceProfile(filteredItems, originalGroupName);
-        generateAndRenderLanguageToAvoid(filteredItems, originalGroupName);
-        generateAndRenderHookPatterns(filteredItems, originalGroupName);
-        generateAndRenderToneMap(filteredItems, originalGroupName);
+        
+        // These are usually fast and help populate the "Discovery" and "FAQ" sections early
+        extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { 
+            renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); 
+            renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); 
+        });
+        generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
+
+        // 2. WAIT 2 SECONDS (Lighter AI tasks & Word Clouds)
         setTimeout(() => {
+            generateAndRenderHybridSentiment(filteredItems, originalGroupName);
+            generateAndRenderPowerPhrases(filteredItems, originalGroupName);
+            generateAndRenderVoiceProfile(filteredItems, originalGroupName);
+            generateAndRenderLanguageToAvoid(filteredItems, originalGroupName);
+            generateEmotionMapData(filteredItems).then(renderEmotionMap);
+            
+            // This needs to run AFTER HybridSentiment has had a head start
             generateAndRenderCloudInsights(filteredItems, originalGroupName);
         }, 2000);
-        generateAndRenderMindsetSummary(filteredItems, originalGroupName);
-        generateAndRenderStrategicPillars(filteredItems, originalGroupName);
-        generateAndRenderAIPrompt(filteredItems, originalGroupName);
-        generateAndRenderSeoSunburst(filteredItems, originalGroupName);
-        extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
-        generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
+
+        // 3. WAIT 5 SECONDS (The "Heaviest" AI Tasks - Tone, SEO, Mindset)
+        setTimeout(() => {
+            generateAndRenderToneMap(filteredItems, originalGroupName);
+            generateAndRenderSeoSunburst(filteredItems, originalGroupName);
+            generateAndRenderMindsetSummary(filteredItems, originalGroupName);
+            generateAndRenderStrategicPillars(filteredItems, originalGroupName);
+            generateAndRenderAIPrompt(filteredItems, originalGroupName);
+            generateAndRenderHookPatterns(filteredItems, originalGroupName);
+        }, 5000);
+
+        // 4. WAIT 8 SECONDS (Background analysis & Discovery)
+        // These are moved to the end of the try block
+        setTimeout(() => {
+            runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime);
+            renderAndHandleRelatedSubreddits(selectedSubreddits);
+        }, 8000);
+
+        // 5. WAIT 12 SECONDS (Deep comment enhancement)
+        setTimeout(() => {
+            enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName);
+        }, 12000);
         if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }
         const topKeywords = getTopKeywords(filteredItems, 10);
         const topPosts = filteredItems.slice(0, 30);
@@ -3479,9 +3424,8 @@ if (!TONE_CARD_BLUEPRINT) {
                 }, 50);
             }
         }
-        setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
-        setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
-        setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
+        
+        
     } catch (err) {
         console.error("!!!!!!!! A FATAL ERROR STOPPED THE ANALYSIS !!!!!!!!", err);
         alert("An error occurred during analysis. Please check the console for details. Error: " + err.message);

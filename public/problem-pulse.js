@@ -747,28 +747,29 @@ async function generateAndRenderCloudInsights(posts, audienceContext) {
     }
 }
 
-
-// --- NEW SECTION 5: TONE MAP ---
 async function generateAndRenderToneMap(posts, audienceContext) {
     const container = document.getElementById('tone-map-container');
-    if (!container) return;
+    if (!container || !TONE_CARD_BLUEPRINT) return;
 
-    container.innerHTML = `<p class="loading-text">Mapping tonal shifts... <span class="loader-dots"></span></p>`;
+    container.innerHTML = '<p class="loading-text">Performing deep tonal analysis...</p>';
 
     try {
-        // Truncate to handle large payloads (Startup community)
         const topPostsText = posts.slice(0, 40).map(p => 
             `Topic: ${p.data.title || ''} - ${(p.data.selftext || p.data.body || '').substring(0, 200)}`
         ).join('\n---\n');
 
-        const prompt = `Analyze these posts from the ${audienceContext} community. Identify 4-6 distinct topic categories this audience discusses, and for each one describe the tone they shift into when discussing it (3-5 short descriptive words). Respond ONLY as valid JSON with key 'tone_map', an array of objects with keys 'topic' and 'tone'. Posts: ${topPostsText}`;
+        const prompt = `Analyze the ${audienceContext} community. Identify 4 distinct conversation topics.
+        For each topic, provide:
+        1. "topic": Short title.
+        2. "traits": Array of 4 adjectives, each with a "score" from 10-100 (intensity).
+        3. "meaning": 2-sentence strategic insight.
+        4. "level": Overall intensity (LOW, MEDIUM, or HIGH).
+        
+        Respond ONLY as valid JSON with key 'tone_analysis'. Posts: ${topPostsText}`;
 
         const openAIParams = {
-            model: "gpt-5.4-mini",
-            messages: [
-                { role: "system", content: "You are a brand strategist who outputs only valid JSON." },
-                { role: "user", content: prompt }
-            ],
+            model: "gpt-4o-mini",
+            messages: [{ role: "system", content: "You are a brand psychologist who outputs only valid JSON." }, { role: "user", content: prompt }],
             temperature: 0.2,
             response_format: { "type": "json_object" }
         };
@@ -782,32 +783,42 @@ async function generateAndRenderToneMap(posts, audienceContext) {
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
-        const rowsHTML = parsed.tone_map.map(item => `
-            <div class="tone-map-row">
-                <div class="tone-map-topic">${item.topic}</div>
-                <div class="tone-map-tone">${item.tone}</div>
-            </div>
-        `).join('');
+        container.innerHTML = ''; // Clear loading
 
-        container.innerHTML = `
-            <div class="tone-map-wrapper">
-                <h3 class="dashboard-section-title">Tone Map</h3>
-                <p class="dashboard-section-subtitle">How the voice shifts by topic</p>
-                <div class="tone-map-grid">
-                    <div class="tone-map-header-row">
-                        <div class="tone-map-header">Topic</div>
-                        <div class="tone-map-header">Voice / Tone</div>
-                    </div>
-                    ${rowsHTML}
-                </div>
-            </div>
-        `;
+        parsed.tone_analysis.forEach(item => {
+            const card = TONE_CARD_BLUEPRINT.cloneNode(true);
+            
+            // 1. Fill Card Basics
+            card.querySelector('.tone-topic-title').innerText = item.topic;
+            card.querySelector('.tone-what-means').innerText = item.meaning;
+            card.querySelector('.tone-intensity-label').innerText = `INTENSITY: ${item.level}`;
+
+            // 2. Clear dummy rows and fill Traits
+            const traitsContainer = card.querySelector('.tone-traits-container');
+            traitsContainer.innerHTML = '';
+
+            item.traits.forEach(trait => {
+                const traitRow = TONE_TRAIT_BLUEPRINT.cloneNode(true);
+                traitRow.querySelector('.tone-trait-name').innerText = trait.name || trait.adjective || trait.word;
+                
+                // Drive the Webflow bar width via JS
+                const fillBar = traitRow.querySelector('.tone-bar-fill');
+                if (fillBar) {
+                    fillBar.style.width = `${trait.score}%`;
+                }
+                
+                traitsContainer.appendChild(traitRow);
+            });
+
+            container.appendChild(card);
+        });
 
     } catch (error) {
         console.error("Tone Map Error:", error);
-        container.innerHTML = `<p class="placeholder-text">Tone map temporarily unavailable.</p>`;
+        container.innerHTML = `<p>Tonal analysis unavailable.</p>`;
     }
 }
+
 
 function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : "Snippet not available."; const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if (closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
@@ -2682,6 +2693,8 @@ let HOOK_ITEM_BLUEPRINT = null;
 let MINDSET_ITEM_BLUEPRINT = null; // ADD THIS
 let AVOID_SWAP_BLUEPRINT = null;   // ADD THIS
 let LANGUAGE_ITEM_BLUEPRINT = null;
+let TONE_CARD_BLUEPRINT = null;
+let TONE_TRAIT_BLUEPRINT = null;
 
 async function generateAndRenderPowerPhrases(posts, audienceContext) {
     const container = document.getElementById('power-phrases');
@@ -3163,6 +3176,15 @@ if (!LANGUAGE_ITEM_BLUEPRINT) {
     if (foundLanguageItem) {
         LANGUAGE_ITEM_BLUEPRINT = foundLanguageItem.cloneNode(true);
         console.log("Language Item blueprint captured.");
+    }
+}
+// Capture Tone Card & Trait Blueprints
+if (!TONE_CARD_BLUEPRINT) {
+    const card = document.querySelector('.tone-card-blueprint');
+    if (card) {
+        TONE_CARD_BLUEPRINT = card.cloneNode(true);
+        TONE_TRAIT_BLUEPRINT = card.querySelector('.tone-trait-row').cloneNode(true);
+        console.log("Tone Deep Dive blueprints captured.");
     }
 }
     const growthHeaderPrefix = document.getElementById('growth-header-prefix');

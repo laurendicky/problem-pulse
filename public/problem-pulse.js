@@ -1579,27 +1579,47 @@ function renderBrandMomentumChart(data) {
     });
 }
 
+
+
 function renderSentimentScore(positiveCount, negativeCount, vibeSentence) {
     const container = document.getElementById('sentiment-score-container');
-    if (!container) return;
+    if (!container) {
+        console.warn("⚠️ Sentiment Error: #sentiment-score-container not found.");
+        return;
+    }
 
     const total = positiveCount + negativeCount;
-    if (total === 0) return;
+    // If no data yet, show loading in the vibe label
+    const vibeLabelEl = container.querySelector('.sentiment-vibe-label');
+    if (total === 0) {
+        if (vibeLabelEl) vibeLabelEl.innerText = "Crunching sentiment data...";
+        return;
+    }
+
     const positivePercent = Math.round((positiveCount / total) * 100);
     const negativePercent = 100 - positivePercent;
+
+    console.log(`📊 Rendering Bar: ${positivePercent}% Pos / ${negativePercent}% Neg`);
 
     // 1. Target the Bar Segments
     const posSegment = container.querySelector('.is-positive');
     const negSegment = container.querySelector('.is-negative');
     
     const updateLabel = (percent, segment, labelText) => {
-        if (!segment) return;
+        if (!segment) {
+            console.warn(`⚠️ Sentiment Error: Missing segment for ${labelText}`);
+            return;
+        }
         const labelEl = segment.querySelector('.score-value');
+        
+        // Update width
         segment.style.width = `${percent}%`;
+
+        // Content logic for small bars
         if (labelEl) {
             if (percent > 20) labelEl.innerText = `${percent}% ${labelText}`;
             else if (percent > 10) labelEl.innerText = `${percent}%`;
-            else labelEl.innerText = "";
+            else labelEl.innerText = ""; // Hide if tiny
         }
     };
 
@@ -1607,16 +1627,14 @@ function renderSentimentScore(positiveCount, negativeCount, vibeSentence) {
     updateLabel(negativePercent, negSegment, "Negative");
 
     // 2. Target the Sentiment Vibe Label (Your Overview Sentence)
-    const vibeLabelEl = container.querySelector('.sentiment-vibe-label');
-    if (vibeLabelEl) {
-        // If vibeSentence is empty (waiting for AI), show a temporary message
-        vibeLabelEl.innerText = vibeSentence || "Analyzing community sentiment profile...";
+    if (vibeLabelEl && vibeSentence) {
+        vibeLabelEl.innerText = vibeSentence;
     }
     
     // 3. Target the Benchmark
     const benchmarkEl = container.querySelector('.sentiment-benchmark-text');
     if (benchmarkEl) {
-        const diff = positivePercent - 55;
+        const diff = positivePercent - 55; // 55% is average community baseline
         benchmarkEl.innerText = diff >= 0 
             ? `${diff}% more positive than the Reddit average.` 
             : `${Math.abs(diff)}% more critical than the Reddit average.`;

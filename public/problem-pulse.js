@@ -712,46 +712,62 @@ async function generateAndRenderCloudInsights(posts, audienceContext) {
     const negInsight = document.getElementById('negative-cloud-insight');
     if (!posInsight || !negInsight) return;
 
-    // Polling logic remains same to ensure window._sentimentData is ready...
-    // [Keep your existing polling logic here]
+    // --- POLLING LOGIC: Wait for the data to exist ---
+    let attempts = 0;
+    const maxAttempts = 20; // Will wait up to 20 seconds total
 
-    const posWordsList = Object.keys(window._sentimentData.positive).slice(0, 15).join(', ');
-    const negWordsList = Object.keys(window._sentimentData.negative).slice(0, 15).join(', ');
+    while (attempts < maxAttempts) {
+        if (window._sentimentData && window._sentimentData.positive && window._sentimentData.negative) {
+            break; // Data is ready, exit the loop and continue
+        }
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+        attempts++;
+        console.log(`Cloud Insights: Waiting for sentiment data... (Attempt ${attempts})`);
+    }
+
+    // Final safety check after polling
+    if (!window._sentimentData || !window._sentimentData.positive || !window._sentimentData.negative) {
+        console.error("Cloud Insights: Sentiment data never populated.");
+        return;
+    }
+
+    // Extract the top 12 terms from the window object
+    const posWordsList = Object.keys(window._sentimentData.positive).slice(0, 12).join(', ');
+    const negWordsList = Object.keys(window._sentimentData.negative).slice(0, 12).join(', ');
 
     try {
-        const prompt = `You are a Psychological Brand Strategist. Look at these two vocabulary sets from the ${audienceContext} community.
-        
-        Positive Vocabulary (Desires/Anchor points): ${posWordsList}
-        Negative Vocabulary (Frustrations/Anxieties): ${negWordsList}
-
-        Write two sharp, high-level strategic insights:
-        1. "positive_insight": Analyze the 'Unspoken Hunger'. What are they actually seeking when they use these positive words? (1 sentence, zero fluff).
-        2. "negative_insight": Analyze the 'Core Anxiety'. What is the underlying fear driving this negative vocabulary? (1 sentence, zero fluff).
-
-        BANNED PHRASES: "sense of community", "shared experience", "supportive", "common thread".
-        Tone: Observational, editorial, and psychologically grounded.
-        Respond ONLY as valid JSON.`;
+        const prompt = `These are the most common positive words from the ${audienceContext} community: ${posWordsList}. And the most common negative words: ${negWordsList}. Write two 1-sentence strategic insights for a marketer: one summarizing what the positive vocabulary reveals about this audience's hopes/desires, one summarizing what the negative vocabulary reveals about their fears/frustrations. Respond ONLY as valid JSON with keys 'positive_insight' and 'negative_insight'.`;
 
         const openAIParams = {
-            model: "gpt-4o-mini",
-            messages: [{ role: "system", content: "You are a sharp, insight-driven creative strategist." }, { role: "user", content: prompt }],
-            temperature: 0.7,
+            model: "gpt-5.4-mini",
+            messages: [
+                { role: "system", content: "You are a market research analyst who outputs only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.3,
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        });
+
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
         if (parsed.positive_insight) {
-            posInsight.innerHTML = `<div class="cloud-insight-pill pos"><strong>Motivation:</strong> ${parsed.positive_insight}</div>`;
+            posInsight.innerHTML = `<div class="cloud-insight-pill pos"><strong>Goal:</strong> ${parsed.positive_insight}</div>`;
         }
         if (parsed.negative_insight) {
-            negInsight.innerHTML = `<div class="cloud-insight-pill neg"><strong>Anxiety:</strong> ${parsed.negative_insight}</div>`;
+            negInsight.innerHTML = `<div class="cloud-insight-pill neg"><strong>Fear:</strong> ${parsed.negative_insight}</div>`;
         }
-    } catch (error) { console.error("Cloud Insight AI Error:", error); }
-}
 
+    } catch (error) {
+        console.error("Cloud Insight AI Error:", error);
+    }
+}
 
 async function generateAndRenderToneMap(posts, audienceContext) {
     const container = document.getElementById('tone-map-container');
@@ -2818,11 +2834,28 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
     const wrapper = document.getElementById('hook-wrapper');
     if (!wrapper || !HOOK_CARD_BLUEPRINT || !HOOK_ITEM_BLUEPRINT) return;
 
-    wrapper.innerHTML = '<p class="loading-text">Extracting psychological triggers...</p>';
+    wrapper.innerHTML = '<p class="loading-text">Analyzing modern engagement patterns...</p>';
 
     try {
-        const topPostsForAI = posts.slice(0, 40).map((p, i) => `ID: ${i} | UPS: ${p.data.ups} | TITLE: ${p.data.title}`).join('\n');
+        const now = Math.floor(Date.now() / 1000);
+        const eighteenMonthsAgo = now - (18 * 30 * 24 * 60 * 60);
 
+        const modernPosts = posts.filter(p => p.data.created_utc > eighteenMonthsAgo);
+        const olderPosts = posts.filter(p => p.data.created_utc <= eighteenMonthsAgo);
+
+        let topPosts = [...modernPosts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0));
+        if (topPosts.length < 30) {
+            topPosts = topPosts.concat([...olderPosts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 30 - topPosts.length));
+        } else {
+            topPosts = topPosts.slice(0, 40);
+        }
+
+        const topPostsForAI = topPosts.map((p, i) => {
+            const year = new Date(p.data.created_utc * 1000).getFullYear();
+            return `ID: ${i} | YEAR: ${year} | UPS: ${p.data.ups} | TITLE: ${p.data.title}`;
+        }).join('\n');
+
+        // --- UPDATED PROMPT FOR CLEANER CONTENT ---
         const prompt = `You are a Senior Copywriter and conversion specialist. Analyze these top-performing posts for ${audienceContext}. 
         Identify 4-6 "Psychological Hook Patterns" that drive deep engagement. 
         Focus on triggers like: seeking reassurance, intellectual superiority, raw confession, venting, or "insider" status.
@@ -2838,54 +2871,85 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
 
         const openAIParams = {
             model: "gpt-4o-mini",
-            messages: [{ role: "system", content: "You are a master of digital psychology and viral hooks." }, { role: "user", content: prompt }],
-            temperature: 0.5,
+            messages: [{ role: "system", content: "You are a content strategist. You are brief and punchy." }, { role: "user", content: prompt }],
+            temperature: 0.1,
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        });
+
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
         wrapper.innerHTML = '';
+
         parsed.patterns.forEach(pattern => {
             const card = HOOK_CARD_BLUEPRINT.cloneNode(true);
-            card.querySelector('.hook-category').innerText = pattern.category;
-            card.querySelector('.hook-why').innerText = pattern.short_summary;
-            card.querySelector('.why-reason').innerText = pattern.strategy;
-            
+
+            const categoryEl = card.querySelector('.hook-category');
+            const whyEl = card.querySelector('.hook-why');
+            const reasonEl = card.querySelector('.why-reason'); // THE NEW ELEMENT
             const listContainer = card.querySelector('.hook-examples-list');
-            listContainer.innerHTML = '';
-            (pattern.example_ids || []).map(id => posts[parseInt(id)]).filter(Boolean).forEach(post => {
-                const item = HOOK_ITEM_BLUEPRINT.cloneNode(true);
-                item.querySelector('.hook-proof-title').innerText = post.data.title.substring(0, 130);
-                item.querySelector('.proof-badge-upvotes').innerText = `👍 ${post.data.ups.toLocaleString()}`;
-                const link = item.tagName === 'A' ? item : item.querySelector('a');
-                if (link) link.href = `https://reddit.com${post.data.permalink}`;
-                listContainer.appendChild(item);
-            });
+
+            if (categoryEl) categoryEl.innerText = pattern.category;
+            if (whyEl) whyEl.innerText = pattern.short_summary;
+            if (reasonEl) reasonEl.innerText = pattern.strategy;
+
+            if (listContainer) {
+                listContainer.innerHTML = '';
+                const validExamples = (pattern.example_ids || []).map(id => topPosts[parseInt(id)]).filter(Boolean);
+
+                validExamples.forEach(post => {
+                    const item = HOOK_ITEM_BLUEPRINT.cloneNode(true);
+
+                    const titleEl = item.querySelector('.hook-proof-title');
+                    const upvoteEl = item.querySelector('.proof-badge-upvotes');
+                    const commentEl = item.querySelector('.proof-badge-comments');
+
+                    // --- TRUNCATION ADDED HERE ---
+                    if (titleEl) {
+                        const rawTitle = post.data.title;
+                        titleEl.innerText = rawTitle.length > 130 ? rawTitle.substring(0, 127) + "..." : rawTitle;
+                    }
+
+                    if (upvoteEl) upvoteEl.innerText = `👍 ${post.data.ups.toLocaleString()}`;
+                    if (commentEl) commentEl.innerText = `💬 ${post.data.num_comments.toLocaleString()}`;
+
+                    const linkTarget = item.tagName === 'A' ? item : item.querySelector('a');
+                    if (linkTarget) {
+                        linkTarget.href = `https://reddit.com${post.data.permalink}`;
+                        linkTarget.target = "_blank";
+                    }
+
+                    listContainer.appendChild(item);
+                });
+            }
             wrapper.appendChild(card);
         });
-    } catch (error) { console.error("Hook Patterns Error:", error); }
+    } catch (error) {
+        console.error("Hook Patterns Error:", error);
+    }
 }
-
-
-    
-    
 
 // --- NEW SECTION 1: VOICE PROFILE ---
 async function generateAndRenderVoiceProfile(posts, audienceContext) {
+    // 1. Target your Webflow Elements
     const container = document.getElementById('voice-profile-container');
     if (!container) return;
 
     const quoteEl = container.querySelector('.voice-tone-quote');
     const tagsContainer = container.querySelector('.voice-adjective-tags');
 
-    if (quoteEl) quoteEl.innerText = "Briefing the creative team...";
-    if (tagsContainer) tagsContainer.innerHTML = "";
+    // 2. Set initial loading state on the quote
+    if (quoteEl) quoteEl.innerText = "Analyzing community voice...";
+    if (tagsContainer) tagsContainer.innerHTML = ""; // Clear your Webflow dummy tags
 
     try {
-        const topPostsText = posts.slice(0, 40).map(p => 
+        const topPostsText = posts.slice(0, 40).map(p =>
             `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
         ).join('\n---\n');
 
@@ -2903,19 +2967,29 @@ async function generateAndRenderVoiceProfile(posts, audienceContext) {
         5. Best messaging: "Messaging performs best when it [strategic tactical advice]..."
 
         Posts: ${topPostsText}`;
-
         const openAIParams = {
-            model: "gpt-4o-mini",
-            messages: [{ role: "system", content: "You are a senior brand strategist who hates corporate jargon and values emotional intelligence." }, { role: "user", content: prompt }],
-            temperature: 0.6, // Slightly higher for more "editorial" flair
+            model: "gpt-4o-mini", // Optimized for speed
+            messages: [
+                { role: "system", content: "You are a brand strategist who outputs only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.3,
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        });
+
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
-        if (quoteEl) quoteEl.innerText = parsed.tone_description;
+        // 3. Inject the Description/Quote
+        if (quoteEl) quoteEl.innerText = `"${parsed.tone_description}"`;
+
+        // 4. Inject the Adjectives using your Blueprint
         if (tagsContainer && VOICE_PILL_BLUEPRINT) {
             parsed.voice_adjectives.forEach(adj => {
                 const pill = VOICE_PILL_BLUEPRINT.cloneNode(true);
@@ -2923,12 +2997,12 @@ async function generateAndRenderVoiceProfile(posts, audienceContext) {
                 tagsContainer.appendChild(pill);
             });
         }
+
     } catch (error) {
         console.error("Voice Profile Error:", error);
+        if (quoteEl) quoteEl.innerText = "Voice profile analysis temporarily unavailable.";
     }
 }
-
-
 
 
 // --- NEW SECTION 2: LANGUAGE TO AVOID ---

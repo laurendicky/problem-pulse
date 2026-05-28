@@ -2906,96 +2906,9 @@ let LANGUAGE_ITEM_BLUEPRINT = null;
 let TONE_CARD_BLUEPRINT = null;
 let TONE_TRAIT_BLUEPRINT = null;
 
-async function generateAndRenderPowerPhrases(posts, audienceContext) {
-    const container = document.getElementById('power-phrases');
-    if (!container || !PHRASE_BLUEPRINT) return;
 
-    // 1. Loading State
-    container.innerHTML = '<p class="loading-text">Identifying community jargon...</p>';
 
-    try {
-        // Prepare a sample of the most relevant text
-        const textSample = posts.slice(0, 40).map(p =>
-            `${p.data.title} ${(p.data.selftext || '').substring(0, 200)}`
-        ).join('\n---\n');
 
-        const prompt = `You are a linguist specializing in Reddit subcultures for the "${audienceContext}" niche. 
-        Analyze the text provided and identify 6-9 "Power Phrases" or "Insider Terms."
-        
-        CRITICAL RULES:
-        - Focus ONLY on niche-specific jargon (e.g., if the niche is fitness, find "PR", "cut", "hypertrophy").
-        - IGNORE generic Reddit terms (AITA, OP, TLDR, "anyone else", "right now", "every time").
-        - IGNORE common English verbs/phrases (e.g., "started offering", "working on").
-        - Find terms that an OUTSIDER wouldn't immediately understand, but an INSIDER uses daily.
-
-        Respond ONLY as valid JSON with a key "terms", which is an array of objects:
-        {"terms": [{"word": "...", "definition": "...", "example": "...", "usage": "..."}]}
-
-        Text to analyze:
-        ${textSample}`;
-
-        const openAIParams = {
-            model: "gpt-4o-mini",
-            messages: [
-                { role: "system", content: "You are a specialized jargon extractor who outputs only valid JSON." },
-                { role: "user", content: prompt }
-            ],
-            temperature: 0.1, // Low temperature for high accuracy
-            response_format: { "type": "json_object" }
-        };
-
-        const response = await fetch(OPENAI_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: openAIParams })
-        });
-
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
-
-        // 2. Clear and Render
-        container.innerHTML = '';
-
-        if (!parsed.terms || parsed.terms.length === 0) {
-            container.innerHTML = '<p>No unique community jargon found in this sample.</p>';
-            return;
-        }
-
-        parsed.terms.forEach(item => {
-            const clone = PHRASE_BLUEPRINT.cloneNode(true);
-
-            // Map the AI data to your Webflow Blueprint IDs/Classes
-            const find = (selector) => clone.querySelector(`#${selector}`) || clone.querySelector(`.${selector}`);
-
-            const headerEl = find('phrase-text');
-            const defEl = find('phrase-definition');
-            const exEl = find('phrase-example');
-            const useEl = find('phrase-usage');
-            const summary = clone.querySelector('.power-phrase-summary');
-            const content = clone.querySelector('.power-phrase-content');
-
-            if (headerEl) headerEl.innerText = item.word;
-            if (defEl) defEl.innerText = item.definition;
-            if (exEl) exEl.innerText = item.example ? `"${item.example}"` : "";
-            if (useEl) useEl.innerText = item.usage;
-
-            // Handle the toggle behavior (Accordion)
-            if (content) content.style.display = 'none';
-            if (summary) {
-                summary.onclick = () => {
-                    const isHidden = content.style.display === 'none';
-                    content.style.display = isHidden ? 'block' : 'none';
-                };
-            }
-
-            container.appendChild(clone);
-        });
-
-    } catch (err) {
-        console.error("Power Phrase AI Error:", err);
-        container.innerHTML = '<p>Failed to load community phrases.</p>';
-    }
-}
 async function generateAndRenderHookPatterns(posts, audienceContext) {
     const wrapper = document.getElementById('hook-wrapper');
     if (!wrapper || !HOOK_CARD_BLUEPRINT || !HOOK_ITEM_BLUEPRINT) return;
@@ -3186,15 +3099,12 @@ Posts: ${topPostsText}`;
 }
 
 async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
-    // 1. Target the main wrapper by ID
     const moduleWrapper = document.getElementById('language-to-avoid-container');
     if (!moduleWrapper || !LANGUAGE_ITEM_BLUEPRINT) return;
 
-    // 2. Find the inner container where rows are listed
     const rowContainer = moduleWrapper.querySelector('.avoid-instead-row');
     if (!rowContainer) return;
 
-    // 3. Clear existing Webflow dummy items
     rowContainer.innerHTML = '';
 
     try {
@@ -3202,12 +3112,22 @@ async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
             `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
         ).join('\n---\n');
 
-        const prompt = `Analyze the ${audienceContext} community. Identify 4-6 inauthentic terms insiders reject, and provide the authentic alternative they use instead. Respond ONLY as valid JSON with key 'pairs', where each item has keys 'avoid' and 'instead'. Posts: ${topPostsText}`;
+        const prompt = `You are a brand linguist analyzing the "${audienceContext}" community. Identify 8-10 language pairs: terms that outsiders and marketers use that insiders find inauthentic, paired with the authentic alternative insiders actually use.
+
+For each pair provide:
+1. "avoid": The term or phrase to avoid
+2. "avoid_reason": One short sentence explaining why it sounds inauthentic (max 12 words)
+3. "use": The authentic insider alternative
+4. "use_reason": One short sentence explaining why this lands better with this community (max 12 words)
+
+Respond ONLY as valid JSON with key 'pairs', as an array of objects with keys: avoid, avoid_reason, use, use_reason.
+
+Posts: ${topPostsText}`;
 
         const openAIParams = {
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "You are a brand strategist who outputs only valid JSON." },
+                { role: "system", content: "You are a brand linguist who outputs only valid JSON." },
                 { role: "user", content: prompt }
             ],
             temperature: 0.3,
@@ -3224,21 +3144,26 @@ async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
 
         const data = await response.json();
 
-        // CRITICAL FIX: Check if openaiResponse exists before parsing
         if (!data || !data.openaiResponse) {
             throw new Error("Proxy returned empty response.");
         }
 
         const parsed = JSON.parse(data.openaiResponse);
 
-        // 4. Loop through AI results and clone your Webflow design
         if (parsed.pairs && Array.isArray(parsed.pairs)) {
             parsed.pairs.forEach(pair => {
                 const clone = LANGUAGE_ITEM_BLUEPRINT.cloneNode(true);
+
                 const avoidEl = clone.querySelector('.term-avoid');
-                const insteadEl = clone.querySelector('.term-instead');
+                const avoidReasonEl = clone.querySelector('.term-avoid-reason');
+                const useEl = clone.querySelector('.term-use');
+                const useReasonEl = clone.querySelector('.term-use-reason');
+
                 if (avoidEl) avoidEl.innerText = pair.avoid;
-                if (insteadEl) insteadEl.innerText = pair.instead;
+                if (avoidReasonEl) avoidReasonEl.innerText = pair.avoid_reason;
+                if (useEl) useEl.innerText = pair.use;
+                if (useReasonEl) useReasonEl.innerText = pair.use_reason;
+
                 rowContainer.appendChild(clone);
             });
         }
@@ -3248,6 +3173,8 @@ async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
         rowContainer.innerHTML = `<p class="placeholder-text">Language analysis timed out. Try a smaller search.</p>`;
     }
 }
+
+
 
     // =================================================================================
     // === NEW FUNCTION: AI AUDIENCE OVERVIEW (DEMOGRAPHICS) ===
@@ -3488,7 +3415,6 @@ async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
             generateAndRenderHybridSentiment(filteredItems, originalGroupName);
             generateEmotionMapData(filteredItems).then(renderEmotionMap);
             renderIncludedSubreddits(selectedSubreddits);
-            generateAndRenderPowerPhrases(filteredItems, originalGroupName);
             generateAndRenderVoiceProfile(filteredItems, originalGroupName);
             generateAndRenderLanguageToAvoid(filteredItems, originalGroupName);
             generateAndRenderHookPatterns(filteredItems, originalGroupName);

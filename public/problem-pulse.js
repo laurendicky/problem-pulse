@@ -2902,7 +2902,8 @@ let HOOK_CARD_BLUEPRINT = null;
 let HOOK_ITEM_BLUEPRINT = null;
 let MINDSET_ITEM_BLUEPRINT = null; // ADD THIS
 let AVOID_SWAP_BLUEPRINT = null;   // ADD THIS
-let LANGUAGE_ITEM_BLUEPRINT = null;
+let LANGUAGE_AVOID_BLUEPRINT = null;
+let LANGUAGE_USE_BLUEPRINT = null;
 let TONE_CARD_BLUEPRINT = null;
 let TONE_TRAIT_BLUEPRINT = null;
 
@@ -3104,12 +3105,10 @@ Posts: ${topPostsText}`;
 
 async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
     const moduleWrapper = document.getElementById('language-to-avoid-container');
-    if (!moduleWrapper || !LANGUAGE_ITEM_BLUEPRINT) return;
+    if (!moduleWrapper || !LANGUAGE_AVOID_BLUEPRINT || !LANGUAGE_USE_BLUEPRINT) return;
 
-    const rowContainer = moduleWrapper.querySelector('.avoid-instead-row');
-    if (!rowContainer) return;
-
-    rowContainer.innerHTML = '';
+    // Clear only previously appended dynamic items, leaving static headers intact
+    moduleWrapper.querySelectorAll('[data-dynamic="true"]').forEach(el => el.remove());
 
     try {
         const topPostsText = posts.slice(0, 40).map(p =>
@@ -3122,7 +3121,7 @@ For each pair provide:
 1. "avoid": The term or phrase to avoid
 2. "avoid_reason": One short sentence explaining why it sounds inauthentic (max 12 words)
 3. "use": The authentic insider alternative
-4. "use_reason": One short sentence explaining why this lands better with this community (max 12 words)
+4. "use_reason": One short sentence explaining why this lands better (max 12 words)
 
 Respond ONLY as valid JSON with key 'pairs', as an array of objects with keys: avoid, avoid_reason, use, use_reason.
 
@@ -3156,28 +3155,33 @@ Posts: ${topPostsText}`;
 
         if (parsed.pairs && Array.isArray(parsed.pairs)) {
             parsed.pairs.forEach(pair => {
-                const clone = LANGUAGE_ITEM_BLUEPRINT.cloneNode(true);
 
-                const avoidEl = clone.querySelector('.term-avoid');
-                const avoidReasonEl = clone.querySelector('.term-avoid-reason');
-                const useEl = clone.querySelector('.term-use');
-                const useReasonEl = clone.querySelector('.term-use-reason');
-
+                // Clone the avoid blueprint and populate it
+                const avoidClone = LANGUAGE_AVOID_BLUEPRINT.cloneNode(true);
+                avoidClone.setAttribute('data-dynamic', 'true');
+                const avoidEl = avoidClone.querySelector('.term-avoid');
+                const avoidReasonEl = avoidClone.querySelector('.term-avoid-reason');
                 if (avoidEl) avoidEl.innerText = pair.avoid;
                 if (avoidReasonEl) avoidReasonEl.innerText = pair.avoid_reason;
+
+                // Clone the use blueprint and populate it
+                const useClone = LANGUAGE_USE_BLUEPRINT.cloneNode(true);
+                useClone.setAttribute('data-dynamic', 'true');
+                const useEl = useClone.querySelector('.term-use');
+                const useReasonEl = useClone.querySelector('.term-use-reason');
                 if (useEl) useEl.innerText = pair.use;
                 if (useReasonEl) useReasonEl.innerText = pair.use_reason;
 
-                rowContainer.appendChild(clone);
+                // Append both to the wrapper - the CSS grid places them side by side
+                moduleWrapper.querySelector('.avoid-instead-list').appendChild(avoidClone);
+                moduleWrapper.querySelector('.avoid-instead-list').appendChild(useClone);
             });
         }
 
     } catch (error) {
         console.error("Language Avoid Error:", error);
-        rowContainer.innerHTML = `<p class="placeholder-text">Language analysis timed out. Try a smaller search.</p>`;
     }
 }
-
 
 
     // =================================================================================
@@ -3343,13 +3347,19 @@ Posts: ${topPostsText}`;
             }
         }
         // Capture Language Avoid Item Blueprint
-        if (!LANGUAGE_ITEM_BLUEPRINT) {
-            const foundLanguageItem = document.querySelector('.avoid-instead-list');
-            if (foundLanguageItem) {
-                LANGUAGE_ITEM_BLUEPRINT = foundLanguageItem.cloneNode(true);
-                console.log("Language Item blueprint captured.");
+        if (!LANGUAGE_AVOID_BLUEPRINT) {
+            const found = document.querySelector('.avoid-term-template');
+            if (found) {
+                LANGUAGE_AVOID_BLUEPRINT = found.cloneNode(true);
             }
         }
+        if (!LANGUAGE_USE_BLUEPRINT) {
+            const found = document.querySelector('.use-term-template');
+            if (found) {
+                LANGUAGE_USE_BLUEPRINT = found.cloneNode(true);
+            }
+        }    
+    
         // Capture Tone Card & Trait Blueprints
         if (!TONE_CARD_BLUEPRINT) {
             const card = document.querySelector('.tone-card-blueprint');

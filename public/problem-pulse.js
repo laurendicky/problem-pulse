@@ -2990,7 +2990,15 @@ async function generateAndRenderVoiceProfile(posts, audienceContext) {
             `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
         ).join('\n---\n');
 
-        const prompt = `Based on these posts from the ${audienceContext} community, write a 2-3 sentence tone-of-voice description that a copywriter could use as a brief, plus 6 adjectives describing the voice. Respond ONLY as valid JSON with keys 'tone_description' and 'voice_adjectives'. Posts: ${topPostsText}`;
+        const prompt = `You are a sharp cultural observer studying how the "${audienceContext}" community actually talks. Write a tone-of-voice read that is observational, psychologically sharp, emotionally textured, culturally aware, and slightly editorial. Avoid marketing cliches like "shared experience," "supportive community," or "celebrate the journey." Look for the real emotional undercurrents, contradictions, and unspoken tensions in how they speak.
+
+        Respond ONLY as valid JSON with two keys: 'tone_description' and 'voice_adjectives'.
+        
+        'tone_description' should be 4-5 short sentences, each on its own line separated by a newline character, covering: their emotional state, how they communicate, how they relate to each other, what they're really seeking, and what kind of messaging lands with them.
+        
+        'voice_adjectives' should be an array of exactly 6 evocative adjectives.
+        
+        Posts: ${topPostsText}`;
 
         const openAIParams = {
             model: "gpt-4o-mini", // Optimized for speed
@@ -3012,7 +3020,7 @@ async function generateAndRenderVoiceProfile(posts, audienceContext) {
         const parsed = JSON.parse(data.openaiResponse);
 
         // 3. Inject the Description/Quote
-        if (quoteEl) quoteEl.innerText = `"${parsed.tone_description}"`;
+        if (quoteEl) quoteEl.innerText = parsed.tone_description;
 
         // 4. Inject the Adjectives using your Blueprint
         if (tagsContainer && VOICE_PILL_BLUEPRINT) {

@@ -3103,11 +3103,16 @@ async function generateAndRenderVoiceProfile(posts, audienceContext) {
     const container = document.getElementById('voice-profile-container');
     if (!container) return;
 
-    const quoteEl = container.querySelector('.voice-tone-quote');
+    const wrap = container.querySelector('.voice-p-wrap');
+if (wrap && Array.isArray(parsed.tone_description)) {
+    const contextEls = wrap.querySelectorAll('.voice-p-context');
+    parsed.tone_description.forEach((text, i) => {
+        if (contextEls[i]) contextEls[i].textContent = text;
+    });
+}
     const tagsContainer = container.querySelector('.voice-adjective-tags');
 
     // 2. Set initial loading state on the quote
-    if (quoteEl) quoteEl.innerText = "Analyzing community voice...";
     if (tagsContainer) tagsContainer.innerHTML = ""; // Clear your Webflow dummy tags
 
     try {
@@ -3115,15 +3120,21 @@ async function generateAndRenderVoiceProfile(posts, audienceContext) {
             `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
         ).join('\n---\n');
 
-        const prompt = `You are a sharp cultural observer studying how the "${audienceContext}" community actually talks. Write a tone-of-voice read that is observational, psychologically sharp, emotionally textured, culturally aware, and slightly editorial. Avoid marketing cliches like "shared experience," "supportive community," or "celebrate the journey." Look for the real emotional undercurrents, contradictions, and unspoken tensions in how they speak.
+        const prompt = `You are a sharp cultural observer studying how the "${audienceContext}" community actually talks. Write a tone-of-voice read that is observational, psychologically sharp, emotionally textured, culturally aware, and slightly editorial. Avoid marketing cliches like "shared experience," "supportive community," or "celebrate the journey."
 
-        Respond ONLY as valid JSON with two keys: 'tone_description' and 'voice_adjectives'.
-        
-        'tone_description' should be 4-5 short sentences, each on its own line separated by a newline character, covering: their emotional state, how they communicate, how they relate to each other, what they're really seeking, and what kind of messaging lands with them.
-        
-        'voice_adjectives' should be an array of exactly 6 evocative adjectives.
-        
-        Posts: ${topPostsText}`;
+Respond ONLY as valid JSON with two keys: 'tone_description' and 'voice_adjectives'.
+
+'tone_description' must be an array of exactly 5 strings in this exact order:
+1. Their emotional state
+2. How they communicate
+3. How they relate to each other
+4. What they are really seeking
+5. What kind of messaging lands with them
+Each string must be one sentence only.
+
+'voice_adjectives' should be an array of exactly 6 evocative adjectives.
+
+Posts: ${topPostsText}`;
 
         const openAIParams = {
             model: "gpt-4o-mini", // Optimized for speed

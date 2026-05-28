@@ -3097,23 +3097,12 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
     }
 }
 
-// --- NEW SECTION 1: VOICE PROFILE ---
 async function generateAndRenderVoiceProfile(posts, audienceContext) {
-    // 1. Target your Webflow Elements
     const container = document.getElementById('voice-profile-container');
     if (!container) return;
 
-    const wrap = container.querySelector('.voice-p-wrap');
-if (wrap && Array.isArray(parsed.tone_description)) {
-    const contextEls = wrap.querySelectorAll('.voice-p-context');
-    parsed.tone_description.forEach((text, i) => {
-        if (contextEls[i]) contextEls[i].textContent = text;
-    });
-}
     const tagsContainer = container.querySelector('.voice-adjective-tags');
-
-    // 2. Set initial loading state on the quote
-    if (tagsContainer) tagsContainer.innerHTML = ""; // Clear your Webflow dummy tags
+    if (tagsContainer) tagsContainer.innerHTML = '';
 
     try {
         const topPostsText = posts.slice(0, 40).map(p =>
@@ -3137,7 +3126,7 @@ Each string must be one sentence only.
 Posts: ${topPostsText}`;
 
         const openAIParams = {
-            model: "gpt-4o-mini", // Optimized for speed
+            model: "gpt-4o-mini",
             messages: [
                 { role: "system", content: "You are a brand strategist who outputs only valid JSON." },
                 { role: "user", content: prompt }
@@ -3155,10 +3144,16 @@ Posts: ${topPostsText}`;
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
-        // 3. Inject the Description/Quote
-        if (quoteEl) quoteEl.innerText = parsed.tone_description;
+        // Populate the 5 voice-p-context elements in order
+        const wrap = container.querySelector('.voice-p-wrap');
+        if (wrap && Array.isArray(parsed.tone_description)) {
+            const contextEls = wrap.querySelectorAll('.voice-p-context');
+            parsed.tone_description.forEach((text, i) => {
+                if (contextEls[i]) contextEls[i].textContent = text;
+            });
+        }
 
-        // 4. Inject the Adjectives using your Blueprint
+        // Inject the adjective pills
         if (tagsContainer && VOICE_PILL_BLUEPRINT) {
             parsed.voice_adjectives.forEach(adj => {
                 const pill = VOICE_PILL_BLUEPRINT.cloneNode(true);
@@ -3169,13 +3164,8 @@ Posts: ${topPostsText}`;
 
     } catch (error) {
         console.error("Voice Profile Error:", error);
-        if (quoteEl) quoteEl.innerText = "Voice profile analysis temporarily unavailable.";
     }
 }
-
-
-// --- NEW SECTION 2: LANGUAGE TO AVOID ---
-
 
 async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
     // 1. Target the main wrapper by ID

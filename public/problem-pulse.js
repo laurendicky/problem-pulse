@@ -92,6 +92,20 @@ async function classifySentimentWithAI(posts) {
     }
     return allSentiments;
 }
+function countSentimentWords(posts) {
+    let positive = 0, negative = 0;
+    posts.forEach(post => {
+        const text = `${post.data.title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase();
+        const words = text.replace(/[^a-z\s']/g, '').split(/\s+/);
+        words.forEach(rawWord => {
+            if (rawWord.length < 3) return;
+            const lemma = lemmatize(rawWord);
+            if (positiveWords.has(lemma)) positive++;
+            else if (negativeWords.has(lemma)) negative++;
+        });
+    });
+    return { positive, negative };
+}
 // =================================================================================
 // === NEW HELPER FUNCTION: generateSentimentContextWithAI (Add this to your script) ===
 // =================================================================================
@@ -1646,9 +1660,7 @@ async function generateAndRenderHistoricalSentiment(subredditQueryString) {
 
     container.innerHTML = '<p class="loading-text">Charting sentiment over time... <span class="loader-dots"></span></p>';
 
-    // Balanced emotional terms so we capture both positive and negative posts
     const sampleTerms = ["love", "hate", "best", "worst", "frustrating", "amazing"];
-
     const timePeriods = [
         { label: 'Past 6 Mo', value: '6month' },
         { label: 'Past 3 Mo', value: '3month' },
@@ -1658,30 +1670,22 @@ async function generateAndRenderHistoricalSentiment(subredditQueryString) {
 
     try {
         const fetchPromises = timePeriods.map(p =>
-            fetchMultipleRedditDataBatched(subredditQueryString, sampleTerms, 30, p.value)
+            fetchMultipleRedditDataBatched(subredditQueryString, sampleTerms, 40, p.value)
         );
         const results = await Promise.allSettled(fetchPromises);
 
         const trendData = [];
-        for (let i = 0; i < results.length; i++) {
-            const result = results[i];
-            if (result.status !== 'fulfilled' || result.value.length === 0) continue;
-
-            // Cap the sample to keep AI classification fast and affordable
-            const posts = deduplicatePosts(result.value).slice(0, 50);
-            const sentiments = await classifySentimentWithAI(posts);
-
-            const pos = sentiments.filter(s => s === 'Positive').length;
-            const neg = sentiments.filter(s => s === 'Negative').length;
-            const total = pos + neg;
-            if (total === 0) continue;
-
+        results.forEach((result, i) => {
+            if (result.status !== 'fulfilled' || result.value.length === 0) return;
+            const posts = deduplicatePosts(result.value);
+            const { positive, negative } = countSentimentWords(posts);
+            const total = positive + negative;
+            if (total === 0) return;
             trendData.push({
                 period: timePeriods[i].label,
-                positive: Math.round((pos / total) * 100),
-                negative: Math.round((neg / total) * 100)
+                positive: Math.round((positive / total) * 100)
             });
-        }
+        });
 
         renderHistoricalSentimentChart(trendData);
     } catch (err) {
@@ -1699,37 +1703,48 @@ function renderHistoricalSentimentChart(data) {
         return;
     }
 
-    container.innerHTML = ''; // clear loading state
+    container.innerHTML = '';
 
     Highcharts.chart(container, {
-        chart: { type: 'area', backgroundColor: 'transparent', height: 300 },
+        chart: { type: 'areaspline', backgroundColor: 'transparent', height: 280 },
         title: { text: null },
         credits: { enabled: false },
         xAxis: {
             categories: data.map(d => d.period),
             labels: { style: { color: '#475569' } },
-            lineColor: 'rgba(0,0,0,0.15)',
-            tickColor: 'rgba(0,0,0,0.15)'
+            lineColor: 'rgba(0,0,0,0.12)',
+            tickColor: 'rgba(0,0,0,0.12)'
         },
         yAxis: {
-            title: { text: null },
+            title: { text: '% Positive', style: { color: '#64748b' } },
             min: 0, max: 100,
             labels: { format: '{value}%', style: { color: '#475569' } },
-            gridLineColor: 'rgba(0,0,0,0.08)'
+            gridLineColor: 'rgba(0,0,0,0.06)',
+            plotLines: [{
+                value: 58,
+                color: 'rgba(100,116,139,0.5)',
+                dashStyle: 'Dash',
+                width: 1,
+                label: { text: 'Reddit avg', style: { color: '#94a3b8', fontSize: '11px' }, align: 'right', x: -5 }
+            }]
         },
-        legend: { itemStyle: { color: '#334155' } },
-        tooltip: { shared: true, valueSuffix: '%' },
+        legend: { enabled: false },
+        tooltip: { valueSuffix: '% positive', backgroundColor: '#ffffff' },
         plotOptions: {
-            area: {
-                stacking: 'percent',
-                marker: { enabled: false },
-                lineWidth: 1
+            areaspline: {
+                color: '#00a5ce',
+                lineWidth: 2,
+                marker: { enabled: true, radius: 4, fillColor: '#00a5ce' },
+                fillColor: {
+                    linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
+                    stops: [
+                        [0, 'rgba(0,165,206,0.18)'],
+                        [1, 'rgba(0,165,206,0.0)']
+                    ]
+                }
             }
         },
-        series: [
-            { name: 'Positive', data: data.map(d => d.positive), color: '#00a5ce' },
-            { name: 'Negative', data: data.map(d => d.negative), color: '#fd80c7' }
-        ]
+        series: [{ name: '% Positive', data: data.map(d => d.positive) }]
     });
 }
 // =================================================================================

@@ -3107,27 +3107,21 @@ async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
     const moduleWrapper = document.getElementById('language-to-avoid-container');
     if (!moduleWrapper) return;
 
-    const avoidTemplate = moduleWrapper.querySelector('.avoid-term-template');
-    const useTemplate = moduleWrapper.querySelector('.use-term-template');
+    const avoidContainer = moduleWrapper.querySelector('.avoid-items-wrap');
+    const useContainer = moduleWrapper.querySelector('.use-items-wrap');
+    if (!avoidContainer || !useContainer) return;
 
-    if (!avoidTemplate || !useTemplate) {
-        console.error("Language blueprints not found.");
-        return;
-    }
+    // Capture blueprints before clearing
+    const avoidTemplate = avoidContainer.querySelector('.avoid-term-template');
+    const useTemplate = useContainer.querySelector('.use-term-template');
+    if (!avoidTemplate || !useTemplate) return;
 
-    // The column containers are the parents of each template
-    const avoidContainer = avoidTemplate.parentElement;
-    const useContainer = useTemplate.parentElement;
+    const avoidBlueprint = avoidTemplate.cloneNode(true);
+    const useBlueprint = useTemplate.cloneNode(true);
 
-    // Hide the original templates
-    avoidTemplate.style.display = 'none';
-    useTemplate.style.display = 'none';
-    avoidContainer.querySelectorAll(':scope > *:not([class*="heading"]):not(.avoid-term-template)').forEach(el => el.remove());
-    useContainer.querySelectorAll(':scope > *:not([class*="heading"]):not(.use-term-template)').forEach(el => el.remove());
-
-    // Clear previously appended items only
-    avoidContainer.querySelectorAll('[data-dynamic="true"]').forEach(el => el.remove());
-    useContainer.querySelectorAll('[data-dynamic="true"]').forEach(el => el.remove());
+    // Clear everything including dummies
+    avoidContainer.innerHTML = '';
+    useContainer.innerHTML = '';
 
     try {
         const topPostsText = posts.slice(0, 40).map(p =>
@@ -3163,7 +3157,6 @@ Posts: ${topPostsText}`;
         });
 
         if (!response.ok) throw new Error('Language Avoid API call failed.');
-
         const data = await response.json();
         if (!data || !data.openaiResponse) throw new Error("Proxy returned empty response.");
 
@@ -3171,21 +3164,14 @@ Posts: ${topPostsText}`;
 
         if (parsed.pairs && Array.isArray(parsed.pairs)) {
             parsed.pairs.forEach(pair => {
-
-                // Clone avoid template into left column
-                const avoidClone = avoidTemplate.cloneNode(true);
-                avoidClone.style.display = '';
-                avoidClone.setAttribute('data-dynamic', 'true');
+                const avoidClone = avoidBlueprint.cloneNode(true);
                 const avoidEl = avoidClone.querySelector('.term-avoid');
                 const avoidReasonEl = avoidClone.querySelector('.term-avoid-reason');
                 if (avoidEl) avoidEl.innerText = pair.avoid;
                 if (avoidReasonEl) avoidReasonEl.innerText = pair.avoid_reason;
                 avoidContainer.appendChild(avoidClone);
 
-                // Clone use template into right column
-                const useClone = useTemplate.cloneNode(true);
-                useClone.style.display = '';
-                useClone.setAttribute('data-dynamic', 'true');
+                const useClone = useBlueprint.cloneNode(true);
                 const useEl = useClone.querySelector('.term-use');
                 const useReasonEl = useClone.querySelector('.term-use-reason');
                 if (useEl) useEl.innerText = pair.use;
@@ -3198,8 +3184,6 @@ Posts: ${topPostsText}`;
         console.error("Language Avoid Error:", error);
     }
 }
-
-
     // =================================================================================
     // === NEW FUNCTION: AI AUDIENCE OVERVIEW (DEMOGRAPHICS) ===
     // =================================================================================

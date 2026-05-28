@@ -3122,6 +3122,8 @@ async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
     // Hide the original templates
     avoidTemplate.style.display = 'none';
     useTemplate.style.display = 'none';
+    avoidContainer.querySelectorAll(':scope > *:not([class*="heading"]):not(.avoid-term-template)').forEach(el => el.remove());
+    useContainer.querySelectorAll(':scope > *:not([class*="heading"]):not(.use-term-template)').forEach(el => el.remove());
 
     // Clear previously appended items only
     avoidContainer.querySelectorAll('[data-dynamic="true"]').forEach(el => el.remove());

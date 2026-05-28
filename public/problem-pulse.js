@@ -1622,33 +1622,33 @@ function renderSentimentScore(positiveCount, negativeCount) {
 
     // --- Vibe label ---
     const vibeLabel = container.querySelector('.sentiment-vibe-label');
-    if (vibeLabel) {
-        let vibe;
-        if (positivePercent >= 75)      vibe = 'Enthusiastic and highly engaged';
-        else if (positivePercent >= 65) vibe = 'Predominantly positive with strong community energy';
-        else if (positivePercent >= 55) vibe = 'Generally upbeat with occasional frustration';
-        else if (positivePercent >= 45) vibe = 'Cautiously optimistic with real underlying tension';
-        else if (positivePercent >= 35) vibe = 'Divided and emotionally complex';
-        else if (positivePercent >= 25) vibe = 'Frequently frustrated, actively seeking solutions';
-        else                            vibe = 'High frustration community, pain points dominate';
-        vibeLabel.textContent = vibe;
-    }
+if (vibeLabel) {
+    let vibe;
+    if (positivePercent >= 70)      vibe = 'Enthusiastic and highly engaged';
+    else if (positivePercent >= 60) vibe = 'Largely positive with pockets of frustration';
+    else if (positivePercent >= 52) vibe = 'Leaning positive, but genuinely mixed';
+    else if (positivePercent >= 48) vibe = 'Evenly split, optimism and frustration in tension';
+    else if (positivePercent >= 40) vibe = 'Leaning negative, frustration outweighs optimism';
+    else if (positivePercent >= 30) vibe = 'Frequently frustrated, actively seeking solutions';
+    else                            vibe = 'High frustration community, pain points dominate';
+    vibeLabel.textContent = vibe;
+}
 
     // --- Benchmark comparison ---
     const benchmarkEl = container.querySelector('.sentiment-benchmark-text');
-    if (benchmarkEl) {
-        const REDDIT_BASELINE = 58; // published approximate for Reddit-wide positive sentiment
-        const diff = positivePercent - REDDIT_BASELINE;
-        let benchmark;
-        if (Math.abs(diff) <= 2) {
-            benchmark = 'Sentiment is in line with the average Reddit community';
-        } else if (diff > 0) {
-            benchmark = `${diff}% more positive than the average Reddit community`;
-        } else {
-            benchmark = `${Math.abs(diff)}% more negative than the average Reddit community`;
-        }
-        benchmarkEl.textContent = `${benchmark} (est.)`;
+if (benchmarkEl) {
+    const REDDIT_BASELINE = 58;
+    const diff = positivePercent - REDDIT_BASELINE;
+    let benchmark;
+    if (Math.abs(diff) <= 2) {
+        benchmark = 'Matches Reddit avg';
+    } else if (diff > 0) {
+        benchmark = `${diff}% above Reddit avg`;
+    } else {
+        benchmark = `${Math.abs(diff)}% below Reddit avg`;
     }
+    benchmarkEl.textContent = `${benchmark} (est.)`;
+}
 }
 
 // =================================================================================
@@ -1725,7 +1725,7 @@ function renderHistoricalSentimentChart(data) {
                 color: 'rgba(100,116,139,0.5)',
                 dashStyle: 'Dash',
                 width: 1,
-                label: { text: 'Reddit avg', style: { color: '#94a3b8', fontSize: '11px' }, align: 'right', x: -5 }
+                label: { text: 'Reddit avg', style: { color: '#94a3b8', fontSize: '11px' }, align: 'left', x: 5, y: -4 }
             }]
         },
         legend: { enabled: false },

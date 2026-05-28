@@ -3105,10 +3105,27 @@ Posts: ${topPostsText}`;
 
 async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
     const moduleWrapper = document.getElementById('language-to-avoid-container');
-    if (!moduleWrapper || !LANGUAGE_AVOID_BLUEPRINT || !LANGUAGE_USE_BLUEPRINT) return;
+    if (!moduleWrapper) return;
 
-    // Clear only previously appended dynamic items, leaving static headers intact
-    moduleWrapper.querySelectorAll('[data-dynamic="true"]').forEach(el => el.remove());
+    const avoidTemplate = moduleWrapper.querySelector('.avoid-term-template');
+    const useTemplate = moduleWrapper.querySelector('.use-term-template');
+
+    if (!avoidTemplate || !useTemplate) {
+        console.error("Language blueprints not found.");
+        return;
+    }
+
+    // The column containers are the parents of each template
+    const avoidContainer = avoidTemplate.parentElement;
+    const useContainer = useTemplate.parentElement;
+
+    // Hide the original templates
+    avoidTemplate.style.display = 'none';
+    useTemplate.style.display = 'none';
+
+    // Clear previously appended items only
+    avoidContainer.querySelectorAll('[data-dynamic="true"]').forEach(el => el.remove());
+    useContainer.querySelectorAll('[data-dynamic="true"]').forEach(el => el.remove());
 
     try {
         const topPostsText = posts.slice(0, 40).map(p =>
@@ -3146,35 +3163,32 @@ Posts: ${topPostsText}`;
         if (!response.ok) throw new Error('Language Avoid API call failed.');
 
         const data = await response.json();
-
-        if (!data || !data.openaiResponse) {
-            throw new Error("Proxy returned empty response.");
-        }
+        if (!data || !data.openaiResponse) throw new Error("Proxy returned empty response.");
 
         const parsed = JSON.parse(data.openaiResponse);
 
         if (parsed.pairs && Array.isArray(parsed.pairs)) {
             parsed.pairs.forEach(pair => {
 
-                // Clone the avoid blueprint and populate it
-                const avoidClone = LANGUAGE_AVOID_BLUEPRINT.cloneNode(true);
+                // Clone avoid template into left column
+                const avoidClone = avoidTemplate.cloneNode(true);
+                avoidClone.style.display = '';
                 avoidClone.setAttribute('data-dynamic', 'true');
                 const avoidEl = avoidClone.querySelector('.term-avoid');
                 const avoidReasonEl = avoidClone.querySelector('.term-avoid-reason');
                 if (avoidEl) avoidEl.innerText = pair.avoid;
                 if (avoidReasonEl) avoidReasonEl.innerText = pair.avoid_reason;
+                avoidContainer.appendChild(avoidClone);
 
-                // Clone the use blueprint and populate it
-                const useClone = LANGUAGE_USE_BLUEPRINT.cloneNode(true);
+                // Clone use template into right column
+                const useClone = useTemplate.cloneNode(true);
+                useClone.style.display = '';
                 useClone.setAttribute('data-dynamic', 'true');
                 const useEl = useClone.querySelector('.term-use');
                 const useReasonEl = useClone.querySelector('.term-use-reason');
                 if (useEl) useEl.innerText = pair.use;
                 if (useReasonEl) useReasonEl.innerText = pair.use_reason;
-
-                // Append both to the wrapper - the CSS grid places them side by side
-                moduleWrapper.querySelector('.avoid-instead-list').appendChild(avoidClone);
-                moduleWrapper.querySelector('.avoid-instead-list').appendChild(useClone);
+                useContainer.appendChild(useClone);
             });
         }
 

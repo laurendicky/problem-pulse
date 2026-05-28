@@ -2996,7 +2996,6 @@ async function generateAndRenderPowerPhrases(posts, audienceContext) {
         container.innerHTML = '<p>Failed to load community phrases.</p>';
     }
 }
-
 async function generateAndRenderHookPatterns(posts, audienceContext) {
     const wrapper = document.getElementById('hook-wrapper');
     if (!wrapper || !HOOK_CARD_BLUEPRINT || !HOOK_ITEM_BLUEPRINT) return;
@@ -3022,13 +3021,17 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
             return `ID: ${i} | YEAR: ${year} | UPS: ${p.data.ups} | TITLE: ${p.data.title}`;
         }).join('\n');
 
-        // --- UPDATED PROMPT FOR CLEANER CONTENT ---
-        const prompt = `Analyze these top posts for ${audienceContext}. Identify 4-6 MODERN hook patterns. 
+        const prompt = `Analyze these top posts for ${audienceContext}. Identify 4-6 MODERN hook patterns.
         Respond ONLY as valid JSON with key 'patterns', each having:
-        1. "category": (e.g., 'Contrarian Truth')
-        2. "short_summary": (A 1-sentence, 10-word max description of the hook style)
-        3. "strategy": (A 1-sentence, 20-word max explanation of why it works)
-        4. "example_ids": (Array of 3 IDs).
+        1. "category": The hook pattern name (e.g., 'Contrarian Truth')
+        2. "short_summary": A 1-sentence, 10-word max description of the hook style
+        3. "strategy": A 1-sentence, 20-word max explanation of why it works
+        4. "example_ids": Array of 3 post IDs
+        5. "emotion_type": The core emotion driving this hook (e.g., "Grief & Vulnerability", "Pride & Identity", "Frustration & Rage")
+        6. "impact_level": Overall impact as a short label (e.g., "High Impact", "Medium Impact", "Very High Impact")
+        7. "emotional_intensity": An integer from 0-100 representing the emotional intensity of this hook pattern
+        8. "viral_potential": An integer from 0-100 representing the viral potential of this hook pattern
+        9. "community_impact": One of "Very High", "High", "Medium", or "Low"
         Posts: ${topPostsForAI}`;
 
         const openAIParams = {
@@ -3052,15 +3055,30 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
         parsed.patterns.forEach(pattern => {
             const card = HOOK_CARD_BLUEPRINT.cloneNode(true);
 
+            // --- Existing elements ---
             const categoryEl = card.querySelector('.hook-category');
             const whyEl = card.querySelector('.hook-why');
-            const reasonEl = card.querySelector('.why-reason'); // THE NEW ELEMENT
-            const listContainer = card.querySelector('.hook-examples-list');
+            const reasonEl = card.querySelector('.why-reason');
 
             if (categoryEl) categoryEl.innerText = pattern.category;
             if (whyEl) whyEl.innerText = pattern.short_summary;
             if (reasonEl) reasonEl.innerText = pattern.strategy;
 
+            // --- New elements ---
+            const emotionEl = card.querySelector('.emotion-hook');
+            const impactLabelEl = card.querySelector('.impact-label');
+            const emotionalIntensityEl = card.querySelector('.emotional-intensity-p');
+            const viralPotentialEl = card.querySelector('.viral-potential-p');
+            const communityImpactEl = card.querySelector('.community-impact');
+
+            if (emotionEl) emotionEl.innerText = pattern.emotion_type || '';
+            if (impactLabelEl) impactLabelEl.innerText = pattern.impact_level || '';
+            if (emotionalIntensityEl) emotionalIntensityEl.innerText = pattern.emotional_intensity != null ? `${pattern.emotional_intensity}%` : '';
+            if (viralPotentialEl) viralPotentialEl.innerText = pattern.viral_potential != null ? `${pattern.viral_potential}%` : '';
+            if (communityImpactEl) communityImpactEl.innerText = pattern.community_impact || '';
+
+            // --- Example posts ---
+            const listContainer = card.querySelector('.hook-examples-list');
             if (listContainer) {
                 listContainer.innerHTML = '';
                 const validExamples = (pattern.example_ids || []).map(id => topPosts[parseInt(id)]).filter(Boolean);
@@ -3072,12 +3090,10 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
                     const upvoteEl = item.querySelector('.proof-badge-upvotes');
                     const commentEl = item.querySelector('.proof-badge-comments');
 
-                    // --- TRUNCATION ADDED HERE ---
                     if (titleEl) {
                         const rawTitle = post.data.title;
                         titleEl.innerText = rawTitle.length > 130 ? rawTitle.substring(0, 127) + "..." : rawTitle;
                     }
-
                     if (upvoteEl) upvoteEl.innerText = `👍 ${post.data.ups.toLocaleString()}`;
                     if (commentEl) commentEl.innerText = `💬 ${post.data.num_comments.toLocaleString()}`;
 
@@ -3090,8 +3106,10 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
                     listContainer.appendChild(item);
                 });
             }
+
             wrapper.appendChild(card);
         });
+
     } catch (error) {
         console.error("Hook Patterns Error:", error);
     }

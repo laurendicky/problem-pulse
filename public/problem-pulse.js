@@ -611,16 +611,18 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
             wordFreq.negative.get(word).add(post);
         });
     });
-
-    // Calculate total counts for the score bar based on all occurrences
-    posts.forEach(post => {
-        const words = `${post.data.title || ''} ${post.data.selftext || ''}`.toLowerCase().split(/\s+/);
-        words.forEach(word => {
-            if (positiveWords.has(word)) positiveCount++;
-            if (negativeWords.has(word)) negativeCount++;
-        });
+// Calculate total counts for the score bar based on all occurrences
+posts.forEach(post => {
+    const text = `${post.data.title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase();
+    const words = text.replace(/[^a-z\s']/g, '').split(/\s+/);
+    words.forEach(rawWord => {
+        if (rawWord.length < 3) return;
+        const lemma = lemmatize(rawWord);
+        if (positiveWords.has(lemma)) positiveCount++;
+        else if (negativeWords.has(lemma)) negativeCount++;
     });
-    renderSentimentScore(positiveCount, negativeCount);
+});
+renderSentimentScore(positiveCount, negativeCount);
 
 
     // --- PART 2: SCRIPT-FIRST - Programmatically Find All Common Phrases (Corrected for unique posts) ---
@@ -2856,17 +2858,12 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
         }).join('\n');
 
         // --- UPDATED PROMPT FOR CLEANER CONTENT ---
-        const prompt = `You are a Senior Copywriter and conversion specialist. Analyze these top-performing posts for ${audienceContext}. 
-        Identify 4-6 "Psychological Hook Patterns" that drive deep engagement. 
-        Focus on triggers like: seeking reassurance, intellectual superiority, raw confession, venting, or "insider" status.
-        
-        CRITICAL: Avoid generic terms. Use editorial, punchy titles for the categories.
+        const prompt = `Analyze these top posts for ${audienceContext}. Identify 4-6 MODERN hook patterns. 
         Respond ONLY as valid JSON with key 'patterns', each having:
-        1. "category": (e.g., 'The Radical Confession' or 'The Reassurance Loop')
-        2. "short_summary": (A punchy 1-sentence description of the emotional hook)
-        3. "strategy": (Why this works psychologically for this specific audience)
+        1. "category": (e.g., 'Contrarian Truth')
+        2. "short_summary": (A 1-sentence, 10-word max description of the hook style)
+        3. "strategy": (A 1-sentence, 20-word max explanation of why it works)
         4. "example_ids": (Array of 3 IDs).
-
         Posts: ${topPostsForAI}`;
 
         const openAIParams = {
@@ -2953,20 +2950,8 @@ async function generateAndRenderVoiceProfile(posts, audienceContext) {
             `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
         ).join('\n---\n');
 
-        const prompt = `You are a Senior Creative Strategist briefing a world-class copywriting team on the "${audienceContext}" community. 
-        Your goal is to decode the unpolished psychological reality of how these people actually speak.
-        
-        CRITICAL: Avoid generic marketing fluff like "shared experience," "supportive atmosphere," "celebrate the joys," or "sense of community." Focus on emotional realism, contradictions, and raw human tension.
+        const prompt = `Based on these posts from the ${audienceContext} community, write a 2-3 sentence tone-of-voice description that a copywriter could use as a brief, plus 6 adjectives describing the voice. Respond ONLY as valid JSON with keys 'tone_description' and 'voice_adjectives'. Posts: ${topPostsText}`;
 
-        Respond ONLY as valid JSON with keys 'tone_description' and 'voice_adjectives'. 
-        The 'tone_description' MUST follow this exact 5-line structure:
-        1. Emotional state: "The audience speaks with [detailed psychological state]..."
-        2. Communication style: "They communicate in a [specific linguistic style]..."
-        3. Relationship dynamics: "Members tend to [how they treat each other/authority]..."
-        4. What people seek: "They value [deep psychological need/validation]..."
-        5. Best messaging: "Messaging performs best when it [strategic tactical advice]..."
-
-        Posts: ${topPostsText}`;
         const openAIParams = {
             model: "gpt-4o-mini", // Optimized for speed
             messages: [

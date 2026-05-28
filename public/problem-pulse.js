@@ -1580,8 +1580,48 @@ function renderBrandMomentumChart(data) {
     });
 }
 
-function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if (!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
+function renderSentimentScore(positiveCount, negativeCount) {
+    const container = document.getElementById('sentiment-score-container');
+    if (!container) return;
 
+    const segments = container.querySelectorAll('.score-segment');
+    if (segments.length < 2) {
+        console.warn('Sentiment score: could not find two .score-segment elements.');
+        return;
+    }
+
+    const total = positiveCount + negativeCount;
+
+    if (total === 0) {
+        container.style.display = 'none';
+        return;
+    }
+    container.style.display = ''; // show it again if a prior run hid it
+
+    const positivePercent = Math.round((positiveCount / total) * 100);
+    const negativePercent = 100 - positivePercent;
+
+    // First segment is positive, second is negative (matches your layout)
+    segments[0].style.width = `${positivePercent}%`;
+    segments[1].style.width = `${negativePercent}%`;
+
+    const posValue = segments[0].querySelector('.score-value');
+    const negValue = segments[1].querySelector('.score-value');
+    if (posValue) posValue.textContent = `${positivePercent}% Positive`;
+    if (negValue) negValue.textContent = `${negativePercent}% Negative`;
+
+    // Optional: fill your vibe label
+    const vibeLabel = container.querySelector('.sentiment-vibe-label');
+    if (vibeLabel) {
+        let vibe;
+        if (positivePercent >= 70) vibe = 'Overwhelmingly Positive';
+        else if (positivePercent >= 55) vibe = 'Mostly Positive';
+        else if (positivePercent >= 45) vibe = 'Mixed';
+        else if (positivePercent >= 30) vibe = 'Mostly Negative';
+        else vibe = 'Overwhelmingly Negative';
+        vibeLabel.textContent = vibe;
+    }
+}
 // =================================================================================
 // === REPLACEMENT FUNCTION: fetchSentimentTrendData (V4 - With Context & Corrected Axis) ===
 // =================================================================================
@@ -3259,7 +3299,7 @@ async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
         const countHeaderDiv = document.getElementById("count-header");
         if (!isUpdate) {
             if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-            ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "sentiment-score-container", "overview-div", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases", "value-tree"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+            ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "overview-div", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases", "value-tree"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
             if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
             for (let i = 1; i <= 5; i++) {
                 const block = document.getElementById(`findings-block${i}`);

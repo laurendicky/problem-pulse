@@ -1579,16 +1579,9 @@ function renderBrandMomentumChart(data) {
         }
     });
 }
-
 function renderSentimentScore(positiveCount, negativeCount) {
     const container = document.getElementById('sentiment-score-container');
     if (!container) return;
-
-    const segments = container.querySelectorAll('.score-segment');
-    if (segments.length < 2) {
-        console.warn('Sentiment score: could not find two .score-segment elements.');
-        return;
-    }
 
     const total = positiveCount + negativeCount;
 
@@ -1596,31 +1589,148 @@ function renderSentimentScore(positiveCount, negativeCount) {
         container.style.display = 'none';
         return;
     }
-    container.style.display = ''; // show it again if a prior run hid it
+    container.style.display = '';
 
     const positivePercent = Math.round((positiveCount / total) * 100);
     const negativePercent = 100 - positivePercent;
 
-    // First segment is positive, second is negative (matches your layout)
-    segments[0].style.width = `${positivePercent}%`;
-    segments[1].style.width = `${negativePercent}%`;
+    // --- Bar segments ---
+    const segments = container.querySelectorAll('.score-segment');
+    if (segments.length >= 2) {
+        segments[0].style.width = `${positivePercent}%`;
+        segments[1].style.width = `${negativePercent}%`;
 
-    const posValue = segments[0].querySelector('.score-value');
-    const negValue = segments[1].querySelector('.score-value');
-    if (posValue) posValue.textContent = `${positivePercent}% Positive`;
-    if (negValue) negValue.textContent = `${negativePercent}% Negative`;
+        const posValue = segments[0].querySelector('.score-value');
+        const negValue = segments[1].querySelector('.score-value');
+        if (posValue) posValue.textContent = `${positivePercent}% Positive`;
+        if (negValue) negValue.textContent = `${negativePercent}% Negative`;
+    }
 
-    // Optional: fill your vibe label
+    // --- Vibe label ---
     const vibeLabel = container.querySelector('.sentiment-vibe-label');
     if (vibeLabel) {
         let vibe;
-        if (positivePercent >= 70) vibe = 'Overwhelmingly Positive';
-        else if (positivePercent >= 55) vibe = 'Mostly Positive';
-        else if (positivePercent >= 45) vibe = 'Mixed';
-        else if (positivePercent >= 30) vibe = 'Mostly Negative';
-        else vibe = 'Overwhelmingly Negative';
+        if (positivePercent >= 75)      vibe = 'Enthusiastic and highly engaged';
+        else if (positivePercent >= 65) vibe = 'Predominantly positive with strong community energy';
+        else if (positivePercent >= 55) vibe = 'Generally upbeat with occasional frustration';
+        else if (positivePercent >= 45) vibe = 'Cautiously optimistic with real underlying tension';
+        else if (positivePercent >= 35) vibe = 'Divided and emotionally complex';
+        else if (positivePercent >= 25) vibe = 'Frequently frustrated, actively seeking solutions';
+        else                            vibe = 'High frustration community, pain points dominate';
         vibeLabel.textContent = vibe;
     }
+
+    // --- Benchmark comparison ---
+    const benchmarkEl = container.querySelector('.sentiment-benchmark-text');
+    if (benchmarkEl) {
+        const REDDIT_BASELINE = 58; // published approximate for Reddit-wide positive sentiment
+        const diff = positivePercent - REDDIT_BASELINE;
+        let benchmark;
+        if (Math.abs(diff) <= 2) {
+            benchmark = 'Sentiment is in line with the average Reddit community';
+        } else if (diff > 0) {
+            benchmark = `${diff}% more positive than the average Reddit community`;
+        } else {
+            benchmark = `${Math.abs(diff)}% more negative than the average Reddit community`;
+        }
+        benchmarkEl.textContent = `${benchmark} (est.)`;
+    }
+}
+
+// =================================================================================
+// === HISTORICAL SENTIMENT CHART (Audience positive/negative split over time) ===
+// =================================================================================
+async function generateAndRenderHistoricalSentiment(subredditQueryString) {
+    const container = document.querySelector('.history-sentiment');
+    if (!container) return;
+
+    container.innerHTML = '<p class="loading-text">Charting sentiment over time... <span class="loader-dots"></span></p>';
+
+    // Balanced emotional terms so we capture both positive and negative posts
+    const sampleTerms = ["love", "hate", "best", "worst", "frustrating", "amazing"];
+
+    const timePeriods = [
+        { label: 'Past 6 Mo', value: '6month' },
+        { label: 'Past 3 Mo', value: '3month' },
+        { label: 'Past Month', value: 'month' },
+        { label: 'Past Week',  value: 'week' },
+    ];
+
+    try {
+        const fetchPromises = timePeriods.map(p =>
+            fetchMultipleRedditDataBatched(subredditQueryString, sampleTerms, 30, p.value)
+        );
+        const results = await Promise.allSettled(fetchPromises);
+
+        const trendData = [];
+        for (let i = 0; i < results.length; i++) {
+            const result = results[i];
+            if (result.status !== 'fulfilled' || result.value.length === 0) continue;
+
+            // Cap the sample to keep AI classification fast and affordable
+            const posts = deduplicatePosts(result.value).slice(0, 50);
+            const sentiments = await classifySentimentWithAI(posts);
+
+            const pos = sentiments.filter(s => s === 'Positive').length;
+            const neg = sentiments.filter(s => s === 'Negative').length;
+            const total = pos + neg;
+            if (total === 0) continue;
+
+            trendData.push({
+                period: timePeriods[i].label,
+                positive: Math.round((pos / total) * 100),
+                negative: Math.round((neg / total) * 100)
+            });
+        }
+
+        renderHistoricalSentimentChart(trendData);
+    } catch (err) {
+        console.error("Historical sentiment chart failed:", err);
+        container.innerHTML = '<p class="error-message">Could not load historical sentiment.</p>';
+    }
+}
+
+function renderHistoricalSentimentChart(data) {
+    const container = document.querySelector('.history-sentiment');
+    if (!container) return;
+
+    if (typeof Highcharts === 'undefined' || !data || data.length < 2) {
+        container.innerHTML = '<p class="placeholder-text">Not enough historical data to chart sentiment over time.</p>';
+        return;
+    }
+
+    container.innerHTML = ''; // clear loading state
+
+    Highcharts.chart(container, {
+        chart: { type: 'area', backgroundColor: 'transparent', height: 300 },
+        title: { text: null },
+        credits: { enabled: false },
+        xAxis: {
+            categories: data.map(d => d.period),
+            labels: { style: { color: '#475569' } },
+            lineColor: 'rgba(0,0,0,0.15)',
+            tickColor: 'rgba(0,0,0,0.15)'
+        },
+        yAxis: {
+            title: { text: null },
+            min: 0, max: 100,
+            labels: { format: '{value}%', style: { color: '#475569' } },
+            gridLineColor: 'rgba(0,0,0,0.08)'
+        },
+        legend: { itemStyle: { color: '#334155' } },
+        tooltip: { shared: true, valueSuffix: '%' },
+        plotOptions: {
+            area: {
+                stacking: 'percent',
+                marker: { enabled: false },
+                lineWidth: 1
+            }
+        },
+        series: [
+            { name: 'Positive', data: data.map(d => d.positive), color: '#00a5ce' },
+            { name: 'Negative', data: data.map(d => d.negative), color: '#fd80c7' }
+        ]
+    });
 }
 // =================================================================================
 // === REPLACEMENT FUNCTION: fetchSentimentTrendData (V4 - With Context & Corrected Axis) ===
@@ -3517,6 +3627,8 @@ async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
             setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
             setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
             setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
+            setTimeout(() => generateAndRenderHistoricalSentiment(subredditQueryString), 3500);
+
         } catch (err) {
             console.error("!!!!!!!! A FATAL ERROR STOPPED THE ANALYSIS !!!!!!!!", err);
             alert("An error occurred during analysis. Please check the console for details. Error: " + err.message);

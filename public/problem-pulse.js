@@ -2961,7 +2961,11 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
         });
 
         const data = await response.json();
+        if (!data || !data.openaiResponse) {
+            throw new Error("Proxy timed out or returned invalid format.");
+        }
         const parsed = JSON.parse(data.openaiResponse);
+
 
         wrapper.innerHTML = '';
 

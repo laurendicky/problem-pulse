@@ -707,7 +707,6 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
     renderCloud(negativeContainer, 'Negative Words & Phrases', wordFreq.negative, finalNegativePhrases, negativeColors);
 }
 
-
 async function generateAndRenderCloudInsights(posts, audienceContext) {
     const posInsight = document.getElementById('positive-cloud-insight');
     const negInsight = document.getElementById('negative-cloud-insight');
@@ -751,7 +750,8 @@ async function generateAndRenderCloudInsights(posts, audienceContext) {
             negInsight.innerHTML = `<div class="cloud-insight-pill neg"><strong>Anxiety:</strong> ${parsed.negative_insight}</div>`;
         }
     } catch (error) { console.error("Cloud Insight AI Error:", error); }
-}                                          
+}
+
 
 async function generateAndRenderToneMap(posts, audienceContext) {
     const container = document.getElementById('tone-map-container');
@@ -1562,20 +1562,8 @@ function renderBrandMomentumChart(data) {
     });
 }
 
-function renderSentimentScore(positiveCount, negativeCount) { 
-    const container = document.getElementById('sentiment-score-container'); 
-    if (!container) return; 
-    const total = positiveCount + negativeCount; 
-    if (total === 0) { 
-        container.innerHTML = ''; 
-        return; 
-    }; 
-    const positivePercent = Math.round((positiveCount / total) * 100); 
-    const negativePercent = 100 - positivePercent; 
+function renderSentimentScore(positiveCount, negativeCount) { const container = document.getElementById('sentiment-score-container'); if (!container) return; const total = positiveCount + negativeCount; if (total === 0) { container.innerHTML = ''; return; }; const positivePercent = Math.round((positiveCount / total) * 100); const negativePercent = 100 - positivePercent; container.innerHTML = `<h3 class="dashboard-section-title">Sentiment Score</h3><div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; }
 
-    // The heading <h3> has been removed from the line below
-    container.innerHTML = `<div id="sentiment-score-bar"><div class="score-segment positive" style="width:${positivePercent}%">${positivePercent}% Positive</div><div class="score-segment negative" style="width:${negativePercent}%">${negativePercent}% Negative</div></div>`; 
-}
 // =================================================================================
 // === REPLACEMENT FUNCTION: fetchSentimentTrendData (V4 - With Context & Corrected Axis) ===
 // =================================================================================
@@ -2882,50 +2870,52 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
 }
 
 
+    
+    
 
 // --- NEW SECTION 1: VOICE PROFILE ---
 async function generateAndRenderVoiceProfile(posts, audienceContext) {
-    // 1. Target your Webflow Elements
     const container = document.getElementById('voice-profile-container');
     if (!container) return;
 
     const quoteEl = container.querySelector('.voice-tone-quote');
     const tagsContainer = container.querySelector('.voice-adjective-tags');
 
-    // 2. Set initial loading state on the quote
-    if (quoteEl) quoteEl.innerText = "Analyzing community voice...";
-    if (tagsContainer) tagsContainer.innerHTML = ""; // Clear your Webflow dummy tags
+    if (quoteEl) quoteEl.innerText = "Briefing the creative team...";
+    if (tagsContainer) tagsContainer.innerHTML = "";
 
     try {
-        const topPostsText = posts.slice(0, 40).map(p =>
+        const topPostsText = posts.slice(0, 40).map(p => 
             `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
         ).join('\n---\n');
 
-        const prompt = `Based on these posts from the ${audienceContext} community, write a 2-3 sentence tone-of-voice description that a copywriter could use as a brief, plus 6 adjectives describing the voice. Respond ONLY as valid JSON with keys 'tone_description' and 'voice_adjectives'. Posts: ${topPostsText}`;
+        const prompt = `You are a Senior Creative Strategist briefing a world-class copywriting team on the "${audienceContext}" community. 
+        Your goal is to decode the unpolished psychological reality of how these people actually speak.
+        
+        CRITICAL: Avoid generic marketing fluff like "shared experience," "supportive atmosphere," "celebrate the joys," or "sense of community." Focus on emotional realism, contradictions, and raw human tension.
+
+        Respond ONLY as valid JSON with keys 'tone_description' and 'voice_adjectives'. 
+        The 'tone_description' MUST follow this exact 5-line structure:
+        1. Emotional state: "The audience speaks with [detailed psychological state]..."
+        2. Communication style: "They communicate in a [specific linguistic style]..."
+        3. Relationship dynamics: "Members tend to [how they treat each other/authority]..."
+        4. What people seek: "They value [deep psychological need/validation]..."
+        5. Best messaging: "Messaging performs best when it [strategic tactical advice]..."
+
+        Posts: ${topPostsText}`;
 
         const openAIParams = {
-            model: "gpt-4o-mini", // Optimized for speed
-            messages: [
-                { role: "system", content: "You are a brand strategist who outputs only valid JSON." },
-                { role: "user", content: prompt }
-            ],
-            temperature: 0.3,
+            model: "gpt-4o-mini",
+            messages: [{ role: "system", content: "You are a senior brand strategist who hates corporate jargon and values emotional intelligence." }, { role: "user", content: prompt }],
+            temperature: 0.6, // Slightly higher for more "editorial" flair
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: openAIParams })
-        });
-
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
-        // 3. Inject the Description/Quote
-        if (quoteEl) quoteEl.innerText = `"${parsed.tone_description}"`;
-
-        // 4. Inject the Adjectives using your Blueprint
+        if (quoteEl) quoteEl.innerText = parsed.tone_description;
         if (tagsContainer && VOICE_PILL_BLUEPRINT) {
             parsed.voice_adjectives.forEach(adj => {
                 const pill = VOICE_PILL_BLUEPRINT.cloneNode(true);
@@ -2933,12 +2923,12 @@ async function generateAndRenderVoiceProfile(posts, audienceContext) {
                 tagsContainer.appendChild(pill);
             });
         }
-
     } catch (error) {
         console.error("Voice Profile Error:", error);
-        if (quoteEl) quoteEl.innerText = "Voice profile analysis temporarily unavailable.";
     }
 }
+
+
 
 
 // --- NEW SECTION 2: LANGUAGE TO AVOID ---

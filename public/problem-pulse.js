@@ -2249,19 +2249,17 @@ Your writing should adopt the following characteristics:
 // =================================================================================
 // === UPGRADED FUNCTION: Action Cards with Strategic Logic & Master Toggle ===
 // =================================================================================
-
 function generateAndRenderActionCards(seoPlan, audienceContext) {
     console.log("SEO Cards: Starting render...");
     const container = document.getElementById('keyword-opportunities-container');
     if (!container) return;
 
-    // Use our SAVED blueprints
     if (!SEO_CARD_BLUEPRINT || !SEO_ITEM_BLUEPRINT) {
         console.error("Blueprints were never captured! Make sure .action-card-blueprint exists on page load.");
         return;
     }
 
-    // Clear the container (it's likely already empty, but let's be sure)
+    // Clear the container
     container.innerHTML = '';
 
     // Flatten the data
@@ -2287,7 +2285,6 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
         });
     });
 
-    // Create the 3 Cards
     const groups = [
         { title: 'The Shortlist', ideas: allIdeas.slice(0, 4) },
         { title: 'Traffic Drivers', ideas: allIdeas.filter(i => i.intent === 'problem_aware').slice(0, 4) },
@@ -2298,7 +2295,9 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
         if (group.ideas.length === 0) return;
 
         const card = SEO_CARD_BLUEPRINT.cloneNode(true);
-        card.classList.remove('action-card-blueprint'); // Remove blueprint class
+        
+        // FIX: Ensure card is visible, but DO NOT remove the class (preserves Webflow styles)
+        card.style.display = 'block'; 
         
         if (card.querySelector('.action-card-title')) {
             card.querySelector('.action-card-title').innerText = group.title;
@@ -2306,16 +2305,24 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
         
         const listEl = card.querySelector('.action-items-list');
         if (listEl) {
-            listEl.innerHTML = ''; // Clear the template item
+            listEl.innerHTML = ''; // Clear the template items out of the clone
             group.ideas.forEach(idea => {
                 const item = SEO_ITEM_BLUEPRINT.cloneNode(true);
-                item.classList.remove('action-item-blueprint');
+                
+                // FIX: Ensure item is visible, but DO NOT remove the class
+                item.style.display = 'block'; 
 
                 if (item.querySelector('.action-item-title')) item.querySelector('.action-item-title').innerText = idea.title;
                 if (item.querySelector('.action-item-keyword')) item.querySelector('.action-item-keyword').innerText = idea.primaryKeyword;
                 if (item.querySelector('.action-item-secondary')) item.querySelector('.action-item-secondary').innerText = idea.secondaryKeyword;
                 if (item.querySelector('.action-item-longtail')) item.querySelector('.action-item-longtail').innerText = idea.longTailKeyword;
                 if (item.querySelector('.action-item-volume')) item.querySelector('.action-item-volume').innerText = idea.primaryVolume.toLocaleString() + "/mo";
+                
+                // Map the new field you added in Webflow
+                if (item.querySelector('.action-item-why')) {
+                    const intentName = idea.intent.replace('_', ' ');
+                    item.querySelector('.action-item-why').innerText = "Targets " + intentName;
+                }
 
                 listEl.appendChild(item);
             });
@@ -2324,6 +2331,8 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
     });
     console.log("SEO Cards: Successfully populated!");
 }
+
+
 
 function getPostsForFinding(findingTitle) {
     if (!window._filteredPosts) return [];
@@ -2337,47 +2346,35 @@ function getPostsForFinding(findingTitle) {
     );
     return matching.length >= 10 ? matching : window._filteredPosts;
 }
+
+
 function populateFindingPills() {
     const wrap = document.getElementById('finding-pills-wrap');
-    if (!wrap || !window._summaries) return;
+    if (!wrap || !window._summaries || !FINDING_PILL_BLUEPRINT) return;
 
-    const pillTemplate = wrap.querySelector('.finding-pill');
-    if (!pillTemplate) return;
-
-    const pillBlueprint = pillTemplate.cloneNode(true);
+    // Clear the wrapper safely
     wrap.innerHTML = '';
 
-    const allPill = pillBlueprint.cloneNode(true);
-    allPill.classList.remove('finding-pill');
-    allPill.classList.add('finding-pill', 'active');
+    // Render 'All findings' pill
+    const allPill = FINDING_PILL_BLUEPRINT.cloneNode(true);
+    allPill.classList.add('active');
     allPill.innerText = 'All findings';
     allPill.dataset.finding = 'all';
+    allPill.style.display = 'inline-block'; // Ensure visibility
     wrap.appendChild(allPill);
 
+    // Render individual finding pills from AI
     window._summaries.forEach(summary => {
-        const pill = pillBlueprint.cloneNode(true);
+        const pill = FINDING_PILL_BLUEPRINT.cloneNode(true);
         pill.classList.remove('active');
         pill.innerText = summary.title;
         pill.dataset.finding = summary.title;
+        pill.style.display = 'inline-block'; // Ensure visibility
         wrap.appendChild(pill);
     });
-
-    wrap.addEventListener('click', async (e) => {
-        const pill = e.target.closest('.finding-pill');
-        if (!pill) return;
-
-        wrap.querySelectorAll('.finding-pill').forEach(p => p.classList.remove('active'));
-        pill.classList.add('active');
-
-        const findingTitle = pill.dataset.finding;
-        const relevantPosts = getPostsForFinding(findingTitle);
-
-        await generateAndRenderSeoSunburst(relevantPosts, window.originalGroupName || '');
-    }, { once: false });
 }
 
 async function generateAndRenderSeoSunburst(posts, audienceContext) {
-    populateFindingPills();   // ADD THIS LINE
     const container = document.getElementById('keyword-sunburst');
     if (!container) {
         console.error('Sunburst container div "keyword-sunburst" not found.');
@@ -2763,6 +2760,7 @@ let TONE_CARD_BLUEPRINT = null;
 let TONE_TRAIT_BLUEPRINT = null;
 let SEO_CARD_BLUEPRINT = null;
 let SEO_ITEM_BLUEPRINT = null;
+let FINDING_PILL_BLUEPRINT = null;
 
 
 
@@ -3232,6 +3230,31 @@ Posts: ${topPostsText}`;
                 LANGUAGE_USE_BLUEPRINT = found.cloneNode(true);
             }
         }    
+        // --- SAFE BLUEPRINT CAPTURE: SEO CARDS ---
+        if (!isUpdate && !SEO_CARD_BLUEPRINT) {
+            const container = document.getElementById('keyword-opportunities-container');
+            if (container) {
+                const cardTemplate = container.querySelector('.action-card-blueprint');
+                if (cardTemplate) {
+                    SEO_CARD_BLUEPRINT = cardTemplate.cloneNode(true);
+                    const itemTemplate = cardTemplate.querySelector('.action-item-blueprint');
+                    if (itemTemplate) {
+                        SEO_ITEM_BLUEPRINT = itemTemplate.cloneNode(true);
+                    }
+                }
+            }
+        }
+
+        // --- SAFE BLUEPRINT CAPTURE: FINDING PILLS ---
+        if (!isUpdate && !FINDING_PILL_BLUEPRINT) {
+            const wrap = document.getElementById('finding-pills-wrap');
+            if (wrap) {
+                const pillTemplate = wrap.querySelector('.finding-pill');
+                if (pillTemplate) {
+                    FINDING_PILL_BLUEPRINT = pillTemplate.cloneNode(true);
+                }
+            }
+        }
     
         // Capture Tone Card & Trait Blueprints
         if (!TONE_CARD_BLUEPRINT) {
@@ -3595,52 +3618,27 @@ Posts: ${topPostsText}`;
             }
         });
     }
-
-    // =================================================================================
-    // === UPDATED INTERACTIVITY (Handles Webflow-built buttons) ===
-    // =================================================================================
     function initializeDashboardInteractivity() {
-        document.addEventListener('click', (e) => {
-            // 1. Handle Back Button
-            const backButton = e.target.closest('#back-to-step1-btn');
-            if (backButton) {
-                location.reload();
-                return;
-            }
+        document.addEventListener('click', async (e) => { // Make sure this is async!
+            // ... (keep your existing back button, brief button, cloud logic) ...
 
-            // 2. Handle "See Brief" Button (The one you built in Webflow)
-            const briefBtn = e.target.closest('.brief-button');
-            if (briefBtn) {
-                const parentSlot = briefBtn.closest('.discovery-list-item');
-                if (parentSlot) {
-                    const word = parentSlot.getAttribute('data-word');
-                    const type = parentSlot.getAttribute('data-type');
-
-                    // Trigger AI data fetch. 
-                    // (Visibility/Animation is handled by your Webflow Interaction)
-                    generateAndRenderBrandBrief(word, type);
+            // --- ADD THIS BLOCK FOR FINDING PILLS ---
+            const pill = e.target.closest('.finding-pill');
+            if (pill) {
+                const pillsWrap = document.getElementById('finding-pills-wrap');
+                if (pillsWrap) {
+                    pillsWrap.querySelectorAll('.finding-pill').forEach(p => p.classList.remove('active'));
                 }
-                return;
-            }
+                pill.classList.add('active');
 
-            // 3. Handle Word Cloud Clicks
-            const cloudWordEl = e.target.closest('.cloud-word');
-            if (cloudWordEl) {
-                const word = cloudWordEl.dataset.word;
-                const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
-                const postsData = window._sentimentData?.[category]?.[word]?.posts;
-                if (postsData) { showSlidingPanel(word, Array.from(postsData), category); }
-                return;
-            }
-
-            // 4. Handle Subreddit Remove Buttons
-            const removeBtnEl = e.target.closest('.remove-sub-btn');
-            if (removeBtnEl) {
-                handleRemoveSubClick(e);
+                const findingTitle = pill.dataset.finding;
+                const relevantPosts = getPostsForFinding(findingTitle);
+                await generateAndRenderSeoSunburst(relevantPosts, window.originalGroupName || '');
                 return;
             }
         });
     }
+
 
     // =================================================================================
     // === CORE INITIALIZATION TOOL ===

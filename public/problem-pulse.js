@@ -3382,8 +3382,6 @@ Posts: ${topPostsText}`;
             generateAndRenderLanguageToAvoid(filteredItems, originalGroupName);
             generateAndRenderHookPatterns(filteredItems, originalGroupName);
             generateAndRenderToneMap(filteredItems, originalGroupName);
-            setTimeout(() => {
-            
             generateAndRenderMindsetSummary(filteredItems, originalGroupName);
             generateAndRenderStrategicPillars(filteredItems, originalGroupName);
             generateAndRenderAIPrompt(filteredItems, originalGroupName);

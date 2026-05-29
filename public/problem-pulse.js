@@ -723,67 +723,7 @@ renderSentimentScore(positiveCount, negativeCount);
     renderCloud(negativeContainer, 'Negative Words & Phrases', wordFreq.negative, finalNegativePhrases, negativeColors);
 }
 
-async function generateAndRenderCloudInsights(posts, audienceContext) {
-    const posInsight = document.getElementById('positive-cloud-insight');
-    const negInsight = document.getElementById('negative-cloud-insight');
-    if (!posInsight || !negInsight) return;
 
-    // --- POLLING LOGIC: Wait for the data to exist ---
-    let attempts = 0;
-    const maxAttempts = 20; // Will wait up to 20 seconds total
-
-    while (attempts < maxAttempts) {
-        if (window._sentimentData && window._sentimentData.positive && window._sentimentData.negative) {
-            break; // Data is ready, exit the loop and continue
-        }
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
-        attempts++;
-        console.log(`Cloud Insights: Waiting for sentiment data... (Attempt ${attempts})`);
-    }
-
-    // Final safety check after polling
-    if (!window._sentimentData || !window._sentimentData.positive || !window._sentimentData.negative) {
-        console.error("Cloud Insights: Sentiment data never populated.");
-        return;
-    }
-
-    // Extract the top 12 terms from the window object
-    const posWordsList = Object.keys(window._sentimentData.positive).slice(0, 12).join(', ');
-    const negWordsList = Object.keys(window._sentimentData.negative).slice(0, 12).join(', ');
-
-    try {
-        const prompt = `These are the most common positive words from the ${audienceContext} community: ${posWordsList}. And the most common negative words: ${negWordsList}. Write two 1-sentence strategic insights for a marketer: one summarizing what the positive vocabulary reveals about this audience's hopes/desires, one summarizing what the negative vocabulary reveals about their fears/frustrations. Respond ONLY as valid JSON with keys 'positive_insight' and 'negative_insight'.`;
-
-        const openAIParams = {
-            model: "gpt-5.4-mini",
-            messages: [
-                { role: "system", content: "You are a market research analyst who outputs only valid JSON." },
-                { role: "user", content: prompt }
-            ],
-            temperature: 0.3,
-            response_format: { "type": "json_object" }
-        };
-
-        const response = await fetch(OPENAI_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: openAIParams })
-        });
-
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
-
-        if (parsed.positive_insight) {
-            posInsight.innerHTML = `<div class="cloud-insight-pill pos"><strong>Goal:</strong> ${parsed.positive_insight}</div>`;
-        }
-        if (parsed.negative_insight) {
-            negInsight.innerHTML = `<div class="cloud-insight-pill neg"><strong>Fear:</strong> ${parsed.negative_insight}</div>`;
-        }
-
-    } catch (error) {
-        console.error("Cloud Insight AI Error:", error);
-    }
-}
 
 async function generateAndRenderToneMap(posts, audienceContext) {
     const container = document.getElementById('tone-map-container');
@@ -800,10 +740,11 @@ async function generateAndRenderToneMap(posts, audienceContext) {
         For each topic, provide:
         1. "topic": Short title.
         2. "traits": Array of 4 adjectives, each with a "score" from 10-100 (intensity).
-        3. "meaning": 2-sentence strategic insight.
+        3. "insights": Array of EXACTLY 3 short standalone sentences. Each sentence must be under 15 words and express ONE distinct strategic observation. Do not combine ideas. Example format: ["AI is creating higher expectations than it can consistently meet", "Developers increasingly value judgement over automation", "Frustration is directed at the gap between promise and reality"].
         4. "level": Overall intensity (LOW, MEDIUM, or HIGH).
         
         Respond ONLY as valid JSON with key 'tone_analysis'. Posts: ${topPostsText}`;
+      
 
         const openAIParams = {
             model: "gpt-4o-mini",
@@ -828,7 +769,15 @@ async function generateAndRenderToneMap(posts, audienceContext) {
 
             // 1. Fill Card Basics
             card.querySelector('.tone-topic-title').innerText = item.topic;
-            card.querySelector('.tone-what-means').innerText = item.meaning;
+            const meaningEls = card.querySelectorAll('.tone-what-means');
+const insights = Array.isArray(item.insights) ? item.insights : [];
+meaningEls.forEach((el, i) => {
+    if (insights[i]) {
+        el.innerText = insights[i];
+    } else {
+        el.innerText = '';
+    }
+});
             card.querySelector('.tone-intensity-label').innerText = `INTENSITY: ${item.level}`;
 
             // 2. Clear dummy rows and fill Traits
@@ -2941,8 +2890,8 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
         2. "short_summary": A 1-sentence, 10-word max description of the hook style
         3. "strategy": A 1-sentence, 20-word max explanation of why it works
         4. "example_ids": Array of 3 post IDs
-        5. "emotion_type": The core emotion driving this hook (e.g., "Grief & Vulnerability", "Pride & Identity", "Frustration & Rage")
-        6. "impact_level": Overall impact as a short label (e.g., "High Impact", "Medium Impact", "Very High Impact")
+        5. "emotion_type": A 2-4 word phrase describing the specific emotional driver of THIS hook pattern. Must be unique to the pattern and tailored to ${audienceContext}. Do not reuse generic labels.
+        6. "impact_level": A 2-3 word phrase summarising the engagement effect of THIS specific pattern (be specific, not generic).
         7. "emotional_intensity": An integer from 0-100 representing the emotional intensity of this hook pattern
         8. "viral_potential": An integer from 0-100 representing the viral potential of this hook pattern
         9. "community_impact": One of "Very High", "High", "Medium", or "Low"
@@ -3434,8 +3383,7 @@ Posts: ${topPostsText}`;
             generateAndRenderHookPatterns(filteredItems, originalGroupName);
             generateAndRenderToneMap(filteredItems, originalGroupName);
             setTimeout(() => {
-                generateAndRenderCloudInsights(filteredItems, originalGroupName);
-            }, 2000);
+            
             generateAndRenderMindsetSummary(filteredItems, originalGroupName);
             generateAndRenderStrategicPillars(filteredItems, originalGroupName);
             generateAndRenderAIPrompt(filteredItems, originalGroupName);

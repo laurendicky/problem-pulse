@@ -2243,123 +2243,41 @@ Your writing should adopt the following characteristics:
         `;
     }
 }
-// =================================================================================
-// === NEW FUNCTION: AI KEYWORD OPPORTUNITIES ===
-// =================================================================================
 
-async function generateAndRenderKeywords(posts, audienceContext) {
-    const container = document.getElementById('keyword-opportunities-container');
-    if (!container) return;
 
-    container.innerHTML = `<h3 class="dashboard-section-title">Keyword Opportunities</h3><p class="loading-text">Extracting high-intent keywords...</p>`;
 
-    try {
-        const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
-
-        const prompt = `You are an expert SEO strategist specializing in identifying user intent from raw text for the "${audienceContext}" audience.
-        Analyze the following user posts and extract up to 15 high-value keywords and phrases. Categorize them into three distinct groups based on user intent:
-
-        1.  "problem_aware": Keywords used by people who know they have a problem but are seeking information or understanding. (e.g., "how to fix...", "why is my...", "is it normal...")
-        2.  "solution_seeking": Keywords used by people actively looking for and comparing types of solutions. (e.g., "best software for...", "alternatives to...", "[product category] reviews")
-        3.  "purchase_intent": Keywords used by people close to making a purchase, often including brand names or commercial terms. (e.g., "[Brand A] vs [Brand B]", "[Product] pricing", "is [Brand] worth it")
-
-        Respond ONLY with a valid JSON object with three keys: "problem_aware", "solution_seeking", and "purchase_intent", each holding an array of up to 5 relevant keyword strings.
-
-        Posts:\n${topPostsText}`;
-
-        const openAIParams = {
-            model: "gpt-5.4-mini",
-            messages: [
-                { role: "system", content: "You are an SEO strategist who outputs structured JSON with keyword categories." },
-                { role: "user", content: prompt }
-            ],
-            temperature: 0.1,
-            max_completion_tokens: 600,
-            response_format: { "type": "json_object" }
-        };
-
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-
-        if (!response.ok) throw new Error('Keyword analysis API call failed.');
-
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
-        const { problem_aware, solution_seeking, purchase_intent } = parsed;
-
-        const renderCluster = (title, icon, description, keywords) => {
-            if (!keywords || keywords.length === 0) return '';
-            const keywordList = keywords.map(kw => `<li>${kw}</li>`).join('');
-            return `
-                <div class="keyword-cluster">
-                    <div class="keyword-cluster-header">
-                        <span class="keyword-cluster-icon">${icon}</span>
-                        <div>
-                            <h4 class="keyword-cluster-title">${title}</h4>
-                            <p class="keyword-cluster-description">${description}</p>
-                        </div>
-                    </div>
-                    <ul class="keyword-list">${keywordList}</ul>
-                </div>
-            `;
-        };
-
-        container.innerHTML = `
-            <h3 class="dashboard-section-title">Keyword Opportunities</h3>
-            <div class="keyword-clusters-grid">
-                ${renderCluster('Problem-Aware', '🤔', 'For blog posts & guides', problem_aware)}
-                ${renderCluster('Solution-Seeking', '🔍', 'For comparisons & reviews', solution_seeking)}
-                ${renderCluster('Purchase-Intent', '💳', 'For landing pages & ads', purchase_intent)}
-            </div>
-        `;
-
-    } catch (error) {
-        console.error("Keyword generation error:", error);
-        container.innerHTML = `
-            <h3 class="dashboard-section-title">Keyword Opportunities</h3>
-            <p class="loading-text" style="color: red;">Could not generate keyword opportunities.</p>
-        `;
-    }
-}
 // =================================================================================
 // === UPGRADED FUNCTION: Action Cards with Strategic Logic & Master Toggle ===
 // =================================================================================
-
 function generateAndRenderActionCards(seoPlan, audienceContext) {
     const container = document.getElementById('keyword-opportunities-container');
     if (!container) return;
 
-    // 1. SELECT BLUEPRINTS BY CLASS
+    // 1. Capture the blueprints BEFORE clearing the container
     const cardTemplate = container.querySelector('.action-card-blueprint');
-    if (!cardTemplate) {
-        console.error("Critical: .action-card-blueprint not found inside container.");
-        return;
-    }
-    const itemTemplate = cardTemplate.querySelector('.action-item-blueprint');
-    if (!itemTemplate) {
-        console.error("Critical: .action-item-blueprint not found inside template.");
+    const itemTemplate = cardTemplate ? cardTemplate.querySelector('.action-item-blueprint') : null;
+
+    if (!cardTemplate || !itemTemplate) {
+        console.error("Blueprints not found! Make sure .action-card-blueprint is inside the container.");
         return;
     }
 
-    // 2. CLONE THE BLUEPRINTS INTO MEMORY BEFORE CLEARING THE DIV
+    // 2. Clone them so we have them in memory
     const cardBlueprint = cardTemplate.cloneNode(true);
     const itemBlueprint = itemTemplate.cloneNode(true);
 
-    // Clean up the clones (remove blueprint class so they style correctly)
-    cardBlueprint.style.display = 'flex'; // Ensure they aren't hidden
-    itemBlueprint.style.display = 'flex';
-
-    // 3. NOW CLEAR THE CONTAINER
+    // 3. NOW clear the container to get rid of the dummy Webflow data
     container.innerHTML = '';
 
-    // 4. DATA PROCESSING (Flattening the SEO Plan)
-    const allContentIdeas = [];
+    // 4. Flatten the data from the AI
+    const allIdeas = [];
     ['problem_aware', 'solution_seeking', 'purchase_intent'].forEach(intent => {
         if (!seoPlan[intent]) return;
         seoPlan[intent].forEach(primary => {
             (primary.secondary_keywords || []).forEach(secondary => {
                 (secondary.long_tail_keywords || []).forEach(longtail => {
                     (longtail.content_examples || []).forEach(content => {
-                        allContentIdeas.push({
+                        allIdeas.push({
                             title: content.title,
                             intent: intent,
                             primaryKeyword: primary.keyword,
@@ -2374,76 +2292,38 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
         });
     });
 
-    if (allContentIdeas.length === 0) return;
-
-    // 5. STRATEGIC GROUPING
-    const trafficDrivers = allContentIdeas
-        .filter(i => i.intent === 'problem_aware')
-        .sort((a, b) => b.primaryVolume - a.primaryVolume)
-        .slice(0, 4);
-
-    const conversionBoosters = allContentIdeas
-        .filter(i => i.intent === 'purchase_intent')
-        .sort((a, b) => b.primaryVolume - a.primaryVolume)
-        .slice(0, 4);
-
-    const quickWins = [...allContentIdeas]
-        .sort((a, b) => a.longTailVolume - b.longTailVolume)
-        .slice(0, 4);
-
-    const cardGroups = [
-        { title: 'Traffic Drivers',     subtitle: 'High-volume, top-of-funnel content',         ideas: trafficDrivers },
-        { title: 'Conversion Boosters', subtitle: 'Content for a ready-to-buy audience',         ideas: conversionBoosters },
-        { title: 'Quick Wins',          subtitle: 'Low-competition, high-relevance topics',      ideas: quickWins }
+    // 5. Create 3 Strategic Cards
+    const groups = [
+        { title: 'The Shortlist', ideas: allIdeas.slice(0, 4) },
+        { title: 'Traffic Drivers', ideas: allIdeas.filter(i => i.intent === 'problem_aware').slice(0, 4) },
+        { title: 'Conversion Boosters', ideas: allIdeas.filter(i => i.intent === 'purchase_intent').slice(0, 4) }
     ];
 
-    const whyShortMap = {
-        'problem_aware': `Captures early-funnel readers searching this topic for the first time.`,
-        'solution_seeking': `Reaches users actively comparing options and ready to evaluate.`,
-        'purchase_intent': `Targets users close to a decision, high conversion potential.`
-    };
-
-    // 6. RENDERING THE CARDS
-    cardGroups.forEach(group => {
+    // 6. Render them using your Webflow classes
+    groups.forEach(group => {
         if (group.ideas.length === 0) return;
 
         const card = cardBlueprint.cloneNode(true);
-        
-        // Target classes based on your screenshot
-        const titleEl = card.querySelector('.action-card-title');
-        const subtitleEl = card.querySelector('.action-card-subtitle');
+        card.querySelector('.action-card-title').innerText = group.title;
         const listEl = card.querySelector('.action-items-list');
+        listEl.innerHTML = ''; // Clear the blueprint item inside the list
 
-        if (titleEl) titleEl.innerText = group.title;
-        if (subtitleEl) subtitleEl.innerText = group.subtitle;
+        group.ideas.forEach(idea => {
+            const item = itemBlueprint.cloneNode(true);
+            
+            // Fill in the text based on your Webflow classes
+            if (item.querySelector('.action-item-title')) item.querySelector('.action-item-title').innerText = idea.title;
+            if (item.querySelector('.action-item-keyword')) item.querySelector('.action-item-keyword').innerText = idea.primaryKeyword;
+            if (item.querySelector('.action-item-secondary')) item.querySelector('.action-item-secondary').innerText = idea.secondaryKeyword;
+            if (item.querySelector('.action-item-longtail')) item.querySelector('.action-item-longtail').innerText = idea.longTailKeyword;
+            if (item.querySelector('.action-item-volume')) item.querySelector('.action-item-volume').innerText = idea.primaryVolume.toLocaleString() + "/mo";
+            
+            listEl.appendChild(item);
+        });
 
-        if (listEl) {
-            listEl.innerHTML = ''; // Clear the dummy item inside the list
-            group.ideas.forEach(idea => {
-                const item = itemBlueprint.cloneNode(true);
-
-                // Update text based on your screenshot classes
-                const iTitle = item.querySelector('.action-item-title');
-                const iKey = item.querySelector('.action-item-keyword');
-                const iSec = item.querySelector('.action-item-secondary');
-                const iLong = item.querySelector('.action-item-longtail');
-                const iVol = item.querySelector('.action-item-volume');
-                const iWhy = item.querySelector('.action-item-why');
-
-                if (iTitle) iTitle.innerText = idea.title;
-                if (iKey) iKey.innerText = idea.primaryKeyword;
-                if (iSec) iSec.innerText = idea.secondaryKeyword;
-                if (iLong) iLong.innerText = idea.longTailKeyword;
-                if (iVol) iVol.innerText = (idea.primaryVolume).toLocaleString() + '/mo';
-                if (iWhy) iWhy.innerText = whyShortMap[idea.intent] || '';
-
-                listEl.appendChild(item);
-            });
-        }
         container.appendChild(card);
     });
 }
-
 
 function getPostsForFinding(findingTitle) {
     if (!window._filteredPosts) return [];
@@ -3457,15 +3337,9 @@ Posts: ${topPostsText}`;
             })).sort((a, b) => b.prevalence - a.prevalence);
 
             console.log("CHECKPOINT A: Analysis is complete. Found these findings:", sortedFindings);
-            const problemTitles = sortedFindings.map(finding => finding.summary.title);
-            updateGrowthHeaderDropdown(problemTitles);
-            console.log("CHECKPOINT B: The dropdown should now be updated.");
-            if (problemTitles.length > 0) {
-                const headerLabel = document.getElementById('growth-header-label');
-                if (headerLabel) {
-                    headerLabel.textContent = problemTitles[0];
-                }
-            }
+
+        
+        
             window._summaries = sortedFindings.map(item => item.summary);
             populateFindingPills();
 
@@ -3594,37 +3468,7 @@ Posts: ${topPostsText}`;
 
 
 
-    function updateGrowthHeaderDropdown(problemTitles) {
-        console.log("CHECKPOINT 1: Entering updateGrowthHeaderDropdown function with these titles:", problemTitles);
 
-        const dropdownList = document.querySelector('#growth-header-dropdown .w-dropdown-list');
-
-        if (!dropdownList) {
-            console.error("DEBUGGING ERROR: Could not find the dropdown list element with selector '#growth-header-dropdown .w-dropdown-list'. Check your Webflow element's ID and class.");
-            return;
-        }
-
-        console.log("CHECKPOINT 2: Successfully found the dropdown list element. Clearing it now.");
-        dropdownList.innerHTML = ''; // Clear defaults
-
-        // Create "Broad Problems" link which acts as our "View All"
-        const viewAllLink = document.createElement('a');
-        viewAllLink.className = 'w-dropdown-link';
-        viewAllLink.textContent = 'broad problems';
-        viewAllLink.setAttribute('data-problem', 'all');
-        dropdownList.appendChild(viewAllLink);
-
-        // Create a link for each specific problem
-        problemTitles.forEach(title => {
-            const problemLink = document.createElement('a');
-            problemLink.className = 'w-dropdown-link';
-            problemLink.textContent = title;
-            problemLink.setAttribute('data-problem', title);
-            dropdownList.appendChild(problemLink);
-        });
-
-        console.log("CHECKPOINT 3: Finished populating the dropdown with new links.");
-    }
 
     function setupGrowthKitInteraction() {
         // Find the key elements of the dropdown header

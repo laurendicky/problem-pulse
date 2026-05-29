@@ -2249,27 +2249,22 @@ Your writing should adopt the following characteristics:
 // =================================================================================
 // === UPGRADED FUNCTION: Action Cards with Strategic Logic & Master Toggle ===
 // =================================================================================
+
 function generateAndRenderActionCards(seoPlan, audienceContext) {
+    console.log("SEO Cards: Starting render...");
     const container = document.getElementById('keyword-opportunities-container');
     if (!container) return;
 
-    // 1. Capture the blueprints BEFORE clearing the container
-    const cardTemplate = container.querySelector('.action-card-blueprint');
-    const itemTemplate = cardTemplate ? cardTemplate.querySelector('.action-item-blueprint') : null;
-
-    if (!cardTemplate || !itemTemplate) {
-        console.error("Blueprints not found! Make sure .action-card-blueprint is inside the container.");
+    // Use our SAVED blueprints
+    if (!SEO_CARD_BLUEPRINT || !SEO_ITEM_BLUEPRINT) {
+        console.error("Blueprints were never captured! Make sure .action-card-blueprint exists on page load.");
         return;
     }
 
-    // 2. Clone them so we have them in memory
-    const cardBlueprint = cardTemplate.cloneNode(true);
-    const itemBlueprint = itemTemplate.cloneNode(true);
-
-    // 3. NOW clear the container to get rid of the dummy Webflow data
+    // Clear the container (it's likely already empty, but let's be sure)
     container.innerHTML = '';
 
-    // 4. Flatten the data from the AI
+    // Flatten the data
     const allIdeas = [];
     ['problem_aware', 'solution_seeking', 'purchase_intent'].forEach(intent => {
         if (!seoPlan[intent]) return;
@@ -2292,37 +2287,42 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
         });
     });
 
-    // 5. Create 3 Strategic Cards
+    // Create the 3 Cards
     const groups = [
         { title: 'The Shortlist', ideas: allIdeas.slice(0, 4) },
         { title: 'Traffic Drivers', ideas: allIdeas.filter(i => i.intent === 'problem_aware').slice(0, 4) },
         { title: 'Conversion Boosters', ideas: allIdeas.filter(i => i.intent === 'purchase_intent').slice(0, 4) }
     ];
 
-    // 6. Render them using your Webflow classes
     groups.forEach(group => {
         if (group.ideas.length === 0) return;
 
-        const card = cardBlueprint.cloneNode(true);
-        card.querySelector('.action-card-title').innerText = group.title;
+        const card = SEO_CARD_BLUEPRINT.cloneNode(true);
+        card.classList.remove('action-card-blueprint'); // Remove blueprint class
+        
+        if (card.querySelector('.action-card-title')) {
+            card.querySelector('.action-card-title').innerText = group.title;
+        }
+        
         const listEl = card.querySelector('.action-items-list');
-        listEl.innerHTML = ''; // Clear the blueprint item inside the list
+        if (listEl) {
+            listEl.innerHTML = ''; // Clear the template item
+            group.ideas.forEach(idea => {
+                const item = SEO_ITEM_BLUEPRINT.cloneNode(true);
+                item.classList.remove('action-item-blueprint');
 
-        group.ideas.forEach(idea => {
-            const item = itemBlueprint.cloneNode(true);
-            
-            // Fill in the text based on your Webflow classes
-            if (item.querySelector('.action-item-title')) item.querySelector('.action-item-title').innerText = idea.title;
-            if (item.querySelector('.action-item-keyword')) item.querySelector('.action-item-keyword').innerText = idea.primaryKeyword;
-            if (item.querySelector('.action-item-secondary')) item.querySelector('.action-item-secondary').innerText = idea.secondaryKeyword;
-            if (item.querySelector('.action-item-longtail')) item.querySelector('.action-item-longtail').innerText = idea.longTailKeyword;
-            if (item.querySelector('.action-item-volume')) item.querySelector('.action-item-volume').innerText = idea.primaryVolume.toLocaleString() + "/mo";
-            
-            listEl.appendChild(item);
-        });
+                if (item.querySelector('.action-item-title')) item.querySelector('.action-item-title').innerText = idea.title;
+                if (item.querySelector('.action-item-keyword')) item.querySelector('.action-item-keyword').innerText = idea.primaryKeyword;
+                if (item.querySelector('.action-item-secondary')) item.querySelector('.action-item-secondary').innerText = idea.secondaryKeyword;
+                if (item.querySelector('.action-item-longtail')) item.querySelector('.action-item-longtail').innerText = idea.longTailKeyword;
+                if (item.querySelector('.action-item-volume')) item.querySelector('.action-item-volume').innerText = idea.primaryVolume.toLocaleString() + "/mo";
 
+                listEl.appendChild(item);
+            });
+        }
         container.appendChild(card);
     });
+    console.log("SEO Cards: Successfully populated!");
 }
 
 function getPostsForFinding(findingTitle) {
@@ -2761,6 +2761,8 @@ let LANGUAGE_AVOID_BLUEPRINT = null;
 let LANGUAGE_USE_BLUEPRINT = null;
 let TONE_CARD_BLUEPRINT = null;
 let TONE_TRAIT_BLUEPRINT = null;
+let SEO_CARD_BLUEPRINT = null;
+let SEO_ITEM_BLUEPRINT = null;
 
 
 
@@ -3134,10 +3136,26 @@ Posts: ${topPostsText}`;
 
 
     async function runProblemFinder(options = {}) {
+        const { isUpdate = false } = options;
+    
+        // --- NEW: SAFE BLUEPRINT CAPTURE ---
+        if (!isUpdate && !SEO_CARD_BLUEPRINT) {
+            const container = document.getElementById('keyword-opportunities-container');
+            if (container) {
+                const cardTemplate = container.querySelector('.action-card-blueprint');
+                if (cardTemplate) {
+                    SEO_CARD_BLUEPRINT = cardTemplate.cloneNode(true);
+                    const itemTemplate = cardTemplate.querySelector('.action-item-blueprint');
+                    if (itemTemplate) {
+                        SEO_ITEM_BLUEPRINT = itemTemplate.cloneNode(true);
+                    }
+                }
+            }
+        }
 
         console.log("CHECKPOINT 2: Inside runProblemFinder. The audience is:", originalGroupName);
 
-        const { isUpdate = false } = options;
+        
         if (!isUpdate && !PHRASE_BLUEPRINT) {
             const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
             if (found) {

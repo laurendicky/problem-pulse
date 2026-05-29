@@ -2328,22 +2328,30 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
     const container = document.getElementById('keyword-opportunities-container');
     if (!container) return;
 
+    // 1. SELECT BLUEPRINTS BY CLASS
     const cardTemplate = container.querySelector('.action-card-blueprint');
     if (!cardTemplate) {
-        console.error("Missing .action-card-blueprint in Webflow");
+        console.error("Critical: .action-card-blueprint not found inside container.");
         return;
     }
     const itemTemplate = cardTemplate.querySelector('.action-item-blueprint');
     if (!itemTemplate) {
-        console.error("Missing .action-item-blueprint in Webflow");
+        console.error("Critical: .action-item-blueprint not found inside template.");
         return;
     }
 
+    // 2. CLONE THE BLUEPRINTS INTO MEMORY BEFORE CLEARING THE DIV
     const cardBlueprint = cardTemplate.cloneNode(true);
     const itemBlueprint = itemTemplate.cloneNode(true);
 
+    // Clean up the clones (remove blueprint class so they style correctly)
+    cardBlueprint.style.display = 'flex'; // Ensure they aren't hidden
+    itemBlueprint.style.display = 'flex';
+
+    // 3. NOW CLEAR THE CONTAINER
     container.innerHTML = '';
 
+    // 4. DATA PROCESSING (Flattening the SEO Plan)
     const allContentIdeas = [];
     ['problem_aware', 'solution_seeking', 'purchase_intent'].forEach(intent => {
         if (!seoPlan[intent]) return;
@@ -2355,10 +2363,10 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
                             title: content.title,
                             intent: intent,
                             primaryKeyword: primary.keyword,
-                            primaryVolume: primary.searchVolume,
+                            primaryVolume: primary.searchVolume || 0,
                             secondaryKeyword: secondary.keyword,
                             longTailKeyword: longtail.keyword,
-                            longTailVolume: longtail.searchVolume,
+                            longTailVolume: longtail.searchVolume || 0,
                         });
                     });
                 });
@@ -2368,6 +2376,7 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
 
     if (allContentIdeas.length === 0) return;
 
+    // 5. STRATEGIC GROUPING
     const trafficDrivers = allContentIdeas
         .filter(i => i.intent === 'problem_aware')
         .sort((a, b) => b.primaryVolume - a.primaryVolume)
@@ -2382,20 +2391,11 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
         .sort((a, b) => a.longTailVolume - b.longTailVolume)
         .slice(0, 4);
 
-    const shortlist = [];
-    let candidates = [...allContentIdeas];
-    ['purchase_intent', 'solution_seeking', 'problem_aware'].forEach(intent => {
-        const top = candidates
-            .filter(c => c.intent === intent)
-            .sort((a, b) => b.primaryVolume - a.primaryVolume)[0];
-        if (top) {
-            shortlist.push(top);
-            candidates = candidates.filter(c => c.title !== top.title);
-        }
-    });
-    while (shortlist.length < 4 && candidates.length > 0) {
-        shortlist.push(candidates.shift());
-    }
+    const cardGroups = [
+        { title: 'Traffic Drivers',     subtitle: 'High-volume, top-of-funnel content',         ideas: trafficDrivers },
+        { title: 'Conversion Boosters', subtitle: 'Content for a ready-to-buy audience',         ideas: conversionBoosters },
+        { title: 'Quick Wins',          subtitle: 'Low-competition, high-relevance topics',      ideas: quickWins }
+    ];
 
     const whyShortMap = {
         'problem_aware': `Captures early-funnel readers searching this topic for the first time.`,
@@ -2403,19 +2403,13 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
         'purchase_intent': `Targets users close to a decision, high conversion potential.`
     };
 
-    const cardGroups = [
-        { title: 'Traffic drivers',     subtitle: 'High-volume, top-of-funnel content',         ideas: trafficDrivers },
-        { title: 'Conversion boosters', subtitle: 'Content for a ready-to-buy audience',         ideas: conversionBoosters },
-        { title: 'Quick wins',          subtitle: 'Low-competition, high-relevance topics',      ideas: quickWins },
-        { title: 'The shortlist',       subtitle: 'Our top strategic content recommendations',   ideas: shortlist },
-    ];
-
+    // 6. RENDERING THE CARDS
     cardGroups.forEach(group => {
-        if (!group.ideas || group.ideas.length === 0) return;
+        if (group.ideas.length === 0) return;
 
         const card = cardBlueprint.cloneNode(true);
-        card.classList.remove('action-card-blueprint');
-
+        
+        // Target classes based on your screenshot
         const titleEl = card.querySelector('.action-card-title');
         const subtitleEl = card.querySelector('.action-card-subtitle');
         const listEl = card.querySelector('.action-items-list');
@@ -2424,33 +2418,31 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
         if (subtitleEl) subtitleEl.innerText = group.subtitle;
 
         if (listEl) {
-            listEl.innerHTML = '';
+            listEl.innerHTML = ''; // Clear the dummy item inside the list
             group.ideas.forEach(idea => {
                 const item = itemBlueprint.cloneNode(true);
-                item.classList.remove('action-item-blueprint');
 
-                const itemTitle = item.querySelector('.action-item-title');
-                const itemKeyword = item.querySelector('.action-item-keyword');
-                const itemSecondary = item.querySelector('.action-item-secondary');
-                const itemLongtail = item.querySelector('.action-item-longtail');
-                const itemVolume = item.querySelector('.action-item-volume');
-                const itemWhy = item.querySelector('.action-item-why');
+                // Update text based on your screenshot classes
+                const iTitle = item.querySelector('.action-item-title');
+                const iKey = item.querySelector('.action-item-keyword');
+                const iSec = item.querySelector('.action-item-secondary');
+                const iLong = item.querySelector('.action-item-longtail');
+                const iVol = item.querySelector('.action-item-volume');
+                const iWhy = item.querySelector('.action-item-why');
 
-                if (itemTitle) itemTitle.innerText = idea.title;
-                if (itemKeyword) itemKeyword.innerText = idea.primaryKeyword;
-                if (itemSecondary) itemSecondary.innerText = idea.secondaryKeyword;
-                if (itemLongtail) itemLongtail.innerText = idea.longTailKeyword;
-                if (itemVolume) itemVolume.innerText = idea.primaryVolume.toLocaleString() + '/mo';
-                if (itemWhy) itemWhy.innerText = whyShortMap[idea.intent] || '';
+                if (iTitle) iTitle.innerText = idea.title;
+                if (iKey) iKey.innerText = idea.primaryKeyword;
+                if (iSec) iSec.innerText = idea.secondaryKeyword;
+                if (iLong) iLong.innerText = idea.longTailKeyword;
+                if (iVol) iVol.innerText = (idea.primaryVolume).toLocaleString() + '/mo';
+                if (iWhy) iWhy.innerText = whyShortMap[idea.intent] || '';
 
                 listEl.appendChild(item);
             });
         }
-
         container.appendChild(card);
     });
 }
-
 
 
 function getPostsForFinding(findingTitle) {
@@ -3419,7 +3411,7 @@ Posts: ${topPostsText}`;
             generateAndRenderMindsetSummary(filteredItems, originalGroupName);
             generateAndRenderStrategicPillars(filteredItems, originalGroupName);
             generateAndRenderAIPrompt(filteredItems, originalGroupName);
-            generateAndRenderSeoSunburst(filteredItems, originalGroupName);
+            generateAndRenderSeoSunburst(filteredItems, window.originalGroupName || '');
             extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
             generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
             if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }

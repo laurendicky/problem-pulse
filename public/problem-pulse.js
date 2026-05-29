@@ -2435,43 +2435,61 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
 // =================================================================================
 // === UPGRADED FUNCTION: Renders a single COLLAPSIBLE Action Card ===
 // =================================================================================
-function renderActionCardHTML(title, subtitle, ideas, whyItMattersGenerator) {
-    if (!ideas || ideas.length === 0) return '';
 
-    const blogTitlesHTML = ideas.map((idea, index) => {
-        return `
-            <details class="action-item-dropdown">
-                <summary class="action-item-summary">
-                    <span class="action-item-icon">📝</span>
-                    ${idea.title}
-                </summary>
-                <div class="action-item-context">
-                    <div class="context-item primary"><span class="context-label">Primary Keyword</span><span class="context-value">${idea.primaryKeyword}</span></div>
-                    <div class="context-item secondary"><span class="context-label">Secondary Keyword</span><span class="context-value">${idea.secondaryKeyword}</span></div>
-                    <div class="context-item longtail"><span class="context-label">Long-Tail Keyword</span><span class="context-value">${idea.longTailKeyword}</span></div>
-                    <div class="context-item why"><span class="context-label">Why It Matters</span><p class="context-prose">${whyItMattersGenerator(idea)}</p></div>
-                </div>
-            </details>
-        `;
-    }).join('');
 
-    // The main card is now a <details> element
-    return `
-    <details class="action-card">
-    <summary class="action-card-summary">
-                <div class="action-card-header">
-                    <h3 class="action-card-title">${title}</h3>
-                    <p class="action-card-subtitle">${subtitle}</p>
-                </div>
-                <div class="action-card-arrow">›</div>
-            </summary>
-            <div class="action-item-list">
-                ${blogTitlesHTML}
-            </div>
-        </details>
-    `;
+function getPostsForFinding(findingTitle) {
+    if (!window._filteredPosts) return [];
+    if (findingTitle === 'all' || !window._summaries) return window._filteredPosts;
+    
+    const finding = window._summaries.find(s => s.title === findingTitle);
+    if (!finding) return window._filteredPosts;
+    
+    const matching = window._filteredPosts.filter(post => 
+        calculateRelevanceScore(post, finding) > 0
+    );
+    return matching.length >= 10 ? matching : window._filteredPosts;
 }
+function populateFindingPills() {
+    const wrap = document.getElementById('finding-pills-wrap');
+    if (!wrap || !window._summaries) return;
+
+    const pillTemplate = wrap.querySelector('.finding-pill');
+    if (!pillTemplate) return;
+
+    const pillBlueprint = pillTemplate.cloneNode(true);
+    wrap.innerHTML = '';
+
+    const allPill = pillBlueprint.cloneNode(true);
+    allPill.classList.remove('finding-pill');
+    allPill.classList.add('finding-pill', 'active');
+    allPill.innerText = 'All findings';
+    allPill.dataset.finding = 'all';
+    wrap.appendChild(allPill);
+
+    window._summaries.forEach(summary => {
+        const pill = pillBlueprint.cloneNode(true);
+        pill.classList.remove('active');
+        pill.innerText = summary.title;
+        pill.dataset.finding = summary.title;
+        wrap.appendChild(pill);
+    });
+
+    wrap.addEventListener('click', async (e) => {
+        const pill = e.target.closest('.finding-pill');
+        if (!pill) return;
+
+        wrap.querySelectorAll('.finding-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+
+        const findingTitle = pill.dataset.finding;
+        const relevantPosts = getPostsForFinding(findingTitle);
+
+        await generateAndRenderSeoSunburst(relevantPosts, window.originalGroupName || '');
+    }, { once: false });
+}
+
 async function generateAndRenderSeoSunburst(posts, audienceContext) {
+    populateFindingPills();   // ADD THIS LINE
     const container = document.getElementById('keyword-sunburst');
     if (!container) {
         console.error('Sunburst container div "keyword-sunburst" not found.');
@@ -2891,7 +2909,7 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
         3. "strategy": A 1-sentence, 20-word max explanation of why it works
         4. "example_ids": Array of 3 post IDs
         5. "emotion_type": A 2-4 word phrase describing the specific emotional driver of THIS hook pattern. Must be unique to the pattern and tailored to ${audienceContext}. Do not reuse generic labels.
-        6. "impact_level": A 2-3 word phrase summarising the engagement effect of THIS specific pattern (be specific, not generic).
+        6. "impact_level": Must be exactly one of these three strings: "Very High Impact", "High Impact", or "Medium Impact". Choose based on how much engagement this hook pattern drives.
         7. "emotional_intensity": An integer from 0-100 representing the emotional intensity of this hook pattern
         8. "viral_potential": An integer from 0-100 representing the viral potential of this hook pattern
         9. "community_impact": One of "Very High", "High", "Medium", or "Low"

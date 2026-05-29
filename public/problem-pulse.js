@@ -2323,11 +2323,27 @@ async function generateAndRenderKeywords(posts, audienceContext) {
 // =================================================================================
 // === UPGRADED FUNCTION: Action Cards with Strategic Logic & Master Toggle ===
 // =================================================================================
+
 function generateAndRenderActionCards(seoPlan, audienceContext) {
     const container = document.getElementById('keyword-opportunities-container');
     if (!container) return;
 
-    // --- A. Flatten the complex SEO plan into a simple list of content ideas (No changes here) ---
+    const cardTemplate = container.querySelector('.action-card-blueprint');
+    if (!cardTemplate) {
+        console.error("Missing .action-card-blueprint in Webflow");
+        return;
+    }
+    const itemTemplate = cardTemplate.querySelector('.action-item-blueprint');
+    if (!itemTemplate) {
+        console.error("Missing .action-item-blueprint in Webflow");
+        return;
+    }
+
+    const cardBlueprint = cardTemplate.cloneNode(true);
+    const itemBlueprint = itemTemplate.cloneNode(true);
+
+    container.innerHTML = '';
+
     const allContentIdeas = [];
     ['problem_aware', 'solution_seeking', 'purchase_intent'].forEach(intent => {
         if (!seoPlan[intent]) return;
@@ -2341,7 +2357,6 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
                             primaryKeyword: primary.keyword,
                             primaryVolume: primary.searchVolume,
                             secondaryKeyword: secondary.keyword,
-                            secondaryVolume: secondary.searchVolume,
                             longTailKeyword: longtail.keyword,
                             longTailVolume: longtail.searchVolume,
                         });
@@ -2351,90 +2366,91 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
         });
     });
 
-    if (allContentIdeas.length === 0) {
-        container.innerHTML = '';
-        return;
-    }
+    if (allContentIdeas.length === 0) return;
 
-    // --- B. Curate the content for each of the 4 cards (REVISED STRATEGIC LOGIC) ---
+    const trafficDrivers = allContentIdeas
+        .filter(i => i.intent === 'problem_aware')
+        .sort((a, b) => b.primaryVolume - a.primaryVolume)
+        .slice(0, 4);
 
-    // Card 1 & 2: Traffic Drivers & Conversion Boosters (No changes here)
-    const trafficDrivers = allContentIdeas.filter(idea => idea.intent === 'problem_aware').sort((a, b) => b.primaryVolume - a.primaryVolume).slice(0, 4);
-    const conversionBoosters = allContentIdeas.filter(idea => idea.intent === 'purchase_intent').sort((a, b) => b.primaryVolume - a.primaryVolume).slice(0, 4);
+    const conversionBoosters = allContentIdeas
+        .filter(i => i.intent === 'purchase_intent')
+        .sort((a, b) => b.primaryVolume - a.primaryVolume)
+        .slice(0, 4);
 
-    // Card 3: Quick Wins (Logic slightly improved to be more reliable)
-    const quickWins = [...allContentIdeas].sort((a, b) => a.longTailVolume - b.longTailVolume).slice(0, 4);
+    const quickWins = [...allContentIdeas]
+        .sort((a, b) => a.longTailVolume - b.longTailVolume)
+        .slice(0, 4);
 
-    // Card 4: The Shortlist (NEW STRATEGIC CURATION)
     const shortlist = [];
     let candidates = [...allContentIdeas];
-
-    // 1. Pick the single best "Purchase Intent" idea (highest volume)
-    const topPurchase = candidates.filter(c => c.intent === 'purchase_intent').sort((a, b) => b.primaryVolume - a.primaryVolume)[0];
-    if (topPurchase) {
-        shortlist.push(topPurchase);
-        candidates = candidates.filter(c => c.title !== topPurchase.title); // Remove from pool
-    }
-
-    // 2. Pick the single best "Solution Seeking" idea
-    const topSolution = candidates.filter(c => c.intent === 'solution_seeking').sort((a, b) => b.primaryVolume - a.primaryVolume)[0];
-    if (topSolution) {
-        shortlist.push(topSolution);
-        candidates = candidates.filter(c => c.title !== topSolution.title);
-    }
-
-    // 3. Pick the single best "Problem Aware" traffic driver
-    const topProblem = candidates.filter(c => c.intent === 'problem_aware').sort((a, b) => b.primaryVolume - a.primaryVolume)[0];
-    if (topProblem) {
-        shortlist.push(topProblem);
-        candidates = candidates.filter(c => c.title !== topProblem.title);
-    }
-
-    // 4. Fill remaining spots with the highest "overall score" ideas from what's left
-    const intentWeights = { purchase_intent: 3, solution_seeking: 2, problem_aware: 1 };
-    while (shortlist.length < 4 && candidates.length > 0) {
-        const bestRemaining = candidates.map(idea => ({
-            ...idea,
-            score: (idea.primaryVolume * 0.7 + idea.longTailVolume * 0.3) * (intentWeights[idea.intent] || 1)
-        })).sort((a, b) => b.score - a.score)[0];
-
-        if (bestRemaining) {
-            shortlist.push(bestRemaining);
-            candidates = candidates.filter(c => c.title !== bestRemaining.title);
-        } else {
-            break; // No more candidates
+    ['purchase_intent', 'solution_seeking', 'problem_aware'].forEach(intent => {
+        const top = candidates
+            .filter(c => c.intent === intent)
+            .sort((a, b) => b.primaryVolume - a.primaryVolume)[0];
+        if (top) {
+            shortlist.push(top);
+            candidates = candidates.filter(c => c.title !== top.title);
         }
+    });
+    while (shortlist.length < 4 && candidates.length > 0) {
+        shortlist.push(candidates.shift());
     }
 
+    const whyShortMap = {
+        'problem_aware': `Captures early-funnel readers searching this topic for the first time.`,
+        'solution_seeking': `Reaches users actively comparing options and ready to evaluate.`,
+        'purchase_intent': `Targets users close to a decision, high conversion potential.`
+    };
 
-    // --- C. Render the HTML, including the new toggle button ---
-    container.innerHTML = `
-        <div class="card-toggle-wrapper">
-            <button id="toggle-all-cards-btn" class="card-toggle-button">Expand All</button>
-        </div>
-        <div class="action-cards-grid">
-            ${renderActionCardHTML('Traffic Drivers', 'High-volume, top-of-funnel content', trafficDrivers, (idea) => `This content targets the high-volume keyword "${idea.primaryKeyword}". It's designed to attract a broad audience early in their journey, maximizing site traffic and brand awareness for ${audienceContext}.`)}
-            ${renderActionCardHTML('Conversion Boosters', 'Content for a ready-to-buy audience', conversionBoosters, (idea) => `This targets users showing clear purchase intent for ${audienceContext}. Answering these questions directly can lead to conversions, as the audience is actively evaluating solutions like yours.`)}
-            ${renderActionCardHTML('Quick Wins', 'Low-competition, high-relevance topics', quickWins, (idea) => `Targeting the low-volume, specific keyword "${idea.longTailKeyword}" can lead to faster search ranking results. It's a way to build authority and capture highly-qualified traffic with less competition.`)}
-            ${renderActionCardHTML('The Shortlist', 'Our top strategic content recommendations', shortlist, (idea) => `This idea was selected for its strong balance of search volume (${idea.primaryVolume.toLocaleString()}) and high-value user intent (${idea.intent.replace('_', '-')}). It represents a prime opportunity to capture a strategic audience segment for ${audienceContext}.`)}
-        </div>
-    `;
+    const cardGroups = [
+        { title: 'Traffic drivers',     subtitle: 'High-volume, top-of-funnel content',         ideas: trafficDrivers },
+        { title: 'Conversion boosters', subtitle: 'Content for a ready-to-buy audience',         ideas: conversionBoosters },
+        { title: 'Quick wins',          subtitle: 'Low-competition, high-relevance topics',      ideas: quickWins },
+        { title: 'The shortlist',       subtitle: 'Our top strategic content recommendations',   ideas: shortlist },
+    ];
 
-    // --- D. Add Event Listener for the new toggle button ---
-    const toggleBtn = document.getElementById('toggle-all-cards-btn');
-    const allCards = document.querySelectorAll('.action-cards-grid .action-card');
-    if (toggleBtn && allCards.length > 0) {
-        toggleBtn.addEventListener('click', () => {
-            // Check if ANY card is closed. If so, the action is to open all.
-            const shouldOpen = Array.from(allCards).some(card => !card.open);
-            allCards.forEach(card => card.open = shouldOpen);
-            toggleBtn.textContent = shouldOpen ? 'Collapse All' : 'Expand All';
-        });
-    }
+    cardGroups.forEach(group => {
+        if (!group.ideas || group.ideas.length === 0) return;
+
+        const card = cardBlueprint.cloneNode(true);
+        card.classList.remove('action-card-blueprint');
+
+        const titleEl = card.querySelector('.action-card-title');
+        const subtitleEl = card.querySelector('.action-card-subtitle');
+        const listEl = card.querySelector('.action-items-list');
+
+        if (titleEl) titleEl.innerText = group.title;
+        if (subtitleEl) subtitleEl.innerText = group.subtitle;
+
+        if (listEl) {
+            listEl.innerHTML = '';
+            group.ideas.forEach(idea => {
+                const item = itemBlueprint.cloneNode(true);
+                item.classList.remove('action-item-blueprint');
+
+                const itemTitle = item.querySelector('.action-item-title');
+                const itemKeyword = item.querySelector('.action-item-keyword');
+                const itemSecondary = item.querySelector('.action-item-secondary');
+                const itemLongtail = item.querySelector('.action-item-longtail');
+                const itemVolume = item.querySelector('.action-item-volume');
+                const itemWhy = item.querySelector('.action-item-why');
+
+                if (itemTitle) itemTitle.innerText = idea.title;
+                if (itemKeyword) itemKeyword.innerText = idea.primaryKeyword;
+                if (itemSecondary) itemSecondary.innerText = idea.secondaryKeyword;
+                if (itemLongtail) itemLongtail.innerText = idea.longTailKeyword;
+                if (itemVolume) itemVolume.innerText = idea.primaryVolume.toLocaleString() + '/mo';
+                if (itemWhy) itemWhy.innerText = whyShortMap[idea.intent] || '';
+
+                listEl.appendChild(item);
+            });
+        }
+
+        container.appendChild(card);
+    });
 }
-// =================================================================================
-// === UPGRADED FUNCTION: Renders a single COLLAPSIBLE Action Card ===
-// =================================================================================
+
 
 
 function getPostsForFinding(findingTitle) {
@@ -3459,6 +3475,8 @@ Posts: ${topPostsText}`;
                 }
             }
             window._summaries = sortedFindings.map(item => item.summary);
+            populateFindingPills();
+
 
             for (let i = 1; i <= 5; i++) {
                 const block = document.getElementById(`findings-block${i}`);

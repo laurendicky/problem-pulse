@@ -1,1425 +1,3187 @@
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-MTB5XXPVTB"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-
-  gtag('config', 'G-MTB5XXPVTB');
-</script>
-
-<style>
-
-/* =================================================================== */
-/* === GLOBAL STYLES & CSS VARIABLES                             === */
-/* =================================================================== */
-
-:root {
-  /* --- Fonts --- */
-  --font-primary: 'Plus Jakarta Sans', sans-serif;
-  --font-secondary: 'Inter', sans-serif;
-  --font-serif: 'Georgia', serif;
-  --font-monospace: 'Menlo', 'Consolas', monospace;
-  --font-default: Arial, sans-serif;
-
-  /* --- Colors --- */
-  --color-text-light: #ffffff;
-  --color-text-dark: #333;
-  --color-text-medium: #555;
-  --color-text-subtle: #777;
-  --color-text-primary-brand: #0e3ea7;
-  --color-text-secondary-brand: #374ca0;
-  --color-text-link: #007bff;
-
-  --bg-body: #f9f9f9;
-  --bg-light: #ffffff;
-  --bg-off-white: #f8f9fa;
-  --bg-accent-positive: #00a9da;
-  --bg-accent-negative: #d6539d;
-  --bg-accent-brand: #05328b;
-
-  --border-color: #e0e4e8;
-  --border-color-light: #f1f3f5;
-  --border-radius-soft: 8px;
-  --border-radius-medium: 12px;
-  --border-radius-round: 20px;
-  --border-radius-pill: 50px;
-
-  /* --- Spacing --- */
-  --spacing-sm: 0.5rem;
-  --spacing-md: 1rem;
-  --spacing-lg: 1.5rem;
-  --spacing-xl: 2rem;
-}
-
-body {
-  font-family: var(--font-default);
-  margin: var(--spacing-xl);
-  background-color: var(--bg-body);
-}
-
-
-/* =================================================================== */
-/* === UTILITY & SHARED COMPONENT STYLES                         === */
-/* =================================================================== */
-
-/* --- Status & Placeholder Text --- */
-.loading,
-.error,
-.no-results-message,
-.chart-placeholder-text,
-.discovery-list-placeholder,
-.faq-placeholder,
-.placeholder-text,
-.no-posts-found {
-  font-family: var(--font-secondary);
-  color: var(--color-text-subtle);
-  padding: var(--spacing-md);
-  text-align: center;
-  font-style: italic;
-  background-color: var(--bg-off-white);
-  border: 1px dashed #ced4da;
-  border-radius: var(--border-radius-soft);
-}
-
-.error,
-.error-message,
-.placeholder-text--error {
-  color: #dc3545;
-  font-weight: bold;
-}
-
-.loading {
-  color: var(--color-text-light);
-  margin-top: 60px;
-  letter-spacing: 0.1rem;
-  border: none;
-  background-color: transparent;
-}
-
-.no-results-message {
-  color: var(--color-text-light);
-  font-weight: normal;
-  font-size: 14px;
-  letter-spacing: 0.1rem;
-  max-width: 350px;
-  border: none;
-  background-color: transparent;
-}
-
-/* --- Section Titles --- */
-.finding .section-title,
-.related-communities-title {
-  font-size: 1rem;
-  font-weight: 700;
-  margin-bottom: var(--spacing-md);
-  padding-bottom: 0;
-  border-bottom: 0 solid #e0e6ed;
-  letter-spacing: 0.1rem;
-}
-.finding .section-title {
-  margin-bottom: var(--spacing-sm);
-}
-.related-communities-title {
-  margin-top: 2.5rem;
-}
-
-
-/* =================================================================== */
-/* === MAIN LAYOUT & SECTIONS                                    === */
-/* =================================================================== */
-
-#problem-pulse {
-  background-color: var(--bg-light);
-  padding: var(--spacing-xl);
-  border-radius: var(--border-radius-soft);
-  box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
-  width: 100vw;
-}
-#problem-pulse h2 {
-  margin-bottom: var(--spacing-md);
-}
-#problem-pulse label {
-  font-weight: bold;
-}
-#pulse-results {
-  margin-top: var(--spacing-xl);
-}
-
-#filter-header {
-  margin-bottom: 10px;
-  color: #ffffffa8;
-  font-family: var(--font-primary);
-  letter-spacing: 0.1rem;
-  font-size: 12px;
-}
-
-#sort-posts {
-  border-radius: 15px;
-  padding: 10px;
-  margin-bottom: 20px;
-}
-
-
-/* =================================================================== */
-/* === COMPONENT: INSIGHTS & POSTS                               === */
-/* =================================================================== */
-
-/* --- Main Insight Cards --- */
-/* NOTE: Merged from two conflicting definitions to preserve original browser rendering. */
-.insight, .summary {
-  background-color: #ffffff99 !important;
-  padding: 1rem 1.1rem !important;
-  border-radius: var(--border-radius-round) !important;
-  border: 0 !important; /* Preserving !important from original rule */
-  color: var(--color-text-secondary-brand);
-  font-size: 16px;
-  font-weight: 400;
-  box-shadow: 2px 5px 10px 2px rgba(0, 0, 0, 0.1);
-  backdrop-filter: blur(20px);
-  margin-bottom: var(--spacing-md);
-  transition: box-shadow 0.2s ease-in-out, transform 0.2s ease-in-out;
-}
-.insight:hover {
-  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.06);
-  transform: translateY(-2px);
-}
-.insight p {
-  margin: 0.5rem 0;
-}
-.insight small {
-  color: var(--color-text-medium);
-}
-.insight a, .insight-title {
-  font-size: 1.2rem;
-  font-weight: bold;
-  color: #201e57 !important;
-  text-decoration: none;
-  padding: 0;
-  display: inline-block;
-  transition: transform 0.2s ease, color 0.2s ease;
-}
-.insight a:hover {
-  transform: scale(1.02);
-}
-.insight-title:hover {
-  color: #0056b3;
-  text-decoration: underline;
-}
-
-.summary-full {
-  font-weight: normal;
-  display: block;
-  margin-top: 2px;
-}
-
-/* --- Reddit Sample Posts (in side panel) --- */
-.reddit-samples-header {
-  font-weight: 500 !important;
-  letter-spacing: 0.1rem;
-  margin-bottom: 30px !important;
-  color: var(--color-text-light) !important;
-  font-size: 1.2rem;
-  text-align: center;
-}
-.reddit-samples-posts {
-  background-color: #fafafa00;
-  padding: 10px 30px;
-  border-radius: 4px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  max-height: 90vh;
-  width: 60vw;
-  overflow-y: scroll;
-}
-.sample-insight {
-  border: 1px solid var(--border-color);
-  padding: 0.75rem;
-  margin-bottom: 0.75rem;
-  background: #fafafa;
-  border-radius: var(--border-radius-soft);
-}
-.sample-insight-title {
-  font-weight: bold;
-  font-size: 1rem;
-  color: var(--color-text-link);
-  text-decoration: none;
-}
-.sample-insight-title:hover {
-  text-decoration: underline;
-}
-.sample-insight-content {
-  font-size: 0.9rem;
-  margin: var(--spacing-sm) 0;
-  color: var(--color-text-dark);
-  line-height: 1.5;
-}
-.insight-content { /* Specific to main insight cards */
-  font-size: 0.9rem;
-  margin: 0.75rem 0;
-  color: var(--color-text-dark);
-  line-height: 1.6;
-}
-.sample-insight-meta, .insight-meta {
-  font-size: 0.8rem;
-  color: var(--color-text-medium);
-  display: block;
-}
-
-
-/* =================================================================== */
-/* === COMPONENT: SENTIMENT ANALYSIS                             === */
-/* =================================================================== */
-
-.sentiment-column {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  background-color: #f7f9fc;
-  border-radius: 16px;
-  border: 1px solid #e0e6ed;
-  padding: var(--spacing-lg);
-}
-.sentiment-title {
-  font-family: var(--font-secondary);
-  font-size: 1.1rem;
-  font-weight: 700;
-  text-align: center;
-  margin: 0 0 var(--spacing-lg) 0;
-  padding-bottom: 0.75rem;
-  border-bottom: 2px solid;
-}
-.sentiment-title.positive {
-  color: #00a5ce;
-  border-bottom-color: #A5D6A7;
-}
-.sentiment-title.negative {
-  color: var(--bg-accent-negative);
-  border-bottom-color: #EF9A9A;
-}
-#sentiment-score-bar {
-  width: 100%;
-  display: flex;
-  height: 30px;
-  border-radius: 30px;
-  overflow: hidden;
-  font-weight: 600;
-  color: white;
-  margin-bottom: 0;
-  letter-spacing: 0.1rem;
-  border: 0.5px solid var(--color-text-light);
-}
-.score-segment {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.12px;
-}
-.score-segment.positive {
-  background-color: #00a5cea5;
-}
-.score-segment.negative {
-  background-color: #d6539dad;
-}
-
-/* --- Word Cloud --- */
-#positive-cloud,
-#negative-cloud {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 12px 18px;
-  min-height: 250px;
-  flex-grow: 1;
-}
-.cloud-word {
-  background: var(--bg-light);
-  display: inline-block;
-  text-transform: uppercase;
-  line-height: 1;
-  padding: 4px 12px;
-  border-radius: 30px;
-  transition: all 0.2s cubic-bezier(0.25, 0.8, 0.25, 1);
-  letter-spacing: 0.5px;
-  cursor: pointer;
-  margin: 3px;
-  box-shadow: 4px 3px 9px 2px rgb(0 0 139 / 28%);
-}
-.cloud-word:hover {
-  transform: scale(1.15) !important;
-  z-index: 10;
-}
-
-
-
-
-
-
-/* =================================================================== */
-/* === COMPONENT: FAQ ACCORDION                                  === */
-/* =================================================================== */
-
-/* NOTE: Merged from two definitions for accuracy. */
-.faq-item {
-  border: 1px solid #e0e6ed;
-  border-radius: var(--border-radius-pill);
-  margin-bottom: var(--spacing-sm);
-  overflow: hidden;
-  border-bottom: 1px solid #e9ecef; /* This overrides the border shorthand's bottom */
-}
-.faq-item.active .faq-question::after {
-  transform: translateY(-50%) rotate(45deg);
-}
-.faq-item.active .faq-answer {
-  max-height: 20rem; /* A large enough value to show content */
-}
-.faq-question {
-  width: 100%;
-  text-align: left;
-  background-color: var(--bg-light);
-  border: none;
-  padding: 1rem 1.5rem;
-  font-family: var(--font-secondary);
-  font-weight: 600;
-  font-size: 1rem;
-  cursor: pointer;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  position: relative;
-  outline: none;
-}
-.faq-question::after {
-  content: '+';
-  position: absolute;
-  right: 0;
-  top: 50%;
-  transform: translateY(-50%);
-  font-size: 1.5rem;
-  color: #0277BD;
-  transition: transform 0.3s ease-in-out;
-}
-.faq-answer {
-  max-height: 0;
-  overflow: hidden;
-  transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
-  background-color: #f9f9fc;
-}
-.faq-answer-content { /* Added for inner padding */
-  padding: 0 1.5rem 1.25rem 0;
-  font-family: var(--font-secondary);
-  font-size: 0.95rem;
-  line-height: 1.6;
-  color: var(--color-text-medium);
-}
-
-
-/* =================================================================== */
-/* === COMPONENT: SLIDING CONTEXT PANELS                         === */
-/* =================================================================== */
-
-.context-slide-panel {
-  position: fixed;
-  top: 0;
-  width: 90%;
-  max-width: 550px;
-  height: 100vh;
-  background-color: var(--bg-light);
-  box-shadow: 0 0 25px rgba(0,0,0,0.35);
-  z-index: 1001;
-  overflow-y: auto;
-  transition: transform 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94);
-  display: flex;
-  flex-direction: column;
-}
-.context-slide-panel.from-left {
-  left: 0;
-  transform: translateX(-105%);
-}
-.context-slide-panel.from-right {
-  right: 0;
-  transform: translateX(105%);
-}
-.context-slide-panel.visible {
-  transform: translateX(0);
-}
-.context-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(0,0,0,0.5);
-  z-index: 1000;
-  opacity: 0;
-  visibility: hidden;
-  transition: opacity 0.4s ease, visibility 0s 0.4s;
-}
-.context-overlay.visible {
-  opacity: 1;
-  visibility: visible;
-  transition: opacity 0.4s ease;
-  cursor: pointer;
-}
-.context-slide-panel .context-header, .context-header {
-  position: sticky;
-  top: 0;
-  background-color: var(--bg-light);
-  padding: var(--spacing-lg) var(--spacing-lg) var(--spacing-md) var(--spacing-lg);
-  border-bottom: 1px solid #eee;
-  z-index: 5;
-}
-.context-slide-panel .context-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px 20px;
-  background-color: #f0f2f5;
-  border-bottom: 1px solid #ddd;
-}
-.context-slide-panel .context-title, .context-title {
-  font-size: 1.5rem;
-  font-weight: 700;
-  margin: 0;
-  padding-right: 2.5rem;
-}
-.context-slide-panel .context-title {
-  font-family: var(--font-secondary);
-  font-size: 1.2rem;
-  color: #1c1e21;
-}
-.context-slide-panel .context-close-btn, .context-close-btn {
-  position: absolute;
-  top: var(--spacing-sm);
-  right: var(--spacing-lg);
-  background: none;
-  border: none;
-  font-size: 2.5rem;
-  font-weight: 300;
-  line-height: 1;
-  color: #aaa;
-  cursor: pointer;
-  padding: 0;
-  transition: all 0.2s ease;
-}
-.context-close-btn:hover {
-  color: var(--color-text-dark);
-  transform: scale(1.1);
-}
-.context-slide-panel .context-close-btn {
-  position: static;
-  font-size: 2.2rem;
-  font-weight: bold;
-  color: #606770;
-  padding: 0 8px;
-}
-.context-slide-panel .context-snippets-wrapper, .context-snippets-wrapper {
-  padding: var(--spacing-lg);
-  flex-grow: 1;
-}
-.context-slide-panel .context-snippets-wrapper {
-  padding: 8px 20px 20px;
-}
-.context-slide-panel .context-snippet, .context-snippet {
-  padding: var(--spacing-md);
-  border: 1px solid var(--border-color-light);
-  border-radius: var(--border-radius-soft);
-  margin-bottom: var(--spacing-md);
-  background-color: #f9f9f9;
-}
-.context-slide-panel .context-snippet {
-  border-color: #e0e0e0;
-  padding: 12px;
-  margin-bottom: 12px;
-  background: #fafafa;
-  border-radius: 6px;
-}
-.context-slide-panel .context-snippet-text, .context-snippet-text {
-  font-family: var(--font-secondary);
-  color: var(--color-text-dark);
-  line-height: 1.6;
-  margin: 0 0 var(--spacing-md) 0;
-}
-.context-slide-panel .context-snippet-text {
-  font-size: 0.95rem;
-  margin-bottom: 0.75rem;
-}
-.context-snippet-text strong {
-  background-color: #fff8c5;
-  padding: 2px 3px;
-  border-radius: 3px;
-  font-weight: 700;
-}
-.context-slide-panel .context-snippet-text strong {
-  background-color: #fff4a3;
-  padding: 1px 3px;
-}
-.context-slide-panel .context-snippet-meta, .context-snippet-meta {
-  font-family: var(--font-secondary);
-  font-size: 0.8rem;
-  color: var(--color-text-medium);
-  margin-top: var(--spacing-md);
-  border-top: 1px solid #eee;
-  padding-top: 0.75rem;
-}
-.context-slide-panel .context-snippet-meta {
-  color: #65676b;
-  border-top: none;
-  padding-top: 0;
-  margin-top: 0;
-}
-
-
-/* =================================================================== */
-/* === COMPONENT: CHARTS & VISUALIZATIONS (EMOTION MAP)          === */
-/* =================================================================== */
-
-#emotion-map-container {
-  position: relative;
-  width: 100%;
-}
-#emotion-map {
-  width: 70vw;
-  margin-bottom: 50px;
-  height: 400px;
-  padding: 10px;
-  border-radius: var(--border-radius-soft);
-}
-#problem-map-description {
-  color: var(--color-text-light);
-  letter-spacing: 0.1rem;
-}
-#emotion-map-wrapper {
-  position: relative;
-  width: 100%;
-}
-#chart-zoom-btn {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10;
-  display: none; /* Toggled by JS */
-  margin: var(--spacing-md) auto 0;
-  padding: 0.5rem 1rem;
-  font-family: var(--font-secondary);
-  font-weight: 500;
-  font-size: 0.85rem;
-  color: var(--color-text-light);
-  background-color: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.4);
-  border-radius: var(--border-radius-round);
-  cursor: pointer;
-  white-space: nowrap;
-  transition: background-color 0.2s ease, border-color 0.2s ease;
-}
-#chart-zoom-btn:hover {
-  background-color: rgba(255, 255, 255, 0.3);
-}
-.chart-description {
-  font-size: 0.9rem;
-  color: var(--color-text-medium);
-  margin-bottom: var(--spacing-sm);
-  text-align: center;
-}
-
-/* --- Constellation Map --- */
-.constellation-star {
-  position: absolute;
-  border-radius: 50%;
-  transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
-  cursor: pointer;
-  box-shadow: 0 0 8px 1px rgba(255, 255, 255, 0.3);
-  z-index: 999;
-}
-.constellation-star:hover {
-  transform: scale(1.8);
-  z-index: 999;
-  box-shadow: 0 0 25px 6px rgba(255, 255, 255, 0.7);
-}
-#constellation-side-panel .panel-content {
-  padding: var(--spacing-md);
-  overflow-y: auto;
-  flex-grow: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-.panel-placeholder {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 100%;
-  text-align: center;
-  color: #201e57;
-  font-size: 1.1rem;
-}
-.panel-content .quote {
-  font-size: 1.2rem;
-  font-style: italic;
-  margin-bottom: var(--spacing-lg);
-  padding: var(--spacing-md);
-  background-color: var(--bg-accent-brand);
-  border-radius: 30px;
-  word-wrap: break-word;
-  max-height: 250px;
-  overflow: scroll;
-}
-.panel-content .problem-theme {
-  font-size: 1rem;
-  margin-bottom: var(--spacing-lg);
-  font-weight: bold;
-}
-.panel-content .meta-info {
-  font-size: 0.9rem;
-  color: #636f7f;
-  margin-bottom: var(--spacing-lg);
-}
-.panel-content .full-thread-link {
-  display: inline-block;
-  padding: 10px 20px;
-  background-color: #00ace8;
-  color: var(--color-text-light);
-  text-decoration: none;
-  border-radius: var(--border-radius-pill);
-  font-weight: bold;
-  font-family: var(--font-primary);
-  letter-spacing: 0.05rem;
-  transition: background-color 0.2s;
-}
-.panel-content .full-thread-link:hover {
-  background-color: var(--bg-accent-negative);
-}
-
-
-/* =================================================================== */
-/* === MISCELLANEOUS COMPONENTS                                  === */
-/* =================================================================== */
-
-/* --- Prevalence Bar --- */
-.prevalence-container {
-  margin-top: 0;
-}
-.prevalence-header {
-  font-size: 0.7rem;
-  font-weight: normal;
-  margin-bottom: 4px;
-}
-.prevalence-bar-background {
-  background-color: #ffffff4d;
-  border-radius: 15px;
-  overflow: hidden;
-  height: 10px;
-  display: flex;
-  align-items: center;
-}
-.prevalence-bar-foreground {
-  color: #ffffff00;
-  text-align: right;
-  padding: 2px 8px;
-  font-weight: bold;
-  font-size: 0.8rem;
-  white-space: nowrap;
-  transition: width 0.5s ease-in-out;
-}
-.prevalence-subtitle {
-  font-size: 0.7rem;
-  color: #374ca07d;
-  margin-top: 4px;
-}
-
-/* --- Mention Count --- */
-.mention-count {
-  font-size: 0.9rem;
-  color: #0807658a;
-  margin-top: var(--spacing-sm);
-  text-align: center;
-  margin-bottom: 10px;
-  width: 80%;
-}
-
-/* --- Purchase Intent Signals --- */
-#purchase-intent-container {
-  background-color: var(--bg-light);
-  border: 1px solid #ddd;
-  border-radius: var(--border-radius-soft);
-  padding: 16px;
-  margin-bottom: 20px;
-}
-.purchase-intent-item {
-  border: 1px solid #e8e8e8;
-  background-color: #fafcff;
-  border-left: 4px solid #27ae60;
-  padding: 12px 16px;
-  margin-bottom: 12px;
-  border-radius: 4px;
-}
-.purchase-intent-item .problem-summary {
-  font-weight: bold;
-  color: var(--color-text-dark);
-  margin-bottom: 8px;
-  font-size: 1rem;
-}
-.purchase-intent-item .quote {
-  font-family: var(--font-serif);
-  font-style: italic;
-  color: var(--color-text-medium);
-  margin: 0;
-  padding-left: 10px;
-}
-
-/* --- Power Phrases (Accordion List) --- */
-
-
-
-/* --- Header Pills --- */
-.header-pill {
-  display: inline-block;
-  padding: 3px 12px;
-  border-radius: var(--border-radius-pill);
-  font-weight: 600;
-  margin: 0 3px;
-  line-height: 1.5;
-  font-size: 0.95em;
-  vertical-align: middle;
-}
-.pill-insights {
-  background-color: #E0F2FE;
-  color: #0C4A6E;
-}
-.pill-posts {
-  background-color: #F3F4F6;
-  color: #4B5563;
-}
-.pill-audience {
-  background-color: #E0E7FF;
-  color: #3730A3;
-}
-
-/* --- Bubble Chart Detail Panel --- */
-.bubble-detail-title {
-  font-family: var(--font-primary);
-  font-size: 1.25rem;
-  font-weight: 700;
-  margin-bottom: 0.75rem;
-  border-bottom: 1px solid #e0e0e0;
-  padding-bottom: 0.75rem;
-  color: var(--color-text-dark);
-}
-.bubble-detail-quote {
-  font-family: var(--font-primary);
-  font-size: 1rem;
-  line-height: 1.6;
-  margin-bottom: var(--spacing-lg);
-  font-style: normal;
-  color: var(--color-text-medium);
-}
-.bubble-detail-meta {
-  font-family: var(--font-primary);
-  font-size: 0.8rem;
-  color: var(--color-text-subtle);
-  margin-bottom: 0.75rem;
-  margin-top: var(--spacing-lg);
-}
-.bubble-detail-source {
-  font-family: var(--font-primary);
-  font-size: 0.9rem;
-  text-decoration: none;
-  background-color: var(--bg-accent-positive);
-  color: var(--color-text-light);
-  padding: 8px 12px;
-  border-radius: var(--border-radius-pill);
-  transition: background-color 0.2s ease, transform 0.2s ease;
-  display: inline-block;
-  width: fit-content;
-}
-.bubble-detail-source:hover {
-  transform: scale(1.2);
-}
-
-/* --- AI Prompt --- */
-#ai-prompt-container {
-  padding: var(--spacing-lg);
-  background-color: #f3f4f6;
-  border-radius: var(--border-radius-soft);
-  margin-top: var(--spacing-xl);
-  border: 1px solid #d1d5db;
-}
-#ai-prompt-container .loading-text,
-#mindset-summary-container .loading-text {
-  font-family: var(--font-secondary);
-  color: var(--color-text-subtle);
-  font-style: italic;
-}
-.ai-prompt-content {
-  background-color: var(--bg-light);
-  border: 1px solid #e5e7eb;
-  border-radius: 6px;
-  padding: var(--spacing-md);
-  font-family: var(--font-monospace);
-  font-size: 0.9rem;
-  line-height: 1.7;
-  color: #111827;
-  white-space: pre-wrap;
-  position: relative;
-}
-.ai-prompt-content strong {
-  color: #000;
-}
-
-
-/* --- Keyword Opportunities --- */
-#keyword-opportunities-container {
-  margin-top: var(--spacing-xl);
-}
-.keyword-clusters-grid {
-  display: flex;
-  flex-direction: column;
-  gap: var(--spacing-lg);
-  margin-top: var(--spacing-md);
-}
-.keyword-cluster {
-  padding: var(--spacing-lg);
-  background-color: var(--bg-off-white);
-  border-radius: var(--border-radius-soft);
-  border: 1px solid #dee2e6;
-}
-.keyword-cluster-header {
-  display: flex;
-  align-items: center;
-  margin-bottom: var(--spacing-md);
-  border-bottom: 1px solid var(--border-color);
-  padding-bottom: 0.75rem;
-}
-.keyword-cluster-icon {
-  margin-right: 0.75rem;
-  font-size: 1.5rem;
-}
-.keyword-cluster-title {
-  font-family: var(--font-primary);
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--color-text-dark);
-}
-.keyword-cluster-description {
-  font-family: var(--font-primary);
-  font-size: 0.8rem;
-  color: var(--color-text-medium);
-  margin-top: 4px;
-}
-.keyword-list {
-  list-style-type: none;
-  padding-left: 0;
-  margin: 0;
-}
-.keyword-list li {
-  font-family: var(--font-primary);
-  font-size: 0.95rem;
-  padding: var(--spacing-sm);
-  border-radius: 4px;
-  margin-bottom: var(--spacing-sm);
-  background-color: var(--bg-light);
-  border: 1px solid var(--border-color);
-}
-
-/* =================================================================== */
-/* === SUBREDDIT SELECTION & CARDS                               === */
-/* =================================================================== */
-
-/* --- Included Subreddits List (Simple Tags) --- */
-.subreddit-tag-list {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: stretch;
-  gap: var(--spacing-md);
-}
-.subreddit-tag {
-  font-family: var(--font-secondary);
-  font-size: 0.85rem;
-  background-color: #e0e6ed;
-  padding: 0.25rem 0.75rem;
-  border-radius: 16px;
-  color: var(--color-text-medium);
-}
-
-/* --- Detailed Subreddit Cards --- */
-.subreddit-tag-detailed {
-  background: #ffffff33;
-  border: 0.5px solid var(--color-text-light);
-  border-radius: 30px;
-  padding: 20px;
-  margin: 8px;
-  width: 280px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  backdrop-filter: blur(20px);
-}
-.tag-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
-}
-.tag-name {
-  font-weight: bold;
-  font-size: 1rem;
-  color: #ffffff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  letter-spacing: 0.05rem;
-}
-.tag-activity {
-  font-size: 0.8rem;
-  background: #e9ecef;
-  color: #495057;
-  padding: 3px 8px;
-  border-radius: var(--border-radius-medium);
-  flex-shrink: 0;
-  margin-left: 8px;
-}
-.tag-description {
-  font-size: 0.85rem;
-  color: #495057;
-  margin: 0 0 10px 0;
-  line-height: 1.4;
-  flex-grow: 1;
-  word-wrap: break-word;
-}
-.tag-footer {
-  font-size: 0.8rem;
-  color: #6c757d;
-  text-align: right;
-  border-top: 1px solid var(--border-color-light);
-  padding-top: 8px;
-}
-.tag-footer-action {
-  margin-top: 12px;
-  display: flex;
-  gap: 8px;
-}
-
-/* --- Subreddit Selection Checkboxes --- */
-.subreddit-choice {
-  display: flex;
-  margin-bottom: var(--spacing-sm);
-}
-.subreddit-choice input[type="checkbox"] {
-  display: none;
-}
-.subreddit-choice label {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  width: 100%;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--border-color);
-  border-radius: var(--border-radius-soft);
-  background-color: var(--bg-light);
-  cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
-}
-.subreddit-choice label:hover {
-  border-color: #adb5bd;
-}
-.subreddit-choice input[type="checkbox"]:checked + label {
-  border-color: var(--color-text-link);
-  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.2);
-}
-.sub-name {
-  font-weight: 600;
-  color: #343a40;
-}
-.sub-pills {
-  display: flex;
-  gap: var(--spacing-sm);
-}
-.pill {
-  padding: 0.2rem 0.6rem;
-  border-radius: var(--border-radius-medium);
-  font-size: 0.8rem;
-  font-weight: 500;
-  white-space: nowrap;
-}
-.members-pill {
-  background-color: var(--border-color-light);
-  color: #495057;
-}
-.activity-pill[data-activity="Hot"] {
-  background-color: #f0fff4;
-  color: #2f855a;
-}
-.activity-pill[data-activity="Warm"] {
-  background-color: #fffbeb;
-  color: #b45309;
-}
-.activity-pill[data-activity="Cool"] {
-  background-color: #f9fafb;
-  color: #4b5563;
-}
-
-/* --- Buttons for Subreddits --- */
-.remove-sub-btn,
-.add-related-sub-btn,
-.view-sub-btn,
-.load-more-button {
-  flex-grow: 1;
-  padding: 8px 12px;
-  border-radius: var(--border-radius-pill);
-  border: 1px solid var(--color-text-light);
-  background-color: var(--bg-accent-positive);
-  color: var(--color-text-light);
-  font-weight: 500;
-  font-family: var(--pf-font-family); /* Assumes --pf-font-family is defined elsewhere */
-  font-size: 0.9rem;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  text-decoration: none;
-  text-align: center;
-}
-.remove-sub-btn:hover {
-  background-color: #f5c6cb;
-  border-color: #c82333;
-}
-.add-related-sub-btn:hover {
-  background-color: #0056b3;
-  border-color: #0056b3;
-}
-.view-sub-btn {
-  background-color: #ffffff8c;
-  color: #00ace8;
-  border-color: #05ace9;
-}
-.view-sub-btn:hover {
-  background-color: #e2e6ea;
-  border-color: #5a6268;
-}
-.load-more-button {
-  display: block;
-  margin: var(--spacing-md) auto;
-  flex-grow: 0; /* Override */
-}
-.load-more-button:hover {
-  transform: translateY(-2px);
-  background-color: #e9ecef;
-}
-
-/* ======================================================= */
-/* == NEW STYLES FOR BRANDSCAPE & POWER PHRASES   == */
-/* ======================================================= */
-
-/* --- Side Panel Styling --- */
-.custom-side-panel {
-  position: fixed;
-  top: 0;
-  height: 100vh;
-  width: 500px;
-  max-width: 90%;
-  background-color: #ffffff;
-  box-shadow: 0 0 25px rgba(0,0,0,0.15);
-  z-index: 1001;
-  transform: translateX(100%);
-  transition: transform 0.4s cubic-bezier(0.23, 1, 0.32, 1);
-  overflow-y: auto;
-}
-.custom-side-panel.left { left: 0; transform: translateX(-100%); }
-.custom-side-panel.right { right: 0; transform: translateX(100%); }
-.custom-side-panel.visible { transform: translateX(0); }
-.context-overlay.visible { opacity: 1; pointer-events: auto; }
-
-/* --- Competitive Brief Card Styling --- */
-.brief-content { padding: 2rem; }
-.brief-header { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 1.5rem; font-weight: 700; color: #333; margin-bottom: 1.5rem; }
-.brief-section { margin-bottom: 2rem; }
-.brief-section-title { display: flex; align-items: center; font-family: 'Plus Jakarta Sans', sans-serif; font-size: 1.1rem; font-weight: 700; color: #333; margin-bottom: 1rem; border-bottom: 1px solid #e0e4e8; padding-bottom: 0.5rem; }
-.brief-section-icon { margin-right: 0.75rem; font-size: 1.5rem; }
-.brief-text, .brief-list { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 1rem; line-height: 1.7; color: #444; }
-.brief-list { list-style-type: none; padding-left: 0; margin: 0; }
-.brief-list li { position: relative; padding-left: 25px; margin-bottom: 0.75rem; }
-.brief-list li::before { position: absolute; left: 0; top: 4px; font-size: 1.1rem; }
-.brief-list.loves li::before { content: '🟢'; }
-.brief-list.hates li::before { content: '🔴'; }
-.brief-list.stakes li::before { content: '🔵'; }
-#brand-momentum-chart { width: 100%; height: 250px; margin-bottom: 0.5rem; }
-.brief-ai-insight { font-family: 'Plus Jakarta Sans', sans-serif; font-size: 0.9rem; color: #555; text-align: center; font-style: italic; }
-
-
-
-
-
-#brand-momentum-chart {
-  width: 100%;
-  height: 250px; /* Adjust height as needed */
-  margin-bottom: 0.5rem;
-}
-
-/* Styling for the new elements in the side panel */
-.brief-header-subtext {
-  font-family: 'Plus Jakarta Sans', sans-serif;
-  font-size: 1rem;
-  color: #555;
-  margin-top: -1.25rem;
-  margin-bottom: 1.5rem;
-}
-
-.brief-verdict {
-  margin-top: 2rem;
-  padding: 1rem;
-  background-color: #f3f4f6;
-  border-radius: 6px;
-  border-left: 4px solid #00a5ce;
-}
-.brief-verdict strong {
-  font-family: 'Plus Jakarta Sans', sans-serif;
-  font-size: 1.1rem;
-  color: #333;
-}
-.brief-verdict p {
-  font-family: 'Plus Jakarta Sans', sans-serif;
-  margin: 0.5rem 0 0 0;
-  color: #444;
-  line-height: 1.6;
-}
-/* --- Add this CSS for the Keyword View Switcher --- */
-
-.keyword-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1rem;
-}
-
-.view-switcher {
-    display: flex;
-    border-radius: 6px;
-    background-color: #f0f2f5;
-    padding: 4px;
-}
-
-.view-btn {
-    padding: 6px 12px;
-    border: none;
-    background-color: transparent;
-    color: #555;
-    font-weight: 500;
-    cursor: pointer;
-    border-radius: 4px;
-    transition: background-color 0.2s ease, color 0.2s ease;
-}
-
-.view-btn.active {
-    background-color: #ffffff;
-    color: #007bff;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-}
-
-.keyword-view {
-    display: none; /* Hide views by default */
-}
-
-.keyword-view.active {
-    display: block; /* Show the active view */
-}
-
-/* Optional: Style for the card grid layout */
-#keyword-cards-view.active {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 1rem;
-}
-
-
-.card-toggle-button {
-    background: rgba(255, 255, 255, 0.7);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-    border: 1px solid rgba(255, 255, 255, 0.4);
-    color: #4a5568;
-    font-size: 0.9rem;
-    font-weight: 600;
-    padding: 0.6rem 1.2rem;
-    border-radius: 20px;
-    cursor: pointer;
-    margin-bottom: 10px;
-    transition: all 0.2s ease;
-}
-
-.card-toggle-button:hover {
-    background: rgba(255, 255, 255, 0.9);
-    border-color: rgba(0, 0, 0, 0.1);
-    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.08);
-    transform: translateY(-2px);
-}
-
-/* --- MODIFIED: Grid and Card styles for <details> element --- */
-.action-cards-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
-    gap: 1.75rem;
-    padding: 1rem;
-        max-height: 70vh;
-    overflow-y: scroll;
-}
-
-/* Card is now a <details> element */
-.action-card {
-    background: rgba(255, 255, 255, 0.65);
-    backdrop-filter: blur(16px) saturate(180%);
-    -webkit-backdrop-filter: blur(16px) saturate(180%);
-    border: 1px solid rgba(255, 255, 255, 0.3);
-    border-radius: 36px;
-    box-shadow: 2px 3px 7px 4px rgba(31, 38, 135, 0.15);
-    transition: all 0.3s ease;
-}
-
-.action-card[open] {
-    box-shadow: 2px 3px 7px 4px rgba(31, 38, 135, 0.15);
-}
-
-.action-card .action-item-list {
-    padding: 0 1.75rem 1.75rem 1.75rem;
-}
-
-/* The clickable header of the main card */
-.action-card-summary {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1rem 1.75rem;
-    cursor: pointer;
-    list-style: none; /* Hide default marker */
-}
-.action-card-summary::-webkit-details-marker { display: none; }
-
-.action-card-title {
-    font-size: 1.6rem;
-    font-weight: 700;
-    color: #1a202c;
-    margin: 0 0 0.3rem 0;
-}
-
-.action-card-subtitle {
-    font-size: 0.95rem;
-    color: #4a5568;
-    margin: 0;
-}
-
-.action-card-arrow {
-    font-size: 2em;
-    font-weight: 300;
-    color: #718096;
-    transition: transform 0.3s ease;
-}
-
-.action-card[open] > .action-card-summary > .action-card-arrow {
-    transform: rotate(90deg);
-}
-
-/* --- UNCHANGED: Inner dropdown styles --- */
-.action-item-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.75rem;
-}
-
-.action-item-dropdown {
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.5);
-    border: 1px solid rgba(255, 255, 255, 0.4);
-    transition: background-color 0.2s ease;
-    overflow: hidden;
-}
-
-.action-item-dropdown[open] { background: rgba(255, 255, 255, 0.7); }
-
-.action-item-summary {
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
-    padding: 0.9rem 1.1rem;
-    font-size: 1rem;
-    font-weight: 500;
-    color: #2d3748;
-    cursor: pointer;
-    list-style: none;
-}
-.action-item-summary::-webkit-details-marker { display: none; }
-
-.action-item-summary::after {
-    content: '›';
-    font-size: 1.5em;
-    font-weight: 300;
-    line-height: 1;
-    margin-left: auto;
-    color: #718096;
-    transition: transform 0.2s ease;
-}
-
-.action-item-dropdown[open] > .action-item-summary::after { transform: rotate(90deg); }
-.action-item-icon { font-size: 1.1rem; opacity: 0.7; }
-.action-item-context {
-    padding: 1rem 1.25rem 1.25rem 1.25rem;
-    border-top: 1px solid rgba(0, 0, 0, 0.08);
-    margin-top: 0.75rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-}
-.context-label { margin-right: 20px; font-size: 0.8rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 0.3rem; }
-.context-value { font-size: 0.95rem; font-weight: 500; padding: 0.4rem 0.8rem; border-radius: 20px; width: fit-content; }
-.context-prose { font-size: 0.95rem; color: #4a5568; line-height: 1.6; margin: 0; padding: 0.75rem; border-radius: 6px; border-left: 3px solid; }
-
-.context-item.primary .context-label { color: #2563eb; }
-.context-item.secondary .context-label { color: #16a34a; }
-.context-item.primary .context-value { background-color: #dbeafe; color: #1e40af; }
-
-.context-item.secondary .context-value { background-color: #d1fae5; color: #065f46; }
-.context-item.longtail .context-label { color: #d97706; }
-.context-item.longtail .context-value { background-color: #fef3c7; color: #92400e; }
-.context-item.why .context-label { color: #9333ea; }
-.context-item.why .context-prose { background-color: #f5f3ff; border-left-color: #9333ea; }
-}
-
-/*
-  ======================================================================
-  === PASTE THIS CSS INTO YOUR STYLESHEET FOR THE BREADCRUMB FIX =======
-  ======================================================================
-*/
-
-/* Step 1: Prepare the chart's container.
-   This creates a "boundary box" for us to position the breadcrumbs inside of. */
-#keyword-sunburst {
-  position: relative !important;
-  /* Creates 30px of clean, empty space at the top for the breadcrumbs to live in */
-  padding-top: 30px !important;
-}
-
-/* Step 2: Target the breadcrumbs group, pull it out of the chart's flow,
-   and pin it to the top of the container we prepared in Step 1. */
-#keyword-sunburst .highcharts-breadcrumbs-group {
-  position: absolute !important;
-  top: 10px !important;    /* Position it 10px from the top edge */
-  left: 10px !important;   /* Position it 10px from the left edge */
-  /* Make it span the full width of the container, minus some padding */
-  width: calc(100% - 20px) !important;
-}
-
-/* Step 3: Force the text inside the breadcrumbs to wrap.
-   This prevents it from running off the edge of the screen. */
-#keyword-sunburst .highcharts-breadcrumbs-group text {
-    white-space: normal !important;
-    word-break: break-word !important;
-}
-
-
-  .reddit-samples-posts {
-    width: 85svw;
-  }
-
-</style>
+// --- 1. GLOBAL VARIABLES & CONSTANTS ---
+const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
+const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
+const HARD_MIN_SUBSCRIBERS = 1000;
+const HARD_MIN_ACTIVE_USERS = 0;
+const LENIENT_MIN_SUBSCRIBERS = 500;
+const LENIENT_MIN_ACTIVE_USERS = 0;
+let originalGroupName = '';
+let _allRankedSubreddits = [];
+
+const suggestions = ["Dog Lovers", "Start-up Founders", "Fitness Freaks", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Software Developers", "Brides To Be"];
+const positiveColors = ['#00a5ce', '#0090b5', '#00c0e6', '#7bd9ec', '#b3e8f3', '#006d85'];
+const negativeColors = ['#fd80c7', '#d6539d', '#ff4fa3', '#ff99d6', '#fbb6ce', '#f472b6'];
+const lemmaMap = { 'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': 'love', 'loving': 'love', 'hates': 'hate', 'wishes': 'wish', 'wishing': 'wish', 'solutions': 'solution', 'challenges': 'challenge', 'recommended': 'recommend', 'disappointed': 'disappoint', 'frustrated': 'frustrate', 'annoyed': 'annoy' };
+const positiveWords = new Set(['love', 'amazing', 'awesome', 'beautiful', 'best', 'brilliant', 'celebrate', 'charming', 'dope', 'excellent', 'excited', 'exciting', 'epic', 'fantastic', 'flawless', 'gorgeous', 'happy', 'impressed', 'incredible', 'insane', 'joy', 'keen', 'lit', 'perfect', 'phenomenal', 'proud', 'rad', 'super', 'stoked', 'thrilled', 'vibrant', 'wow', 'wonderful', 'blessed', 'calm', 'chill', 'comfortable', 'cozy', 'grateful', 'loyal', 'peaceful', 'pleased', 'relaxed', 'relieved', 'satisfied', 'secure', 'thankful', 'want', 'wish', 'hope', 'desire', 'craving', 'benefit', 'bonus', 'deal', 'hack', 'improvement', 'quality', 'solution', 'strength', 'advice', 'tip', 'trick', 'recommend']);
+const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'broken', 'hate', 'challenge', 'confused', 'crazy', 'critical', 'danger', 'desperate', 'disappoint', 'disgusted', 'dreadful', 'fear', 'frustrate', 'furious', 'horrible', 'irritated', 'jealous', 'nightmare', 'outraged', 'pain', 'panic', 'problem', 'rant', 'scared', 'shocked', 'stressful', 'terrible', 'terrified', 'trash', 'alone', 'ashamed', 'bored', 'depressed', 'discouraged', 'dull', 'empty', 'exhausted', 'failure', 'guilty', 'heartbroken', 'hopeless', 'hurt', 'insecure', 'lonely', 'miserable', 'sad', 'sorry', 'tired', 'unhappy', 'upset', 'weak', 'need', 'disadvantage', 'issue', 'flaw']);
+const emotionalIntensityScores = { 'annoy': 3, 'irritated': 3, 'bored': 2, 'issue': 3, 'sad': 4, 'bad': 3, 'confused': 4, 'tired': 3, 'upset': 5, 'unhappy': 5, 'disappoint': 6, 'frustrate': 6, 'stressful': 6, 'awful': 7, 'hate': 8, 'angry': 7, 'broken': 5, 'exhausted': 5, 'pain': 7, 'miserable': 8, 'terrible': 8, 'worst': 9, 'horrible': 8, 'furious': 9, 'outraged': 9, 'dreadful': 8, 'terrified': 10, 'nightmare': 10, 'heartbroken': 9, 'desperate': 8, 'rage': 10, 'problem': 4, 'challenge': 5, 'critical': 6, 'danger': 7, 'fear': 7, 'panic': 8, 'scared': 6, 'shocked': 7, 'trash': 5, 'alone': 4, 'ashamed': 5, 'depressed': 8, 'discouraged': 5, 'dull': 2, 'empty': 6, 'failure': 7, 'guilty': 6, 'hopeless': 8, 'insecure': 5, 'lonely': 6, 'weak': 4, 'need': 5, 'disadvantage': 4, 'flaw': 4 };
+const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
+
+// --- 1. SAFE STORAGE FOR YOUR WEBFLOW DESIGN ---
+let PHRASE_BLUEPRINT = null;
+let PILLAR_BLUEPRINT = null;
+let VOICE_PILL_BLUEPRINT = null;
+let HOOK_CARD_BLUEPRINT = null;
+let HOOK_ITEM_BLUEPRINT = null;
+let MINDSET_ITEM_BLUEPRINT = null;
+let AVOID_SWAP_BLUEPRINT = null;
+let LANGUAGE_AVOID_BLUEPRINT = null;
+let LANGUAGE_USE_BLUEPRINT = null;
+let TONE_CARD_BLUEPRINT = null;
+let TONE_TRAIT_BLUEPRINT = null;
+let SEO_CARD_BLUEPRINT = null;
+let SEO_ITEM_BLUEPRINT = null;
+
+
+// =================================================================================
+// === HELPER FUNCTIONS ===
+// =================================================================================
+function generateNgrams(words, n) {
+    const ngrams = [];
+    if (n > words.length) {
+        return ngrams;
+    }
+    for (let i = 0; i <= words.length - n; i++) {
+        const ngramSlice = words.slice(i, i + n);
+        if (!ngramSlice.some(word => stopWords.includes(word))) {
+            ngrams.push(ngramSlice.join(' '));
+        }
+    }
+    return ngrams;
+}
+
+async function classifySentimentWithAI(posts) {
+    const BATCH_SIZE = 25; 
+    let allSentiments = [];
+
+    for (let i = 0; i < posts.length; i += BATCH_SIZE) {
+        const batch = posts.slice(i, i + BATCH_SIZE);
+        const postsForAI = batch.map((p, index) => ({
+            index: index,
+            text: `Title: ${p.data.title || ''}. Body: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
+        }));
+
+        const prompt = `You are a sentiment analysis engine. For each post provided, classify its overall sentiment towards the main subject as "Positive", "Negative", or "Neutral". Respond ONLY with a valid JSON object with a single key "sentiments", which is an array of objects. Each object must have two keys: "post_index" and "sentiment". Example Response: { "sentiments": [ {"post_index": 0, "sentiment": "Positive"}, {"post_index": 1, "sentiment": "Negative"} ] } Posts to analyze: ${JSON.stringify(postsForAI)}`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [{ role: "system", content: "You are a precise JSON-only sentiment classifier." }, { role: "user", content: prompt }],
+            temperature: 0,
+            max_completion_tokens: 1500,
+            response_format: { "type": "json_object" }
+        };
+
+        try {
+            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+            if (response.ok) {
+                const data = await response.json();
+                const parsed = JSON.parse(data.openaiResponse);
+                if (parsed.sentiments && Array.isArray(parsed.sentiments)) {
+                    const sentimentMap = new Map(parsed.sentiments.map(s => [s.post_index, s.sentiment]));
+                    const batchSentiments = postsForAI.map(p => sentimentMap.get(p.index) || 'Neutral');
+                    allSentiments.push(...batchSentiments);
+                }
+            } else {
+                allSentiments.push(...Array(batch.length).fill('Neutral'));
+            }
+        } catch (error) {
+            console.error("AI sentiment classification batch failed:", error);
+            allSentiments.push(...Array(batch.length).fill('Neutral'));
+        }
+    }
+    return allSentiments;
+}
+
+function countSentimentWords(posts) {
+    let positive = 0, negative = 0;
+    posts.forEach(post => {
+        const text = `${post.data.title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase();
+        const words = text.replace(/[^a-z\s']/g, '').split(/\s+/);
+        words.forEach(rawWord => {
+            if (rawWord.length < 3) return;
+            const lemma = lemmatize(rawWord);
+            if (positiveWords.has(lemma)) positive++;
+            else if (negativeWords.has(lemma)) negative++;
+        });
+    });
+    return { positive, negative };
+}
+
+async function generateSentimentContextWithAI(posts, brandName) {
+    const samplePosts = posts.slice(0, 25);
+    if (samplePosts.length === 0) {
+        return { positive_theme: "", negative_theme: "", verdict: "No discussion found for this period." };
+    }
+
+    const postsForAI = samplePosts.map(p => `"${(p.data.title || '')} - ${(p.data.selftext || p.data.body || '').substring(0, 250)}"`).join('\n');
+
+    const prompt = `You are a market research analyst. Below is a sample of user comments about "${brandName}".
+    Your task is to provide a brief, insightful summary of the discussion.
+    Respond ONLY with a valid JSON object with three keys:
+    1.  "positive_theme": A single, short sentence describing the main reason for positive sentiment. If none, return "".
+    2.  "negative_theme": A single, short sentence describing the main reason for negative sentiment. If none, return "".
+    3.  "verdict": A single concluding sentence that explains the overall sentiment balance.
+    User Comments: ${postsForAI}`;
+
+    const openAIParams = {
+        model: "gpt-5.4-mini",
+        messages: [{ role: "system", content: "You are a concise market analyst outputting only JSON." }, { role: "user", content: prompt }],
+        temperature: 0.1,
+        max_completion_tokens: 300,
+        response_format: { "type": "json_object" }
+    };
+
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (response.ok) {
+            const data = await response.json();
+            return JSON.parse(data.openaiResponse);
+        }
+    } catch (error) {
+        console.error("AI context generation failed:", error);
+    }
+    return { positive_theme: "N/A", negative_theme: "N/A", verdict: "Could not generate context." };
+}
+
+function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
+function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
+
+async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all', searchInComments = false) { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const payload = { searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after }; if (searchInComments) { payload.includeComments = true; } const response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return []; } return allPosts.slice(0, totalLimit); }
+async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all', searchInComments = false) { const allResults = []; for (let i = 0; i < searchTerms.length; i += 8) { const batchTerms = searchTerms.slice(i, i + 8); const batchPromises = batchTerms.map(term => fetchRedditForTermWithPagination(niche, term, limitPerTerm, timeFilter, searchInComments)); const batchResults = await Promise.all(batchPromises); batchResults.forEach(posts => { if (Array.isArray(posts)) { allResults.push(...posts); } }); if (i + 8 < searchTerms.length) { await new Promise(resolve => setTimeout(resolve, 500)); } } return deduplicatePosts(allResults); }
+
+function deduplicateByContent(items) {
+    const seenContentSignatures = new Set();
+    const uniqueIds = new Set(); 
+
+    return items.filter(item => {
+        const id = item.data.id;
+        const content = (item.data.selftext || item.data.body || '').trim();
+
+        if (!content || uniqueIds.has(id)) {
+            return false;
+        }
+
+        const signature = content.substring(0, 500).toLowerCase().replace(/\s+/g, '');
+
+        if (signature.length < 20) {
+            if (seenContentSignatures.has(content)) {
+                return false; 
+            }
+            seenContentSignatures.add(content);
+        } else {
+            if (seenContentSignatures.has(signature)) {
+                return false; 
+            }
+            seenContentSignatures.add(signature);
+        }
+
+        uniqueIds.add(id);
+        return true;
+    });
+}
+
+function parseAISummary(aiResponse) {
+    try {
+        if (!aiResponse) {
+            throw new Error("AI Response was empty or undefined.");
+        }
+        aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim();
+        const jsonMatch = aiResponse.match(/{[\s\S]*}/);
+        if (!jsonMatch) {
+            throw new Error("No JSON object in AI response.");
+        }
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (!parsed.summaries || !Array.isArray(parsed.summaries) || parsed.summaries.length < 1) {
+            throw new Error("AI response lacks a 'summaries' array.");
+        }
+        return parsed.summaries;
+    } catch (error) {
+        console.error("Parsing Error:", error);
+        return [];
+    }
+}
+
+function parseAIAssignments(aiResponse) { try { aiResponse = aiResponse.replace(/```(?:json)?\s*/, '').replace(/```$/, '').trim(); const jsonMatch = aiResponse.match(/{[\s\S]*}/); if (!jsonMatch) { throw new Error("No JSON object in AI response."); } const parsed = JSON.parse(jsonMatch[0]); if (!parsed.assignments || !Array.isArray(parsed.assignments)) { throw new Error("AI response lacks an 'assignments' array."); } parsed.assignments.forEach((assignment, idx) => { const missingFields = []; if (typeof assignment.postNumber !== 'number') missingFields.push("postNumber"); if (typeof assignment.finding !== 'number') missingFields.push("finding"); if (missingFields.length > 0) throw new Error(`Assignment ${idx + 1} is missing required fields: ${missingFields.join(", ")}.`); }); return parsed.assignments; } catch (error) { console.error("Parsing Error:", error); console.log("Raw AI Response:", aiResponse); throw new Error("Failed to parse AI response."); } }
+function filterPosts(posts, minUpvotes = 20) { return posts.filter(post => { const title = (post.data.title || post.data.link_title || '').toLowerCase(); const selftext = post.data.selftext || post.data.body || ''; if (title.includes('[ad]') || title.includes('sponsored') || post.data.upvote_ratio < 0.2 || post.data.ups < minUpvotes || !selftext || selftext.length < 20) return false; const isRamblingOrNoisy = (text) => { if (!text) return false; return /&#x[0-9a-fA-F]+;/g.test(text) || /[^a-zA-Z0-9\s]{5,}/g.test(text) || /(.)\1{6,}/g.test(text); }; return !isRamblingOrNoisy(title) && !isRamblingOrNoisy(selftext); }); }
+function getTopKeywords(posts, topN = 10) { const freqMap = {}; posts.forEach(post => { const cleanedText = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.replace(/<[^>]+>/g, '').replace(/[^a-zA-Z0-9\s.,!?]/g, '').toLowerCase().replace(/\s+/g, ' ').trim(); const words = cleanedText.split(/\s+/); words.forEach(word => { if (!stopWords.includes(word) && word.length > 2) { freqMap[word] = (freqMap[word] || 0) + 1; } }); }); return Object.keys(freqMap).sort((a, b) => freqMap[b] - freqMap[a]).slice(0, topN); }
+function getFirstTwoSentences(text) { if (!text) return ''; const sentences = text.match(/[^\.!\?]+[\.!\?]+(?:\s|$)/g); return sentences ? sentences.slice(0, 2).join(' ').trim() : text; }
+
+async function assignPostsToFindings(summaries, posts) {
+    const postsForAI = posts.slice(0, 50);
+    const prompt = `You are an expert data analyst. Your task is to categorize Reddit posts into the most relevant "Finding" from a provided list.\n\nHere are the ${summaries.length} findings:\n${summaries.map((s, i) => `Finding ${i + 1}: ${s.title}`).join('\n')}\n\nHere are the ${postsForAI.length} Reddit posts:\n${postsForAI.map((p, i) => `Post ${i + 1}: ${(p.data.title || p.data.link_title || '').substring(0, 150)}`).join('\n')}\n\nINSTRUCTIONS: For each post, assign it to the most relevant Finding (from 1 to ${summaries.length}). Respond ONLY with a JSON object with a single key "assignments", which is an array of objects like {"postNumber": 1, "finding": 2}.`;
+    const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a precise data categorization engine that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_completion_tokens: 1500, response_format: { "type": "json_object" } };
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error(`OpenAI API Error for assignments: ${response.statusText}`);
+        const data = await response.json();
+        return parseAIAssignments(data.openaiResponse);
+    } catch (error) {
+        console.error("Assignment function error:", error);
+        return [];
+    }
+}
+
+function calculateRelevanceScore(post, finding) { let score = 0; const postTitle = (post.data.title || post.data.link_title || "").toLowerCase(); const postBody = (post.data.selftext || post.data.body || "").toLowerCase(); const findingTitleWords = finding.title.toLowerCase().split(' ').filter(word => word.length > 3 && !stopWords.includes(word)); const findingKeywords = (finding.keywords || []).map(k => k.toLowerCase()); let titleWordMatched = false, keywordMatched = false; for (const word of findingTitleWords) { const regex = new RegExp(`\\b${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'); if (regex.test(postTitle)) { score += 5; titleWordMatched = true; } if (regex.test(postBody)) { score += 2; titleWordMatched = true; } } for (const keyword of findingKeywords) { const regex = new RegExp(`\\b${keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'); if (regex.test(postTitle)) { score += 3; keywordMatched = true; } if (regex.test(postBody)) { score += 1; keywordMatched = true; } } if (titleWordMatched && keywordMatched) { score += 10; } return score; }
+function calculateFindingMetrics(validatedSummaries, filteredPosts) { const metrics = {}; const allProblemPostIds = new Set(); validatedSummaries.forEach((finding, index) => { metrics[index] = { supportCount: 0 }; }); filteredPosts.forEach(post => { let bestFindingIndex = -1; let maxScore = 0; validatedSummaries.forEach((finding, index) => { const score = calculateRelevanceScore(post, finding); if (score > maxScore) { maxScore = score; bestFindingIndex = index; } }); if (bestFindingIndex !== -1 && maxScore > 0) { metrics[bestFindingIndex].supportCount++; allProblemPostIds.add(post.data.id); } }); metrics.totalProblemPosts = allProblemPostIds.size; return metrics; }
+
+function renderPosts(posts) {
+    const container = document.getElementById("posts-container");
+    if (!container) {
+        return;
+    }
+    container.innerHTML = posts.map(post => {
+        const content = post.data.selftext || post.data.body || 'No additional content.';
+        const title = post.data.title || post.data.link_title || 'View Comment Thread';
+        const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : '';
+        return `
+            <div class="insight">
+                <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" class="insight-title">
+                    ${title}
+                </a>
+                <p class="insight-content">
+                    ${content.substring(0, 200) + '...'}
+                </p>
+                <small class="insight-meta">
+                    r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)}
+                </small>
+            </div>
+        `;
+    }).join('');
+}
+
+function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
+    if (!assignments) return;
+    const finding = window._summaries[summaryIndex];
+    if (!finding) return;
+
+    let relevantPosts = [];
+    const addedPostIds = new Set();
+
+    const addPost = (post) => {
+        if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) {
+            relevantPosts.push(post);
+            addedPostIds.add(post.data.id);
+        }
+    };
+
+    const assignedPostNumbers = assignments.filter(a => a.finding === (summaryIndex + 1)).map(a => a.postNumber);
+    assignedPostNumbers.forEach(postNum => {
+        if (postNum - 1 < window._postsForAssignment.length) {
+            addPost(window._postsForAssignment[postNum - 1]);
+        }
+    });
+
+    if (relevantPosts.length < 8) {
+        const candidatePool = allPosts.filter(p => !usedPostIds.has(p.data.id) && !addedPostIds.has(p.data.id));
+        const scoredCandidates = candidatePool.map(post => ({
+            post: post,
+            score: calculateRelevanceScore(post, finding)
+        })).filter(item => item.score >= 4).sort((a, b) => b.score - a.score);
+
+        for (const candidate of scoredCandidates) {
+            if (relevantPosts.length >= 8) break;
+            addPost(candidate.post);
+        }
+    }
+
+    let html;
+    if (relevantPosts.length === 0) {
+        html = `<div class="no-posts-found">Could not find any highly relevant Reddit posts for this finding.</div>`;
+    } else {
+        const finalPosts = relevantPosts.slice(0, 8);
+        finalPosts.forEach(post => usedPostIds.add(post.data.id));
+        html = finalPosts.map(post => {
+            const content = post.data.selftext || post.data.body || 'No content.';
+            const title = post.data.title || post.data.link_title || 'View Comment';
+            const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : '';
+
+            return `
+                <div class="sample-insight">
+                    <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" class="sample-insight-title">
+                        ${title}
+                    </a>
+                    <p class="sample-insight-content">
+                        ${content.substring(0, 150) + '...'}
+                    </p>
+                    <small class="sample-insight-meta">
+                        r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)}
+                    </small>
+                </div>
+            `;
+        }).join('');
+    }
+
+    const container = document.getElementById(`reddit-div${summaryIndex + 1}`);
+    if (container) {
+        container.innerHTML = `
+            <div class="reddit-samples-header">Real Stories from Reddit: "${finding.title}"</div>
+            <div class="reddit-samples-posts">${html}</div>
+        `;
+    }
+}
+
+async function getRelatedSearchTermsAI(audience) {
+    const prompt = `Given the target audience "${audience}", generate up to 5 related but distinct search terms or concepts that would help find communities for them. Think about activities, problems, life stages, and related interests. Respond ONLY with a valid JSON object with a single key "terms", which is an array of strings.`;
+    const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a creative brainstorming assistant that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0.4, max_completion_tokens: 150, response_format: { "type": "json_object" } };
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('AI keyword generation failed.');
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        return parsed.terms || [];
+    } catch (error) {
+        console.error("Error generating related search terms:", error);
+        return [];
+    }
+}
+
+async function findSubredditsForGroup(groupName) {
+    const relatedTerms = await getRelatedSearchTermsAI(groupName);
+    const allTerms = [groupName, ...relatedTerms];
+    const prompt = `Based on the following audience and related keywords: [${allTerms.join(', ')}], suggest up to 20 relevant and active Reddit subreddits. Prioritize a variety of communities, including both large general ones and smaller niche ones. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`;
+    const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_completion_tokens: 300, response_format: { "type": "json_object" } };
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('OpenAI API request failed.');
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) throw new Error("AI response did not contain a 'subreddits' array.");
+        return parsed.subreddits;
+    } catch (error) {
+        console.error("Error finding subreddits:", error);
+        alert("Sorry, I couldn't find any relevant communities. Please try another group name.");
+        return [];
+    }
+}
+
+async function fetchCommentsForPosts(postIds, batchSize = 5) {
+    let allComments = [];
+    console.log(`Fetching comments for ${postIds.length} posts...`);
+    for (let i = 0; i < postIds.length; i += batchSize) {
+        const batchIds = postIds.slice(i, i + batchSize);
+        const batchPromises = batchIds.map(postId => {
+            const payload = { type: 'comments', postId: postId };
+            return fetch(REDDIT_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            }).then(res => res.json()).then(data => {
+                if (Array.isArray(data) && data.length > 1 && data[1].data && data[1].data.children) {
+                    return data[1].data.children.filter(comment => comment.kind === 't1');
+                }
+                return [];
+            }).catch(err => {
+                console.error(`Failed to fetch comments for post ${postId}:`, err);
+                return [];
+            });
+        });
+        const results = await Promise.all(batchPromises);
+        results.forEach(comments => allComments.push(...comments));
+        if (i + batchSize < postIds.length) {
+            await new Promise(resolve => setTimeout(resolve, 300));
+        }
+    }
+    console.log(`Successfully fetched ${allComments.length} comments.`);
+    return allComments;
+}
+
+function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1); return word; }
+
+async function generateEmotionMapData(posts) { try { const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || p.data.link_title}\nBody: ${(p.data.selftext || p.data.body).substring(0, 1000)}`).join('\n---\n'); const prompt = `You are a world-class market research analyst for '${originalGroupName}'. Analyze the following text to identify the 15 most significant problems, pain points, or key topics.\n\nFor each one, provide:\n1. "problem": A short, descriptive name for the problem (e.g., "Finding Reliable Vendors", "Budgeting Anxiety").\n2. "intensity": A score from 1 (mild) to 10 (severe) of how big a problem this is.\n3. "frequency": A score from 1 (rarely mentioned) to 10 (frequently mentioned) based on its prevalence in the text.\n\nRespond ONLY with a valid JSON object with a single key "problems", which is an array of these objects.\nExample: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequency": 9 }] }`; const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_completion_tokens: 1500, response_format: { "type": "json_object" } }; const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) { throw new Error(`AI API failed with status: ${response.status}`); } const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const aiProblems = parsed.problems || []; if (aiProblems.length >= 3) { console.log("Successfully used AI analysis for Problem Map."); const chartData = aiProblems.map(item => { if (!item.problem || typeof item.intensity !== 'number' || typeof item.frequency !== 'number') return null; return { x: item.frequency, y: item.intensity, label: item.problem }; }).filter(Boolean); return chartData.sort((a, b) => b.x - a.x); } else { console.warn("AI analysis returned too few problems. Falling back to keyword analysis."); } } catch (error) { console.error("AI analysis for Problem Map failed:", error, "Falling back to reliable keyword-based analysis."); } const emotionFreq = {}; posts.forEach(post => { const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase(); const words = text.replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { const lemma = lemmatize(rawWord); if (emotionalIntensityScores[lemma]) { emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1; } }); }); const chartData = Object.entries(emotionFreq).map(([word, freq]) => ({ x: freq, y: emotionalIntensityScores[word], label: word })); return chartData.sort((a, b) => b.x - a.x).slice(0, 25); }
+
+function renderEmotionMap(data) {
+    const container = document.getElementById('emotion-map-container');
+    if (!container) return;
+
+    if (window.myEmotionChart) {
+        window.myEmotionChart.destroy();
+    }
+
+    if (data.length < 3) {
+        container.innerHTML = `
+            <p class="chart-placeholder-text">Not enough distinct problems were found to build a map.</p>
+        `;
+        return;
+    }
+
+    container.innerHTML = `
+        <div id="emotion-map-wrapper">
+            <div id="emotion-map">
+                <canvas id="emotion-chart-canvas"></canvas>
+            </div>
+            <button id="chart-zoom-btn"></button>
+        </div>
+    `;
+
+    const ctx = document.getElementById('emotion-chart-canvas')?.getContext('2d');
+    if (!ctx) return;
+
+    const maxFreq = Math.max(...data.map(p => p.x));
+    const allFrequencies = data.map(p => p.x);
+    const minObservedFreq = Math.min(...allFrequencies);
+    const collapsedMinX = 5;
+    const isCollapseFeatureEnabled = minObservedFreq >= collapsedMinX;
+    const initialMinX = isCollapseFeatureEnabled ? collapsedMinX : 0;
+
+    window.myEmotionChart = new Chart(ctx, {
+        type: 'scatter',
+        data: {
+            datasets: [{
+                label: 'Problems/Topics',
+                data: data,
+                backgroundColor: '#00a5ce',
+                borderColor: 'rgba(255, 255, 255, 0.5)',
+                borderWidth: 1,
+                pointRadius: (context) => 5 + (context.raw.x / maxFreq) * 20,
+                pointHoverRadius: (context) => 8 + (context.raw.x / maxFreq) * 20,
+                clip: false,
+            }]
+        },
+        options: {
+            maintainAspectRatio: false,
+            layout: {
+                padding: {
+                    top: 30,
+                    right: 35,
+                    bottom: 10,
+                    left: 10
+                }
+            },
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    mode: 'nearest',
+                    intersect: false,
+                    callbacks: {
+                        title: function (tooltipItems) {
+                            return tooltipItems[0].raw.label;
+                        },
+                        label: function (context) {
+                            return '';
+                        },
+                        afterBody: function (tooltipItems) {
+                            const point = tooltipItems[0].raw;
+                            return `Frequency: ${point.x}, Intensity: ${point.y.toFixed(1)}`;
+                        }
+                    },
+                    displayColors: false,
+                    titleFont: {
+                        size: 14,
+                        weight: 'bold'
+                    },
+                    bodyFont: {
+                        size: 12
+                    },
+                    backgroundColor: '#fd80c7',
+                    titleColor: '#ffffff',
+                    bodyColor: '#dddddd',
+                }
+            },
+            scales: {
+                x: {
+                    title: {
+                        display: true,
+                        text: 'Frequency (1-10)',
+                        color: 'white',
+                        font: {
+                            weight: 'bold'
+                        }
+                    },
+                    min: initialMinX,
+                    max: 10,
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.15)'
+                    },
+                    ticks: {
+                        color: 'white'
+                    }
+                },
+                y: {
+                    title: {
+                        display: true,
+                        text: 'Problem Intensity (1-10)',
+                        color: 'white',
+                        font: {
+                            weight: 'bold'
+                        }
+                    },
+                    min: 0,
+                    max: 10,
+                    grid: {
+                        color: 'rgba(255, 255, 255, 0.15)'
+                    },
+                    ticks: {
+                        color: 'white'
+                    }
+                }
+            }
+        }
+    });
+
+    const zoomButton = document.getElementById('chart-zoom-btn');
+    zoomButton.style.display = 'none';
+
+    if (isCollapseFeatureEnabled) {
+        zoomButton.style.display = 'block';
+        const updateButtonText = () => {
+            const isCurrentlyCollapsed = window.myEmotionChart.options.scales.x.min !== 0;
+            zoomButton.textContent = isCurrentlyCollapsed ? 'Zoom Out to See Full Range' : 'Zoom In to High-Frequency';
+        };
+
+        zoomButton.addEventListener('click', () => {
+            const chart = window.myEmotionChart;
+            const isCurrentlyCollapsed = chart.options.scales.x.min !== 0;
+            chart.options.scales.x.min = isCurrentlyCollapsed ? 0 : collapsedMinX;
+            chart.update('none');
+            updateButtonText();
+        });
+
+        updateButtonText();
+    }
+}
+
+async function generateAndRenderHybridSentiment(posts, audienceContext) {
+    const positiveContainer = document.getElementById('positive-cloud');
+    const negativeContainer = document.getElementById('negative-cloud');
+
+    if (!positiveContainer || !negativeContainer) {
+        console.error("Sentiment cloud containers not found.");
+        return;
+    }
+
+    positiveContainer.innerHTML = `<p class="loading-text">Analyzing sentiment...</p>`;
+    negativeContainer.innerHTML = `<p class="loading-text">Analyzing sentiment...</p>`;
+
+    let positiveCount = 0, negativeCount = 0;
+    const wordFreq = { positive: new Map(), negative: new Map() };
+
+    posts.forEach(post => {
+        const text = `${post.data.title || post.data.link_title || ''} ${post.data.
+            selftext || post.data.body || ''}`.toLowerCase();
+        const words = text.replace(/[^a-z\s']/g, '').split(/\s+/);
+
+        const uniqueWordsInPost = { positive: new Set(), negative: new Set() };
+
+        words.forEach(rawWord => {
+            if (rawWord.length < 3 || stopWords.includes(rawWord)) return;
+            const lemma = lemmatize(rawWord);
+            if (positiveWords.has(lemma)) {
+                uniqueWordsInPost.positive.add(lemma);
+            } else if (negativeWords.has(lemma)) {
+                uniqueWordsInPost.negative.add(lemma);
+            }
+        });
+
+        uniqueWordsInPost.positive.forEach(word => {
+            if (!wordFreq.positive.has(word)) wordFreq.positive.set(word, new Set());
+            wordFreq.positive.get(word).add(post);
+        });
+        uniqueWordsInPost.negative.forEach(word => {
+            if (!wordFreq.negative.has(word)) wordFreq.negative.set(word, new Set());
+            wordFreq.negative.get(word).add(post);
+        });
+    });
+
+    posts.forEach(post => {
+        const text = `${post.data.title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase();
+        const words = text.replace(/[^a-z\s']/g, '').split(/\s+/);
+        words.forEach(rawWord => {
+            if (rawWord.length < 3) return;
+            const lemma = lemmatize(rawWord);
+            if (positiveWords.has(lemma)) positiveCount++;
+            else if (negativeWords.has(lemma)) negativeCount++;
+        });
+    });
+    renderSentimentScore(positiveCount, negativeCount);
+
+
+    const phraseFreq = new Map();
+    posts.forEach(post => {
+        const text = `${post.data.title || ''} ${post.data.selftext || ''}`.toLowerCase().replace(/[^a-z\s']/g, '');
+        const words = text.split(/\s+/).filter(w => w.length > 0);
+        const ngrams = [...generateNgrams(words, 2), ...generateNgrams(words, 3), ...generateNgrams(words, 4)];
+
+        const uniqueNgramsInPost = new Set(ngrams);
+
+        uniqueNgramsInPost.forEach(ngram => {
+            if (!phraseFreq.has(ngram)) phraseFreq.set(ngram, new Set());
+            phraseFreq.get(ngram).add(post); 
+        });
+    });
+
+    const candidatePhrases = Array.from(phraseFreq.entries())
+        .filter(([_, postSet]) => postSet.size >= 2) 
+        .sort((a, b) => b[1].size - a[1].size)
+        .slice(0, 100)
+        .map(item => item[0]);
+
+    let finalPositivePhrases = [], finalNegativePhrases = [];
+    if (candidatePhrases.length > 0) {
+        try {
+            const prompt = `You are a market research analyst. Below is a list of common phrases from the "${audienceContext}" community. Your task is to filter this list. Identify phrases that express clear **positive sentiment** and **negative sentiment**. Ignore neutral phrases. Respond ONLY with a valid JSON object with two keys: "positive_phrases" and "negative_phrases", holding an array of the relevant strings you selected. Candidate Phrases: ${JSON.stringify(candidatePhrases)}`;
+            const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert sentiment filter that only outputs JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_completion_tokens: 1000, response_format: { "type": "json_object" } };
+            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+            if (response.ok) {
+                const data = await response.json();
+                const parsed = JSON.parse(data.openaiResponse);
+                finalPositivePhrases = parsed.positive_phrases || [];
+                finalNegativePhrases = parsed.negative_phrases || [];
+            }
+        } catch (error) { console.error("AI phrase filtering failed, proceeding with words only.", error); }
+    }
+
+    const renderCloud = (container, title, wordMap, phraseList, colors) => {
+        const topWords = Array.from(wordMap.entries())
+            .map(([word, postSet]) => [word, { count: postSet.size, posts: postSet }])
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 23);
+
+        const topPhrases = phraseList.map(phrase => {
+            const postSet = phraseFreq.get(phrase);
+            return [phrase, { count: postSet.size, posts: postSet }];
+        }).filter(item => item[1]);
+
+        const combinedData = [...topWords, ...topPhrases];
+
+        const category = title.includes('Positive') ? 'positive' : 'negative';
+        window._sentimentData = window._sentimentData || {};
+        window._sentimentData[category] = Object.fromEntries(combinedData.map(([key, value]) => [key, value]));
+
+        container.innerHTML = ''; 
+        const cloudContainer = document.createElement('div');
+        container.appendChild(cloudContainer); 
+
+        if (combinedData.length < 3) {
+            cloudContainer.innerHTML = `<p style="font-family: sans-serif; color: #777; padding: 1rem; text-align: center;">Not enough distinct terms found.</p>`; return;
+        }
+
+        const counts = combinedData.map(item => item[1].count);
+        const maxCount = Math.max(...counts);
+        const minCount = Math.min(...counts);
+        const minFontSize = 16, maxFontSize = 42;
+        const cloudHTML = combinedData.map(([word, data]) => {
+            const fontSize = minFontSize + ((data.count - minCount) / (maxCount - minCount || 1)) * (maxFontSize - minFontSize);
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            const rotation = Math.random() * 8 - 4;
+            return `<span class="cloud-word" data-word="${word}" style="font-size: ${fontSize.toFixed(1)}px; color: ${color}; transform: rotate(${rotation.toFixed(1)}deg);">${word}</span>`;
+        }).join('');
+        cloudContainer.innerHTML = cloudHTML;
+    };
+
+    renderCloud(positiveContainer, 'Positive Words & Phrases', wordFreq.positive, finalPositivePhrases, positiveColors);
+    renderCloud(negativeContainer, 'Negative Words & Phrases', wordFreq.negative, finalNegativePhrases, negativeColors);
+}
+
+async function generateAndRenderToneMap(posts, audienceContext) {
+    const container = document.getElementById('tone-map-container');
+    if (!container || !TONE_CARD_BLUEPRINT) return;
+
+    container.innerHTML = '<p class="loading-text">Performing deep tonal analysis...</p>';
+
+    try {
+        const topPostsText = posts.slice(0, 40).map(p =>
+            `Topic: ${p.data.title || ''} - ${(p.data.selftext || p.data.body || '').substring(0, 200)}`
+        ).join('\n---\n');
+
+        const prompt = `Analyze the ${audienceContext} community. Identify 4 distinct conversation topics.
+        For each topic, provide:
+        1. "topic": Short title.
+        2. "traits": Array of 4 adjectives, each with a "score" from 10-100 (intensity).
+        3. "insights": Array of EXACTLY 3 short standalone sentences. Each sentence must be under 15 words and express ONE distinct strategic observation. Do not combine ideas. Example format: ["AI is creating higher expectations than it can consistently meet", "Developers increasingly value judgement over automation", "Frustration is directed at the gap between promise and reality"].
+        4. "level": Overall intensity (LOW, MEDIUM, or HIGH).
+        
+        Respond ONLY as valid JSON with key 'tone_analysis'. Posts: ${topPostsText}`;
+      
+        const openAIParams = {
+            model: "gpt-4o-mini",
+            messages: [{ role: "system", content: "You are a brand psychologist who outputs only valid JSON." }, { role: "user", content: prompt }],
+            temperature: 0.2,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        });
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        container.innerHTML = ''; 
+
+        parsed.tone_analysis.forEach(item => {
+            const card = TONE_CARD_BLUEPRINT.cloneNode(true);
+
+            card.querySelector('.tone-topic-title').innerText = item.topic;
+            const meaningEls = card.querySelectorAll('.tone-what-means');
+            const insights = Array.isArray(item.insights) ? item.insights : [];
+            meaningEls.forEach((el, i) => {
+                if (insights[i]) {
+                    el.innerText = insights[i];
+                } else {
+                    el.innerText = '';
+                }
+            });
+            card.querySelector('.tone-intensity-label').innerText = `INTENSITY: ${item.level}`;
+
+            const traitsContainer = card.querySelector('.tone-traits-container');
+            traitsContainer.innerHTML = '';
+
+            item.traits.forEach(trait => {
+                const traitRow = TONE_TRAIT_BLUEPRINT.cloneNode(true);
+                traitRow.querySelector('.tone-trait-name').innerText = trait.name || trait.adjective || trait.word;
+
+                const fillBar = traitRow.querySelector('.tone-bar-fill');
+                if (fillBar) {
+                    fillBar.style.width = `${trait.score}%`;
+                }
+
+                traitsContainer.appendChild(traitRow);
+            });
+
+            container.appendChild(card);
+        });
+
+    } catch (error) {
+        console.error("Tone Map Error:", error);
+        container.innerHTML = `<p>Tonal analysis unavailable.</p>`;
+    }
+}
+
+function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : "Snippet not available."; const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if (closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
+function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
+async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title || p.data.link_title || ''}\nContent: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_completion_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
+
+async function extractAndValidateEntities(posts, nicheContext) {
+    const allText = posts.map(p =>
+        (p.data.title || '') + " " + (p.data.selftext || p.data.body || '')
+    ).join(" [SEP] ").toLowerCase();
+
+    const sampleText = posts.slice(0, 50).map(p =>
+        `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 300)}`
+    ).join('\n---\n');
+
+    const prompt = `You are a market research analyst for the '${nicheContext}' industry. 
+    Your task is to identify Commercial Brands and Generic Product Categories.
+
+    1. BRANDS: Extract exactly 15 Commercial Brands or specific product lines (e.g., 'Kong', 'Purina', 'Milk-Bone', 'West Paw').
+    CRITICAL: Do NOT include names of individual pets, dogs, people, or Reddit users. (e.g., ignore 'Arnold', 'Peaches', 'Bella', 'Cooper'). If it is a name of a dog, skip it.
+
+    2. PRODUCTS: Extract exactly 15 Generic Product Categories (e.g., 'Kibble', 'Harness', 'Chew Toy').
+
+    Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}`;
+
+    const openAIParams = {
+        model: "gpt-4o-mini",
+        messages: [
+            { role: "system", content: "You are a specialized business data extractor. You distinguish between commercial entities and personal names." },
+            { role: "user", content: prompt + "\n\nText to analyze:\n" + sampleText }
+        ],
+        temperature: 0,
+        response_format: { "type": "json_object" }
+    };
+
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        if (!window._entityData) window._entityData = { brands: {}, products: {} };
+
+        ['brands', 'products'].forEach(type => {
+            if (!parsed[type]) return;
+            parsed[type].forEach(name => {
+                const cleanKey = name.toLowerCase().trim();
+                if (cleanKey.length < 3) return;
+
+                const escapedName = cleanKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                const regex = new RegExp(`\\b${escapedName}(s|es|'s)?\\b`, 'gi');
+
+                const occurrenceMatch = allText.match(regex);
+                const occurrenceCount = occurrenceMatch ? occurrenceMatch.length : 0;
+
+                const relevantPosts = posts.filter(p => regex.test((p.data.title || '') + " " + (p.data.selftext || p.data.body || '')));
+
+                if (occurrenceCount > 0) {
+                    if (!window._entityData[type][cleanKey]) {
+                        window._entityData[type][cleanKey] = {
+                            originalName: name,
+                            count: 0,
+                            posts: []
+                        };
+                    }
+
+                    window._entityData[type][cleanKey].count += occurrenceCount;
+
+                    const existingIds = new Set(window._entityData[type][cleanKey].posts.map(p => p.data.id));
+                    relevantPosts.forEach(m => {
+                        if (!existingIds.has(m.data.id)) window._entityData[type][cleanKey].posts.push(m);
+                    });
+                }
+            });
+        });
+
+        return {
+            topBrands: Object.entries(window._entityData.brands).sort((a, b) => b[1].count - a[1].count).slice(0, 8),
+            topProducts: Object.entries(window._entityData.products).sort((a, b) => b[1].count - a[1].count).slice(0, 8)
+        };
+    } catch (error) {
+        console.error("Entity extraction error:", error);
+        return { topBrands: [], topProducts: [] };
+    }
+}
+
+async function enhanceDiscoveryWithComments(initialPosts, nicheContext) {
+    console.log("Enhancing with comments...");
+    try {
+        const postIds = initialPosts.slice(0, 60).map(p => p.data.id);
+        const comments = await fetchCommentsForPosts(postIds);
+        if (!comments || comments.length < 5) return;
+
+        const uniqueComments = deduplicateByContent(comments);
+
+        await extractAndValidateEntities(uniqueComments, nicheContext);
+
+        const finalBrands = Object.entries(window._entityData.brands)
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 8);
+
+        const finalProducts = Object.entries(window._entityData.products)
+            .sort((a, b) => b[1].count - a[1].count)
+            .slice(0, 8);
+
+        renderDiscoveryList('top-brands-container', finalBrands, 'Top Brands', 'brands');
+        renderDiscoveryList('top-products-container', finalProducts, 'Top Products', 'products');
+
+    } catch (error) {
+        console.error("Discovery enhancement failed:", error);
+    }
+}
+
+function renderFAQs(faqs) {
+    const container = document.getElementById('faq-container');
+    if (!container) return;
+
+    let faqItems = '<p class="faq-placeholder">Could not generate common questions from the text.</p>';
+
+    if (faqs.length > 0) {
+        faqItems = faqs.map((faq) => `
+            <div class="faq-item">
+                <button class="faq-question">${faq}</button>
+                <div class="faq-answer">
+                    <div class="faq-answer-content">
+                        <em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em>
+                    </div>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    container.innerHTML = `
+        <h3 class="dashboard-section-title">Frequently Asked Questions</h3>
+        ${faqItems}
+    `;
+
+    container.querySelectorAll('.faq-question').forEach(button => {
+        button.addEventListener('click', () => {
+            const faqItem = button.closest('.faq-item'); 
+            faqItem.classList.toggle('active');
+        });
+    });
+}
+
+// =================================================================================
+// === SUBREDDIT VALIDATION & DISPLAY FUNCTIONS ===
+// =================================================================================
+async function handleRemoveSubClick(event) {
+    const button = event.target.closest('.remove-sub-btn');
+    if (!button) return;
+
+    const card = button.closest('.subreddit-tag-detailed');
+    const destinationList = document.querySelector('#similar-subreddits-container .subreddit-tag-list');
+
+    if (card && destinationList) {
+        const actionContainer = card.querySelector('.tag-footer-action');
+        const subName = button.dataset.subname;
+        const subDetailsString = button.dataset.subDetails || '{}';
+
+        if (actionContainer && subName) {
+            const newButton = document.createElement('button');
+            newButton.className = 'add-related-sub-btn';
+            newButton.dataset.subname = subName;
+            newButton.dataset.subDetails = subDetailsString;
+            newButton.textContent = '+ Add to Analysis';
+
+            actionContainer.replaceChild(newButton, button);
+            destinationList.prepend(card);
+        }
+    }
+
+    const subName = button.dataset.subname;
+    if (!subName) {
+        console.error("Missing subreddit name on the 'Remove' button.");
+        return;
+    }
+
+    const checkbox = document.getElementById(`sub-${subName}`);
+    if (checkbox) {
+        checkbox.checked = false;
+    }
+
+    const countHeaderDiv = document.getElementById("count-header");
+    if (countHeaderDiv) {
+        countHeaderDiv.innerHTML = 'Updating analysis... <span class="loader-dots"></span>';
+    }
+
+    await runProblemFinder({ isUpdate: true });
+}
+
+async function fetchSubredditDetails(subredditName) {
+    const MAX_RETRIES = 2;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            const payload = { type: 'about', subreddit: subredditName };
+            const response = await fetch(REDDIT_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            if (response.status >= 500) { throw new Error(`Server error: ${response.status}`); }
+            if (!response.ok) {
+                console.warn(`Subreddit r/${subredditName} not found or failed to load. Status: ${response.status}`);
+                return null;
+            }
+            const data = await response.json();
+            return data && data.data ? data.data : null;
+        } catch (error) {
+            console.error(`Attempt ${attempt} failed for r/${subredditName}:`, error.message);
+            if (attempt === MAX_RETRIES) { return null; }
+            await new Promise(r => setTimeout(r, 200 * attempt));
+        }
+    }
+    return null;
+}
+function formatMemberCount(num) {
+    if (num === null || num === undefined) return 'N/A';
+    if (num >= 1000000) { return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'm'; }
+    if (num >= 1000) { return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'k'; }
+    return num.toLocaleString();
+}
+function getActivityLabel(activeUsers, totalMembers) {
+    if (!totalMembers || totalMembers === 0 || activeUsers === null || activeUsers === undefined) { return '💤 Cool'; }
+    const ratio = activeUsers / totalMembers;
+    if (activeUsers > 5000 || (ratio > 0.01 && totalMembers > 1000)) { return '🔥 Hot'; }
+    if (activeUsers < 10 || (totalMembers > 20000 && activeUsers < 50)) { return '💤 Cool'; }
+    return '🌤️ Warm';
+}
+async function fetchAndRankSubreddits(subredditNames) {
+    console.log(`AI suggested ${subredditNames.length} subreddits. Validating and ranking in batches...`);
+    const BATCH_SIZE = 5;
+    let allDetails = [];
+    for (let i = 0; i < subredditNames.length; i += BATCH_SIZE) {
+        const batchNames = subredditNames.slice(i, i + BATCH_SIZE);
+        const batchPromises = batchNames.map(name => fetchSubredditDetails(name));
+        const batchResults = await Promise.all(batchPromises);
+        allDetails.push(...batchResults.filter(Boolean));
+    }
+    const mapDetails = (details) => ({
+        name: details.display_name,
+        members: details.subscribers,
+        activityLabel: getActivityLabel(details.active_user_count, details.subscribers),
+        description: details.public_description || ''
+    });
+    let strictResults = allDetails.filter(d => d.subscribers >= HARD_MIN_SUBSCRIBERS && (d.active_user_count || 0) >= HARD_MIN_ACTIVE_USERS).map(mapDetails);
+    if (strictResults.length < 10) {
+        console.log(`Strict filter yielded only ${strictResults.length} subs. Running lenient filter as a safety net.`);
+        const lenientResults = allDetails.filter(d => d.subscribers >= LENIENT_MIN_SUBSCRIBERS && (d.active_user_count || 0) >= LENIENT_MIN_ACTIVE_USERS).map(mapDetails);
+        const strictResultNames = new Set(strictResults.map(r => r.name));
+        lenientResults.forEach(lenientSub => {
+            if (!strictResultNames.has(lenientSub.name)) {
+                strictResults.push(lenientSub);
+            }
+        });
+    }
+    const finalResults = strictResults.sort((a, b) => b.members - a.members);
+    console.log(`Found ${finalResults.length} valid communities. Ready to display.`);
+    return finalResults;
+}
+function renderSubredditChoicesHTML(subreddits) {
+    return subreddits.map(sub => {
+        const activityState = sub.activityLabel.split(' ')[1];
+
+        return `
+            <div class="subreddit-choice">
+                <input type="checkbox" id="sub-${sub.name}" value="${sub.name}" checked>
+                <label for="sub-${sub.name}">
+                    <span class="sub-name">r/${sub.name}</span>
+                    <span class="sub-pills">
+                        <span class="pill members-pill">${formatMemberCount(sub.members)}</span>
+                        
+                        <span class="pill activity-pill" data-activity="${activityState}">
+                            ${sub.activityLabel}
+                        </span>
+                    </span>
+                </label>
+            </div>
+        `;
+    }).join('');
+}
+function displaySubredditChoices(rankedSubreddits) {
+    const choicesDiv = document.getElementById('subreddit-choices');
+    const loadMoreContainer = document.getElementById('load-more-container');
+    if (!choicesDiv || !loadMoreContainer) return;
+
+    loadMoreContainer.innerHTML = '';
+    _allRankedSubreddits = rankedSubreddits;
+
+    if (_allRankedSubreddits.length === 0) {
+        choicesDiv.innerHTML = '<p class="loading-text">No suitable communities found. Try a different group.</p>';
+        return;
+    }
+
+    const initialToShow = _allRankedSubreddits.slice(0, 8);
+    choicesDiv.innerHTML = renderSubredditChoicesHTML(initialToShow);
+
+    if (_allRankedSubreddits.length > 8) {
+        const loadMoreBtn = document.createElement('button');
+        loadMoreBtn.id = 'load-more-subs-btn';
+        loadMoreBtn.className = 'load-more-button'; 
+        loadMoreBtn.textContent = 'Load More Communities';
+
+        loadMoreBtn.onclick = loadMoreSubreddits;
+        loadMoreContainer.appendChild(loadMoreBtn);
+    }
+}
+
+function loadMoreSubreddits() {
+    const choicesDiv = document.getElementById('subreddit-choices');
+    const loadMoreBtn = document.getElementById('load-more-subs-btn');
+    if (!choicesDiv || !loadMoreBtn) return;
+    const currentlyShownCount = choicesDiv.querySelectorAll('.subreddit-choice').length;
+    const nextBatch = _allRankedSubreddits.slice(currentlyShownCount, currentlyShownCount + 8);
+    if (nextBatch.length > 0) {
+        const newChoicesHTML = renderSubredditChoicesHTML(nextBatch);
+        choicesDiv.insertAdjacentHTML('beforeend', newChoicesHTML);
+    }
+    const newTotalShown = choicesDiv.querySelectorAll('.subreddit-choice').length;
+    if (newTotalShown >= _allRankedSubreddits.length) {
+        loadMoreBtn.remove();
+    }
+}
+async function renderIncludedSubreddits(subreddits) {
+    const container = document.getElementById('included-subreddits-container');
+    if (!container) return;
+
+    container.innerHTML = `
+        <h3 class="dashboard-section-title">Analysis Based On</h3>
+        <div class="subreddit-tag-list">
+            <p class="placeholder-text">Loading community details...</p>
+        </div>
+    `;
+
+    try {
+        const detailPromises = subreddits.map(sub => fetchSubredditDetails(sub));
+        const detailsArray = await Promise.all(detailPromises);
+        const tagsHTML = detailsArray.map((details, index) => {
+            const subName = subreddits[index];
+            const detailsString = details ? JSON.stringify(details).replace(/'/g, "&apos;") : "{}";
+
+            if (!details) {
+                return `
+                    <div class="subreddit-tag-detailed subreddit-tag-detailed--error">
+                        <div class="tag-header">r/${subName}</div>
+                        <div class="tag-body">Details could not be loaded.</div>
+                    </div>
+                `;
+            }
+
+            const description = details.public_description || 'No public description available.';
+            const members = formatMemberCount(details.subscribers);
+            const [activityEmoji, activityText] = getActivityLabel(details.active_user_count, details.subscribers).split(' ');
+
+            return `
+                <div class="subreddit-tag-detailed">
+                    <div>
+                        <div class="tag-header">
+                            <span class="tag-name">r/${subName}</span>
+                            <span class="tag-activity">${activityEmoji} ${activityText}</span>
+                        </div>
+                        <p class="tag-description">
+                            ${description.substring(0, 150)}${description.length > 150 ? '...' : ''}
+                        </p>
+                        <div class="tag-footer">
+                            <span class="tag-members"><strong>${members}</strong> members</span>
+                        </div>
+                    </div>
+                    <div class="tag-footer-action">
+                        <button class="remove-sub-btn" data-subname="${subName}" data-sub-details='${detailsString}'>
+                            Remove
+                        </button>
+                        <a href="https://www.reddit.com/r/${subName}" target="_blank" rel="noopener noreferrer" class="view-sub-btn">
+                            View on Reddit
+                        </a>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Analysis Based On</h3>
+            <div class="subreddit-tag-list">${tagsHTML}</div>
+        `;
+    } catch (error) {
+        console.error("Error rendering subreddit details:", error);
+        const tags = subreddits.map(sub => `<div class="subreddit-tag">r/${sub}</div>`).join('');
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Analysis Based On</h3>
+            <div class="subreddit-tag-list">
+                ${tags}
+                <p class="error-message">Could not load community details.</p>
+            </div>
+        `;
+    }
+}
+async function findRelatedSubredditsAI(analyzedSubsData, audienceContext) {
+    const subNames = analyzedSubsData.map(d => d.name).join(', ');
+    const prompt = `You are a Reddit discovery expert. A user is analyzing communities for the audience "${audienceContext}", including: ${subNames}. Your task is to suggest up to 20 NEW, related subreddits that explore NICHE or ADJACENT topics. Think outside the box. For example, if the user is analyzing 'weddingplanning', suggest 'bridezillas', 'weddingdress', 'honeymoons', or 'UKweddings' instead of just another general wedding sub. CRITICAL: Do NOT include any of the original subreddits in your suggestions: ${subNames}. Provide your response ONLY as a JSON object with a single key "subreddits", containing an array of subreddit names (without "r/").`;
+    const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.4, max_completion_tokens: 300, response_format: { "type": "json_object" } };
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('OpenAI related subreddits request failed.');
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        if (!parsed.subreddits || !Array.isArray(parsed.subreddits)) { throw new Error("AI response for related subs did not contain a 'subreddits' array."); }
+        return parsed.subreddits;
+    } catch (error) {
+        console.error("Error finding related subreddits via AI:", error);
+        return [];
+    }
+}
+async function handleAddRelatedSubClick(event) {
+    if (!event.target.classList.contains('add-related-sub-btn')) return;
+
+    const button = event.target;
+    const subName = button.dataset.subname;
+    const subDetailsJSON = button.dataset.subDetails;
+
+    if (!subName || !subDetailsJSON) {
+        console.error("Missing subreddit data on the 'Add' button.");
+        return;
+    }
+
+    const card = button.closest('.subreddit-tag-detailed');
+    const destinationList = document.querySelector('#included-subreddits-container .subreddit-tag-list');
+
+    if (card && destinationList) {
+        const actionContainer = card.querySelector('.tag-footer-action');
+        if (actionContainer) {
+            const newButton = document.createElement('button');
+            newButton.className = 'remove-sub-btn';
+            newButton.dataset.subname = subName;
+            newButton.dataset.subDetails = subDetailsJSON;
+            newButton.textContent = 'Remove';
+
+            actionContainer.replaceChild(newButton, button);
+            destinationList.prepend(card);
+        }
+    }
+
+    try {
+        const countHeaderDiv = document.getElementById("count-header");
+        if (countHeaderDiv) {
+            countHeaderDiv.innerHTML = 'Adding new audiences... <span class="loader-dots"></span>';
+        }
+
+        const currentSubTags = document.querySelectorAll('#included-subreddits-container .tag-name');
+        const currentSubs = Array.from(currentSubTags).map(tag => tag.textContent.replace('r/', '').trim());
+        const newSubList = [...new Set([...currentSubs, subName])];
+
+        const choicesDiv = document.getElementById('subreddit-choices');
+        let checkbox = document.getElementById(`sub-${subName}`);
+        if (!checkbox && choicesDiv) {
+            const subDetails = JSON.parse(subDetailsJSON);
+            const newChoiceHTML = renderSubredditChoicesHTML([subDetails]);
+            choicesDiv.insertAdjacentHTML('beforeend', newChoiceHTML);
+        }
+
+        const allCheckboxes = document.querySelectorAll('#subreddit-choices input[type="checkbox"]');
+        allCheckboxes.forEach(cb => {
+            cb.checked = newSubList.includes(cb.value);
+        });
+
+        await runProblemFinder({
+            isUpdate: true
+        });
+    } catch (error) {
+        console.error("Failed to add related sub and re-run analysis:", error);
+        alert("An error occurred while adding the community. Please try again.");
+    }
+}
+async function renderAndHandleRelatedSubreddits(analyzedSubs) {
+    const container = document.getElementById('similar-subreddits-container');
+    if (!container) return;
+
+    container.innerHTML = `
+        <h3 class="dashboard-section-title related-communities-title">Related Communities to Explore</h3>
+        <div class="subreddit-tag-list">
+            <p class="placeholder-text">Finding similar communities...</p>
+        </div>
+    `;
+
+    container.removeEventListener('click', handleAddRelatedSubClick);
+    container.addEventListener('click', handleAddRelatedSubClick);
+
+    try {
+        const detailPromises = analyzedSubs.map(sub => fetchSubredditDetails(sub));
+        const detailsArray = await Promise.all(detailPromises);
+        const validDetails = detailsArray.filter(Boolean).map(d => ({ name: d.display_name, description: d.public_description || '' }));
+        if (validDetails.length === 0) throw new Error("Could not get details for source subreddits.");
+
+        const relatedSubNames = await findRelatedSubredditsAI(validDetails, originalGroupName);
+        const newSubNames = relatedSubNames.filter(name => !analyzedSubs.some(s => s.toLowerCase() === name.toLowerCase()));
+
+        if (newSubNames.length === 0) {
+            container.querySelector('.subreddit-tag-list').innerHTML = `<p class="placeholder-text">No new related communities were found.</p>`;
+            return;
+        }
+
+        const rankedRelatedSubs = await fetchAndRankSubreddits(newSubNames);
+        if (rankedRelatedSubs.length === 0) {
+            container.querySelector('.subreddit-tag-list').innerHTML = `<p class="placeholder-text">No suitable communities found after validation.</p>`;
+            return;
+        }
+
+        const tagsHTML = rankedRelatedSubs.slice(0, 10).map(sub => {
+            const subDetailsString = JSON.stringify(sub).replace(/'/g, "&apos;");
+            const members = formatMemberCount(sub.members);
+            const [activityEmoji, activityText] = sub.activityLabel.split(' ');
+            const description = sub.description.trim() ? sub.description : `A community for discussions and content related to r/${sub.name}.`;
+
+            return `
+                <div class="subreddit-tag-detailed">
+                    <div>
+                        <div class="tag-header">
+                            <span class="tag-name">r/${sub.name}</span>
+                            <span class="tag-activity">${activityEmoji} ${activityText}</span>
+                        </div>
+                        <p class="tag-description">
+                            ${description.substring(0, 150)}${description.length > 150 ? '...' : ''}
+                        </p>
+                        <div class="tag-footer">
+                            <span class="tag-members"><strong>${members}</strong> members</span>
+                        </div>
+                    </div>
+                    <div class="tag-footer-action">
+                        <button class="add-related-sub-btn" data-subname="${sub.name}" data-sub-details='${subDetailsString}'>
+                            + Add to Analysis
+                        </button>
+                        <a href="https://www.reddit.com/r/${sub.name}" target="_blank" rel="noopener noreferrer" class="view-sub-btn">
+                            View on Reddit
+                        </a>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        container.querySelector('.subreddit-tag-list').innerHTML = tagsHTML;
+    } catch (error) {
+        console.error("Error in renderAndHandleRelatedSubreddits:", error);
+        container.querySelector('.subreddit-tag-list').innerHTML = `<p class="error-message">Could not load related community suggestions.</p>`;
+    }
+}
+
+const briefCache = new Map();
+
+
+// =================================================================================
+// === OPTIMIZED: DETACHED LOADING (Text first, Chart later) ===
+// =================================================================================
+
+
+async function generateAndRenderBrandBrief(itemName, itemType) {
+    const isBrand = itemType === 'brands';
+    const targetPanel = document.getElementById(isBrand ? 'brand-detail-panel' : 'product-detail-panel');
+
+    if (!targetPanel) return;
+
+    targetPanel.innerHTML = '<div class="brief-content"><p class="loading-text">Building brief... <span class="loader-dots"></span></p></div>';
+
+    if (briefCache.has(itemName)) {
+        targetPanel.innerHTML = briefCache.get(itemName);
+        if (isBrand && targetPanel.querySelector('#brand-momentum-chart-data')) {
+            const cachedTrend = JSON.parse(targetPanel.querySelector('#brand-momentum-chart-data').textContent);
+            if (cachedTrend) renderBrandMomentumChart(cachedTrend);
+        }
+        return;
+    }
+
+    const postsForAnalysis = (window._entityData?.[itemType]?.[itemName]?.posts || []);
+    const top50Posts = postsForAnalysis.slice(0, 50);
+    const topPostsText = top50Posts.map(p => `"${p.data.title || ''} - ${p.data.selftext || p.data.body || ''}"`).join('\n');
+
+    try {
+        const prompt = isBrand ?
+            `Analyze "${itemName}" based on: ${topPostsText}. Return JSON with: what_it_is, use_case, loves (array), hates (array), verdict.` :
+            `Analyze category "${itemName}" based on: ${topPostsText}. Return JSON with: what_it_is, job_to_be_done, table_stakes (array), disruption_opportunities (array).`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [{ role: "system", content: "You are a fast market analyst. Output JSON." }, { role: "user", content: prompt }],
+            temperature: 0.1,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        let htmlContent = '';
+        if (isBrand) {
+            htmlContent = `
+                <div class="brief-content">
+                    <h3 class="brief-header">${itemName}</h3>
+                    <div class="brief-section"><h4 class="brief-section-title">What It Is</h4><p class="brief-text">${parsed.what_it_is}</p></div>
+                    
+                    <div class="brief-section">
+                        <h4 class="brief-section-title">Momentum Trend</h4>
+                        <div id="brand-momentum-chart" style="height:200px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.03); border-radius:8px; font-size:12px; color:#888;">
+                            <span class="loader-dots">Crunching historical mentions...</span>
+                        </div>
+                    </div>
+
+                    <div class="brief-section"><h4>Use Case</h4><p class="brief-text">${parsed.use_case}</p></div>
+                    <div class="brief-section"><h4>Strengths</h4><ul class="brief-list">${parsed.loves.map(i => `<li>${i}</li>`).join('')}</ul></div>
+                    <div class="brief-section"><h4>Pain Points</h4><ul class="brief-list">${parsed.hates.map(i => `<li>${i}</li>`).join('')}</ul></div>
+                    <div class="brief-verdict" style="background:rgba(0,165,206,0.1); padding:15px; border-radius:8px;"><p><strong>Verdict:</strong> ${parsed.verdict}</p></div>
+                </div>`;
+        } else {
+            htmlContent = `
+                <div class="brief-content">
+                    <h3 class="brief-header">${itemName}</h3>
+                    <div class="brief-section"><h4>Category Info</h4><p>${parsed.what_it_is}</p></div>
+                    <div class="brief-section"><h4>Job to be Done</h4><p>${parsed.job_to_be_done}</p></div>
+                    <div class="brief-section"><h4>Table Stakes</h4><ul>${parsed.table_stakes.map(i => `<li>${i}</li>`).join('')}</ul></div>
+                </div>`;
+        }
+
+        targetPanel.innerHTML = htmlContent;
+        briefCache.set(itemName, htmlContent);
+
+        if (isBrand) {
+            const selectedSubreddits = Array.from(document.querySelectorAll('#subreddit-choices input:checked')).map(cb => cb.value);
+            const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
+
+            fetchSentimentTrendData(itemName, subredditQueryString).then(trendResult => {
+                if (trendResult && trendResult.length > 0) {
+                    renderBrandMomentumChart(trendResult);
+                    const s = document.createElement('script');
+                    s.id = 'brand-momentum-chart-data';
+                    s.type = 'application/json';
+                    s.textContent = JSON.stringify(trendResult);
+                    targetPanel.querySelector('.brief-content').appendChild(s);
+                } else {
+                    document.getElementById('brand-momentum-chart').innerHTML = '<span>Not enough data.</span>';
+                }
+            });
+        }
+    } catch (error) {
+        targetPanel.innerHTML = `<div class="brief-content"><p>Error loading content.</p></div>`;
+    }
+}
+
+
+
+// =================================================================================
+// === REPLACEMENT FUNCTION: renderBrandMomentumChart (V2 - With Contextual Tooltip) ===
+// =================================================================================
+function renderBrandMomentumChart(data) {
+    if (typeof Highcharts === 'undefined' || !data || data.length === 0) {
+        const chartContainer = document.getElementById('brand-momentum-chart');
+        if (chartContainer) chartContainer.innerHTML = '<p>Not enough data.</p>';
+        return;
+    }
+
+    Highcharts.chart('brand-momentum-chart', {
+        chart: { type: 'line', backgroundColor: 'transparent' },
+        title: { text: null },
+        credits: { enabled: false },
+        xAxis: { categories: data.map(d => d.period), labels: { style: { color: '#888' } } },
+        yAxis: { title: { text: null }, min: 0, max: 100, labels: { style: { color: '#888' } } },
+        legend: { enabled: false },
+        series: [{
+            name: '% Positive',
+            data: data.map(d => ({ y: d.positivePercentage, context: d.context })),
+            color: '#00a5ce'
+        }],
+        tooltip: {
+            useHTML: true,
+            outside: true, 
+            backgroundColor: '#FFFFFF',
+            borderColor: '#E0E0E0',
+            borderWidth: 1,
+            padding: 16, 
+            borderRadius: 10,
+            shadow: true,
+            style: {
+                fontSize: '14px',
+                zIndex: 9999
+            },
+            formatter: function () {
+                const context = this.point.options.context;
+                let html = `<div style="min-width: 220px; max-width: 280px; white-space: normal; line-height: 1.4;">`;
+                html += `<b>${this.key}</b><br/>`;
+                html += `<span style="color:${this.series.color}">●</span> Positive: <b>${this.y}%</b>`;
+
+                if (context) {
+                    html += `<hr style="margin: 8px 0; border: 0; border-top: 1px solid #eee;">`;
+                    if (context.positive_theme) html += `<div style="margin-bottom:4px"><span style="color:#28a745">🟢</span> ${context.positive_theme}</div>`;
+                    if (context.negative_theme) html += `<div style="margin-bottom:8px"><span style="color:#dc3545">🔴</span> ${context.negative_theme}</div>`;
+                    html += `<div style="font-size:12px; font-style:italic; color:#666;">${context.verdict}</div>`;
+                }
+
+                html += `</div>`;
+                return html;
+            }
+        }
+    });
+}
+function renderSentimentScore(positiveCount, negativeCount) {
+    const container = document.getElementById('sentiment-score-container');
+    if (!container) return;
+
+    const total = positiveCount + negativeCount;
+
+    if (total === 0) {
+        container.style.display = 'none';
+        return;
+    }
+    container.style.display = '';
+
+    const positivePercent = Math.round((positiveCount / total) * 100);
+    const negativePercent = 100 - positivePercent;
+
+    const segments = container.querySelectorAll('.score-segment');
+    if (segments.length >= 2) {
+        segments[0].style.width = `${positivePercent}%`;
+        segments[1].style.width = `${negativePercent}%`;
+
+        const posValue = segments[0].querySelector('.score-value');
+        const negValue = segments[1].querySelector('.score-value');
+        if (posValue) posValue.textContent = `${positivePercent}% Positive`;
+        if (negValue) negValue.textContent = `${negativePercent}% Negative`;
+    }
+
+    const vibeLabel = container.querySelector('.sentiment-vibe-label');
+if (vibeLabel) {
+    let vibe;
+    if (positivePercent >= 70)      vibe = 'Enthusiastic and highly engaged';
+    else if (positivePercent >= 60) vibe = 'Largely positive with pockets of frustration';
+    else if (positivePercent >= 52) vibe = 'Leaning positive, but genuinely mixed';
+    else if (positivePercent >= 48) vibe = 'Evenly split, optimism and frustration in tension';
+    else if (positivePercent >= 40) vibe = 'Leaning negative, frustration outweighs optimism';
+    else if (positivePercent >= 30) vibe = 'Frequently frustrated, actively seeking solutions';
+    else                            vibe = 'High frustration community, pain points dominate';
+    vibeLabel.textContent = vibe;
+}
+
+    const benchmarkEl = container.querySelector('.sentiment-benchmark-text');
+if (benchmarkEl) {
+    const REDDIT_BASELINE = 58;
+    const diff = positivePercent - REDDIT_BASELINE;
+    let benchmark;
+    if (Math.abs(diff) <= 2) {
+        benchmark = 'Matches Reddit avg';
+    } else if (diff > 0) {
+        benchmark = `${diff}% above Reddit avg`;
+    } else {
+        benchmark = `${Math.abs(diff)}% below Reddit avg`;
+    }
+    benchmarkEl.textContent = `${benchmark} (est.)`;
+}
+}
+
+// =================================================================================
+// === HISTORICAL SENTIMENT CHART (Audience positive/negative split over time) ===
+// =================================================================================
+async function generateAndRenderHistoricalSentiment(subredditQueryString) {
+    const container = document.querySelector('.history-sentiment');
+    if (!container) return;
+
+    container.innerHTML = '<p class="loading-text">Charting sentiment over time... <span class="loader-dots"></span></p>';
+
+    const sampleTerms = ["love", "hate", "best", "worst", "frustrating", "amazing"];
+    const timePeriods = [
+        { label: 'Past 6 Mo', value: '6month' },
+        { label: 'Past 3 Mo', value: '3month' },
+        { label: 'Past Month', value: 'month' },
+        { label: 'Past Week',  value: 'week' },
+    ];
+
+    try {
+        const fetchPromises = timePeriods.map(p =>
+            fetchMultipleRedditDataBatched(subredditQueryString, sampleTerms, 40, p.value)
+        );
+        const results = await Promise.allSettled(fetchPromises);
+
+        const trendData = [];
+        results.forEach((result, i) => {
+            if (result.status !== 'fulfilled' || result.value.length === 0) return;
+            const posts = deduplicatePosts(result.value);
+            const { positive, negative } = countSentimentWords(posts);
+            const total = positive + negative;
+            if (total === 0) return;
+            trendData.push({
+                period: timePeriods[i].label,
+                positive: Math.round((positive / total) * 100)
+            });
+        });
+
+        renderHistoricalSentimentChart(trendData);
+    } catch (err) {
+        console.error("Historical sentiment chart failed:", err);
+        container.innerHTML = '<p class="error-message">Could not load historical sentiment.</p>';
+    }
+}
+
+function renderHistoricalSentimentChart(data) {
+    const container = document.querySelector('.history-sentiment');
+    if (!container) return;
+
+    if (typeof Highcharts === 'undefined' || !data || data.length < 2) {
+        container.innerHTML = '<p class="placeholder-text">Not enough historical data to chart sentiment over time.</p>';
+        return;
+    }
+
+    container.innerHTML = '';
+
+    Highcharts.chart(container, {
+        chart: { type: 'areaspline', backgroundColor: 'transparent', height: 280 },
+        title: { text: null },
+        credits: { enabled: false },
+        xAxis: {
+            categories: data.map(d => d.period),
+            labels: { style: { color: '#475569' } },
+            lineColor: 'rgba(0,0,0,0.12)',
+            tickColor: 'rgba(0,0,0,0.12)'
+        },
+        yAxis: {
+            title: { text: '% Positive', style: { color: '#64748b' } },
+            min: 0, max: 100,
+            labels: { format: '{value}%', style: { color: '#475569' } },
+            gridLineColor: 'rgba(0,0,0,0.06)',
+            plotLines: [{
+                value: 58,
+                color: 'rgba(100,116,139,0.5)',
+                dashStyle: 'Dash',
+                width: 1,
+                label: { text: 'Reddit avg', style: { color: '#94a3b8', fontSize: '11px' }, align: 'left', x: 5, y: -4 }
+            }]
+        },
+        legend: { enabled: false },
+        tooltip: { valueSuffix: '% positive', backgroundColor: '#ffffff' },
+        plotOptions: {
+            areaspline: {
+                color: '#00a5ce',
+                lineWidth: 2,
+                marker: { enabled: true, radius: 4, fillColor: '#00a5ce' },
+                fillColor: {
+                    linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 },
+                    stops: [
+                        [0, 'rgba(0,165,206,0.18)'],
+                        [1, 'rgba(0,165,206,0.0)']
+                    ]
+                }
+            }
+        },
+        series: [{ name: '% Positive', data: data.map(d => d.positive) }]
+    });
+}
+// =================================================================================
+// === REPLACEMENT FUNCTION: fetchSentimentTrendData (V4 - With Context & Corrected Axis) ===
+// =================================================================================
+async function fetchSentimentTrendData(brandName, subredditQueryString) {
+    let searchTerms = [`"${brandName}"`];
+    if (brandName.toLowerCase() === 'openai') {
+        searchTerms.push('"gpt-4o"', '"chatgpt"', '"gpt-5"');
+    }
+
+    const revisedTimePeriods = [
+        { label: 'Past 6 Mos', value: '6month' },
+        { label: 'Past 3 Mos', value: '3month' },
+        { label: 'Last 30 Days', value: 'month' },
+        { label: 'Last 7 Days', value: 'week' },
+    ];
+
+    const fetchPromises = revisedTimePeriods.map(period =>
+        fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 50, period.value)
+    );
+    const results = await Promise.allSettled(fetchPromises);
+
+    const trendData = [];
+
+    for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        const periodLabel = revisedTimePeriods[i].label;
+
+        if (result.status === 'fulfilled' && result.value.length > 0) {
+            const uniquePosts = deduplicatePosts(result.value);
+            const sentimentResults = await classifySentimentWithAI(uniquePosts);
+
+            // --- KEY CHANGE 1: Generate context for this time period ---
+            const contextSummary = await generateSentimentContextWithAI(uniquePosts, brandName);
+
+            const positiveMentions = sentimentResults.filter(s => s === 'Positive').length;
+            const negativeMentions = sentimentResults.filter(s => s === 'Negative').length;
+            const totalMentions = positiveMentions + negativeMentions;
+            const positivePercentage = totalMentions > 0 ? Math.round((positiveMentions / totalMentions) * 100) : 50;
+
+            trendData.push({
+                period: periodLabel,
+                positivePercentage: positivePercentage,
+                context: contextSummary // Attach the context to the data point
+            });
+        } else {
+            console.warn(`Could not fetch data for period: ${periodLabel}`);
+        }
+    }
+
+    // --- KEY CHANGE 2: REMOVED .reverse() TO FIX X-AXIS ORDER ---
+    // The data is now naturally ordered from oldest to newest.
+    return trendData;
+}
+
+async function generateAndRenderConstellation(items) {
+    console.log("[Highcharts] Starting full generation process with batching strategy...");
+    const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 60);
+    console.log(`[Highcharts] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
+
+    const BATCH_SIZE = 10;
+    let rawSignals = [];
+
+    for (let i = 0; i < prioritizedItems.length; i += BATCH_SIZE) {
+        const batch = prioritizedItems.slice(i, i + BATCH_SIZE);
+        const batchStartIndex = i;
+
+        const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 5 quotes that express a strong purchase intent, an unsolved problem, or a significant pain point. Focus ONLY on phrases that directly mention: Willingness to pay, Frustration with a lack of a tool, A specific, unmet need, Mentions of high cost, Comparisons to other products, or A sense of urgency. CRITICAL: IGNORE general complaints or non-commercial emotional support. Here are the comments:\n${batch.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}\nRespond ONLY with a valid JSON object: {"signals": [{"quote": "The extracted quote.", "source_index": 4}]}`;
+
+        try {
+            const response = await fetch(OPENAI_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    openaiPayload: {
+                        model: "gpt-5.4-mini",
+                        messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: extractionPrompt }],
+                        temperature: 0.1,
+                        max_completion_tokens: 1500,
+                        response_format: { "type": "json_object" }
+                    }
+                })
+            });
+
+            if (!response.ok) throw new Error(`Batch from index ${batchStartIndex} failed.`);
+
+            const data = await response.json();
+
+            if (!data || !data.openaiResponse) {
+                throw new Error("Proxy timed out or returned invalid format.");
+            }
+
+            const parsedExtraction = JSON.parse(data.openaiResponse);
+            if (parsedExtraction.signals && Array.isArray(parsedExtraction.signals)) {
+                const validSignals = parsedExtraction.signals.map(signal => ({
+                    quote: signal.quote,
+                    sourceItem: prioritizedItems[batchStartIndex + signal.source_index]
+                })).filter(s => s.sourceItem);
+
+                rawSignals.push(...validSignals);
+            }
+        } catch (error) {
+            console.error(`[Highcharts] Error processing batch starting at index ${batchStartIndex}:`, error.message);
+        }
+
+        if (i + BATCH_SIZE < prioritizedItems.length) {
+            await new Promise(resolve => setTimeout(resolve, 1500));
+        }
+    }
+
+    console.log(`[Highcharts] AI extracted a total of ${rawSignals.length} high-quality signals from all batches.`);
+    if (rawSignals.length === 0) {
+        renderHighchartsBubbleChart([]);
+        return;
+    }
+
+    const enrichedSignals = [];
+    const validCategories = ["DemandSignals", "WillingnessToPay", "Frustration", "SubstituteComparisons", "Urgency", "CostConcerns"];
+
+    for (const rawSignal of rawSignals) {
+        try {
+            const enrichmentPrompt = `You are a market research analyst. For the quote below, provide a short summary of the user's core problem and classify it into the MOST relevant category. Here are the categories: [${validCategories.join(', ')}]. Quote: "${rawSignal.quote}" Provide a JSON object with: 1. "problem_theme": A short, 4-5 word summary of the core problem. 2. "category": Classify into ONE of the categories. Respond ONLY with a valid JSON object.`;
+            const enrichmentResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_completion_tokens: 250, response_format: { "type": "json_object" } } }) });
+
+            if (enrichmentResponse.ok) {
+                const enrichmentData = await enrichmentResponse.json();
+
+                if (enrichmentData && enrichmentData.openaiResponse) {
+                    const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse);
+                    if (parsedEnrichment.problem_theme && parsedEnrichment.category) {
+                        enrichedSignals.push({ ...rawSignal, ...parsedEnrichment, source: rawSignal.sourceItem.data });
+                    } else {
+                        console.warn("Skipping a signal due to missing fields in AI enrichment response:", parsedEnrichment);
+                    }
+                }
+            } else {
+                console.warn(`Failed to enrich a signal. Status: ${enrichmentResponse.status}`);
+            }
+        } catch (error) {
+            console.error("CRITICAL ERROR during individual signal enrichment:", error.message);
+        }
+    }
+
+    console.log(`[Highcharts] AI successfully enriched ${enrichedSignals.length} signals. Rendering chart.`);
+    renderHighchartsBubbleChart(enrichedSignals);
+}
+
+async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
+    console.log("--- Starting Delayed Highcharts Chart Analysis (in background) ---");
+    try {
+        const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false);
+        const postIds = demandSignalPosts.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id);
+        const highIntentComments = await fetchCommentsForPosts(postIds);
+        const allItems = [...demandSignalPosts, ...highIntentComments];
+        await generateAndRenderConstellation(allItems);
+    } catch (error) {
+        console.error("Highcharts analysis failed in the background:", error);
+        renderHighchartsBubbleChart([]);
+    } finally {
+        console.log("--- Highcharts Analysis Complete. ---");
+    }
+}
+
+function renderHighchartsBubbleChart(signals) {
+    const container = document.getElementById('constellation-map-container');
+    const panelContent = document.getElementById('bubble-content'); // Use the new ID
+
+    if (typeof Highcharts === 'undefined') {
+        console.error("Highcharts is not loaded. Please ensure the Highcharts script tags are in your HTML.");
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder" style="color: red;">Chart Error: Highcharts library not found.</div>`;
+        return;
+    }
+
+    if (!signals || signals.length === 0) {
+        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        return;
+    }
+
+    const aggregatedSignals = {};
+    signals.forEach(signal => {
+        if (!signal.problem_theme || !signal.source || !signal.category) return;
+        const theme = signal.problem_theme.trim();
+        if (!aggregatedSignals[theme]) {
+            aggregatedSignals[theme] = { ...signal, quotes: [], frequency: 0, totalUpvotes: 0 };
+        }
+        aggregatedSignals[theme].quotes.push(signal.quote);
+        aggregatedSignals[theme].frequency++;
+        aggregatedSignals[theme].totalUpvotes += (signal.source.ups || 0);
+    });
+
+    const groupedByCategory = new Map();
+    Object.values(aggregatedSignals).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!groupedByCategory.has(category)) {
+            groupedByCategory.set(category, []);
+        }
+        groupedByCategory.get(category).push({
+            name: d.problem_theme,
+            value: d.frequency,
+            quote: d.quotes[0],
+            source: d.source
+        });
+    });
+
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+
+    Highcharts.chart(container, {
+        chart: {
+            type: 'packedbubble',
+            backgroundColor: 'transparent'
+        },
+        title: {
+            text: null
+        },
+        credits: {
+            enabled: false
+        },
+        tooltip: {
+            useHTML: true,
+            backgroundColor: '#FFFFFF',
+            borderColor: '#E0E0E0',
+            borderWidth: 1,
+            shadow: {
+                color: 'rgba(0, 0, 0, 0.15)',
+                offsetX: 0,
+                offsetY: 3,
+                opacity: 1,
+                width: 10
+            },
+            style: {
+                color: '#333333',
+                fontFamily: "'Plus Jakarta Sans', sans-serif"
+            },
+            formatter: function () {
+                return `
+                    <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid #E0E0E0; padding-bottom: 6px;">${this.point.name}</div>
+                    <div style="font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
+                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #555555; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                `;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '35%',
+                maxSize: '140%',
+                zMin: 0,
+                zMax: 1000,
+                layoutAlgorithm: {
+                    splitSeries: true,
+                    gravitationalConstant: 0.05,
+                    seriesInteraction: false,
+                    dragBetweenSeries: true,
+                    parentNodeLimit: true,
+                    parentNodeOptions: {
+                        bubblePadding: 3
+                    }
+                },
+                dataLabels: {
+                    enabled: true,
+                    useHTML: true,
+                    style: {
+                        color: 'black',
+                        textOutline: 'none',
+                        fontWeight: 'normal',
+                        fontFamily: "'Plus Jakarta Sans', sans-serif",
+                        textAlign: 'center'
+                    },
+                    formatter: function () {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) {
+                            return null;
+                        }
+                        const fontSize = Math.max(8, radius / 3.5);
+                        return `<div style="font-size: ${fontSize}px;">${this.point.name}</div>`;
+                    }
+                },
+                // --- NEW FEATURE: Click Event Handler ---
+                point: {
+                    events: {
+                        click: function () {
+                            // isParentNode is true for the large category bubbles
+                            if (!this.isParentNode) {
+                                const bubbleContent = document.getElementById('bubble-content');
+                                if (bubbleContent) {
+                                    const { name, quote, source } = this.options;
+                                    bubbleContent.innerHTML = `
+                                    <h4 class="bubble-detail-title">${name}</h4>
+                                    <p class="bubble-detail-quote">“${quote}”</p>
+                                    
+                                    <!-- This is the new element for the metadata -->
+                                    <p class="bubble-detail-meta">r/${source.subreddit} | 👍 ${source.ups.toLocaleString()}</p>
+                                    
+                                    <!-- This is the modified link with only the button text -->
+                                    <a href="https://www.reddit.com${source.permalink}" target="_blank" rel="noopener noreferrer" class="bubble-detail-source">
+                                        View on Reddit
+                                    </a>
+                                `;
+
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        series: chartSeries
+    });
+
+    if (panelContent) {
+        panelContent.innerHTML = `<div class="panel-placeholder">Click a bubble to see details.</div>`;
+    }
+}
+
+// =================================================================================
+// === REVISED FUNCTION V2: AI MINDSET SUMMARY WITH DESCRIPTIVE POINTS ===
+// =================================================================================
+
+async function generateAndRenderMindsetSummary(posts, audienceContext) {
+    // --- Find all your target Webflow elements ---
+    const container = document.getElementById('mindset-summary-container');
+    const archetypeHeadingEl = document.getElementById('archetype-heading');
+    const archetypeDescEl = document.getElementById('archetype-d');
+    const characteristicsEl = document.getElementById('characteristics-d');
+    const rejectsEl = document.getElementById('reject-d');
+
+    // Exit if the required elements aren't on the page
+    if (!container || !archetypeHeadingEl || !archetypeDescEl || !characteristicsEl || !rejectsEl) {
+        console.error("One or more target mindset elements are missing from the page. Aborting render.");
+        if (container) container.innerHTML = '';
+        return;
+    }
+
+    // --- Set a loading state ---
+    archetypeHeadingEl.textContent = 'Analyzing...';
+    archetypeDescEl.textContent = '';
+    characteristicsEl.innerHTML = '<p class="loading-text">Extracting core values...</p>';
+    rejectsEl.innerHTML = '<p class="loading-text">Identifying dislikes...</p>';
+
+    try {
+        const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+
+        // --- 1. THE NEW PROMPT ---
+        // This prompt now asks for an array of objects, each with a "title" and a "description".
+        const prompt = `You are an expert market psychologist specializing in the "${audienceContext}" community. Analyze the following Reddit posts to create a concise "Audience Mindset" summary.
+
+        Respond ONLY with a valid JSON object with the following keys:
+        1. "archetype": A short, 2-3 word evocative name for this audience (e.g., "The Pragmatic Dreamer").
+        2. "summary": A 1-2 sentence summary explaining the core motivation of this archetype.
+        3. "values": An array of 3 objects. Each object must have two keys: "title" (a short, 3-4 word summary of the value) and "description" (a single sentence explaining the title).
+        4. "rejects": An array of 3 objects. Each object must have two keys: "title" (a short, 3-4 word summary of the rejection) and "description" (a single sentence explaining the title).
+
+        Example for "values" format:
+        "values": [
+            { "title": "Value in Action, Not Theory", "description": "They respect builders, not just talkers, valuing demonstrable progress over ideas." },
+            { "title": "Authenticity is Currency", "description": "They value transparent accounts of failure as much as stories of success." }
+        ]
+
+        Posts:
+        ${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-4o",
+            messages: [
+                { role: "system", content: "You are an expert market psychologist who provides structured analysis of audience mindsets in a strict JSON format." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.3,
+            max_completion_tokens: 600,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+
+        if (!response.ok) throw new Error('Mindset analysis API call failed.');
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        const { archetype, summary, values, rejects } = parsed;
+
+        // --- 2. THE NEW RENDERING LOGIC ---
+        // This now populates the elements based on the new "title" and "description" structure.
+        archetypeHeadingEl.textContent = archetype;
+        archetypeDescEl.textContent = summary;
+
+        if (values && values.length > 0) {
+            // Create a list item for each object, making the title bold.
+            const characteristicsHTML = '<ol>' + values.map(item =>
+                `<li><strong>${item.title}:</strong> ${item.description}</li>`
+            ).join('') + '</ol>';
+            characteristicsEl.innerHTML = characteristicsHTML;
+        } else {
+            characteristicsEl.innerHTML = '<p>Could not identify key characteristics.</p>';
+        }
+
+        if (rejects && rejects.length > 0) {
+            const rejectsHTML = '<ol>' + rejects.map(item =>
+                `<li><strong>${item.title}:</strong> ${item.description}</li>`
+            ).join('') + '</ol>';
+            rejectsEl.innerHTML = rejectsHTML;
+        } else {
+            rejectsEl.innerHTML = '<p>Could not identify dislikes.</p>';
+        }
+
+    } catch (error) {
+        console.error("Mindset summary generation error:", error);
+        archetypeHeadingEl.textContent = 'Analysis Failed';
+        archetypeDescEl.textContent = 'Could not generate the audience mindset summary. Please try again.';
+        characteristicsEl.innerHTML = '';
+        rejectsEl.innerHTML = '';
+    }
+}
+// =================================================================================
+// === NEW FUNCTION: AI STRATEGIC PILLARS (GOALS & FEARS) ===
+// ================================================================================
+
+async function generateAndRenderStrategicPillars(posts, audienceContext) {
+    const goalsContainer = document.getElementById('goals-pillar');
+    const fearsContainer = document.getElementById('fears-pillar');
+
+    if (!goalsContainer || !fearsContainer || !PILLAR_BLUEPRINT) return;
+
+    // 1. Clear the containers
+    goalsContainer.innerHTML = '';
+    fearsContainer.innerHTML = '';
+
+    try {
+        const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+
+        const prompt = `Identify 3 core "Ultimate Goals" and 3 "Greatest Fears" for the ${audienceContext} community. Respond ONLY with JSON: {"goals": ["goal1", "goal2", "goal3"], "fears": ["fear1", "fear2", "fear3"]}`;
+
+        const openAIParams = {
+            model: "gpt-4o-mini",
+            messages: [{ role: "system", content: "You are a market psychologist." }, { role: "user", content: prompt }],
+            temperature: 0.3,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        });
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        // 2. Helper function to clone and populate
+        const populatePillars = (container, items) => {
+            items.forEach(text => {
+                const clone = PILLAR_BLUEPRINT.cloneNode(true);
+                // Look for the text element inside the clone
+                const textNode = clone.querySelector('#pillar-item-text') || clone.querySelector('.pillar-item-text');
+                if (textNode) {
+                    textNode.innerText = text;
+                }
+                container.appendChild(clone);
+            });
+        };
+
+        // 3. Render the lists using your Webflow design
+        if (parsed.goals) populatePillars(goalsContainer, parsed.goals);
+        if (parsed.fears) populatePillars(fearsContainer, parsed.fears);
+
+    } catch (error) {
+        console.error("Strategic pillars generation error:", error);
+    }
+}
+
+
+
+// =================================================================================
+// === NEW FUNCTION: AI GENERATIVE PROMPT ===
+// =================================================================================
+
+async function generateAndRenderAIPrompt(posts, audienceContext) {
+    const container = document.getElementById('ai-prompt-container');
+    if (!container) return;
+
+    container.innerHTML = `<h3 class="dashboard-section-title">Generative AI Prompt</h3><p class="loading-text">Crafting a tone of voice prompt...</p>`;
+
+    try {
+        const topPostsText = posts.slice(0, 30).map(p => `"${p.data.title || ''} ${getFirstTwoSentences(p.data.selftext || p.data.body || '')}"`).join('\n');
+
+        const prompt = `You are a world-class brand strategist and copywriter. Analyze the following sample of posts from the "${audienceContext}" community. Your task is to create a "Generative AI Prompt" that a marketer could use to write content in the authentic voice of this audience.
+
+        Based on the text, identify the following:
+        - **tone:** 3-4 descriptive adjectives for the overall emotional tone.
+        - **vocabulary:** 3-5 key slang words, acronyms, or insider phrases they use.
+        - **style:** 2-3 bullet points describing their writing style (e.g., sentence structure, use of humor, etc.).
+        - **sentiment:** 1 sentence describing their general outlook (e.g., are they generally optimistic, critical, helpful?).
+
+        Respond ONLY with a valid JSON object with the keys "tone", "vocabulary", "style", and "sentiment".
+
+        Sample Posts:\n${topPostsText}`;
+
+        const openAIParams = {
+            model: "gpt-5.4-mini",
+            messages: [
+                { role: "system", content: "You are a brand strategist who creates structured JSON output for AI prompts." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.2,
+            max_completion_tokens: 500,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+
+        if (!response.ok) throw new Error('AI prompt generation API call failed.');
+
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+
+        const promptText = `Write a blog post about [YOUR TOPIC] for an audience of ${audienceContext}.
+
+Your writing should adopt the following characteristics:
+
+**TONE:**
+- ${parsed.tone.join('\n- ')}
+
+**VOCABULARY:**
+- Use terms like: ${parsed.vocabulary.join(', ')}
+
+**STYLE:**
+- ${parsed.style.join('\n- ')}
+
+**SENTIMENT:**
+- ${parsed.sentiment}
+`;
+
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Generative AI Prompt</h3>
+            <div class="ai-prompt-content" id="ai-prompt-text">${promptText}</div>
+        `;
+
+    } catch (error) {
+        console.error("AI prompt generation error:", error);
+        container.innerHTML = `
+            <h3 class="dashboard-section-title">Generative AI Prompt</h3>
+            <p class="loading-text" style="color: red;">Could not generate AI prompt.</p>
+        `;
+    }
+}
+
+
+
+// =================================================================================
+// === UPGRADED FUNCTION: Action Cards with Strategic Logic & Master Toggle ===
+// =================================================================================
+
+function generateAndRenderActionCards(seoPlan, audienceContext) {
+    console.log("SEO Cards: Starting render...");
+    const container = document.getElementById('keyword-opportunities-container');
+    if (!container) return;
+
+    // Use our SAVED blueprints
+    if (!SEO_CARD_BLUEPRINT || !SEO_ITEM_BLUEPRINT) {
+        console.error("Blueprints were never captured! Make sure .action-card-blueprint exists on page load.");
+        return;
+    }
+
+    // Clear the container (it's likely already empty, but let's be sure)
+    container.innerHTML = '';
+
+    // Flatten the data
+    const allIdeas = [];
+    ['problem_aware', 'solution_seeking', 'purchase_intent'].forEach(intent => {
+        if (!seoPlan[intent]) return;
+        seoPlan[intent].forEach(primary => {
+            (primary.secondary_keywords || []).forEach(secondary => {
+                (secondary.long_tail_keywords || []).forEach(longtail => {
+                    (longtail.content_examples || []).forEach(content => {
+                        allIdeas.push({
+                            title: content.title,
+                            intent: intent,
+                            primaryKeyword: primary.keyword,
+                            primaryVolume: primary.searchVolume || 0,
+                            secondaryKeyword: secondary.keyword,
+                            longTailKeyword: longtail.keyword,
+                            longTailVolume: longtail.searchVolume || 0,
+                        });
+                    });
+                });
+            });
+        });
+    });
+
+    // Create the 3 Cards
+    const groups = [
+        { title: 'The Shortlist', ideas: allIdeas.slice(0, 4) },
+        { title: 'Traffic Drivers', ideas: allIdeas.filter(i => i.intent === 'problem_aware').slice(0, 4) },
+        { title: 'Conversion Boosters', ideas: allIdeas.filter(i => i.intent === 'purchase_intent').slice(0, 4) }
+    ];
+
+    groups.forEach(group => {
+        if (group.ideas.length === 0) return;
+
+        const card = SEO_CARD_BLUEPRINT.cloneNode(true);
+        card.classList.remove('action-card-blueprint'); // Remove blueprint class
+        card.style.display = 'flex';
+        card.style.opacity = '1';
+        
+        if (card.querySelector('.action-card-title')) {
+            card.querySelector('.action-card-title').innerText = group.title;
+        }
+        
+        const listEl = card.querySelector('.action-items-list');
+        if (listEl) {
+            listEl.innerHTML = ''; // Clear the template item
+            group.ideas.forEach(idea => {
+                const item = SEO_ITEM_BLUEPRINT.cloneNode(true);
+                item.classList.remove('action-item-blueprint');
+                item.style.display = 'flex';
+                item.style.opacity = '1';
+
+                if (item.querySelector('.action-item-title')) item.querySelector('.action-item-title').innerText = idea.title;
+                if (item.querySelector('.action-item-keyword')) item.querySelector('.action-item-keyword').innerText = idea.primaryKeyword;
+                if (item.querySelector('.action-item-secondary')) item.querySelector('.action-item-secondary').innerText = idea.secondaryKeyword;
+                if (item.querySelector('.action-item-longtail')) item.querySelector('.action-item-longtail').innerText = idea.longTailKeyword;
+                if (item.querySelector('.action-item-volume')) item.querySelector('.action-item-volume').innerText = idea.primaryVolume.toLocaleString() + "/mo";
+
+                listEl.appendChild(item);
+            });
+        }
+        container.appendChild(card);
+    });
+    console.log("SEO Cards: Successfully populated!");
+}
+
+function getPostsForFinding(findingTitle) {
+    if (!window._filteredPosts) return [];
+    if (findingTitle === 'all' || !window._summaries) return window._filteredPosts;
+    
+    const finding = window._summaries.find(s => s.title === findingTitle);
+    if (!finding) return window._filteredPosts;
+    
+    const matching = window._filteredPosts.filter(post => 
+        calculateRelevanceScore(post, finding) > 0
+    );
+    return matching.length >= 10 ? matching : window._filteredPosts;
+}
+function populateFindingPills() {
+    const wrap = document.getElementById('finding-pills-wrap');
+    if (!wrap || !window._summaries) return;
+
+    if (wrap.querySelector('.finding-pill:not(.active)')) wrap.innerHTML = '';
+
+    const pillTemplate = wrap.querySelector('.finding-pill');
+    if (!pillTemplate) return;
+
+    const pillBlueprint = pillTemplate.cloneNode(true);
+    wrap.innerHTML = '';
+
+    const allPill = pillBlueprint.cloneNode(true);
+    allPill.classList.remove('finding-pill');
+    allPill.classList.add('finding-pill', 'active');
+    allPill.innerText = 'All findings';
+    allPill.dataset.finding = 'all';
+    wrap.appendChild(allPill);
+
+    window._summaries.forEach(summary => {
+        const pill = pillBlueprint.cloneNode(true);
+        pill.classList.remove('active');
+        pill.innerText = summary.title;
+        pill.dataset.finding = summary.title;
+        wrap.appendChild(pill);
+    });
+
+    wrap.addEventListener('click', async (e) => {
+        const pill = e.target.closest('.finding-pill');
+        if (!pill) return;
+
+        wrap.querySelectorAll('.finding-pill').forEach(p => p.classList.remove('active'));
+        pill.classList.add('active');
+
+        const findingTitle = pill.dataset.finding;
+        const relevantPosts = getPostsForFinding(findingTitle);
+
+        await generateAndRenderSeoSunburst(relevantPosts, window.originalGroupName || '');
+    }, { once: false });
+}
+
+async function generateAndRenderSeoSunburst(posts, audienceContext) {
+    const container = document.getElementById('keyword-sunburst');
+    if (!container) {
+        console.error('Sunburst container div "keyword-sunburst" not found.');
+        return;
+    }
+
+    container.innerHTML = '<p class="loading-text">Building data-driven SEO plan...</p>';
+
+    try {
+        const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+
+        // *** CHANGE 1: The AI prompt is updated to match the new node count rules. ***
+        const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Create a comprehensive, multi-level SEO plan based on the provided text.
+
+        Structure your response as a single, valid JSON object.
+
+        For each of the three intents (problem_aware, solution_seeking, purchase_intent), provide an array of 2-5 primary keywords.
+
+        - For EACH primary keyword, provide an array of 2-4 "secondary_keywords".
+        - For EACH secondary keyword, provide an array of 2-3 "long_tail_keywords".
+        - For EACH long-tail keyword, provide an array of 1-2 "content_examples".
+
+        CRITICAL: Every keyword object (primary, secondary, long_tail) MUST contain:
+        - "keyword": The keyword phrase.
+        - "searchVolume": A realistic monthly search volume (integer).
+
+        Each "content_examples" item should be an object with a single key: "title".
+
+        Example JSON Structure:
+        {
+          "problem_aware": [
+            {
+              "keyword": "primary keyword A", "searchVolume": 5000,
+              "secondary_keywords": [
+                {
+                  "keyword": "secondary keyword A1", "searchVolume": 1200,
+                  "long_tail_keywords": [
+                    {
+                      "keyword": "long-tail keyword A1a", "searchVolume": 300,
+                      "content_examples": [ { "title": "Example Blog Title 1" } ]
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "solution_seeking": [ ... ], "purchase_intent": [ ... ]
+        }`;
+
+        const openAIParams = {
+            model: "gpt-4o",
+            messages: [{ role: "system", content: "You are a JSON-only SEO strategist." }, { role: "user", content: prompt }],
+            temperature: 0.2,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        if (!response.ok) throw new Error('AI SEO plan generation failed.');
+
+        const aiResult = await response.json();
+
+        // FIX: Verify openaiResponse actually exists to prevent "undefined is not valid JSON"
+        if (!aiResult || !aiResult.openaiResponse) {
+            throw new Error("AI Proxy failed to return a valid response (possible server timeout).");
+        }
+
+        const seoPlan = JSON.parse(aiResult.openaiResponse);
+        generateAndRenderActionCards(seoPlan, audienceContext);
+
+
+        // =========================================================================
+        // === STEP 1: CORRECTED DATA GENERATION ===================================
+        // =========================================================================
+
+        // Data transformation logic
+        const sunburstData = [{
+            id: 'root', parent: '', name: 'SEO Plan',
+            levelName: 'SEO Plan' // <-- FLATTENED PROPERTY
+        }, {
+            id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF',
+            levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
+        }, {
+            id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF',
+            levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
+        }, {
+            id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8',
+            levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
+        }];
+
+        const processIntent = (intentId, intentName, intentData) => {
+            if (!intentData || !Array.isArray(intentData)) return;
+
+            // Level 3: Primary Keywords
+            intentData.forEach((primary, i) => {
+                const primaryId = `${intentId}_p_${i}`;
+                sunburstData.push({
+                    id: primaryId,
+                    parent: intentId,
+                    name: primary.keyword,
+                    // NO 'extra' OBJECT. Properties are added directly.
+                    intentName: intentName,
+                    levelName: 'Primary keyword',
+                    searchVolume: primary.searchVolume
+                });
+
+                // Level 4: Secondary Keywords
+                (primary.secondary_keywords || []).forEach((secondary, j) => {
+                    const secondaryId = `${primaryId}_s_${j}`;
+                    sunburstData.push({
+                        id: secondaryId,
+                        parent: primaryId,
+                        name: secondary.keyword,
+                        intentName: intentName,
+                        levelName: 'Secondary keyword',
+                        searchVolume: secondary.searchVolume
+                    });
+
+                    // Level 5: Long-tail Keywords
+                    (secondary.long_tail_keywords || []).forEach((longtail, k) => {
+                        const longtailId = `${secondaryId}_l_${k}`;
+                        sunburstData.push({
+                            id: longtailId,
+                            parent: secondaryId,
+                            name: longtail.keyword,
+                            intentName: intentName,
+                            levelName: 'Long-tail keyword',
+                            searchVolume: longtail.searchVolume
+                        });
+
+                        // Level 6: Content Examples
+                        (longtail.content_examples || []).forEach((content, l) => {
+                            const value = longtail.searchVolume / (longtail.content_examples.length || 1);
+                            sunburstData.push({
+                                id: `${longtailId}_c_${l}`,
+                                parent: longtailId,
+                                name: content.title,
+                                value: Math.max(value, 1),
+                                intentName: intentName,
+                                levelName: 'Content example',
+                                searchVolume: longtail.searchVolume // Storing the parent's volume
+                            });
+                        });
+                    });
+                });
+            });
+        };
+
+
+        processIntent('pa', 'Problem-Aware', seoPlan.problem_aware);
+        processIntent('ss', 'Solution-Seeking', seoPlan.solution_seeking);
+        processIntent('pi', 'Purchase-Intent', seoPlan.purchase_intent);
+
+        const seriesName = sunburstData.find(d => d.id === 'root')?.name || 'SEO Plan';
+
+        // =========================================================================
+        // === START: COPY AND REPLACE THIS ENTIRE BLOCK ===========================
+        // =========================================================================
+
+        Highcharts.chart(container, {
+            chart: { type: 'sunburst', height: '650px', backgroundColor: null },
+            title: { text: null },
+            credits: { enabled: false },
+
+            // THIS IS THE KEY FIX for removing "Series 1" and enabling CSS control
+            breadcrumbs: {
+                showFullPath: false, // <-- This removes the "Series 1" prefix
+                useHTML: true        // <-- This allows our CSS to control wrapping
+            },
+
+            plotOptions: {
+                sunburst: {
+                    animation: { duration: 1000 },
+                    borderColor: '#FFFFFF',
+                    borderWidth: 1
+                }
+            },
+
+            series: [{
+                type: 'sunburst',
+                name: seriesName,
+                data: sunburstData,
+                allowDrillToNode: true,
+                cursor: 'pointer',
+                dataLabels: {
+                    format: '{point.name}',
+                    filter: { property: 'innerArcLength', operator: '>', value: 20 },
+                    rotationMode: 'circular',
+                    style: {
+                        color: '#FFFFFF',
+                        textOutline: 'none',
+                        fontWeight: '400'
+                    }
+                },
+                levels: [{
+                    level: 1,
+                    levelIsConstant: false,
+                    dataLabels: {
+                        enabled: true,
+                        filter: { property: 'value', operator: '>', value: -1 },
+                        style: {
+                            fontSize: '1.1em',
+                            fontWeight: '400',
+                            color: '#FFFFFF',
+                            textOutline: 'none'
+                        }
+                    }
+                }, { level: 2, colorByPoint: true }, { level: 3, colorVariation: { key: 'brightness', to: -0.25 } }, { level: 4, colorVariation: { key: 'brightness', to: 0.25 } }, { level: 5, colorVariation: { key: 'brightness', to: -0.45 } }, { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }]
+            }],
+
+            tooltip: {
+                useHTML: true,
+                headerFormat: '',
+                pointFormatter: function () {
+                    const point = this;
+                    let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
+
+                    // THIS IS THE FIX for the bold and capitalized name in the tooltip
+                    const capitalizedName = point.name.replace(/(^\w{1})|(\s+\w{1})/g, letter => letter.toUpperCase());
+                    html += `<b>Name:</b> <b>${capitalizedName}</b><br/>`; // <-- MODIFIED LINE
+
+                    if (point.levelName) {
+                        html += `<b>Level:</b> ${point.levelName}<br/>`;
+                    }
+                    if (point.intentName) {
+                        html += `<b>Intent:</b> ${point.intentName}<br/>`;
+                    }
+                    if (point.searchVolume !== undefined) {
+                        html += `<b>Search volume:</b> ${point.searchVolume.toLocaleString()}<br/>`;
+                    }
+                    html += `</div>`;
+                    return html;
+                }
+            },
+
+            exporting: { enabled: true },
+            accessibility: { enabled: true },
+        });
+
+        // =========================================================================
+        // === END OF BLOCK TO REPLACE =============================================
+        // =========================================================================
+    } catch (error) {
+        console.error("Failed to generate or render SEO Sunburst chart:", error);
+        container.innerHTML = `<p class="error-message">Could not generate the visual SEO plan.</p>`;
+    }
+}
+// =================================================================================
+// === NEW SOLUTION: PROBLEM/OFFER SANKEY DIAGRAM ==================================
+// =================================================================================
+
+async function generateProblemOfferPairsAI(summaries) {
+    if (!summaries || summaries.length === 0) return [];
+
+    const problemTitles = summaries.map(s => s.title);
+    const prompt = `You are a startup advisor. For each customer problem provided for the audience "${originalGroupName}", generate a single, concise "offer angle" or "solution".
+    
+    Respond ONLY with a valid JSON object with a single key "pairs". The value should be an array of objects, where each object has two keys: "problem" and "offer". 
+    
+    CRITICAL: Ensure there is one object for each problem provided, and that neither the "problem" nor the "offer" value is an empty string.
+
+    Example Response:
+    { "pairs": [ { "problem": "Models take forever to train", "offer": "Cut training time by 60%" } ] }
+
+    Problems to solve:
+    ${JSON.stringify(problemTitles)}
+    `;
+
+    const openAIParams = {
+        model: "gpt-4o",
+        messages: [{ role: "system", content: "You are a startup advisor creating problem-solution pairs in strict JSON format." }, { role: "user", content: prompt }],
+        temperature: 0.6,
+        max_completion_tokens: 2000,
+        response_format: { "type": "json_object" }
+    };
+
+    try {
+        const response = await fetch(OPENAI_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ openaiPayload: openAIParams })
+        });
+        if (!response.ok) throw new Error(`OpenAI API Error for pairs: ${response.statusText}`);
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        if (parsed.pairs && Array.isArray(parsed.pairs)) return parsed.pairs;
+        else throw new Error("AI response did not contain a valid 'pairs' array.");
+    } catch (error) {
+        console.error("Problem/Offer pair generation failed:", error);
+        return [];
+    }
+}
+
+// =================================================================================
+// === PASTE THIS ENTIRE CORRECTED FUNCTION ========================================
+// =================================================================================
+async function generateAndRenderValueSankey(audienceName, summaries) {
+    const container = document.getElementById('value-tree');
+    if (!container) return;
+
+    container.innerHTML = '<p class="loading-text">Generating AI value propositions... <span class="loader-dots"></span></p>';
+
+    const pairs = await generateProblemOfferPairsAI(summaries);
+    const validatedPairs = pairs.filter(p => p.problem && p.offer && p.problem.trim() !== "" && p.offer.trim() !== "");
+
+    if (validatedPairs.length === 0) {
+        container.innerHTML = '<p class="placeholder-text">Could not generate any offer angles.</p>';
+        return;
+    }
+
+    const sankeyData = [];
+    const sankeyNodes = [];
+    const addedNodes = new Set();
+
+    validatedPairs.forEach(pair => {
+        // Create the link from problem to offer
+        sankeyData.push([pair.problem, pair.offer, 1]); // Weight of 1 for uniform lines
+
+        // Add the problem node if it doesn't exist
+        if (!addedNodes.has(pair.problem)) {
+            // --- THIS IS THE FIX: Add the 'name' property ---
+            sankeyNodes.push({ id: pair.problem, name: pair.problem, column: 0, type: 'problem' });
+            addedNodes.add(pair.problem);
+        }
+        // Add the offer node if it doesn't exist
+        if (!addedNodes.has(pair.offer)) {
+            // --- THIS IS THE FIX: Add the 'name' property ---
+            sankeyNodes.push({ id: pair.offer, name: pair.offer, column: 1, type: 'offer' });
+            addedNodes.add(pair.offer);
+        }
+    });
+    // =================================================================================
+    // === PASTE THIS ENTIRE FINAL CHART CONFIGURATION =================================
+    // =================================================================================
+    Highcharts.chart('value-tree', {
+        chart: {
+            type: 'sankey',
+            backgroundColor: 'transparent',
+            margin: [20, 20, 20, 20] // Added slightly more margin
+        },
+        title: { text: null },
+        credits: { enabled: false },
+        tooltip: { enabled: false },
+        series: [{
+            keys: ['from', 'to', 'weight'],
+            data: sankeyData,
+            nodes: sankeyNodes,
+            nodePadding: 25, // Vertical space between nodes
+
+            // Link styling
+            link: {
+                color: 'rgba(94, 209, 216, 0.6)',
+                linkOpacity: 0.6
+            },
+
+            // --- THIS IS THE DEFINITIVE FIX ---
+            // We use the standard 'formatter' and remove all conflicting properties.
+            dataLabels: {
+                enabled: true,
+                useHTML: true,
+                formatter: function () {
+                    // 'this.point' correctly refers to the node data
+                    const point = this.point;
+                    const className = point.type === 'problem' ? 'sankey-problem' : 'sankey-offer';
+                    // Return the custom HTML div, which will now be rendered correctly
+                    return `<div class="sankey-label ${className}">${point.name}</div>`;
+                }
+            },
+        }]
+    });
+}
+
+async function runProblemFinder(options = {}) {
+    const { isUpdate = false } = options;
+
+    // --- NEW: SAFE BLUEPRINT CAPTURE ---
+    if (!isUpdate && !SEO_CARD_BLUEPRINT) {
+        const container = document.getElementById('keyword-opportunities-container');
+        if (container) {
+            const cardTemplate = container.querySelector('.action-card-blueprint');
+            if (cardTemplate) {
+                SEO_CARD_BLUEPRINT = cardTemplate.cloneNode(true);
+                const itemTemplate = cardTemplate.querySelector('.action-item-blueprint');
+                if (itemTemplate) {
+                    SEO_ITEM_BLUEPRINT = itemTemplate.cloneNode(true);
+                }
+            }
+        }
+    }
+
+    console.log("CHECKPOINT 2: Inside runProblemFinder. The audience is:", originalGroupName);
+
+    
+    if (!isUpdate && !PHRASE_BLUEPRINT) {
+        const found = document.getElementById('phrase-term') || document.querySelector('.phrase-item-template');
+        if (found) {
+            PHRASE_BLUEPRINT = found.cloneNode(true);
+            PHRASE_BLUEPRINT.id = '';
+            console.log("Blueprint captured exactly as styled in Webflow.");
+        }
+    }
+
+    if (!isUpdate && !PILLAR_BLUEPRINT) {
+        const found = document.querySelector('.pillar-item-template');
+        if (found) {
+            PILLAR_BLUEPRINT = found.cloneNode(true);
+            console.log("Strategic Pillar blueprint captured.");
+        }
+    }
+    
+    if (!VOICE_PILL_BLUEPRINT) {
+        const container = document.querySelector('.voice-adjective-tags');
+        if (container) {
+            const foundPill = container.querySelector('.voice-adjective-tags');
+            if (foundPill) {
+                VOICE_PILL_BLUEPRINT = foundPill.cloneNode(true);
+                console.log("Voice Pill blueprint captured.");
+            }
+        }
+    }
+    
+    if (!HOOK_CARD_BLUEPRINT) {
+        const foundCard = document.querySelector('.hook-pattern-card');
+        if (foundCard) {
+            HOOK_CARD_BLUEPRINT = foundCard.cloneNode(true);
+            const foundItem = HOOK_CARD_BLUEPRINT.querySelector('.hook-proof-item');
+            if (foundItem) {
+                HOOK_ITEM_BLUEPRINT = foundItem.cloneNode(true);
+            }
+            console.log("Hook Card & Item blueprints captured.");
+        }
+    }
+    
+    if (!MINDSET_ITEM_BLUEPRINT) {
+        const foundMindset = document.querySelector('.mindset-item-template');
+        if (foundMindset) {
+            MINDSET_ITEM_BLUEPRINT = foundMindset.cloneNode(true);
+            console.log("Mindset Item blueprint captured.");
+        }
+    }
+
+    if (!AVOID_SWAP_BLUEPRINT) {
+        const foundSwap = document.querySelector('.avoid-instead-row'); 
+        if (foundSwap) {
+            AVOID_SWAP_BLUEPRINT = foundSwap.cloneNode(true);
+            console.log("Language Avoid blueprint captured.");
+        }
+    }
+    
+    if (!LANGUAGE_AVOID_BLUEPRINT) {
+        const found = document.querySelector('.avoid-term-template');
+        if (found) {
+            LANGUAGE_AVOID_BLUEPRINT = found.cloneNode(true);
+        }
+    }
+    if (!LANGUAGE_USE_BLUEPRINT) {
+        const found = document.querySelector('.use-term-template');
+        if (found) {
+            LANGUAGE_USE_BLUEPRINT = found.cloneNode(true);
+        }
+    }    
+
+    if (!TONE_CARD_BLUEPRINT) {
+        const card = document.querySelector('.tone-card-blueprint');
+        if (card) {
+            TONE_CARD_BLUEPRINT = card.cloneNode(true);
+            TONE_TRAIT_BLUEPRINT = card.querySelector('.tone-trait-row').cloneNode(true);
+            console.log("Tone Deep Dive blueprints captured.");
+        }
+    }
+
+    const searchButton = document.getElementById('search-selected-btn');
+    if (!searchButton) { console.error("Could not find button."); return; }
+    const selectedCheckboxes = document.querySelectorAll('#subreddit-choices input:checked');
+    if (selectedCheckboxes.length === 0) { alert("Please select at least one community."); return; }
+    const selectedSubreddits = Array.from(selectedCheckboxes).map(cb => cb.value);
+
+    const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
+    if (!isUpdate) {
+        searchButton.classList.add('is-loading');
+        searchButton.disabled = true;
+    }
+    const problemTerms = ["problem", "challenge", "frustration", "annoyance", "wish I could", "hate that", "help with", "solution for"];
+    const deepProblemTerms = ["struggle", "issue", "difficulty", "pain point", "pet peeve", "disappointed", "advice", "workaround", "how to", "fix", "rant", "vent"];
+    const demandSignalTerms = ["i'd pay good money for", "buy it in a second", "i'd subscribe to", "throw money at it", "where can i buy", "happily pay", "shut up and take my money", "sick of doing this manually", "can't find anything that", "waste so much time on", "has to be a better way", "shouldn't be this hard", "why is there no tool for", "why is there no app for", "tried everything and nothing works", "tool almost did what i wanted", "it's missing", "tried", "gave up on it", "if only there was an app", "i wish someone would build", "why hasn't anyone made", "waste hours every week", "such a timesuck", "pay just to not have to think", "rather pay than do this myself"];
+    const resultsWrapper = document.getElementById('results-wrapper-b');
+    const resultsMessageDiv = document.getElementById("results-message");
+    const countHeaderDiv = document.getElementById("count-header");
+    
+    if (!isUpdate) {
+        if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
+        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "overview-div", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases", "value-tree"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+        if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
+        for (let i = 1; i <= 5; i++) {
+            const block = document.getElementById(`findings-block${i}`);
+            if (block) {
+                block.style.display = 'none';
+                const prevalenceWrapper = block.querySelector('.prevalence-container-wrapper');
+                if (prevalenceWrapper) {
+                    prevalenceWrapper.innerHTML = "<p class='loading-text' style='text-align: center; padding: 2rem;'>Brewing insights...</p>";
+                }
+            }
+        }
+    }
+    
+    try {
+        console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
+        const panelContent = document.getElementById('bubble-content');
+        if (panelContent) {
+            panelContent.innerHTML = `<div class="panel-placeholder">Loading purchase signals... <span class="loader-dots"></span></div>`;
+        }
+        const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
+        let generalSearchTerms = (searchDepth === 'deep') ? [...problemTerms, ...deepProblemTerms] : problemTerms;
+        let limitPerTerm = (searchDepth === 'deep') ? 75 : 40;
+        const selectedTimeRaw = document.querySelector('input[name="timePosted"]:checked')?.value || "all";
+        const selectedMinUpvotes = parseInt(document.querySelector('input[name="minVotes"]:checked')?.value || "20", 10);
+        const timeMap = { week: "week", month: "month", "6months": "year", year: "year", all: "all" };
+        const selectedTime = timeMap[selectedTimeRaw] || "all";
+        const problemItems = await fetchMultipleRedditDataBatched(subredditQueryString, generalSearchTerms, limitPerTerm, selectedTime, false);
+        const allItems = deduplicatePosts(problemItems);
+        if (allItems.length === 0) throw new Error("No initial problem posts found. Try different communities or a broader search.");
+        const filteredItems = filterPosts(allItems, selectedMinUpvotes);
+        if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
+        
+        window._filteredPosts = filteredItems;
+        generateAndRenderOverview(filteredItems, originalGroupName);
+        renderPosts(filteredItems);
+        generateAndRenderHybridSentiment(filteredItems, originalGroupName);
+        generateEmotionMapData(filteredItems).then(renderEmotionMap);
+        renderIncludedSubreddits(selectedSubreddits);
+        generateAndRenderVoiceProfile(filteredItems, originalGroupName);
+        generateAndRenderLanguageToAvoid(filteredItems, originalGroupName);
+        generateAndRenderHookPatterns(filteredItems, originalGroupName);
+        generateAndRenderToneMap(filteredItems, originalGroupName);
+        generateAndRenderMindsetSummary(filteredItems, originalGroupName);
+        generateAndRenderStrategicPillars(filteredItems, originalGroupName);
+        generateAndRenderAIPrompt(filteredItems, originalGroupName);
+        
+        // This is safe, it will update finding pills later.
+        generateAndRenderSeoSunburst(filteredItems, window.originalGroupName || '');
+        
+        extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
+        generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
+        
+        if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }
+        const topKeywords = getTopKeywords(filteredItems, 10);
+        const topPosts = filteredItems.slice(0, 30);
+        const combinedTexts = topPosts.map(post => `${post.data.title || post.data.link_title || ''}. ${getFirstTwoSentences(post.data.selftext || post.data.body || '')}`).join("\n\n");
+        const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". CRITICAL RULES FOR QUOTES: The "quotes" array must contain exactly 3 strings, and each string MUST be 63 characters or less. Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["A short quote under 63 chars.", "Another quote under 63 chars.", "A final quote under 63 chars."], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_completion_tokens: 1500, response_format: { "type": "json_object" } };
+        const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+
+        let summaries = [];
+        if (openAIResponse.ok) {
+            const openAIData = await openAIResponse.json();
+            summaries = parseAISummary(openAIData.openaiResponse);
+        }
+
+        if (summaries.length === 0) {
+            console.warn("AI failed to generate summaries. Using fallback.");
+            summaries = [{
+                title: "General Insights",
+                body: `Community members in ${originalGroupName} are discussing various topics. View the raw posts below for details.`,
+                count: filteredItems.length,
+                quotes: ["Look at raw posts for details", "No specific quotes found", "Check the posts below"],
+                keywords: ["Discussion"]
+            }];
+        }
+
+        const validatedSummaries = summaries.filter(finding => 
+            filteredItems.filter(post => calculateRelevanceScore(post, finding) > 0).length >= 1
+        );
+
+        const finalSummaries = validatedSummaries.length > 0 ? validatedSummaries : summaries;
+
+        const metrics = calculateFindingMetrics(finalSummaries, filteredItems);
+
+        const sortedFindings = validatedSummaries.map((summary, index) => ({
+            summary,
+            prevalence: Math.round((metrics[index].supportCount / (metrics.totalProblemPosts || 1)) * 100),
+            supportCount: metrics[index].supportCount
+        })).sort((a, b) => b.prevalence - a.prevalence);
+
+        console.log("CHECKPOINT A: Analysis is complete. Found these findings:", sortedFindings);
+
+        window._summaries = sortedFindings.map(item => item.summary);
+        
+        // Triggers the findings pill update after data is ready
+        populateFindingPills();
+
+        for (let i = 1; i <= 5; i++) {
+            const block = document.getElementById(`findings-block${i}`);
+            if (block) block.style.display = "none";
+        }
+        sortedFindings.forEach((findingData, index) => {
+            const displayIndex = index + 1;
+            if (displayIndex > 5) return;
+            const block = document.getElementById(`findings-block${displayIndex}`);
+            if (!block) return;
+            const content = document.getElementById(`findings-${displayIndex}`);
+            const btn = block.querySelector('.sample-posts-button');
+            block.style.display = "flex";
+            if (content) {
+                const { summary, prevalence, supportCount } = findingData;
+                const titleEl = content.querySelector('.section-title');
+                if (titleEl) titleEl.textContent = summary.title;
+                const teaserEl = content.querySelector('.summary-teaser');
+                const fullEl = content.querySelector('.summary-full');
+                const seeMoreBtn = content.querySelector('.see-more-btn');
+                if (teaserEl && fullEl && seeMoreBtn) {
+                    if (summary.body.length > 95) {
+                        teaserEl.textContent = summary.body.substring(0, 95) + "…";
+                        fullEl.textContent = summary.body;
+                        teaserEl.style.display = 'inline';
+                        fullEl.style.display = 'none';
+                        seeMoreBtn.style.display = 'inline-block';
+                        seeMoreBtn.textContent = 'See more';
+                        const newBtn = seeMoreBtn.cloneNode(true);
+                        seeMoreBtn.parentNode.replaceChild(newBtn, seeMoreBtn);
+                        newBtn.addEventListener('click', function () {
+                            const isHidden = teaserEl.style.display !== 'none';
+                            teaserEl.style.display = isHidden ? 'none' : 'inline';
+                            fullEl.style.display = isHidden ? 'inline' : 'none';
+                            newBtn.textContent = isHidden ? 'See less' : 'See more';
+                        });
+                    } else {
+                        teaserEl.textContent = summary.body;
+                        teaserEl.style.display = 'inline';
+                        fullEl.style.display = 'none';
+                        seeMoreBtn.style.display = 'none';
+                    }
+                }
+                const quotesContainer = content.querySelector('.quotes-container');
+                if (quotesContainer) {
+                    const quoteElements = quotesContainer.querySelectorAll('.quote');
+                    summary.quotes.forEach((quoteText, i) => {
+                        if (quoteElements[i]) {
+                            if (quoteText) {
+                                quoteElements[i].textContent = `"${quoteText}"`;
+                                quoteElements[i].style.display = 'block';
+                            } else {
+                                quoteElements[i].style.display = 'none';
+                            }
+                        }
+                    });
+                }
+                const metricsWrapper = content.querySelector('.prevalence-container-wrapper');
+                if (metricsWrapper) {
+                    metricsWrapper.innerHTML = (sortedFindings.length === 1) ? `<div class="prevalence-container"><div class="prevalence-header">Primary Finding</div><div class="single-finding-metric">Supported by ${supportCount} Posts</div><div class="prevalence-subtitle">This was the only significant problem theme identified.</div></div>` : `<div class="prevalence-container"><div class="prevalence-header">${prevalence >= 30 ? "High" : prevalence >= 15 ? "Medium" : "Low"} Prevalence</div><div class="prevalence-bar-background"><div class="prevalence-bar-foreground" style="width: ${prevalence}%; background-color: ${prevalence >= 30 ? "#296fd3" : prevalence >= 15 ? "#5b98eb" : "#aecbfa"};">${prevalence}%</div></div><div class="prevalence-subtitle">Represents ${prevalence}% of all identified problems.</div></div>`;
+                }
+            }
+            if (btn) {
+                btn.onclick = () => showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds);
+            }
+        });
+        try {
+            window._postsForAssignment = filteredItems.slice(0, 75);
+            window._usedPostIds = new Set();
+            const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment);
+            window._assignments = assignments;
+            for (let i = 0; i < window._summaries.length; i++) {
+                if (i >= 5) break;
+                showSamplePosts(i, assignments, filteredItems, window._usedPostIds);
+            }
+        } catch (err) {
+            console.error("CRITICAL (but isolated): Failed to assign posts to findings.", err);
+            for (let i = 1; i <= 5; i++) { const redditDiv = document.getElementById(`reddit-div${i}`); if (redditDiv) { redditDiv.innerHTML = `<div style="font-style: italic; color: #999;">Could not load sample posts.</div>`; } }
+        }
+
+        // This is the single, correct call for the new mind map
+        generateAndRenderValueSankey(originalGroupName, window._summaries);
+
+        if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
+            if (resultsWrapper) {
+                resultsWrapper.style.setProperty('display', 'flex', 'important');
+                setTimeout(() => {
+                    if (resultsWrapper) {
+                        resultsWrapper.style.opacity = '1';
+                        if (!isUpdate) {
+                            resultsWrapper.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                            const fullHeader = document.getElementById('full-header');
+                            if (fullHeader) {
+                                fullHeader.classList.add('header-hidden');
+                                fullHeader.addEventListener('transitionend', () => {
+                                    fullHeader.style.display = 'none';
+                                }, { once: true });
+                            }
+                        }
+                    }
+                }, 50);
+            }
+        }
+        setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
+        setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
+        setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
+        setTimeout(() => generateAndRenderHistoricalSentiment(subredditQueryString), 3500);
+
+    } catch (err) {
+        console.error("!!!!!!!! A FATAL ERROR STOPPED THE ANALYSIS !!!!!!!!", err);
+        alert("An error occurred during analysis. Please check the console for details. Error: " + err.message);
+        if (resultsMessageDiv) resultsMessageDiv.innerHTML = `<p class='error' style="color: red; text-align: center;">❌ ${err.message}</p>`;
+        if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); resultsWrapper.style.opacity = '1'; }
+    } finally {
+        if (!isUpdate) {
+            searchButton.classList.remove('is-loading');
+            searchButton.disabled = false;
+        }
+    }
+}
+
+
+function renderDiscoveryList(containerId, data, title, type) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const slots = container.querySelectorAll('.discovery-list-item');
+
+    slots.forEach(slot => {
+        slot.style.display = 'none';
+        slot.style.opacity = '0';
+    });
+
+    if (!data || data.length === 0) {
+        return;
+    }
+
+    data.forEach(([name, details], index) => {
+        if (slots[index]) {
+            const slot = slots[index];
+            const rankEl = slot.querySelector('.rank');
+            const nameEl = slot.querySelector('.name');
+            const countEl = slot.querySelector('.count');
+
+            if (rankEl) rankEl.textContent = `${index + 1}.`;
+            if (nameEl) nameEl.textContent = name;
+            if (countEl) countEl.textContent = `${details.count} mentions`;
+
+            slot.setAttribute('data-word', name);
+            slot.setAttribute('data-type', type);
+
+            slot.style.display = 'flex';
+            setTimeout(() => { slot.style.opacity = '1'; }, index * 50);
+        }
+    });
+}
+
+function initializeDashboardInteractivity() {
+    document.addEventListener('click', (e) => {
+        const backButton = e.target.closest('#back-to-step1-btn');
+        if (backButton) {
+            location.reload();
+            return;
+        }
+
+        const briefBtn = e.target.closest('.brief-button');
+        if (briefBtn) {
+            const parentSlot = briefBtn.closest('.discovery-list-item');
+            if (parentSlot) {
+                const word = parentSlot.getAttribute('data-word');
+                const type = parentSlot.getAttribute('data-type');
+                generateAndRenderBrandBrief(word, type);
+            }
+            return;
+        }
+
+        const cloudWordEl = e.target.closest('.cloud-word');
+        if (cloudWordEl) {
+            const word = cloudWordEl.dataset.word;
+            const category = cloudWordEl.closest('#positive-cloud') ? 'positive' : 'negative';
+            const postsData = window._sentimentData?.[category]?.[word]?.posts;
+            if (postsData) { showSlidingPanel(word, Array.from(postsData), category); }
+            return;
+        }
+
+        const removeBtnEl = e.target.closest('.remove-sub-btn');
+        if (removeBtnEl) {
+            handleRemoveSubClick(e);
+            return;
+        }
+    });
+}
+
+function initializeProblemFinderTool() {
+    const style = document.createElement('style');
+    style.textContent = `
+    .sankey-label {
+        padding: 12px 16px;
+        border-radius: 12px;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-size: 15px;
+        font-weight: 500;
+        white-space: normal !important;
+        word-break: break-word !important;
+        text-align: center;
+        line-height: 1.4;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+    }
+    .sankey-problem { background-color: #e0f2fe; color: #0c4a6e; }
+    .sankey-offer { background-color: #ede9fe; color: #5b21b6; }
+`;
+    document.head.appendChild(style);
+
+    console.log("Problem Finder elements found. Initializing...");
+    const welcomeDiv = document.getElementById('welcome-div');
+    const pillsContainer = document.getElementById('pf-suggestion-pills');
+    const groupInput = document.getElementById('group-input');
+    const findCommunitiesBtn = document.getElementById('find-communities-btn');
+    const searchSelectedBtn = document.getElementById('search-selected-btn');
+    const step1Container = document.getElementById('step-1-container');
+    const step2Container = document.getElementById('subreddit-selection-container');
+    const inspireButton = document.getElementById('inspire-me-button');
+    const choicesContainer = document.getElementById('subreddit-choices');
+    const audienceTitle = document.getElementById('pf-audience-title');
+
+    if (!findCommunitiesBtn || !searchSelectedBtn || !choicesContainer) {
+        console.error("Critical error: A key UI element was not found.");
+        return;
+    }
+
+    const transitionToStep2 = () => {
+        if (step2Container.classList.contains('visible')) return;
+        if (welcomeDiv) { welcomeDiv.style.display = 'none'; }
+        step1Container.classList.add('hidden');
+        step2Container.classList.add('visible');
+        choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>';
+        if (audienceTitle) audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`;
+    };
+
+    if (pillsContainer) {
+        pillsContainer.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
+        pillsContainer.addEventListener('click', (event) => {
+            if (event.target.classList.contains('pf-suggestion-pill')) {
+                groupInput.value = event.target.getAttribute('data-value');
+                findCommunitiesBtn.click();
+            }
+        });
+    }
+
+    if (inspireButton) {
+        inspireButton.addEventListener('click', () => {
+            if (pillsContainer) pillsContainer.classList.toggle('visible');
+        });
+    }
+
+    findCommunitiesBtn.addEventListener("click", async (event) => {
+        event.preventDefault();
+        const groupName = groupInput.value.trim();
+        if (!groupName) {
+            alert("Please enter a group of people or select a suggestion.");
+            return;
+        }
+        originalGroupName = groupName;
+        transitionToStep2();
+        try {
+            const initialSuggestions = await findSubredditsForGroup(groupName);
+            const rankedSubreddits = await fetchAndRankSubreddits(initialSuggestions);
+            displaySubredditChoices(rankedSubreddits);
+        } catch (error) {
+            console.error("Failed subreddit validation:", error);
+            displaySubredditChoices([]);
+        }
+    });
+
+    searchSelectedBtn.addEventListener("click", (event) => {
+        event.preventDefault();
+        runProblemFinder();
+    });
+
+    choicesContainer.addEventListener('click', (event) => {
+        const choiceDiv = event.target.closest('.subreddit-choice');
+        if (choiceDiv) {
+            const checkbox = choiceDiv.querySelector('input[type="checkbox"]');
+            if (checkbox && event.target !== checkbox) checkbox.checked = !checkbox.checked;
+        }
+    });
+
+    initializeDashboardInteractivity();
+
+    console.log("Problem Finder tool successfully initialized.");
+}
+
+function waitForElementAndInit() {
+    const keyElementId = 'find-communities-btn';
+    let retries = 0;
+    const maxRetries = 50;
+    const intervalId = setInterval(() => {
+        const keyElement = document.getElementById(keyElementId);
+        if (keyElement) {
+            clearInterval(intervalId);
+            initializeProblemFinderTool();
+        } else {
+            retries++;
+            if (retries > maxRetries) {
+                clearInterval(intervalId);
+                console.error(`Initialization FAILED. Element "#${keyElementId}" not found.`);
+            }
+        }
+    }, 100);
+}
+
+document.addEventListener('DOMContentLoaded', waitForElementAndInit);
+Citations
+
+https://slideplayer.com/slide/17191292/
+https://slideplayer.com/slide/4361372/

@@ -3181,7 +3181,3 @@ function waitForElementAndInit() {
 }
 
 document.addEventListener('DOMContentLoaded', waitForElementAndInit);
-Citations
-
-https://slideplayer.com/slide/17191292/
-https://slideplayer.com/slide/4361372/

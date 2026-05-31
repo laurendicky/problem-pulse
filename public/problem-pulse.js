@@ -21,11 +21,101 @@ const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'bro
 const emotionalIntensityScores = { 'annoy': 3, 'irritated': 3, 'bored': 2, 'issue': 3, 'sad': 4, 'bad': 3, 'confused': 4, 'tired': 3, 'upset': 5, 'unhappy': 5, 'disappoint': 6, 'frustrate': 6, 'stressful': 6, 'awful': 7, 'hate': 8, 'angry': 7, 'broken': 5, 'exhausted': 5, 'pain': 7, 'miserable': 8, 'terrible': 8, 'worst': 9, 'horrible': 8, 'furious': 9, 'outraged': 9, 'dreadful': 8, 'terrified': 10, 'nightmare': 10, 'heartbroken': 9, 'desperate': 8, 'rage': 10, 'problem': 4, 'challenge': 5, 'critical': 6, 'danger': 7, 'fear': 7, 'panic': 8, 'scared': 6, 'shocked': 7, 'trash': 5, 'alone': 4, 'ashamed': 5, 'depressed': 8, 'discouraged': 5, 'dull': 2, 'empty': 6, 'failure': 7, 'guilty': 6, 'hopeless': 8, 'insecure': 5, 'lonely': 6, 'weak': 4, 'need': 5, 'disadvantage': 4, 'flaw': 4 };
 const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
 
+const EMBEDDING_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/embeddings-proxy';
+const SIM_THRESHOLD = 0.30; // <-- the accuracy dial. Raise it if everything looks over-grounded.
+
+window._postEmbeddingCache = window._postEmbeddingCache || new Map();
+
+function cosineSimilarity(a, b) {
+    let dot = 0, na = 0, nb = 0;
+    for (let i = 0; i < a.length; i++) {
+        dot += a[i] * b[i];
+        na += a[i] * a[i];
+        nb += b[i] * b[i];
+    }
+    if (na === 0 || nb === 0) return 0;
+    return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+// Embed an array of strings in batches. Returns array of vectors (aligned to input order).
+async function embedTexts(texts, batchSize = 200) {
+    const vectors = [];
+    for (let i = 0; i < texts.length; i += batchSize) {
+        const batch = texts.slice(i, i + batchSize).map(t => (t || '').substring(0, 1500));
+        const payload = { model: "text-embedding-3-small", input: batch };
+        const response = await fetch(EMBEDDING_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ embeddingPayload: payload })
+        });
+        const data = await response.json();
+        if (!response.ok || data?.error) throw new Error('Embedding proxy returned an error.');
+        const embObjs = data?.embeddingResponse?.data || [];
+     
+        embObjs.forEach(o => vectors.push(o.embedding));
+    }
+    return vectors;
+}
+
+// Embed posts once, cached by post id, so pill re-runs only embed what's new.
+async function getPostEmbeddings(posts) {
+    const cache = window._postEmbeddingCache;
+    const missing = posts.filter(p => p.data && p.data.id && !cache.has(p.data.id));
+    if (missing.length > 0) {
+        const texts = missing.map(p => `${p.data.title || p.data.link_title || ''} ${p.data.selftext || p.data.body || ''}`);
+        const vectors = await embedTexts(texts);
+        missing.forEach((p, i) => { if (vectors[i]) cache.set(p.data.id, vectors[i]); });
+    }
+    return posts.map(p => cache.get(p.data?.id)).filter(Boolean);
+}
+
+// Build keyword -> count of semantically matching discussions. Null on failure (triggers fallback).
+async function buildGroundingMap(keywords, posts) {
+    try {
+        const postVectors = await getPostEmbeddings(posts);
+        if (postVectors.length === 0) return null;
+
+        const uniqueKeywords = [...new Set(keywords.map(k => k.toLowerCase().trim()).filter(Boolean))];
+        const keywordVectors = await embedTexts(uniqueKeywords);
+
+        const map = new Map();
+        let maxSim = 0, simSum = 0, simCount = 0; // for the calibration log
+        uniqueKeywords.forEach((kw, i) => {
+            const kv = keywordVectors[i];
+            if (!kv) { map.set(kw, 0); return; }
+            let count = 0;
+            for (const pv of postVectors) {
+                const sim = cosineSimilarity(kv, pv);
+                if (sim > maxSim) maxSim = sim;
+                simSum += sim; simCount++;
+                if (sim >= SIM_THRESHOLD) count++;
+            }
+            map.set(kw, count);
+        });
+        console.log(`[Grounding] threshold=${SIM_THRESHOLD} | max sim=${maxSim.toFixed(3)} | avg sim=${(simSum / (simCount || 1)).toFixed(3)}`);
+        return map;
+    } catch (err) {
+        console.error("Embedding grounding failed; falling back to word matching:", err);
+        return null;
+    }
+}
+
+// Unified lookup: semantic count if available, else the word-overlap fallback.
+function groundingCount(keyword, groundingMap, lowerTexts) {
+    if (!keyword) return 0;
+    if (groundingMap) {
+        const v = groundingMap.get(keyword.toLowerCase().trim());
+        if (v !== undefined) return v;
+    }
+    return countKeywordMentions(keyword, lowerTexts);
+}
 // Count how many analyzed discussions genuinely touch a keyword's theme.
 // Loose word-overlap match (>=50% of the keyword's meaningful words present).
 function countKeywordMentions(keyword, lowerTexts) {
     if (!keyword) return 0;
-    const words = keyword.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !stopWords.includes(w));
+    const words = keyword.toLowerCase().split(/\s+/)
+        .filter(w => w.length > 2 && !stopWords.includes(w))
+        .map(w => lemmatize(w)); // catch singular/plural + common variants
     if (words.length === 0) return 0;
     let count = 0;
     for (const text of lowerTexts) {
@@ -2285,7 +2375,8 @@ Your writing should adopt the following characteristics:
 // === UPGRADED FUNCTION: Action Cards with Strategic Logic & Master Toggle ===
 // =================================================================================
 
-function generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, confidence) {
+function generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, confidence, groundingMap) {
+
     console.log("SEO Cards: Starting render...");
     const container = document.getElementById('keyword-opportunities-container');
     if (!container) return;
@@ -2296,24 +2387,28 @@ function generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, conf
     }
 
     container.innerHTML = '';
+    const total = lowerTexts.length; // the real denominator (filtered discussions)
 
-    // Flatten every content idea and attach a REAL grounding count.
     const allIdeas = [];
     ['problem_aware', 'solution_seeking', 'purchase_intent'].forEach(intent => {
         if (!seoPlan[intent]) return;
         seoPlan[intent].forEach(primary => {
+            // Theme-level reach: how prevalent is this broad topic in the data.
+            const themeMentions = groundingCount(primary.keyword, groundingMap, lowerTexts);
+
             (primary.secondary_keywords || []).forEach(secondary => {
                 (secondary.long_tail_keywords || []).forEach(longtail => {
+                    // Specific-phrase reach: used only to break ties.
+                    const longTailMentions = groundingCount(longtail.keyword, groundingMap, lowerTexts);
                     (longtail.content_examples || []).forEach(content => {
-                        const mentions = countKeywordMentions(longtail.keyword, lowerTexts)
-                            || countKeywordMentions(primary.keyword, lowerTexts);
                         allIdeas.push({
                             title: content.title,
                             intent: intent,
                             primaryKeyword: primary.keyword,
                             secondaryKeyword: secondary.keyword,
                             longTailKeyword: longtail.keyword,
-                            mentions: mentions
+                            themeMentions: themeMentions,
+                            longTailMentions: longTailMentions
                         });
                     });
                 });
@@ -2321,11 +2416,13 @@ function generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, conf
         });
     });
 
-    // Rank by how grounded each idea is in the real discussions.
-    const ranked = [...allIdeas].sort((a, b) => b.mentions - a.mentions);
+    // Rank by how big the theme is, then by how specific the phrase match is.
+    const ranked = [...allIdeas].sort((a, b) =>
+        (b.themeMentions - a.themeMentions) || (b.longTailMentions - a.longTailMentions)
+    );
 
     const groups = [
-        { title: 'The Shortlist', subtitle: `Most grounded content ideas for ${audienceContext}, ranked by how often the theme came up.`, ideas: ranked.slice(0, 4) },
+        { title: 'The Shortlist', subtitle: `Most grounded content ideas for ${audienceContext}, ranked by how prevalent the theme is.`, ideas: ranked.slice(0, 4) },
         { title: 'Traffic Drivers', subtitle: 'Top-of-funnel ideas that match what problem-aware readers are already discussing.', ideas: ranked.filter(i => i.intent === 'problem_aware').slice(0, 4) },
         { title: 'Conversion Boosters', subtitle: 'Bottom-of-funnel ideas for readers showing real purchase intent.', ideas: ranked.filter(i => i.intent === 'purchase_intent').slice(0, 4) }
     ];
@@ -2354,11 +2451,10 @@ function generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, conf
                 if (item.querySelector('.action-item-secondary')) item.querySelector('.action-item-secondary').innerText = idea.secondaryKeyword;
                 if (item.querySelector('.action-item-longtail')) item.querySelector('.action-item-longtail').innerText = idea.longTailKeyword;
 
-                // Honest grounding signal, replacing the old fabricated volume.
                 const groundingEl = item.querySelector('.action-item-grounding');
                 if (groundingEl) {
-                    groundingEl.innerText = idea.mentions > 0
-                        ? `Seen in ${idea.mentions} discussion${idea.mentions === 1 ? '' : 's'}`
+                    groundingEl.innerText = idea.themeMentions > 0
+                        ? `Theme seen in ${idea.themeMentions} of ${total} discussions`
                         : 'Newly surfaced topic';
                 }
 
@@ -2377,46 +2473,6 @@ function generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, conf
 }
 
 
-function getPostsForFinding(findingTitle) {
-    if (!window._filteredPosts) return [];
-    if (findingTitle === 'all' || !window._summaries) return window._filteredPosts;
-    
-    const finding = window._summaries.find(s => s.title === findingTitle);
-    if (!finding) return window._filteredPosts;
-    
-    const matching = window._filteredPosts.filter(post => 
-        calculateRelevanceScore(post, finding) > 0
-    );
-    return matching.length >= 10 ? matching : window._filteredPosts;
-}
-
-
-function populateFindingPills() {
-    const wrap = document.getElementById('finding-pills-wrap');
-    if (!wrap || !window._summaries || !FINDING_PILL_BLUEPRINT) return;
-
-    // Clear the wrapper safely
-    wrap.innerHTML = '';
-
-    // Render 'All findings' pill
-    const allPill = FINDING_PILL_BLUEPRINT.cloneNode(true);
-    allPill.classList.add('active');
-    allPill.innerText = 'All findings';
-    allPill.dataset.finding = 'all';
-    allPill.style.display = 'inline-block'; // Ensure visibility
-    wrap.appendChild(allPill);
-
-    // Render individual finding pills from AI
-    window._summaries.forEach(summary => {
-        const pill = FINDING_PILL_BLUEPRINT.cloneNode(true);
-        pill.classList.remove('active');
-        pill.innerText = summary.title;
-        pill.dataset.finding = summary.title;
-        pill.style.display = 'inline-block'; // Ensure visibility
-        wrap.appendChild(pill);
-    });
-}
-
 async function generateAndRenderSeoSunburst(posts, audienceContext) {
     const container = document.getElementById('keyword-sunburst');
     if (!container) {
@@ -2430,6 +2486,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
     const lowerTexts = posts.map(p =>
         `${p.data.title || p.data.link_title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase()
     );
+    const totalDiscussions = lowerTexts.length;
     const confidence = getSeoConfidence(posts.length);
     renderSeoConfidence(confidence);
 
@@ -2496,8 +2553,26 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
 
         const seoPlan = JSON.parse(aiResult.openaiResponse);
 
-        // Render the Webflow action cards with real grounding + confidence.
-        generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, confidence);
+        // Collect every keyword in the plan, then build a semantic grounding map once.
+        const allKeywords = [];
+        ['problem_aware', 'solution_seeking', 'purchase_intent'].forEach(intent => {
+            (seoPlan[intent] || []).forEach(primary => {
+                if (primary.keyword) allKeywords.push(primary.keyword);
+                (primary.secondary_keywords || []).forEach(sec => {
+                    if (sec.keyword) allKeywords.push(sec.keyword);
+                    (sec.long_tail_keywords || []).forEach(lt => {
+                        if (lt.keyword) allKeywords.push(lt.keyword);
+                    });
+                });
+            });
+        });
+        const groundingMap = await buildGroundingMap(allKeywords, posts);
+
+        // Render the Webflow action cards with semantic grounding + confidence.
+        generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, confidence, groundingMap);
+
+
+
 
         // ---- Build sunburst data, sized by real grounding instead of fake volume ----
         const sunburstData = [
@@ -2526,7 +2601,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
 
                     (secondary.long_tail_keywords || []).forEach((longtail, k) => {
                         const longtailId = `${secondaryId}_l_${k}`;
-                        const mentions = countKeywordMentions(longtail.keyword, lowerTexts);
+                        const mentions = groundingCount(longtail.keyword, groundingMap, lowerTexts);
                         sunburstData.push({
                             id: longtailId, parent: secondaryId, name: longtail.keyword,
                             intentName: intentName, levelName: 'Long-tail keyword', mentions: mentions
@@ -2597,8 +2672,10 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                     if (point.levelName) html += `<b>Level:</b> ${point.levelName}<br/>`;
                     if (point.intentName) html += `<b>Intent:</b> ${point.intentName}<br/>`;
                     if (point.mentions !== undefined) {
-                        html += `<b>Appeared in:</b> ${point.mentions} discussion${point.mentions === 1 ? '' : 's'}<br/>`;
+                        html += `<b>Appeared in:</b> ${point.mentions} of ${totalDiscussions} discussions<br/>`;
                     }
+                 
+                 
                     html += `</div>`;
                     return html;
                 }

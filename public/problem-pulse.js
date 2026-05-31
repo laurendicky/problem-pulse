@@ -3197,7 +3197,41 @@ Posts: ${topPostsText}`;
             container.innerHTML = "Error analyzing detailed demographics.";
         }
     }
-
+    function getPostsForFinding(findingTitle) {
+        if (!window._filteredPosts) return [];
+        if (findingTitle === 'all' || !window._summaries) return window._filteredPosts;
+    
+        const finding = window._summaries.find(s => s.title === findingTitle);
+        if (!finding) return window._filteredPosts;
+    
+        const matching = window._filteredPosts.filter(post =>
+            calculateRelevanceScore(post, finding) > 0
+        );
+        return matching.length >= 10 ? matching : window._filteredPosts;
+    }
+    
+    function populateFindingPills() {
+        const wrap = document.getElementById('finding-pills-wrap');
+        if (!wrap || !window._summaries || !FINDING_PILL_BLUEPRINT) return;
+    
+        wrap.innerHTML = '';
+    
+        const allPill = FINDING_PILL_BLUEPRINT.cloneNode(true);
+        allPill.classList.add('active');
+        allPill.innerText = 'All findings';
+        allPill.dataset.finding = 'all';
+        allPill.style.display = 'inline-block';
+        wrap.appendChild(allPill);
+    
+        window._summaries.forEach(summary => {
+            const pill = FINDING_PILL_BLUEPRINT.cloneNode(true);
+            pill.classList.remove('active');
+            pill.innerText = summary.title;
+            pill.dataset.finding = summary.title;
+            pill.style.display = 'inline-block';
+            wrap.appendChild(pill);
+        });
+    }
 
     async function runProblemFinder(options = {}) {
         const { isUpdate = false } = options;

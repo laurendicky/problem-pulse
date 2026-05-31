@@ -1,31 +1,42 @@
+const OpenAI = require('openai');
+const allowedOrigins = [
+  'https://minky.ai', 'https://www.minky.ai',
+  'https://problempop.io', 'https://www.problempop.io',
+  'http://localhost:8888'
+];
 exports.handler = async (event) => {
-    const headers = {
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+  const origin = event.headers.origin;
+  const headers = {
+    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Content-Type': 'application/json',
+    'Access-Control-Allow-Origin': allowedOrigins.includes(origin) ? origin : '*'
+  };
+  if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers, body: '' };
+  try {
+    const apiKey = process.env.OPENAI_API_KEY;
+    const openai = new OpenAI({ apiKey });
+    const { embeddingPayload } = JSON.parse(event.body);
+
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('OpenAI_Latency_Limit')), 25000)
+    );
+    const embeddingResult = await Promise.race([
+      openai.embeddings.create(embeddingPayload),
+      timeoutPromise
+    ]);
+
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({ embeddingResponse: { data: embeddingResult.data } })
     };
-    if (event.httpMethod === 'OPTIONS') {
-        return { statusCode: 200, headers, body: '' };
-    }
-    try {
-        const { embeddingPayload } = JSON.parse(event.body || '{}');
-        if (!embeddingPayload) {
-            return { statusCode: 400, headers, body: JSON.stringify({ error: 'Missing embeddingPayload' }) };
-        }
-        const resp = await fetch('https://api.openai.com/v1/embeddings', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
-            },
-            body: JSON.stringify(embeddingPayload)
-        });
-        const data = await resp.json();
-        if (!resp.ok) {
-            return { statusCode: resp.status, headers, body: JSON.stringify({ error: data }) };
-        }
-        return { statusCode: 200, headers, body: JSON.stringify({ embeddingResponse: data }) };
-    } catch (err) {
-        return { statusCode: 500, headers, body: JSON.stringify({ error: err.message }) };
-    }
+  } catch (error) {
+    console.error('[EMBED PROXY LOG]', error.message);
+    return {
+      statusCode: 200,
+      headers,
+      body: JSON.stringify({ error: true, message: "Embedding service slow or unavailable." })
+    };
+  }
 };

@@ -21,7 +21,42 @@ const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'bro
 const emotionalIntensityScores = { 'annoy': 3, 'irritated': 3, 'bored': 2, 'issue': 3, 'sad': 4, 'bad': 3, 'confused': 4, 'tired': 3, 'upset': 5, 'unhappy': 5, 'disappoint': 6, 'frustrate': 6, 'stressful': 6, 'awful': 7, 'hate': 8, 'angry': 7, 'broken': 5, 'exhausted': 5, 'pain': 7, 'miserable': 8, 'terrible': 8, 'worst': 9, 'horrible': 8, 'furious': 9, 'outraged': 9, 'dreadful': 8, 'terrified': 10, 'nightmare': 10, 'heartbroken': 9, 'desperate': 8, 'rage': 10, 'problem': 4, 'challenge': 5, 'critical': 6, 'danger': 7, 'fear': 7, 'panic': 8, 'scared': 6, 'shocked': 7, 'trash': 5, 'alone': 4, 'ashamed': 5, 'depressed': 8, 'discouraged': 5, 'dull': 2, 'empty': 6, 'failure': 7, 'guilty': 6, 'hopeless': 8, 'insecure': 5, 'lonely': 6, 'weak': 4, 'need': 5, 'disadvantage': 4, 'flaw': 4 };
 const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
 
+// Count how many analyzed discussions genuinely touch a keyword's theme.
+// Loose word-overlap match (>=50% of the keyword's meaningful words present).
+function countKeywordMentions(keyword, lowerTexts) {
+    if (!keyword) return 0;
+    const words = keyword.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !stopWords.includes(w));
+    if (words.length === 0) return 0;
+    let count = 0;
+    for (const text of lowerTexts) {
+        let matched = 0;
+        for (const w of words) { if (text.includes(w)) matched++; }
+        if (matched / words.length >= 0.5) count++;
+    }
+    return count;
+}
 
+// Deterministic confidence based on how much real data we have. Tune the thresholds.
+function getSeoConfidence(postCount) {
+    if (postCount >= 120) {
+        return { level: 'High confidence', key: 'high', text: `Built from ${postCount} community discussions. A broad, reliable sample for this audience.` };
+    }
+    if (postCount >= 50) {
+        return { level: 'Medium confidence', key: 'medium', text: `Built from ${postCount} community discussions. Directional and useful, but validate before putting real budget behind it.` };
+    }
+    return { level: 'Low confidence', key: 'low', text: `Built from only ${postCount} community discussions. Treat these as early hints, not conclusions. A Deep search or longer time frame will sharpen them.` };
+}
+
+// Fills the Webflow confidence banner. Skips silently if you haven't added it yet.
+function renderSeoConfidence(confidence) {
+    const banner = document.getElementById('seo-confidence-banner');
+    if (!banner) return;
+    banner.setAttribute('data-confidence', confidence.key);
+    const labelEl = banner.querySelector('.seo-confidence-label');
+    const textEl = banner.querySelector('.seo-confidence-text');
+    if (labelEl) labelEl.innerText = confidence.level;
+    if (textEl) textEl.innerText = confidence.text;
+}
 // =================================================================================
 // === ADD THIS MISSING HELPER FUNCTION TO YOUR SCRIPT ===
 // =================================================================================
@@ -2249,7 +2284,8 @@ Your writing should adopt the following characteristics:
 // =================================================================================
 // === UPGRADED FUNCTION: Action Cards with Strategic Logic & Master Toggle ===
 // =================================================================================
-function generateAndRenderActionCards(seoPlan, audienceContext) {
+
+function generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, confidence) {
     console.log("SEO Cards: Starting render...");
     const container = document.getElementById('keyword-opportunities-container');
     if (!container) return;
@@ -2259,10 +2295,9 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
         return;
     }
 
-    // Clear the container
     container.innerHTML = '';
 
-    // Flatten the data
+    // Flatten every content idea and attach a REAL grounding count.
     const allIdeas = [];
     ['problem_aware', 'solution_seeking', 'purchase_intent'].forEach(intent => {
         if (!seoPlan[intent]) return;
@@ -2270,14 +2305,15 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
             (primary.secondary_keywords || []).forEach(secondary => {
                 (secondary.long_tail_keywords || []).forEach(longtail => {
                     (longtail.content_examples || []).forEach(content => {
+                        const mentions = countKeywordMentions(longtail.keyword, lowerTexts)
+                            || countKeywordMentions(primary.keyword, lowerTexts);
                         allIdeas.push({
                             title: content.title,
                             intent: intent,
                             primaryKeyword: primary.keyword,
-                            primaryVolume: primary.searchVolume || 0,
                             secondaryKeyword: secondary.keyword,
                             longTailKeyword: longtail.keyword,
-                            longTailVolume: longtail.searchVolume || 0,
+                            mentions: mentions
                         });
                     });
                 });
@@ -2285,42 +2321,49 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
         });
     });
 
+    // Rank by how grounded each idea is in the real discussions.
+    const ranked = [...allIdeas].sort((a, b) => b.mentions - a.mentions);
+
     const groups = [
-        { title: 'The Shortlist', ideas: allIdeas.slice(0, 4) },
-        { title: 'Traffic Drivers', ideas: allIdeas.filter(i => i.intent === 'problem_aware').slice(0, 4) },
-        { title: 'Conversion Boosters', ideas: allIdeas.filter(i => i.intent === 'purchase_intent').slice(0, 4) }
+        { title: 'The Shortlist', subtitle: `Most grounded content ideas for ${audienceContext}, ranked by how often the theme came up.`, ideas: ranked.slice(0, 4) },
+        { title: 'Traffic Drivers', subtitle: 'Top-of-funnel ideas that match what problem-aware readers are already discussing.', ideas: ranked.filter(i => i.intent === 'problem_aware').slice(0, 4) },
+        { title: 'Conversion Boosters', subtitle: 'Bottom-of-funnel ideas for readers showing real purchase intent.', ideas: ranked.filter(i => i.intent === 'purchase_intent').slice(0, 4) }
     ];
 
     groups.forEach(group => {
         if (group.ideas.length === 0) return;
 
         const card = SEO_CARD_BLUEPRINT.cloneNode(true);
-        
-        // FIX: Ensure card is visible, but DO NOT remove the class (preserves Webflow styles)
-        card.style.display = 'block'; 
-        
-        if (card.querySelector('.action-card-title')) {
-            card.querySelector('.action-card-title').innerText = group.title;
-        }
-        
+        card.style.display = 'block';
+
+        const titleEl = card.querySelector('.action-card-title');
+        if (titleEl) titleEl.innerText = group.title;
+
+        const subtitleEl = card.querySelector('.action-card-subtitle');
+        if (subtitleEl) subtitleEl.innerText = group.subtitle;
+
         const listEl = card.querySelector('.action-items-list');
         if (listEl) {
-            listEl.innerHTML = ''; // Clear the template items out of the clone
+            listEl.innerHTML = '';
             group.ideas.forEach(idea => {
                 const item = SEO_ITEM_BLUEPRINT.cloneNode(true);
-                
-                // FIX: Ensure item is visible, but DO NOT remove the class
-                item.style.display = 'block'; 
+                item.style.display = 'block';
 
                 if (item.querySelector('.action-item-title')) item.querySelector('.action-item-title').innerText = idea.title;
                 if (item.querySelector('.action-item-keyword')) item.querySelector('.action-item-keyword').innerText = idea.primaryKeyword;
                 if (item.querySelector('.action-item-secondary')) item.querySelector('.action-item-secondary').innerText = idea.secondaryKeyword;
                 if (item.querySelector('.action-item-longtail')) item.querySelector('.action-item-longtail').innerText = idea.longTailKeyword;
-                if (item.querySelector('.action-item-volume')) item.querySelector('.action-item-volume').innerText = idea.primaryVolume.toLocaleString() + "/mo";
-                
-                // Map the new field you added in Webflow
+
+                // Honest grounding signal, replacing the old fabricated volume.
+                const groundingEl = item.querySelector('.action-item-grounding');
+                if (groundingEl) {
+                    groundingEl.innerText = idea.mentions > 0
+                        ? `Seen in ${idea.mentions} discussion${idea.mentions === 1 ? '' : 's'}`
+                        : 'Newly surfaced topic';
+                }
+
                 if (item.querySelector('.action-item-why')) {
-                    const intentName = idea.intent.replace('_', ' ');
+                    const intentName = idea.intent.replace(/_/g, ' ');
                     item.querySelector('.action-item-why').innerText = "Targets " + intentName;
                 }
 
@@ -2329,9 +2372,9 @@ function generateAndRenderActionCards(seoPlan, audienceContext) {
         }
         container.appendChild(card);
     });
+
     console.log("SEO Cards: Successfully populated!");
 }
-
 
 
 function getPostsForFinding(findingTitle) {
@@ -2381,39 +2424,48 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         return;
     }
 
-    container.innerHTML = '<p class="loading-text">Building data-driven SEO plan...</p>';
+    container.innerHTML = '<p class="loading-text">Building data-grounded content plan...</p>';
+
+    // Real, reusable inputs for grounding + confidence.
+    const lowerTexts = posts.map(p =>
+        `${p.data.title || p.data.link_title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase()
+    );
+    const confidence = getSeoConfidence(posts.length);
+    renderSeoConfidence(confidence);
 
     try {
         const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        // *** CHANGE 1: The AI prompt is updated to match the new node count rules. ***
-        const prompt = `You are an expert SEO strategist for the "${audienceContext}" audience. Create a comprehensive, multi-level SEO plan based on the provided text.
+        const prompt = `You are an SEO and content strategist for the "${audienceContext}" audience. Below are real discussions from this community. Build a content plan whose keywords reflect the ACTUAL language, questions, and pain points in these discussions.
+
+        CRITICAL RULES:
+        - Do NOT invent search volumes, traffic numbers, or any metrics. Return none.
+        - Only use topics and phrasings that are supported by the discussions provided.
+        - Long-tail keywords must sound like something this specific audience would actually type or say.
 
         Structure your response as a single, valid JSON object.
 
-        For each of the three intents (problem_aware, solution_seeking, purchase_intent), provide an array of 2-5 primary keywords.
-
+        For each of the three intents (problem_aware, solution_seeking, purchase_intent), provide an array of 2-5 primary keywords (broad themes).
         - For EACH primary keyword, provide an array of 2-4 "secondary_keywords".
         - For EACH secondary keyword, provide an array of 2-3 "long_tail_keywords".
-        - For EACH long-tail keyword, provide an array of 1-2 "content_examples".
+        - For EACH long_tail keyword, provide an array of 1-2 "content_examples".
 
-        CRITICAL: Every keyword object (primary, secondary, long_tail) MUST contain:
-        - "keyword": The keyword phrase.
-        - "searchVolume": A realistic monthly search volume (integer).
+        Every keyword object (primary, secondary, long_tail) MUST contain exactly one key:
+        - "keyword": the keyword phrase, in language this audience would actually use.
 
-        Each "content_examples" item should be an object with a single key: "title".
+        Each "content_examples" item must be an object with a single key: "title".
 
         Example JSON Structure:
         {
           "problem_aware": [
             {
-              "keyword": "primary keyword A", "searchVolume": 5000,
+              "keyword": "primary theme A",
               "secondary_keywords": [
                 {
-                  "keyword": "secondary keyword A1", "searchVolume": 1200,
+                  "keyword": "secondary keyword A1",
                   "long_tail_keywords": [
                     {
-                      "keyword": "long-tail keyword A1a", "searchVolume": 300,
+                      "keyword": "long-tail keyword A1a",
                       "content_examples": [ { "title": "Example Blog Title 1" } ]
                     }
                   ]
@@ -2422,11 +2474,14 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
             }
           ],
           "solution_seeking": [ ... ], "purchase_intent": [ ... ]
-        }`;
+        }
+
+        Discussions to base everything on:
+        ${topPostsText}`;
 
         const openAIParams = {
             model: "gpt-4o",
-            messages: [{ role: "system", content: "You are a JSON-only SEO strategist." }, { role: "user", content: prompt }],
+            messages: [{ role: "system", content: "You are a JSON-only SEO strategist who never fabricates metrics and grounds every keyword in the supplied text." }, { role: "user", content: prompt }],
             temperature: 0.2,
             response_format: { "type": "json_object" }
         };
@@ -2435,86 +2490,53 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         if (!response.ok) throw new Error('AI SEO plan generation failed.');
 
         const aiResult = await response.json();
-
-        // FIX: Verify openaiResponse actually exists to prevent "undefined is not valid JSON"
         if (!aiResult || !aiResult.openaiResponse) {
             throw new Error("AI Proxy failed to return a valid response (possible server timeout).");
         }
 
         const seoPlan = JSON.parse(aiResult.openaiResponse);
-        generateAndRenderActionCards(seoPlan, audienceContext);
 
+        // Render the Webflow action cards with real grounding + confidence.
+        generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, confidence);
 
-        // =========================================================================
-        // === STEP 1: CORRECTED DATA GENERATION ===================================
-        // =========================================================================
-
-        // Data transformation logic
-        const sunburstData = [{
-            id: 'root', parent: '', name: 'SEO Plan',
-            levelName: 'SEO Plan' // <-- FLATTENED PROPERTY
-        }, {
-            id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF',
-            levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
-        }, {
-            id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF',
-            levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
-        }, {
-            id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8',
-            levelName: 'Intent bucket' // <-- FLATTENED PROPERTY
-        }];
+        // ---- Build sunburst data, sized by real grounding instead of fake volume ----
+        const sunburstData = [
+            { id: 'root', parent: '', name: 'Content Plan', levelName: 'Content Plan' },
+            { id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF', levelName: 'Intent bucket' },
+            { id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF', levelName: 'Intent bucket' },
+            { id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8', levelName: 'Intent bucket' }
+        ];
 
         const processIntent = (intentId, intentName, intentData) => {
             if (!intentData || !Array.isArray(intentData)) return;
 
-            // Level 3: Primary Keywords
             intentData.forEach((primary, i) => {
                 const primaryId = `${intentId}_p_${i}`;
                 sunburstData.push({
-                    id: primaryId,
-                    parent: intentId,
-                    name: primary.keyword,
-                    // NO 'extra' OBJECT. Properties are added directly.
-                    intentName: intentName,
-                    levelName: 'Primary keyword',
-                    searchVolume: primary.searchVolume
+                    id: primaryId, parent: intentId, name: primary.keyword,
+                    intentName: intentName, levelName: 'Primary keyword'
                 });
 
-                // Level 4: Secondary Keywords
                 (primary.secondary_keywords || []).forEach((secondary, j) => {
                     const secondaryId = `${primaryId}_s_${j}`;
                     sunburstData.push({
-                        id: secondaryId,
-                        parent: primaryId,
-                        name: secondary.keyword,
-                        intentName: intentName,
-                        levelName: 'Secondary keyword',
-                        searchVolume: secondary.searchVolume
+                        id: secondaryId, parent: primaryId, name: secondary.keyword,
+                        intentName: intentName, levelName: 'Secondary keyword'
                     });
 
-                    // Level 5: Long-tail Keywords
                     (secondary.long_tail_keywords || []).forEach((longtail, k) => {
                         const longtailId = `${secondaryId}_l_${k}`;
+                        const mentions = countKeywordMentions(longtail.keyword, lowerTexts);
                         sunburstData.push({
-                            id: longtailId,
-                            parent: secondaryId,
-                            name: longtail.keyword,
-                            intentName: intentName,
-                            levelName: 'Long-tail keyword',
-                            searchVolume: longtail.searchVolume
+                            id: longtailId, parent: secondaryId, name: longtail.keyword,
+                            intentName: intentName, levelName: 'Long-tail keyword', mentions: mentions
                         });
 
-                        // Level 6: Content Examples
                         (longtail.content_examples || []).forEach((content, l) => {
-                            const value = longtail.searchVolume / (longtail.content_examples.length || 1);
                             sunburstData.push({
-                                id: `${longtailId}_c_${l}`,
-                                parent: longtailId,
-                                name: content.title,
-                                value: Math.max(value, 1),
-                                intentName: intentName,
-                                levelName: 'Content example',
-                                searchVolume: longtail.searchVolume // Storing the parent's volume
+                                id: `${longtailId}_c_${l}`, parent: longtailId, name: content.title,
+                                value: Math.max(mentions, 1),
+                                intentName: intentName, levelName: 'Content example', mentions: mentions
                             });
                         });
                     });
@@ -2522,36 +2544,20 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
             });
         };
 
-
         processIntent('pa', 'Problem-Aware', seoPlan.problem_aware);
         processIntent('ss', 'Solution-Seeking', seoPlan.solution_seeking);
         processIntent('pi', 'Purchase-Intent', seoPlan.purchase_intent);
 
-        const seriesName = sunburstData.find(d => d.id === 'root')?.name || 'SEO Plan';
-
-        // =========================================================================
-        // === START: COPY AND REPLACE THIS ENTIRE BLOCK ===========================
-        // =========================================================================
+        const seriesName = sunburstData.find(d => d.id === 'root')?.name || 'Content Plan';
 
         Highcharts.chart(container, {
             chart: { type: 'sunburst', height: '650px', backgroundColor: null },
             title: { text: null },
             credits: { enabled: false },
-
-            // THIS IS THE KEY FIX for removing "Series 1" and enabling CSS control
-            breadcrumbs: {
-                showFullPath: false, // <-- This removes the "Series 1" prefix
-                useHTML: true        // <-- This allows our CSS to control wrapping
-            },
-
+            breadcrumbs: { showFullPath: false, useHTML: true },
             plotOptions: {
-                sunburst: {
-                    animation: { duration: 1000 },
-                    borderColor: '#FFFFFF',
-                    borderWidth: 1
-                }
+                sunburst: { animation: { duration: 1000 }, borderColor: '#FFFFFF', borderWidth: 1 }
             },
-
             series: [{
                 type: 'sunburst',
                 name: seriesName,
@@ -2562,68 +2568,51 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                     format: '{point.name}',
                     filter: { property: 'innerArcLength', operator: '>', value: 20 },
                     rotationMode: 'circular',
-                    style: {
-                        color: '#FFFFFF',
-                        textOutline: 'none',
-                        fontWeight: '400'
-                    }
+                    style: { color: '#FFFFFF', textOutline: 'none', fontWeight: '400' }
                 },
-                levels: [{
-                    level: 1,
-                    levelIsConstant: false,
-                    dataLabels: {
-                        enabled: true,
-                        filter: { property: 'value', operator: '>', value: -1 },
-                        style: {
-                            fontSize: '1.1em',
-                            fontWeight: '400',
-                            color: '#FFFFFF',
-                            textOutline: 'none'
+                levels: [
+                    {
+                        level: 1, levelIsConstant: false,
+                        dataLabels: {
+                            enabled: true,
+                            filter: { property: 'value', operator: '>', value: -1 },
+                            style: { fontSize: '1.1em', fontWeight: '400', color: '#FFFFFF', textOutline: 'none' }
                         }
-                    }
-                }, { level: 2, colorByPoint: true }, { level: 3, colorVariation: { key: 'brightness', to: -0.25 } }, { level: 4, colorVariation: { key: 'brightness', to: 0.25 } }, { level: 5, colorVariation: { key: 'brightness', to: -0.45 } }, { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }]
+                    },
+                    { level: 2, colorByPoint: true },
+                    { level: 3, colorVariation: { key: 'brightness', to: -0.25 } },
+                    { level: 4, colorVariation: { key: 'brightness', to: 0.25 } },
+                    { level: 5, colorVariation: { key: 'brightness', to: -0.45 } },
+                    { level: 6, colorVariation: { key: 'brightness', to: 0.45 } }
+                ]
             }],
-
             tooltip: {
                 useHTML: true,
                 headerFormat: '',
                 pointFormatter: function () {
                     const point = this;
                     let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
-
-                    // THIS IS THE FIX for the bold and capitalized name in the tooltip
                     const capitalizedName = point.name.replace(/(^\w{1})|(\s+\w{1})/g, letter => letter.toUpperCase());
-                    html += `<b>Name:</b> <b>${capitalizedName}</b><br/>`; // <-- MODIFIED LINE
-
-                    if (point.levelName) {
-                        html += `<b>Level:</b> ${point.levelName}<br/>`;
-                    }
-                    if (point.intentName) {
-                        html += `<b>Intent:</b> ${point.intentName}<br/>`;
-                    }
-                    if (point.searchVolume !== undefined) {
-                        html += `<b>Search volume:</b> ${point.searchVolume.toLocaleString()}<br/>`;
+                    html += `<b>Name:</b> <b>${capitalizedName}</b><br/>`;
+                    if (point.levelName) html += `<b>Level:</b> ${point.levelName}<br/>`;
+                    if (point.intentName) html += `<b>Intent:</b> ${point.intentName}<br/>`;
+                    if (point.mentions !== undefined) {
+                        html += `<b>Appeared in:</b> ${point.mentions} discussion${point.mentions === 1 ? '' : 's'}<br/>`;
                     }
                     html += `</div>`;
                     return html;
                 }
             },
-
             exporting: { enabled: true },
-            accessibility: { enabled: true },
+            accessibility: { enabled: true }
         });
 
-        // =========================================================================
-        // === END OF BLOCK TO REPLACE =============================================
-        // =========================================================================
     } catch (error) {
         console.error("Failed to generate or render SEO Sunburst chart:", error);
-        container.innerHTML = `<p class="error-message">Could not generate the visual SEO plan.</p>`;
+        container.innerHTML = `<p class="error-message">Could not generate the content plan.</p>`;
     }
 }
-// =================================================================================
-// === NEW SOLUTION: PROBLEM/OFFER SANKEY DIAGRAM ==================================
-// =================================================================================
+
 
 async function generateProblemOfferPairsAI(summaries) {
     if (!summaries || summaries.length === 0) return [];
@@ -3713,6 +3702,7 @@ Posts: ${topPostsText}`;
                 return;
             }
             originalGroupName = groupName;
+            window.originalGroupName = groupName;
             transitionToStep2();
             try {
                 const initialSuggestions = await findSubredditsForGroup(groupName);

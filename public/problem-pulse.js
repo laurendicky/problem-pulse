@@ -142,7 +142,7 @@ function mineAssociations(matrix) {
 }
 
 async function generateAndRenderHiddenGems(posts, audienceContext) {
-    const grid = document.querySelector('.card-grid');
+    const grid = document.querySelector('.gem-card-grid');
     if (!grid) return;
 
     if (!window._gemBlueprint) {

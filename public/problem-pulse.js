@@ -57,6 +57,225 @@ async function embedTexts(texts, batchSize = 200) {
     return vectors;
 }
 
+// =================================================================================
+// === HIDDEN GEMS ENGINE (statistics-first, surprise-curated) ===
+// =================================================================================
+const GEM_MIN_SUPPORT = 4;    // pair must co-occur in >= this many discussions
+const GEM_MIN_LIFT    = 1.4;  // co-occur at least 40% more than chance
+const GEM_MIN_CHI2    = 3.84; // ~ p < 0.05 at 1 degree of freedom
+const GEM_MAX_SIM     = 0.55; // drop near-synonym pairs (too alike = not surprising)
+
+function buildFeatureMatrix(posts) {
+    const N = posts.length;
+    const df = new Map();
+    const featurePosts = new Map();
+
+    const emotionTerms = new Set([
+        ...positiveWords, ...negativeWords, ...Object.keys(emotionalIntensityScores),
+        'guilt','guilty','shame','blame','embarrassed','judged','judgement','judgment',
+        'avoid','isolate','isolated','isolation','lonely','loneliness','identity','confidence',
+        'insecure','overwhelmed','obsessed','regret','resent','grief','cope','coping','anxiety'
+    ].map(w => lemmatize(w)));
+
+    posts.forEach((post, idx) => {
+        const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase();
+        const seen = new Set();
+        text.replace(/[^a-z\s']/g, ' ').split(/\s+/).forEach(w => {
+            if (w.length < 3 || stopWords.includes(w)) return;
+            const lemma = lemmatize(w);
+            if (lemma.length < 3 || stopWords.includes(lemma)) return;
+            seen.add(lemma);
+        });
+        seen.forEach(f => {
+            df.set(f, (df.get(f) || 0) + 1);
+            if (!featurePosts.has(f)) featurePosts.set(f, new Set());
+            featurePosts.get(f).add(idx);
+        });
+    });
+
+    const minDF = Math.max(3, Math.round(N * 0.03));
+    const boostMinDF = Math.max(2, Math.round(N * 0.015)); // lower bar for emotion words
+    const maxDF = Math.round(N * 0.6);
+
+    const scored = [...df.entries()].filter(([f, c]) => {
+        if (c > maxDF) return false;
+        return emotionTerms.has(f) ? c >= boostMinDF : c >= minDF;
+    }).sort((a, b) => b[1] - a[1]);
+
+    const vocab = scored.slice(0, 70).map(([f]) => f);
+    const types = new Map(vocab.map(f => [f, emotionTerms.has(f) ? 'emotion' : 'topic']));
+
+    return { N, df, featurePosts, vocab, types };
+}
+
+function chiSquare2x2(a, b, c, d) {
+    const n = a + b + c + d;
+    const denom = (a + b) * (c + d) * (a + c) * (b + d);
+    if (denom === 0) return 0;
+    return (n * Math.pow(a * d - b * c, 2)) / denom;
+}
+
+function mineAssociations(matrix) {
+    const { N, df, featurePosts, vocab } = matrix;
+    const pairs = [];
+    for (let i = 0; i < vocab.length; i++) {
+        for (let j = i + 1; j < vocab.length; j++) {
+            const X = vocab[i], Y = vocab[j];
+            const setX = featurePosts.get(X), setY = featurePosts.get(Y);
+            const [small, big] = setX.size <= setY.size ? [setX, setY] : [setY, setX];
+            let support = 0;
+            small.forEach(idx => { if (big.has(idx)) support++; });
+            if (support < GEM_MIN_SUPPORT) continue;
+
+            const dfX = df.get(X), dfY = df.get(Y);
+            const lift = (support / N) / ((dfX / N) * (dfY / N));
+            if (lift < GEM_MIN_LIFT) continue;
+
+            const a = support, b = dfX - support, c = dfY - support, d = N - a - b - c;
+            const chi2 = chiSquare2x2(a, b, c, d);
+            if (chi2 < GEM_MIN_CHI2) continue;
+
+            pairs.push({ x: X, y: Y, support, lift, chi2 });
+        }
+    }
+    return pairs;
+}
+
+async function generateAndRenderHiddenGems(posts, audienceContext) {
+    const grid = document.querySelector('.card-grid');
+    if (!grid) return;
+
+    if (!window._gemBlueprint) {
+        const bp = grid.querySelector('.card-wrapper');
+        if (bp) window._gemBlueprint = bp.cloneNode(true);
+    }
+    const GEM_BLUEPRINT = window._gemBlueprint;
+    if (!GEM_BLUEPRINT) { console.error('Hidden Gems: .card-wrapper blueprint not found inside .card-grid.'); return; }
+
+    grid.innerHTML = '<p class="loading-text">Mining for hidden connections...</p>';
+
+    if (!posts || posts.length < 25) {
+        grid.innerHTML = '<p class="placeholder-text">Not enough discussions yet for reliable hidden gems. Try a Deep search or a longer time frame.</p>';
+        return;
+    }
+
+    try {
+        const matrix = buildFeatureMatrix(posts);
+        let candidates = mineAssociations(matrix);
+        if (candidates.length === 0) {
+            grid.innerHTML = '<p class="placeholder-text">No statistically surprising connections in this sample.</p>';
+            return;
+        }
+
+        // Surprise filter 1: drop near-synonym pairs.
+        const featuresInPlay = [...new Set(candidates.flatMap(p => [p.x, p.y]))];
+        const vectors = await embedTexts(featuresInPlay);
+        const vecMap = new Map(featuresInPlay.map((f, i) => [f, vectors[i]]));
+        candidates = candidates.map(p => {
+            const vx = vecMap.get(p.x), vy = vecMap.get(p.y);
+            const sim = (vx && vy) ? cosineSimilarity(vx, vy) : 0;
+            return { ...p, sim, distance: 1 - sim };
+        }).filter(p => p.sim <= GEM_MAX_SIM);
+        if (candidates.length === 0) {
+            grid.innerHTML = '<p class="placeholder-text">Connections found, but too predictable to call hidden gems.</p>';
+            return;
+        }
+
+        // Score: surprise x reliability x distance x topic<->emotion bridge bonus.
+        candidates.forEach(p => {
+            const tx = matrix.types.get(p.x), ty = matrix.types.get(p.y);
+            let bonus = 1.0;
+            if (tx === 'emotion' && ty === 'emotion') bonus = 1.2;
+            else if (tx === 'emotion' || ty === 'emotion') bonus = 1.6;
+            p.score = p.lift * Math.log2(p.support + 1) * p.distance * bonus;
+        });
+        candidates.sort((a, b) => b.score - a.score);
+        const shortlist = candidates.slice(0, 14);
+
+        shortlist.forEach(p => {
+            const setX = matrix.featurePosts.get(p.x), setY = matrix.featurePosts.get(p.y);
+            for (const idx of setX) {
+                if (setY.has(idx)) {
+                    const ex = posts[idx];
+                    const txt = `${ex.data.title || ''} ${ex.data.selftext || ex.data.body || ''}`.trim();
+                    p.quote = txt.length > 220 ? txt.substring(0, 217) + '...' : txt;
+                    break;
+                }
+            }
+        });
+
+        // Surprise filter 2 + phrasing: the LLM keeps only the genuinely unexpected.
+        const alreadyShown = (window._summaries || []).map(s => s.title).slice(0, 6);
+        const items = shortlist.map((p, i) => ({ id: i, term_a: p.x, term_b: p.y, times_together: p.support, lift: Number(p.lift.toFixed(1)), quote: p.quote || '' }));
+
+        const prompt = `You are curating "Hidden Gem" cards for the "${audienceContext}" audience. Each item below is a STATISTICALLY VERIFIED connection: two themes that appear together in real discussions far more often than chance. You did NOT find these and you MUST NOT invent new ones or alter the relationship.
+
+Two jobs:
+1. CURATE: keep ONLY connections that are genuinely surprising, the kind that makes a marketer say "I would never have guessed that". Aggressively DISCARD anything obvious or expected for this audience, and anything that just restates these themes they have already seen: ${JSON.stringify(alreadyShown)}. Returning fewer is good. Quality over quantity.
+2. PHRASE each kept connection. Decide which term is the intriguing setup and which is the surprising reveal.
+
+For each kept item return:
+- "id": the original id.
+- "topic_a": clean 1-3 word label for the setup theme.
+- "front_teaser": one sentence hinting at a surprising connection WITHOUT naming the reveal (e.g. "People who discuss behaviour issues are strongly connected to something that has nothing to do with training...").
+- "reveal_finding": clean 1-4 word label for the surprising thing they are connected to.
+- "reveal_summary": one plain sentence stating the connection, grounded in the terms and quote. No invented claims or numbers.
+
+Respond ONLY as JSON: {"gems":[{"id":0,"topic_a":"...","front_teaser":"...","reveal_finding":"...","reveal_summary":"..."}]}
+
+Items:
+${JSON.stringify(items)}`;
+
+        let curated = [];
+        try {
+            const r = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: {
+                model: "gpt-4o",
+                messages: [{ role: "system", content: "You curate pre-verified data findings for genuine surprise and phrase the survivors. You never invent connections or statistics." }, { role: "user", content: prompt }],
+                temperature: 0.5,
+                response_format: { "type": "json_object" }
+            }})});
+            const data = await r.json();
+            if (data && data.openaiResponse && !data.error) curated = JSON.parse(data.openaiResponse).gems || [];
+        } catch (e) { console.error('Hidden Gems curation failed, using fallback.', e); }
+
+        if (curated.length === 0) {
+            curated = shortlist.slice(0, 6).map((p, i) => ({
+                id: i, topic_a: p.x, front_teaser: `People who discuss "${p.x}" are unusually connected to something unexpected...`,
+                reveal_finding: p.y, reveal_summary: `Discussions about "${p.x}" are unusually likely to also involve "${p.y}".`
+            }));
+        }
+
+        grid.innerHTML = '';
+        const set = (root, sel, val) => { const e = root.querySelector(sel); if (e) e.innerText = val; };
+
+        curated.slice(0, 8).forEach(g => {
+            const p = shortlist[g.id] || {};
+            const card = GEM_BLUEPRINT.cloneNode(true);
+            card.classList.remove('is-flipped');
+            card.style.display = '';
+
+            set(card, '.topic-a', g.topic_a || '');
+            set(card, '.front-summary', g.front_teaser || '');
+            set(card, '.topic-a-back', g.topic_a || '');
+            set(card, '.reveal-finding', g.reveal_finding || '');
+            set(card, '.reveal-summary', g.reveal_summary || '');
+
+            const stat = card.querySelector('.gem-stat');
+            if (stat && p.support) stat.innerText = `Seen together in ${p.support} discussions · ${p.lift.toFixed(1)}× more than chance`;
+
+            card.addEventListener('click', () => card.classList.toggle('is-flipped'));
+            grid.appendChild(card);
+        });
+
+        if (grid.children.length === 0) {
+            grid.innerHTML = '<p class="placeholder-text">No connections surprising enough to surface this time.</p>';
+        }
+
+    } catch (error) {
+        console.error('Hidden Gems error:', error);
+        grid.innerHTML = '<p class="error-message">Could not generate hidden gems.</p>';
+    }
+}
 // Embed posts once, cached by post id, so pill re-runs only embed what's new.
 async function getPostEmbeddings(posts) {
     const cache = window._postEmbeddingCache;
@@ -3589,6 +3808,8 @@ Posts: ${topPostsText}`;
             setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
             setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
             setTimeout(() => generateAndRenderHistoricalSentiment(subredditQueryString), 3500);
+            setTimeout(() => generateAndRenderHiddenGems(window._filteredPosts, originalGroupName), 4000);
+
 
         } catch (err) {
             console.error("!!!!!!!! A FATAL ERROR STOPPED THE ANALYSIS !!!!!!!!", err);

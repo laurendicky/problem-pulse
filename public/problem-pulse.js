@@ -2376,8 +2376,7 @@ Your writing should adopt the following characteristics:
 // =================================================================================
 
 function generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, confidence, groundingMap) {
-
-    console.log("SEO Cards: Starting render...");
+    console.log("Content Opportunities: Starting render...");
     const container = document.getElementById('keyword-opportunities-container');
     if (!container) return;
 
@@ -2386,6 +2385,13 @@ function generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, conf
         return;
     }
 
+    // Plain-language stage labels (replaces the SEO funnel jargon).
+    const STAGE_LABELS = {
+        problem_aware: 'Feeling the problem',
+        solution_seeking: 'Comparing solutions',
+        purchase_intent: 'Ready to buy'
+    };
+
     container.innerHTML = '';
     const total = lowerTexts.length; // the real denominator (filtered discussions)
 
@@ -2393,12 +2399,9 @@ function generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, conf
     ['problem_aware', 'solution_seeking', 'purchase_intent'].forEach(intent => {
         if (!seoPlan[intent]) return;
         seoPlan[intent].forEach(primary => {
-            // Theme-level reach: how prevalent is this broad topic in the data.
             const themeMentions = groundingCount(primary.keyword, groundingMap, lowerTexts);
-
             (primary.secondary_keywords || []).forEach(secondary => {
                 (secondary.long_tail_keywords || []).forEach(longtail => {
-                    // Specific-phrase reach: used only to break ties.
                     const longTailMentions = groundingCount(longtail.keyword, groundingMap, lowerTexts);
                     (longtail.content_examples || []).forEach(content => {
                         allIdeas.push({
@@ -2416,15 +2419,14 @@ function generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, conf
         });
     });
 
-    // Rank by how big the theme is, then by how specific the phrase match is.
     const ranked = [...allIdeas].sort((a, b) =>
         (b.themeMentions - a.themeMentions) || (b.longTailMentions - a.longTailMentions)
     );
 
     const groups = [
-        { title: 'The Shortlist', subtitle: `Most grounded content ideas for ${audienceContext}, ranked by how prevalent the theme is.`, ideas: ranked.slice(0, 4) },
-        { title: 'Traffic Drivers', subtitle: 'Top-of-funnel ideas that match what problem-aware readers are already discussing.', ideas: ranked.filter(i => i.intent === 'problem_aware').slice(0, 4) },
-        { title: 'Conversion Boosters', subtitle: 'Bottom-of-funnel ideas for readers showing real purchase intent.', ideas: ranked.filter(i => i.intent === 'purchase_intent').slice(0, 4) }
+        { title: 'The Shortlist', subtitle: `The most grounded content ideas for ${audienceContext}, ranked by how much the theme comes up.`, ideas: ranked.slice(0, 4) },
+        { title: 'Awareness Builders', subtitle: 'Ideas for people who feel the problem but are not yet looking for a solution.', ideas: ranked.filter(i => i.intent === 'problem_aware').slice(0, 4) },
+        { title: 'Decision Drivers', subtitle: 'Ideas for people weighing their options and close to choosing.', ideas: ranked.filter(i => i.intent === 'purchase_intent').slice(0, 4) }
     ];
 
     groups.forEach(group => {
@@ -2459,8 +2461,7 @@ function generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, conf
                 }
 
                 if (item.querySelector('.action-item-why')) {
-                    const intentName = idea.intent.replace(/_/g, ' ');
-                    item.querySelector('.action-item-why').innerText = "Targets " + intentName;
+                    item.querySelector('.action-item-why').innerText = "Speaks to: " + (STAGE_LABELS[idea.intent] || idea.intent);
                 }
 
                 listEl.appendChild(item);
@@ -2469,20 +2470,18 @@ function generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, conf
         container.appendChild(card);
     });
 
-    console.log("SEO Cards: Successfully populated!");
+    console.log("Content Opportunities: Successfully populated!");
 }
-
 
 async function generateAndRenderSeoSunburst(posts, audienceContext) {
     const container = document.getElementById('keyword-sunburst');
     if (!container) {
-        console.error('Sunburst container div "keyword-sunburst" not found.');
+        console.error('Content map container div "keyword-sunburst" not found.');
         return;
     }
 
-    container.innerHTML = '<p class="loading-text">Building data-grounded content plan...</p>';
+    container.innerHTML = '<p class="loading-text">Mapping the topics this audience actually discusses...</p>';
 
-    // Real, reusable inputs for grounding + confidence.
     const lowerTexts = posts.map(p =>
         `${p.data.title || p.data.link_title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase()
     );
@@ -2493,22 +2492,25 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
     try {
         const topPostsText = posts.slice(0, 50).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        const prompt = `You are an SEO and content strategist for the "${audienceContext}" audience. Below are real discussions from this community. Build a content plan whose keywords reflect the ACTUAL language, questions, and pain points in these discussions.
+        const prompt = `You are a content strategist for the "${audienceContext}" audience. Below are real discussions from this community. Build a content plan whose topics reflect the ACTUAL language, questions, and pain points in these discussions.
 
         CRITICAL RULES:
         - Do NOT invent search volumes, traffic numbers, or any metrics. Return none.
         - Only use topics and phrasings that are supported by the discussions provided.
-        - Long-tail keywords must sound like something this specific audience would actually type or say.
+        - The most specific topics must sound like something this audience would actually say.
 
-        Structure your response as a single, valid JSON object.
+        Organize the plan by where the audience is in their journey, using these three keys:
+        - "problem_aware": topics for people who feel the problem but are not yet looking for a solution.
+        - "solution_seeking": topics for people actively comparing approaches or solutions.
+        - "purchase_intent": topics for people ready to choose or buy.
 
-        For each of the three intents (problem_aware, solution_seeking, purchase_intent), provide an array of 2-5 primary keywords (broad themes).
-        - For EACH primary keyword, provide an array of 2-4 "secondary_keywords".
-        - For EACH secondary keyword, provide an array of 2-3 "long_tail_keywords".
-        - For EACH long_tail keyword, provide an array of 1-2 "content_examples".
+        For each of the three, provide an array of 2-5 broad themes.
+        - For EACH theme, provide an array of 2-4 "secondary_keywords" (sub-themes).
+        - For EACH sub-theme, provide an array of 2-3 "long_tail_keywords" (specific angles, in the audience's own words).
+        - For EACH specific angle, provide an array of 1-2 "content_examples".
 
-        Every keyword object (primary, secondary, long_tail) MUST contain exactly one key:
-        - "keyword": the keyword phrase, in language this audience would actually use.
+        Every theme, sub-theme, and angle object MUST contain exactly one key:
+        - "keyword": the topic phrase, in language this audience would actually use.
 
         Each "content_examples" item must be an object with a single key: "title".
 
@@ -2516,14 +2518,14 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         {
           "problem_aware": [
             {
-              "keyword": "primary theme A",
+              "keyword": "broad theme A",
               "secondary_keywords": [
                 {
-                  "keyword": "secondary keyword A1",
+                  "keyword": "sub-theme A1",
                   "long_tail_keywords": [
                     {
-                      "keyword": "long-tail keyword A1a",
-                      "content_examples": [ { "title": "Example Blog Title 1" } ]
+                      "keyword": "specific angle A1a",
+                      "content_examples": [ { "title": "Example Content Title 1" } ]
                     }
                   ]
                 }
@@ -2538,13 +2540,13 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
 
         const openAIParams = {
             model: "gpt-4o",
-            messages: [{ role: "system", content: "You are a JSON-only SEO strategist who never fabricates metrics and grounds every keyword in the supplied text." }, { role: "user", content: prompt }],
+            messages: [{ role: "system", content: "You are a content strategist who grounds every idea in the supplied discussions and never fabricates metrics." }, { role: "user", content: prompt }],
             temperature: 0.2,
             response_format: { "type": "json_object" }
         };
 
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        if (!response.ok) throw new Error('AI SEO plan generation failed.');
+        if (!response.ok) throw new Error('AI content plan generation failed.');
 
         const aiResult = await response.json();
         if (!aiResult || !aiResult.openaiResponse) {
@@ -2553,7 +2555,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
 
         const seoPlan = JSON.parse(aiResult.openaiResponse);
 
-        // Collect every keyword in the plan, then build a semantic grounding map once.
+        // Collect every topic in the plan, then build a semantic grounding map once.
         const allKeywords = [];
         ['problem_aware', 'solution_seeking', 'purchase_intent'].forEach(intent => {
             (seoPlan[intent] || []).forEach(primary => {
@@ -2568,35 +2570,32 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         });
         const groundingMap = await buildGroundingMap(allKeywords, posts);
 
-        // Render the Webflow action cards with semantic grounding + confidence.
+        // Render the Webflow content cards with semantic grounding + confidence.
         generateAndRenderActionCards(seoPlan, audienceContext, lowerTexts, confidence, groundingMap);
 
-
-
-
-        // ---- Build sunburst data, sized by real grounding instead of fake volume ----
+        // ---- Build the topic map, sized by real grounding ----
         const sunburstData = [
-            { id: 'root', parent: '', name: 'Content Plan', levelName: 'Content Plan' },
-            { id: 'pa', parent: 'root', name: 'Problem-Aware', color: '#6AA9FF', levelName: 'Intent bucket' },
-            { id: 'ss', parent: 'root', name: 'Solution-Seeking', color: '#9B7CFF', levelName: 'Intent bucket' },
-            { id: 'pi', parent: 'root', name: 'Purchase-Intent', color: '#5ED1B8', levelName: 'Intent bucket' }
+            { id: 'root', parent: '', name: 'Content Plan', levelName: 'Content plan' },
+            { id: 'pa', parent: 'root', name: 'Feeling the Problem', color: '#6AA9FF', levelName: 'Journey stage' },
+            { id: 'ss', parent: 'root', name: 'Comparing Solutions', color: '#9B7CFF', levelName: 'Journey stage' },
+            { id: 'pi', parent: 'root', name: 'Ready to Buy', color: '#5ED1B8', levelName: 'Journey stage' }
         ];
 
-        const processIntent = (intentId, intentName, intentData) => {
+        const processIntent = (intentId, stageName, intentData) => {
             if (!intentData || !Array.isArray(intentData)) return;
 
             intentData.forEach((primary, i) => {
                 const primaryId = `${intentId}_p_${i}`;
                 sunburstData.push({
                     id: primaryId, parent: intentId, name: primary.keyword,
-                    intentName: intentName, levelName: 'Primary keyword'
+                    stageName: stageName, levelName: 'Theme'
                 });
 
                 (primary.secondary_keywords || []).forEach((secondary, j) => {
                     const secondaryId = `${primaryId}_s_${j}`;
                     sunburstData.push({
                         id: secondaryId, parent: primaryId, name: secondary.keyword,
-                        intentName: intentName, levelName: 'Secondary keyword'
+                        stageName: stageName, levelName: 'Sub-theme'
                     });
 
                     (secondary.long_tail_keywords || []).forEach((longtail, k) => {
@@ -2604,14 +2603,14 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                         const mentions = groundingCount(longtail.keyword, groundingMap, lowerTexts);
                         sunburstData.push({
                             id: longtailId, parent: secondaryId, name: longtail.keyword,
-                            intentName: intentName, levelName: 'Long-tail keyword', mentions: mentions
+                            stageName: stageName, levelName: 'Specific angle', mentions: mentions
                         });
 
                         (longtail.content_examples || []).forEach((content, l) => {
                             sunburstData.push({
                                 id: `${longtailId}_c_${l}`, parent: longtailId, name: content.title,
                                 value: Math.max(mentions, 1),
-                                intentName: intentName, levelName: 'Content example', mentions: mentions
+                                stageName: stageName, levelName: 'Content idea', mentions: mentions
                             });
                         });
                     });
@@ -2619,9 +2618,9 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
             });
         };
 
-        processIntent('pa', 'Problem-Aware', seoPlan.problem_aware);
-        processIntent('ss', 'Solution-Seeking', seoPlan.solution_seeking);
-        processIntent('pi', 'Purchase-Intent', seoPlan.purchase_intent);
+        processIntent('pa', 'Feeling the Problem', seoPlan.problem_aware);
+        processIntent('ss', 'Comparing Solutions', seoPlan.solution_seeking);
+        processIntent('pi', 'Ready to Buy', seoPlan.purchase_intent);
 
         const seriesName = sunburstData.find(d => d.id === 'root')?.name || 'Content Plan';
 
@@ -2668,14 +2667,12 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
                     const point = this;
                     let html = `<div style="min-width: 250px; max-width: 400px; font-size: 14px; white-space: normal; word-wrap: break-word;">`;
                     const capitalizedName = point.name.replace(/(^\w{1})|(\s+\w{1})/g, letter => letter.toUpperCase());
-                    html += `<b>Name:</b> <b>${capitalizedName}</b><br/>`;
+                    html += `<b>Topic:</b> <b>${capitalizedName}</b><br/>`;
                     if (point.levelName) html += `<b>Level:</b> ${point.levelName}<br/>`;
-                    if (point.intentName) html += `<b>Intent:</b> ${point.intentName}<br/>`;
+                    if (point.stageName) html += `<b>Stage:</b> ${point.stageName}<br/>`;
                     if (point.mentions !== undefined) {
                         html += `<b>Appeared in:</b> ${point.mentions} of ${totalDiscussions} discussions<br/>`;
                     }
-                 
-                 
                     html += `</div>`;
                     return html;
                 }
@@ -2685,10 +2682,11 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         });
 
     } catch (error) {
-        console.error("Failed to generate or render SEO Sunburst chart:", error);
+        console.error("Failed to generate or render the content plan:", error);
         container.innerHTML = `<p class="error-message">Could not generate the content plan.</p>`;
     }
 }
+
 
 
 async function generateProblemOfferPairsAI(summaries) {

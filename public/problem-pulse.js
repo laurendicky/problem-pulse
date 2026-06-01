@@ -146,11 +146,11 @@ async function generateAndRenderHiddenGems(posts, audienceContext) {
     if (!grid) return;
 
     if (!window._gemBlueprint) {
-        const bp = grid.querySelector('.card-wrapper');
+        const bp = grid.querySelector('.gem-card-wrapper');
         if (bp) window._gemBlueprint = bp.cloneNode(true);
     }
     const GEM_BLUEPRINT = window._gemBlueprint;
-    if (!GEM_BLUEPRINT) { console.error('Hidden Gems: .card-wrapper blueprint not found inside .card-grid.'); return; }
+    if (!GEM_BLUEPRINT) { console.error('Hidden Gems: .gem-card-wrapper blueprint not found inside .card-grid.'); return; }
 
     grid.innerHTML = '<p class="loading-text">Mining for hidden connections...</p>';
 

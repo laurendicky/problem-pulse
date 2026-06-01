@@ -3421,7 +3421,7 @@ async function generateAndRenderOverview(posts, audienceContext) {
         const parsed = JSON.parse(data.openaiResponse);
 
         container.innerHTML = `
-            <div style="background: #111; padding: 24px; border-radius: 12px; border: 1px solid #333; color: white; font-family: sans-serif;">
+            <div style="background: transparent; padding: 24px; border-radius: 12px; border: 1px solid #333; color: white; font-family: sans-serif;">
                 <h3 style="margin: 0 0 20px 0; font-size: 18px; color: #00a5ce;">Audience Demographics</h3>
                 
                 <!-- Gender Section -->

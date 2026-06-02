@@ -164,7 +164,7 @@ async function generateAndRenderHiddenGems(posts, audienceContext) {
 
     // ---- Tunables ----
     const GEM_MAX_SIM_LOCAL  = typeof GEM_MAX_SIM !== 'undefined' ? GEM_MAX_SIM : 0.7;
-    const SURPRISE_THRESHOLD = 7;    // 1-10. Only gems the model rates this surprising or higher get shown.
+    const SURPRISE_THRESHOLD = 8;    // 1-10. Quality over quantity: only genuinely surprising gems show.
     const SHORTLIST_SIZE     = 35;   // Raw candidates handed to the model (we now reject hard, so give it more to choose from).
     const QUOTES_PER_PAIR    = 4;    // Evidence quotes per candidate, so the model verifies a pattern instead of guessing from one line.
     const QUOTE_CHARS        = 240;  // Max length per quote.
@@ -182,8 +182,8 @@ async function generateAndRenderHiddenGems(posts, audienceContext) {
     const surpriseLabel = (scores) => {
         if (!scores.length) return '';
         const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
-        if (avg >= 8.5) return 'Very High';
-        if (avg >= 7.5) return 'High';
+        if (avg >= 9) return 'Very High';
+        if (avg >= 8) return 'High';
         return 'Medium';
     };
 
@@ -195,7 +195,12 @@ async function generateAndRenderHiddenGems(posts, audienceContext) {
 
     const updateGemHeader = (searchedCount, shownGems) => {
         const n = shownGems.length;
-        const commercial = shownGems.filter(g => g.category === 'commercial_leap').length;
+        // A commercial opportunity = any shown gem the model scored highly for commercial value,
+        // not just the ones it filed under the commercial_leap category. An emotional or behavioural
+        // leap can still be a strong buying angle.
+        const commercial = shownGems.filter(g =>
+            Number(g.commercial_value) >= 7 || g.category === 'commercial_leap'
+        ).length;
         const scores = shownGems.map(g => Number(g.surprise_score)).filter(s => !isNaN(s));
 
         setText('.gem-search-statement', `We Searched ${Number(searchedCount).toLocaleString()} discussions`);
@@ -209,24 +214,53 @@ async function generateAndRenderHiddenGems(posts, audienceContext) {
         const matrix = buildFeatureMatrix(posts);
         let candidates = mineAssociations(matrix);
 
-        // Junk filter: keep generic conversational words out of the data.
-        const junkWords = new Set([
-            'best','took','want','since','first','need','just','like','know','think',
-            'good','really','even','still','well','right','should','never','always',
-            'many','those','going','things','something','anything','make','made',
-            'take','taken','give','given','look','looked','find','found','use','used',
-            'work','worked','way','day','year','people','person','time','much','very',
-            'been','were','does','not','has','had','get','got','could','would'
+        // Junk filter. The single biggest cause of nonsense gems (e.g. "will") is that features are
+        // single words, so common function words sneak in and co-occur with everything. Until the
+        // matrix produces real phrases, we aggressively strip stopwords here. This list is deliberately
+        // broad: articles, pronouns, modals, prepositions, conjunctions, fillers and Reddit chrome.
+        const STOPWORDS = new Set([
+            // articles / determiners
+            'a','an','the','this','that','these','those','my','your','his','her','its','our','their',
+            'some','any','no','every','each','all','both','few','more','most','other','such','own','same',
+            // pronouns
+            'i','me','you','he','she','it','we','they','them','him','us','who','whom','whose','which','what',
+            'mine','yours','ours','theirs','myself','yourself','himself','herself','itself','ourselves',
+            'themselves','one','ones','someone','anyone','everyone','nobody','something','anything',
+            'everything','nothing',
+            // auxiliaries / modals
+            'am','is','are','was','were','be','been','being','have','has','had','having','do','does','did',
+            'doing','will','would','shall','should','can','could','may','might','must','ought','need','dare',
+            'going','gonna','wanna',
+            // prepositions / conjunctions
+            'of','in','on','at','by','for','with','about','against','between','into','through','during',
+            'before','after','above','below','to','from','up','down','out','off','over','under','again',
+            'further','then','once','and','but','or','nor','so','than','too','very','as','because','while',
+            'if','though','although','unless','until','whereas',
+            // common fillers / generic verbs / adjectives
+            'best','took','want','since','first','just','like','know','think','good','really','even','still',
+            'well','right','never','always','many','things','thing','make','made','take','taken','give','given',
+            'look','looked','find','found','use','used','work','worked','way','day','days','year','years',
+            'people','person','time','times','much','lot','also','actually','basically','literally','maybe',
+            'probably','definitely','etc','stuff','kind','sort','bit','able','new','old','big','little',
+            // adverbs / question words
+            'how','when','where','why','here','there','now','today','yesterday','tomorrow','soon','ever',
+            'often','sometimes','usually','around','almost','enough','quite','rather','pretty','really',
+            // Reddit / forum chrome
+            'edit','op','tldr','imo','imho','fyi','btw','lol','lmao','ngl','afaik','eli5','ama','post','posts',
+            'comment','comments','reddit','subreddit','sub','thread','upvote','downvote','guys','anyone'
         ]);
 
-        candidates = candidates.filter(p =>
-            p.x.length > 2 && p.y.length > 2 &&
-            !junkWords.has(p.x.toLowerCase()) &&
-            !junkWords.has(p.y.toLowerCase())
-        );
+        // A term is usable only if it is a real content word: at least 3 letters, alphabetic
+        // (allowing internal hyphen/apostrophe), and not a stopword.
+        const isValidTerm = (t) => {
+            const s = (t || '').toLowerCase().trim();
+            return s.length >= 3 && /^[a-z][a-z'-]*[a-z]$/.test(s) && !STOPWORDS.has(s);
+        };
+
+        candidates = candidates.filter(p => isValidTerm(p.x) && isValidTerm(p.y));
 
         if (candidates.length === 0) {
-            grid.innerHTML = '<p class="placeholder-text">No statistically surprising connections in this sample.</p>';
+            grid.innerHTML = '<p class="placeholder-text">No statistically significant hidden connections were discovered in this dataset.</p>';
             return;
         }
 
@@ -290,41 +324,56 @@ async function generateAndRenderHiddenGems(posts, audienceContext) {
             quotes: p.quotes || []
         }));
 
-        // NEW PROMPT: built around the "wait, what?!" test, the four leap types, explicit rejection
-        // of expected consequences, and a numeric surprise score we enforce in code.
-        const prompt = `You are a consumer-intelligence analyst studying the "${audienceContext}" audience for a founder who wants non-obvious market insight.
+        // PROMPT: built around the "wait, what?!" test, the four leap types, explicit rejection of
+        // obvious or circular findings, a hard rule against echoing raw words, and three numeric
+        // scores (surprise / actionability / commercial) we enforce in code. Distance is supplied
+        // objectively from embeddings rather than asked of the model.
+        const prompt = `You are a ruthless consumer-intelligence analyst studying the "${audienceContext}" audience for a founder who wants non-obvious market insight. Hidden Gems is meant to be the most interesting part of the product. If a finding would not make a founder stop scrolling and think "that is fascinating", it does not belong here.
 
-Below are pairs of terms that co-occur in real discussions far more often than chance, each with sample quotes. Surface ONLY "Hidden Gems".
+Below are pairs of terms that co-occur in real discussions far more often than chance, each with sample quotes.
 
-THE TEST FOR A HIDDEN GEM:
-If you showed it to a founder, would they stop and say "wait, what?!". If instead they would say "well, yeah, that makes sense", it is NOT a gem. Discard it.
+THE ONE TEST THAT MATTERS:
+Would a smart human naturally expect these two things to be connected? If YES, reject it. If NO, and the quotes support it, that is a Hidden Gem. You are not answering "what is mentioned together", you are answering "what would genuinely surprise a smart reader".
 
-REJECT expected consequences. These feel true but obvious, so they fail:
-- "Sudden pet loss" linked to "regret" (grief obviously follows loss)
-- "Frustrated training" linked to "disillusionment" (frustration obviously feels bad)
-- "Misdiagnosed illness" linked to "anxiety" (worry obviously follows a scare)
-If term B is just the predictable feeling or outcome of term A, throw it out.
+REJECT these, they are obvious, circular or too closely related to be a discovery:
+- "Pet illness" and "anxiety about illness" (circular, same idea twice)
+- "Dog training" and "frustration" (obvious feeling)
+- "Sudden pet loss" and "regret" (grief obviously follows loss)
+- "Persistent begging" and "food brand loyalty" (obvious, both are just about food)
+- Anything where term B is the predictable feeling, restatement or direct consequence of term A.
 
-KEEP findings that leap between two different worlds. Every kept gem must fit exactly ONE category:
-1. EMOTIONAL LEAP: the audience seems to discuss one thing but is really driven by a deeper, non-obvious worry (e.g. training problems are really about feelings of personal failure).
-2. BEHAVIOURAL LEAP: an unexpected overlap with another interest, community or behaviour (e.g. dog owners and home security, raw feeding and alternative-health communities).
-3. COMMERCIAL LEAP: an adjacent buying opportunity nobody would guess (e.g. dog anxiety and CCTV products, puppy owners and sleep solutions).
-4. CONTRADICTION: the audience says one thing but does another (e.g. asks for professional advice yet ignores trainers, says price matters yet picks premium).
+KEEP findings that leap between two different worlds. Examples of the right shape:
+- Reactive dogs and social isolation
+- Dog anxiety and home security purchases
+- Owners seeking training help and distrust of professional trainers
+- Budget-conscious buyers and premium brand loyalty
+- Frequent runners and appearance or fake-tan products
 
-RULES:
-- READ THE QUOTES. Only assert what the quotes and the co-occurrence support.
-- Do NOT invent statistics such as "more than average" or "more than other owners". You have no baseline population, so phrase findings as connections within this audience, never as comparisons to other audiences.
-- The raw terms may be messy or generic. Rename them to the real concept the quotes are actually about. If the quotes do not support a real, surprising concept, DISCARD the item.
-- Score every kept gem 1-10 on surprise. Be harsh. A 7+ means a smart founder genuinely would not have predicted it.
-- Returning very few gems, or none, is correct. Never pad to fill space.
+Every kept gem must fit exactly ONE category:
+1. emotional_leap: the audience seems to discuss one thing but is really driven by a deeper, non-obvious worry (training problems are really about personal failure).
+2. behavioural_leap: an unexpected overlap with another interest, community or behaviour (dog owners and home security).
+3. commercial_leap: an adjacent buying opportunity nobody would guess (dog anxiety and CCTV products).
+4. contradiction: the audience says one thing but does another (asks for expert advice yet ignores trainers; says price matters yet picks premium).
 
-Respond ONLY with JSON: {"gems":[{"id":0,"category":"emotional_leap|behavioural_leap|commercial_leap|contradiction","surprise_score":0,"topic_a":"...","front_teaser":"...","reveal_finding":"...","reveal_summary":"...","opportunity":"..."}]}
+HARD RULES:
+- Some raw terms are meaningless function words (e.g. "will", "their", "about"). NEVER output a raw term as a label and NEVER build a gem around a word that carries no concept. Identify the real concept the QUOTES are about and label that. If you cannot find a real, concrete concept for BOTH sides in the quotes, DISCARD the item.
+- READ THE QUOTES. Only assert what the quotes plus the co-occurrence actually support.
+- Do NOT invent comparative statistics like "more than average owners". You have no baseline population. Phrase findings as connections within this audience only.
+- Quality over quantity. Three exceptional gems beat twenty weak ones. Returning one gem, or none, is the correct and expected outcome much of the time. Never pad.
+
+SCORING. Score every candidate you keep, 1-10, and be harsh:
+- surprise: 10 means a founder would never have predicted the link; low means obvious.
+- actionability: could a founder, marketer or creator actually do something with it.
+- commercial_value: does it reveal a new audience, product, angle, positioning or market.
+Only keep a gem if surprise is genuinely high. If surprise is mediocre, drop it regardless of the other scores.
+
+Respond ONLY with JSON: {"gems":[{"id":0,"category":"emotional_leap|behavioural_leap|commercial_leap|contradiction","surprise_score":0,"actionability_score":0,"commercial_value":0,"topic_a":"...","front_teaser":"...","reveal_finding":"...","reveal_summary":"...","opportunity":"..."}]}
 
 Field rules:
 - "id": match the source id.
-- "topic_a": clean 1-3 word label for the surface topic.
+- "topic_a": clean 1-3 word label for the surface topic. A real concept, never a function word.
 - "front_teaser": ONE sentence hinting at the surprise without revealing it (e.g. "Owners of reactive dogs keep circling back to a worry that has nothing to do with the dog...").
-- "reveal_finding": clean 1-4 word label for the unexpected side.
+- "reveal_finding": clean 1-4 word label for the unexpected side. A real concept, never a function word.
 - "reveal_summary": ONE plain sentence stating the counterintuitive connection, grounded in the quotes. No marketing fluff.
 - "opportunity": ONE actionable sentence telling a founder or marketer how to act on this finding. Focus on positioning, messaging or product angle, not a restatement of the insight. Examples of the right shape: "Lead with reassurance and upskilling, not just product features." or "Position around peace of mind and safety, not obedience or training." Never use em dash characters; use commas or full stops.
 
@@ -355,10 +404,23 @@ ${JSON.stringify(items)}`;
             console.error('Hidden Gems curation failed.', e);
         }
 
-        // Enforce the surprise bar in code, then sort by it. No fallback padding: if nothing clears
-        // the bar, we say so rather than forcing boring pairs onto the UI.
+        // Enforce the bars in code. Belt and braces: even if the model echoes a junk word like
+        // "will" or rates an obvious pair highly, we drop it here. No fallback padding: if nothing
+        // clears the bar, we say so rather than forcing weak findings onto the UI.
+        const ACTION_THRESHOLD = 6;
+        const labelOk = (s) => {
+            const t = (s || '').toLowerCase().trim();
+            if (t.length < 3) return false;
+            const tokens = t.split(/\s+/);
+            return !(tokens.length === 1 && STOPWORDS.has(tokens[0]));
+        };
+
         curated = curated
-            .filter(g => Number(g.surprise_score) >= SURPRISE_THRESHOLD)
+            .filter(g =>
+                Number(g.surprise_score) >= SURPRISE_THRESHOLD &&
+                Number(g.actionability_score) >= ACTION_THRESHOLD &&
+                labelOk(g.topic_a) && labelOk(g.reveal_finding)
+            )
             .sort((a, b) => Number(b.surprise_score) - Number(a.surprise_score));
 
         if (curated.length === 0) {
@@ -406,6 +468,8 @@ ${JSON.stringify(items)}`;
         grid.innerHTML = '<p class="error-message">Could not generate hidden gems.</p>';
     }
 }
+
+
 
 
 // Build keyword -> count of semantically matching discussions. Null on failure (triggers fallback).

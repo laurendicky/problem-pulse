@@ -194,18 +194,19 @@ async function generateAndRenderHiddenGems(posts, audienceContext) {
     };
 
     const updateGemHeader = (searchedCount, shownGems) => {
-        const n = shownGems.length;
-        // A commercial opportunity = any shown gem the model scored highly for commercial value,
-        // not just the ones it filed under the commercial_leap category. An emotional or behavioural
-        // leap can still be a strong buying angle.
+        // Only gems that truly cleared the bar count as "found". Near-miss backfill cards carry their
+        // own label and are not counted here, so the headline number stays honest.
+        const madeCut = shownGems.filter(g => g._tier !== 'near').length;
+        // A commercial opportunity = any shown gem scored highly for commercial value, not just the
+        // ones filed under commercial_leap. An emotional or behavioural leap can still be a buying angle.
         const commercial = shownGems.filter(g =>
             Number(g.commercial_value) >= 7 || g.category === 'commercial_leap'
         ).length;
         const scores = shownGems.map(g => Number(g.surprise_score)).filter(s => !isNaN(s));
 
         setText('.gem-search-statement', `We Searched ${Number(searchedCount).toLocaleString()} discussions`);
-        setText('.gem-search-disclaimer', disclaimerText(n));
-        setText('.number-found', String(n));
+        setText('.gem-search-disclaimer', disclaimerText(madeCut));
+        setText('.number-found', String(madeCut));
         setText('.surprise-score', surpriseLabel(scores) || 'Medium');
         setText('.com-oppertunites', String(commercial));
     };
@@ -374,7 +375,7 @@ Field rules:
 - "topic_a": clean 1-3 word label for the surface topic. A real concept, never a function word.
 - "front_teaser": ONE sentence hinting at the surprise without revealing it (e.g. "Owners of reactive dogs keep circling back to a worry that has nothing to do with the dog...").
 - "reveal_finding": clean 1-4 word label for the unexpected side. A real concept, never a function word.
-- "reveal_summary": ONE plain sentence stating the counterintuitive connection, grounded in the quotes. No marketing fluff.
+- "reveal_summary": Tell the STORY behind the connection in one or two plain sentences, not the bare correlation. Never write "discussions about X mention Y" or "X frequently mentions Y", that just restates the data. Instead explain what is really going on: what the surface topic quietly turns into, or what the audience is actually seeking underneath it. Right shape: "Food discussions often turn into conversations about belonging and community rather than nutrition." or "Owners researching premium food keep gravitating to dog parks, meetups and new friendships, so the real pull looks like social connection, not diet." Ground every claim in the quotes. Do NOT fabricate comparisons to "the average owner" or any baseline population you were not given.
 - "opportunity": ONE actionable sentence telling a founder or marketer how to act on this finding. Focus on positioning, messaging or product angle, not a restatement of the insight. Examples of the right shape: "Lead with reassurance and upskilling, not just product features." or "Position around peace of mind and safety, not obedience or training." Never use em dash characters; use commas or full stops.
 
 Items:
@@ -407,7 +408,10 @@ ${JSON.stringify(items)}`;
         // Enforce the bars in code. Belt and braces: even if the model echoes a junk word like
         // "will" or rates an obvious pair highly, we drop it here. No fallback padding: if nothing
         // clears the bar, we say so rather than forcing weak findings onto the UI.
-        const ACTION_THRESHOLD = 6;
+        const ACTION_THRESHOLD    = 6;
+        const NEAR_MISS_THRESHOLD = 6;  // softer surprise bar, used only to top up to MIN_SHOWN.
+        const MIN_SHOWN           = 2;  // aim to show at least this many cards when we honestly can.
+
         const labelOk = (s) => {
             const t = (s || '').toLowerCase().trim();
             if (t.length < 3) return false;
@@ -415,21 +419,42 @@ ${JSON.stringify(items)}`;
             return !(tokens.length === 1 && STOPWORDS.has(tokens[0]));
         };
 
-        curated = curated
-            .filter(g =>
-                Number(g.surprise_score) >= SURPRISE_THRESHOLD &&
-                Number(g.actionability_score) >= ACTION_THRESHOLD &&
-                labelOk(g.topic_a) && labelOk(g.reveal_finding)
-            )
-            .sort((a, b) => Number(b.surprise_score) - Number(a.surprise_score));
+        // Base quality every shown card must meet regardless of tier.
+        const passesBase = (g) =>
+            Number(g.actionability_score) >= ACTION_THRESHOLD &&
+            labelOk(g.topic_a) && labelOk(g.reveal_finding);
 
-        if (curated.length === 0) {
+        const bySurprise = (a, b) => Number(b.surprise_score) - Number(a.surprise_score);
+
+        // Strong = cleared the full surprise bar. Near = almost (6 to <8), used only as backfill.
+        const strong = curated
+            .filter(g => passesBase(g) && Number(g.surprise_score) >= SURPRISE_THRESHOLD)
+            .sort(bySurprise);
+        const near = curated
+            .filter(g => passesBase(g) &&
+                Number(g.surprise_score) >= NEAR_MISS_THRESHOLD &&
+                Number(g.surprise_score) <  SURPRISE_THRESHOLD)
+            .sort(bySurprise);
+
+        strong.forEach(g => g._tier = 'gem');
+        near.forEach(g => g._tier = 'near');
+
+        // If we already have enough strong gems, show only those. Otherwise top up with the best
+        // near-misses just enough to reach MIN_SHOWN. We never pad beyond that, and if nothing clears
+        // even the softer bar we show the empty state.
+        let shown;
+        if (strong.length >= MIN_SHOWN) {
+            shown = strong.slice(0, 8);
+        } else {
+            shown = [...strong, ...near.slice(0, MIN_SHOWN - strong.length)].slice(0, 8);
+        }
+
+        if (shown.length === 0) {
             updateGemHeader(posts.length, []);
-            grid.innerHTML = '<p class="placeholder-text">No connections surprising enough to surface this time. Check back as more discussions are gathered.</p>';
+            grid.innerHTML = '<p class="placeholder-text">No statistically significant hidden connections were discovered in this dataset.</p>';
             return;
         }
 
-        const shown = curated.slice(0, 8);
         updateGemHeader(posts.length, shown);
 
         grid.innerHTML = '';
@@ -440,12 +465,15 @@ ${JSON.stringify(items)}`;
             commercial_leap:  'Commercial leap',
             contradiction:    'Contradiction'
         };
+        const TIER_LABELS = { gem: '', near: 'Worth a look' };
 
         shown.forEach(g => {
             const p = shortlist[g.id] || {};
             const card = GEM_BLUEPRINT.cloneNode(true);
             card.classList.remove('is-flipped');
             card.style.display = '';
+            // Styling hook so near-misses can look distinct from full gems.
+            card.classList.toggle('is-near-miss', g._tier === 'near');
 
             set(card, '.topic-a', g.topic_a || '');
             set(card, '.front-summary', g.front_teaser || '');
@@ -453,8 +481,9 @@ ${JSON.stringify(items)}`;
             set(card, '.reveal-finding', g.reveal_finding || '');
             set(card, '.reveal-summary', g.reveal_summary || '');
             set(card, '.gem-opportunity', g.opportunity || '');
-            // Optional category tag: only fills if your blueprint has a .gem-category slot. Harmless if not.
+            // Optional tags: only fill if your blueprint has these slots. Harmless if not.
             set(card, '.gem-category', CATEGORY_LABELS[g.category] || '');
+            set(card, '.gem-tier', TIER_LABELS[g._tier] || '');
 
             const stat = card.querySelector('.gem-stat');
             if (stat && p.support) stat.innerText = `Seen together in ${p.support} discussions · ${p.lift.toFixed(1)}× more than chance`;
@@ -468,7 +497,6 @@ ${JSON.stringify(items)}`;
         grid.innerHTML = '<p class="error-message">Could not generate hidden gems.</p>';
     }
 }
-
 
 
 

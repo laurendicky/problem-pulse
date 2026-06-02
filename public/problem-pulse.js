@@ -69,8 +69,8 @@ async function embedTexts(texts, batchSize = 200) {
 // === emotionalIntensityScores, embedTexts, cosineSimilarity, OPENAI_PROXY_URL.
 // =================================================================================
 
-const GEM_MIN_LIFT       = 1.4;   // pair must co-occur at least 40% more than chance
-const GEM_MIN_CHI2       = 3.84;  // ~ p < 0.05 at 1 degree of freedom
+const GEM_MIN_LIFT       = 1.2;   // pair must co-occur at least 40% more than chance
+const GEM_MIN_CHI2       = 3.0;  // ~ p < 0.05 at 1 degree of freedom
 const GEM_MAX_SIM        = 0.55;  // drop near-synonym pairs (too alike = not surprising)
 const GEM_VOCAB_UNIGRAMS = 120;   // how many single-word features to keep (was a flat 70 total)
 const GEM_VOCAB_PHRASES  = 90;    // how many phrase features to keep
@@ -475,8 +475,8 @@ ${JSON.stringify(items)}`;
         // Enforce the bars in code. Belt and braces: even if the model echoes a junk word like
         // "will" or rates an obvious pair highly, we drop it here. No fallback padding: if nothing
         // clears the bar, we say so rather than forcing weak findings onto the UI.
-        const ACTION_THRESHOLD    = 6;
-        const NEAR_MISS_THRESHOLD = 6;  // softer surprise bar, used only to top up to MIN_SHOWN.
+        const ACTION_THRESHOLD    = 4;
+        const NEAR_MISS_THRESHOLD = 4;  // softer surprise bar, used only to top up to MIN_SHOWN.
         const MIN_SHOWN           = 2;  // aim to show at least this many cards when we honestly can.
 
         const labelOk = (s) => {

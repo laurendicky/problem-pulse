@@ -57,6 +57,7 @@ async function embedTexts(texts, batchSize = 200) {
     return vectors;
 }
 
+
 // =================================================================================
 // === HIDDEN GEMS ENGINE (statistics-first, surprise-curated) ===
 // === v2: phrase features + adaptive support + overlap guard ===
@@ -115,10 +116,14 @@ function buildFeatureMatrix(posts) {
         });
     });
 
-    const minDFuni    = Math.max(3, Math.round(N * 0.03));
-    const boostMinDF  = Math.max(2, Math.round(N * 0.015)); // lower bar for emotion words
-    const minDFphrase = Math.max(2, Math.round(N * 0.02));  // phrases are rarer, so a lower bar
-    const maxDF       = Math.round(N * 0.6);
+    // Thresholds are CLAMPED, not linear. When comments push N into the thousands, a flat
+    // percentage demands absurd frequencies and silently starves the vocab. Floors keep tiny
+    // corpora usable; ceilings keep large ones from requiring dozens of mentions to qualify.
+    const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+    const minDFuni    = clamp(Math.round(N * 0.01),  3, 40);
+    const boostMinDF  = clamp(Math.round(N * 0.006), 2, 25); // lower bar for emotion words
+    const minDFphrase = clamp(Math.round(N * 0.005), 2, 20); // phrases are rarer, so a lower bar
+    const maxDF       = Math.round(N * 0.5);
 
     const entries = [...df.entries()];
 
@@ -154,7 +159,9 @@ function mineAssociations(matrix) {
 
     // Support scales with corpus size instead of a flat 4. On a small post-only corpus this
     // relaxes to 3 (so candidates actually exist); once comments push N up, it tightens again.
-    const minSupport = Math.max(3, Math.round(N * 0.015));
+    // Clamped, not linear: floors at 3 for small corpora, ceilings at 8 so a large comment-rich
+    // corpus does not demand dozens of co-occurrences (which silently killed every pair last time).
+    const minSupport = Math.min(8, Math.max(3, Math.round(N * 0.005)));
 
     const pairs = [];
     for (let i = 0; i < vocab.length; i++) {
@@ -185,6 +192,10 @@ function mineAssociations(matrix) {
             pairs.push({ x: X, y: Y, support, lift, chi2 });
         }
     }
+
+    // Diagnostic: if this logs vocab=0 or candidates=0, the thresholds are still too tight for
+    // this corpus. Lift/chi2/support are the dials.
+    console.log(`[Hidden Gems] N=${N} vocab=${vocab.length} minSupport=${minSupport} candidates=${pairs.length}`);
     return pairs;
 }
 

@@ -70,7 +70,7 @@ async function embedTexts(texts, batchSize = 200) {
 // =================================================================================
 
 const GEM_MIN_LIFT       = 1.2;   // pair must co-occur at least 40% more than chance
-const GEM_MIN_CHI2       = 3.0;  // ~ p < 0.05 at 1 degree of freedom
+const GEM_MIN_CHI2       = 2.0;  // ~ p < 0.05 at 1 degree of freedom
 const GEM_MAX_SIM        = 0.55;  // drop near-synonym pairs (too alike = not surprising)
 const GEM_VOCAB_UNIGRAMS = 120;   // how many single-word features to keep (was a flat 70 total)
 const GEM_VOCAB_PHRASES  = 90;    // how many phrase features to keep

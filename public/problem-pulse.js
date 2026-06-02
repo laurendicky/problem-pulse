@@ -150,9 +150,9 @@ async function generateAndRenderHiddenGems(posts, audienceContext) {
         if (bp) window._gemBlueprint = bp.cloneNode(true);
     }
     const GEM_BLUEPRINT = window._gemBlueprint;
-    if (!GEM_BLUEPRINT) { 
-        console.error('Hidden Gems: .gem-card-wrapper blueprint not found inside .card-grid.'); 
-        return; 
+    if (!GEM_BLUEPRINT) {
+        console.error('Hidden Gems: .gem-card-wrapper blueprint not found inside .card-grid.');
+        return;
     }
 
     grid.innerHTML = '<p class="loading-text">Mining for hidden connections...</p>';
@@ -162,11 +162,54 @@ async function generateAndRenderHiddenGems(posts, audienceContext) {
         return;
     }
 
+    // ---- Tunables ----
+    const GEM_MAX_SIM_LOCAL  = typeof GEM_MAX_SIM !== 'undefined' ? GEM_MAX_SIM : 0.7;
+    const SURPRISE_THRESHOLD = 7;    // 1-10. Only gems the model rates this surprising or higher get shown.
+    const SHORTLIST_SIZE     = 35;   // Raw candidates handed to the model (we now reject hard, so give it more to choose from).
+    const QUOTES_PER_PAIR    = 4;    // Evidence quotes per candidate, so the model verifies a pattern instead of guessing from one line.
+    const QUOTE_CHARS        = 240;  // Max length per quote.
+
+    // ---- Header / summary helpers ----
+    // These populate the elements outside the card grid: the search statement, the disclaimer,
+    // and the highlights bar (count found, surprise level, commercial opportunities). They query
+    // the document directly and no-op safely if a slot is missing, so they will not throw if the
+    // markup changes.
+    const setText = (sel, val) => {
+        const el = document.querySelector(sel);
+        if (el) el.innerText = val;
+    };
+
+    const surpriseLabel = (scores) => {
+        if (!scores.length) return '';
+        const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+        if (avg >= 8.5) return 'Very High';
+        if (avg >= 7.5) return 'High';
+        return 'Medium';
+    };
+
+    const disclaimerText = (n) => {
+        if (n === 0) return 'None were strong enough to make the cut this time.';
+        if (n === 1) return 'Only 1 hidden gem was strong enough to make the cut.';
+        return `Only ${n} hidden gems were strong enough to make the cut.`;
+    };
+
+    const updateGemHeader = (searchedCount, shownGems) => {
+        const n = shownGems.length;
+        const commercial = shownGems.filter(g => g.category === 'commercial_leap').length;
+        const scores = shownGems.map(g => Number(g.surprise_score)).filter(s => !isNaN(s));
+
+        setText('.gem-search-statement', `We Searched ${Number(searchedCount).toLocaleString()} discussions`);
+        setText('.gem-search-disclaimer', disclaimerText(n));
+        setText('.number-found', String(n));
+        setText('.surprise-score', surpriseLabel(scores) || 'Medium');
+        setText('.com-oppertunites', String(commercial));
+    };
+
     try {
         const matrix = buildFeatureMatrix(posts);
         let candidates = mineAssociations(matrix);
-        
-        // 1. AGGRESSIVE JUNK FILTER: Stop generic conversational words from ruining the data
+
+        // Junk filter: keep generic conversational words out of the data.
         const junkWords = new Set([
             'best','took','want','since','first','need','just','like','know','think',
             'good','really','even','still','well','right','should','never','always',
@@ -175,10 +218,10 @@ async function generateAndRenderHiddenGems(posts, audienceContext) {
             'work','worked','way','day','year','people','person','time','much','very',
             'been','were','does','not','has','had','get','got','could','would'
         ]);
-        
-        candidates = candidates.filter(p => 
+
+        candidates = candidates.filter(p =>
             p.x.length > 2 && p.y.length > 2 &&
-            !junkWords.has(p.x.toLowerCase()) && 
+            !junkWords.has(p.x.toLowerCase()) &&
             !junkWords.has(p.y.toLowerCase())
         );
 
@@ -187,86 +230,105 @@ async function generateAndRenderHiddenGems(posts, audienceContext) {
             return;
         }
 
-        // Surprise filter 1: drop near-synonym pairs.
+        // Embeddings: drop near-synonyms, and keep the distance as our "two different worlds" signal.
         const featuresInPlay = [...new Set(candidates.flatMap(p => [p.x, p.y]))];
         const vectors = await embedTexts(featuresInPlay);
         const vecMap = new Map(featuresInPlay.map((f, i) => [f, vectors[i]]));
-        
-        const maxSim = typeof GEM_MAX_SIM !== 'undefined' ? GEM_MAX_SIM : 0.7;
+
         candidates = candidates.map(p => {
             const vx = vecMap.get(p.x), vy = vecMap.get(p.y);
             const sim = (vx && vy) ? cosineSimilarity(vx, vy) : 0;
             return { ...p, sim, distance: 1 - sim };
-        }).filter(p => p.sim <= maxSim);
+        }).filter(p => p.sim <= GEM_MAX_SIM_LOCAL);
 
         if (candidates.length === 0) {
             grid.innerHTML = '<p class="placeholder-text">Connections found, but too predictable to call hidden gems.</p>';
             return;
         }
 
-        // Score: surprise x reliability x distance x topic<->emotion bridge bonus.
+        // RESCORED FOR LEAPS, NOT FOR EMOTIONAL CONSEQUENCES.
+        // The old scorer multiplied by up to 1.6x whenever one side was an emotion, which pushed
+        // obvious "topic -> its predictable feeling" pairs to the top (pet loss -> regret).
+        // We now reward semantic distance hard (distance squared) so genuine cross-category jumps
+        // rise, and we stop privileging emotion pairs. A useful side effect: terms like "loss" and
+        // "regret" sit close in embedding space and sink on their own, while "dog training" and
+        // "home security" sit far apart and rise.
         candidates.forEach(p => {
-            const tx = matrix.types ? matrix.types.get(p.x) : 'unknown';
-            const ty = matrix.types ? matrix.types.get(p.y) : 'unknown';
-            let bonus = 1.0;
-            if (tx === 'emotion' && ty === 'emotion') bonus = 1.2;
-            else if (tx === 'emotion' || ty === 'emotion') bonus = 1.6;
-            p.score = p.lift * Math.log2(p.support + 1) * p.distance * bonus;
+            const leap = Math.pow(p.distance, 2);
+            p.score = p.lift * Math.log2(p.support + 1) * leap;
         });
-        
-        candidates.sort((a, b) => b.score - a.score);
-        // Give the LLM slightly more candidates to choose from
-        const shortlist = candidates.slice(0, 20); 
 
+        candidates.sort((a, b) => b.score - a.score);
+        const shortlist = candidates.slice(0, SHORTLIST_SIZE);
+
+        // MULTIPLE GROUNDING QUOTES per pair (was a single 400-char snippet).
+        // More evidence lets the model confirm a pattern is real, not a one-off, and name the
+        // underlying concept honestly instead of confabulating from one line.
         shortlist.forEach(p => {
             const setX = matrix.featurePosts.get(p.x), setY = matrix.featurePosts.get(p.y);
-            for (const idx of setX) {
-                if (setY.has(idx)) {
-                    const ex = posts[idx];
-                    const txt = `${ex.data.title || ''} ${ex.data.selftext || ex.data.body || ''}`.trim();
-                    // 2. BIGGER QUOTE: Give the LLM 400 chars (instead of 220) so it actually understands the psychology
-                    p.quote = txt.length > 400 ? txt.substring(0, 397) + '...' : txt;
-                    break;
+            const quotes = [];
+            if (setX && setY) {
+                for (const idx of setX) {
+                    if (setY.has(idx)) {
+                        const ex = posts[idx];
+                        const txt = `${ex.data.title || ''} ${ex.data.selftext || ex.data.body || ''}`
+                            .trim().replace(/\s+/g, ' ');
+                        if (txt) quotes.push(txt.length > QUOTE_CHARS ? txt.slice(0, QUOTE_CHARS - 3) + '...' : txt);
+                        if (quotes.length >= QUOTES_PER_PAIR) break;
+                    }
                 }
             }
+            p.quotes = quotes;
         });
 
-        const items = shortlist.map((p, i) => ({ 
-            id: i, 
-            term_a: p.x, 
-            term_b: p.y, 
-            times_together: p.support, 
-            lift: Number(p.lift.toFixed(1)), 
-            quote: p.quote || '' 
+        const items = shortlist.map((p, i) => ({
+            id: i,
+            term_a: p.x,
+            term_b: p.y,
+            times_together: p.support,
+            lift: Number(p.lift.toFixed(1)),
+            quotes: p.quotes || []
         }));
 
-        // 3. IMPROVED PROMPT: Treat the LLM like a behavioral psychologist, not a data parser.
-        const prompt = `You are a world-class behavioral psychologist and consumer researcher analyzing data for the "${audienceContext}" audience. 
-Your goal is to find "Hidden Gems"—unexpected connections, contradictions, hidden motivations, or counterintuitive patterns that would make a marketer say "Wow, I would never have guessed that."
+        // NEW PROMPT: built around the "wait, what?!" test, the four leap types, explicit rejection
+        // of expected consequences, and a numeric surprise score we enforce in code.
+        const prompt = `You are a consumer-intelligence analyst studying the "${audienceContext}" audience for a founder who wants non-obvious market insight.
 
-You are given a list of statistically verified co-occurring terms and a sample quote demonstrating their context. 
+Below are pairs of terms that co-occur in real discussions far more often than chance, each with sample quotes. Surface ONLY "Hidden Gems".
 
-WARNING: The raw terms might be messy or generic (e.g., "first" and "need"). DO NOT just parrot the terms. 
-YOUR JOB:
-1. READ THE QUOTE thoroughly. Is there a genuine, surprising human behavior, fear, or motivation hidden in that context?
-2. If YES: Extract THAT specific insight. RENAME the topics to reflect the actual concepts discussed in the quote (e.g., change "best" to "Marathon Shoes", change "need" to "Self-Doubt").
-3. If NO (it's just a generic sentence, conversational filler, or boring/obvious): DISCARD the item completely.
+THE TEST FOR A HIDDEN GEM:
+If you showed it to a founder, would they stop and say "wait, what?!". If instead they would say "well, yeah, that makes sense", it is NOT a gem. Discard it.
 
-Examples of Good Hidden Gems:
-- People discussing dog behavior issues are unexpectedly more concerned with home security than training.
-- Developers complaining about AI often spend more time discussing career anxiety than technology.
-- People seeking productivity tools are actually searching for a sense of control.
+REJECT expected consequences. These feel true but obvious, so they fail:
+- "Sudden pet loss" linked to "regret" (grief obviously follows loss)
+- "Frustrated training" linked to "disillusionment" (frustration obviously feels bad)
+- "Misdiagnosed illness" linked to "anxiety" (worry obviously follows a scare)
+If term B is just the predictable feeling or outcome of term A, throw it out.
 
-Respond ONLY with JSON matching this structure: {"gems":[{"id":0,"topic_a":"...","front_teaser":"...","reveal_finding":"...","reveal_summary":"..."}]}
+KEEP findings that leap between two different worlds. Every kept gem must fit exactly ONE category:
+1. EMOTIONAL LEAP: the audience seems to discuss one thing but is really driven by a deeper, non-obvious worry (e.g. training problems are really about feelings of personal failure).
+2. BEHAVIOURAL LEAP: an unexpected overlap with another interest, community or behaviour (e.g. dog owners and home security, raw feeding and alternative-health communities).
+3. COMMERCIAL LEAP: an adjacent buying opportunity nobody would guess (e.g. dog anxiety and CCTV products, puppy owners and sleep solutions).
+4. CONTRADICTION: the audience says one thing but does another (e.g. asks for professional advice yet ignores trainers, says price matters yet picks premium).
 
-Format rules for kept gems:
-- "id": Must match the original id.
-- "topic_a": Clean, punchy 1-3 word label for the setup.
-- "front_teaser": ONE sentence hinting at a surprising connection (e.g. "Owners dealing with reactive dogs share a surprising hidden anxiety...") DO NOT reveal the ending.
-- "reveal_finding": Clean, punchy 1-4 word label for the unexpected reveal.
-- "reveal_summary": ONE plain sentence stating the counterintuitive connection grounded in the quote. NO marketing fluff.
+RULES:
+- READ THE QUOTES. Only assert what the quotes and the co-occurrence support.
+- Do NOT invent statistics such as "more than average" or "more than other owners". You have no baseline population, so phrase findings as connections within this audience, never as comparisons to other audiences.
+- The raw terms may be messy or generic. Rename them to the real concept the quotes are actually about. If the quotes do not support a real, surprising concept, DISCARD the item.
+- Score every kept gem 1-10 on surprise. Be harsh. A 7+ means a smart founder genuinely would not have predicted it.
+- Returning very few gems, or none, is correct. Never pad to fill space.
 
-Items to analyze:
+Respond ONLY with JSON: {"gems":[{"id":0,"category":"emotional_leap|behavioural_leap|commercial_leap|contradiction","surprise_score":0,"topic_a":"...","front_teaser":"...","reveal_finding":"...","reveal_summary":"...","opportunity":"..."}]}
+
+Field rules:
+- "id": match the source id.
+- "topic_a": clean 1-3 word label for the surface topic.
+- "front_teaser": ONE sentence hinting at the surprise without revealing it (e.g. "Owners of reactive dogs keep circling back to a worry that has nothing to do with the dog...").
+- "reveal_finding": clean 1-4 word label for the unexpected side.
+- "reveal_summary": ONE plain sentence stating the counterintuitive connection, grounded in the quotes. No marketing fluff.
+- "opportunity": ONE actionable sentence telling a founder or marketer how to act on this finding. Focus on positioning, messaging or product angle, not a restatement of the insight. Examples of the right shape: "Lead with reassurance and upskilling, not just product features." or "Position around peace of mind and safety, not obedience or training." Never use em dash characters; use commas or full stops.
+
+Items:
 ${JSON.stringify(items)}`;
 
         let curated = [];
@@ -277,10 +339,10 @@ ${JSON.stringify(items)}`;
                     openaiPayload: {
                         model: "gpt-4o",
                         messages: [
-                            { role: "system", content: "You are an expert consumer psychologist. You extract only highly surprising, non-obvious insights from text, discarding generic or boring word associations." },
+                            { role: "system", content: "You are a ruthless consumer-intelligence analyst. You surface only genuinely surprising, cross-category, commercially useful insights, and you aggressively discard anything that reads as an obvious consequence." },
                             { role: "user", content: prompt }
                         ],
-                        temperature: 0.7, // Bumped slightly higher for creative interpretation
+                        temperature: 0.5, // Lower than before. This is a judging task, so we want consistent rejection, not invention.
                         response_format: { type: "json_object" }
                     }
                 })
@@ -289,20 +351,35 @@ ${JSON.stringify(items)}`;
             if (data && data.openaiResponse && !data.error) {
                 curated = JSON.parse(data.openaiResponse).gems || [];
             }
-        } catch (e) { 
-            console.error('Hidden Gems curation failed.', e); 
+        } catch (e) {
+            console.error('Hidden Gems curation failed.', e);
         }
 
-        // 4. REMOVED THE TOXIC FALLBACK: If the LLM rightfully rejected all the words for being boring, we do NOT force them onto the UI.
+        // Enforce the surprise bar in code, then sort by it. No fallback padding: if nothing clears
+        // the bar, we say so rather than forcing boring pairs onto the UI.
+        curated = curated
+            .filter(g => Number(g.surprise_score) >= SURPRISE_THRESHOLD)
+            .sort((a, b) => Number(b.surprise_score) - Number(a.surprise_score));
+
         if (curated.length === 0) {
+            updateGemHeader(posts.length, []);
             grid.innerHTML = '<p class="placeholder-text">No connections surprising enough to surface this time. Check back as more discussions are gathered.</p>';
             return;
         }
 
+        const shown = curated.slice(0, 8);
+        updateGemHeader(posts.length, shown);
+
         grid.innerHTML = '';
         const set = (root, sel, val) => { const e = root.querySelector(sel); if (e) e.innerText = val; };
+        const CATEGORY_LABELS = {
+            emotional_leap:   'Emotional leap',
+            behavioural_leap: 'Behavioural leap',
+            commercial_leap:  'Commercial leap',
+            contradiction:    'Contradiction'
+        };
 
-        curated.slice(0, 8).forEach(g => {
+        shown.forEach(g => {
             const p = shortlist[g.id] || {};
             const card = GEM_BLUEPRINT.cloneNode(true);
             card.classList.remove('is-flipped');
@@ -313,6 +390,9 @@ ${JSON.stringify(items)}`;
             set(card, '.topic-a-back', g.topic_a || '');
             set(card, '.reveal-finding', g.reveal_finding || '');
             set(card, '.reveal-summary', g.reveal_summary || '');
+            set(card, '.gem-opportunity', g.opportunity || '');
+            // Optional category tag: only fills if your blueprint has a .gem-category slot. Harmless if not.
+            set(card, '.gem-category', CATEGORY_LABELS[g.category] || '');
 
             const stat = card.querySelector('.gem-stat');
             if (stat && p.support) stat.innerText = `Seen together in ${p.support} discussions · ${p.lift.toFixed(1)}× more than chance`;
@@ -327,17 +407,6 @@ ${JSON.stringify(items)}`;
     }
 }
 
-// Embed posts once, cached by post id, so pill re-runs only embed what's new.
-async function getPostEmbeddings(posts) {
-    const cache = window._postEmbeddingCache;
-    const missing = posts.filter(p => p.data && p.data.id && !cache.has(p.data.id));
-    if (missing.length > 0) {
-        const texts = missing.map(p => `${p.data.title || p.data.link_title || ''} ${p.data.selftext || p.data.body || ''}`);
-        const vectors = await embedTexts(texts);
-        missing.forEach((p, i) => { if (vectors[i]) cache.set(p.data.id, vectors[i]); });
-    }
-    return posts.map(p => cache.get(p.data?.id)).filter(Boolean);
-}
 
 // Build keyword -> count of semantically matching discussions. Null on failure (triggers fallback).
 async function buildGroundingMap(keywords, posts) {

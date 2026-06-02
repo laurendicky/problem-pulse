@@ -59,11 +59,20 @@ async function embedTexts(texts, batchSize = 200) {
 
 // =================================================================================
 // === HIDDEN GEMS ENGINE (statistics-first, surprise-curated) ===
+// === v2: phrase features + adaptive support + overlap guard ===
+// ===
+// === Drop-in replacement for the whole "HIDDEN GEMS ENGINE" block in your script
+// === (the GEM_* constants, buildFeatureMatrix, chiSquare2x2, mineAssociations and
+// === generateAndRenderHiddenGems). Relies on the same globals already in your file:
+// === stopWords, lemmatize, generateNgrams, positiveWords, negativeWords,
+// === emotionalIntensityScores, embedTexts, cosineSimilarity, OPENAI_PROXY_URL.
 // =================================================================================
-const GEM_MIN_SUPPORT = 4;    // pair must co-occur in >= this many discussions
-const GEM_MIN_LIFT = 1.4;  // co-occur at least 40% more than chance
-const GEM_MIN_CHI2 = 3.84; // ~ p < 0.05 at 1 degree of freedom
-const GEM_MAX_SIM = 0.55; // drop near-synonym pairs (too alike = not surprising)
+
+const GEM_MIN_LIFT       = 1.4;   // pair must co-occur at least 40% more than chance
+const GEM_MIN_CHI2       = 3.84;  // ~ p < 0.05 at 1 degree of freedom
+const GEM_MAX_SIM        = 0.55;  // drop near-synonym pairs (too alike = not surprising)
+const GEM_VOCAB_UNIGRAMS = 120;   // how many single-word features to keep (was a flat 70 total)
+const GEM_VOCAB_PHRASES  = 90;    // how many phrase features to keep
 
 function buildFeatureMatrix(posts) {
     const N = posts.length;
@@ -79,13 +88,26 @@ function buildFeatureMatrix(posts) {
 
     posts.forEach((post, idx) => {
         const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase();
+        const cleanWords = text.replace(/[^a-z\s']/g, ' ').split(/\s+/).filter(Boolean);
+
+        // One Set per post so document frequency counts unique posts, not raw occurrences.
         const seen = new Set();
-        text.replace(/[^a-z\s']/g, ' ').split(/\s+/).forEach(w => {
+
+        // 1. Unigrams, lemmatised (so "problems" and "problem" merge).
+        cleanWords.forEach(w => {
             if (w.length < 3 || stopWords.includes(w)) return;
             const lemma = lemmatize(w);
             if (lemma.length < 3 || stopWords.includes(lemma)) return;
             seen.add(lemma);
         });
+
+        // 2. Phrases (bigrams + trigrams), left unlemmatised so they read naturally
+        //    ("home security", "moving house"). generateNgrams already drops any ngram
+        //    containing a stop word, so we only get clean, meaningful phrases.
+        [...generateNgrams(cleanWords, 2), ...generateNgrams(cleanWords, 3)].forEach(ph => {
+            if (ph.split(' ').every(t => t.length >= 3)) seen.add(ph);
+        });
+
         seen.forEach(f => {
             df.set(f, (df.get(f) || 0) + 1);
             if (!featurePosts.has(f)) featurePosts.set(f, new Set());
@@ -93,17 +115,29 @@ function buildFeatureMatrix(posts) {
         });
     });
 
-    const minDF = Math.max(3, Math.round(N * 0.03));
-    const boostMinDF = Math.max(2, Math.round(N * 0.015)); // lower bar for emotion words
-    const maxDF = Math.round(N * 0.6);
+    const minDFuni    = Math.max(3, Math.round(N * 0.03));
+    const boostMinDF  = Math.max(2, Math.round(N * 0.015)); // lower bar for emotion words
+    const minDFphrase = Math.max(2, Math.round(N * 0.02));  // phrases are rarer, so a lower bar
+    const maxDF       = Math.round(N * 0.6);
 
-    const scored = [...df.entries()].filter(([f, c]) => {
-        if (c > maxDF) return false;
-        return emotionTerms.has(f) ? c >= boostMinDF : c >= minDF;
-    }).sort((a, b) => b[1] - a[1]);
+    const entries = [...df.entries()];
 
-    const vocab = scored.slice(0, 70).map(([f]) => f);
-    const types = new Map(vocab.map(f => [f, emotionTerms.has(f) ? 'emotion' : 'topic']));
+    // Keep unigrams and phrases in separate budgets so a flood of single words can't
+    // crowd out every phrase (or vice versa).
+    const unigrams = entries
+        .filter(([f, c]) => !f.includes(' ') && c <= maxDF && (emotionTerms.has(f) ? c >= boostMinDF : c >= minDFuni))
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, GEM_VOCAB_UNIGRAMS)
+        .map(([f]) => f);
+
+    const phrases = entries
+        .filter(([f, c]) => f.includes(' ') && c <= maxDF && c >= minDFphrase)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, GEM_VOCAB_PHRASES)
+        .map(([f]) => f);
+
+    const vocab = [...unigrams, ...phrases];
+    const types = new Map(vocab.map(f => [f, (!f.includes(' ') && emotionTerms.has(f)) ? 'emotion' : 'topic']));
 
     return { N, df, featurePosts, vocab, types };
 }
@@ -117,15 +151,28 @@ function chiSquare2x2(a, b, c, d) {
 
 function mineAssociations(matrix) {
     const { N, df, featurePosts, vocab } = matrix;
+
+    // Support scales with corpus size instead of a flat 4. On a small post-only corpus this
+    // relaxes to 3 (so candidates actually exist); once comments push N up, it tightens again.
+    const minSupport = Math.max(3, Math.round(N * 0.015));
+
     const pairs = [];
     for (let i = 0; i < vocab.length; i++) {
+        const X = vocab[i];
+        const wordsX = new Set(X.split(' '));
         for (let j = i + 1; j < vocab.length; j++) {
-            const X = vocab[i], Y = vocab[j];
+            const Y = vocab[j];
+
+            // Skip trivially-overlapping pairs: "dog" vs "dog park", "dog park" vs "park bench".
+            // Shared words make the link mechanical, not a surprising leap between two worlds.
+            if (Y.split(' ').some(w => wordsX.has(w))) continue;
+
             const setX = featurePosts.get(X), setY = featurePosts.get(Y);
+            if (!setX || !setY) continue;
             const [small, big] = setX.size <= setY.size ? [setX, setY] : [setY, setX];
             let support = 0;
             small.forEach(idx => { if (big.has(idx)) support++; });
-            if (support < GEM_MIN_SUPPORT) continue;
+            if (support < minSupport) continue;
 
             const dfX = df.get(X), dfY = df.get(Y);
             const lift = (support / N) / ((dfX / N) * (dfY / N));
@@ -141,7 +188,7 @@ function mineAssociations(matrix) {
     return pairs;
 }
 
-async function generateAndRenderHiddenGems(posts, audienceContext) {
+async function generateAndRenderHiddenGems(posts, audienceContext, meta = {}) {
     const grid = document.querySelector('.gem-card-grid');
     if (!grid) return;
 
@@ -169,6 +216,12 @@ async function generateAndRenderHiddenGems(posts, audienceContext) {
     const QUOTES_PER_PAIR    = 4;    // Evidence quotes per candidate, so the model verifies a pattern instead of guessing from one line.
     const QUOTE_CHARS        = 240;  // Max length per quote.
 
+    // What the header reports as "searched". This function only sees the array it is handed (the
+    // distilled set), so by default it can only report posts.length. The caller should pass the true
+    // corpus size and wording, e.g. meta = { searchedCount: 315, searchedLabel: 'posts and comments' }.
+    const searchedCount = Number.isFinite(meta.searchedCount) ? meta.searchedCount : posts.length;
+    const searchedLabel = meta.searchedLabel || 'discussions';
+
     // ---- Header / summary helpers ----
     // These populate the elements outside the card grid: the search statement, the disclaimer,
     // and the highlights bar (count found, surprise level, commercial opportunities). They query
@@ -193,7 +246,7 @@ async function generateAndRenderHiddenGems(posts, audienceContext) {
         return `Only ${n} hidden gems were strong enough to make the cut.`;
     };
 
-    const updateGemHeader = (searchedCount, shownGems) => {
+    const updateGemHeader = (shownGems) => {
         // Only gems that truly cleared the bar count as "found". Near-miss backfill cards carry their
         // own label and are not counted here, so the headline number stays honest.
         const madeCut = shownGems.filter(g => g._tier !== 'near').length;
@@ -204,7 +257,7 @@ async function generateAndRenderHiddenGems(posts, audienceContext) {
         ).length;
         const scores = shownGems.map(g => Number(g.surprise_score)).filter(s => !isNaN(s));
 
-        setText('.gem-search-statement', `We Searched ${Number(searchedCount).toLocaleString()} discussions`);
+        setText('.gem-search-statement', `We Searched ${Number(searchedCount).toLocaleString()} ${searchedLabel}`);
         setText('.gem-search-disclaimer', disclaimerText(madeCut));
         setText('.number-found', String(madeCut));
         setText('.surprise-score', surpriseLabel(scores) || 'Medium');
@@ -357,16 +410,19 @@ Every kept gem must fit exactly ONE category:
 4. contradiction: the audience says one thing but does another (asks for expert advice yet ignores trainers; says price matters yet picks premium).
 
 HARD RULES:
-- Some raw terms are meaningless function words (e.g. "will", "their", "about"). NEVER output a raw term as a label and NEVER build a gem around a word that carries no concept. Identify the real concept the QUOTES are about and label that. If you cannot find a real, concrete concept for BOTH sides in the quotes, DISCARD the item.
+- Some raw terms are meaningless function words (e.g. "will", "their", "about"). NEVER output a raw term as a label and NEVER build a gem around a word that carries no concept. Identify the real concept the QUOTES are about and label that. If you cannot find a real, concrete concept for BOTH sides in the quotes, DISCARD the item entirely.
 - READ THE QUOTES. Only assert what the quotes plus the co-occurrence actually support.
 - Do NOT invent comparative statistics like "more than average owners". You have no baseline population. Phrase findings as connections within this audience only.
-- Quality over quantity. Three exceptional gems beat twenty weak ones. Returning one gem, or none, is the correct and expected outcome much of the time. Never pad.
 
-SCORING. Score every candidate you keep, 1-10, and be harsh:
-- surprise: 10 means a founder would never have predicted the link; low means obvious.
+WHAT TO RETURN (this matters):
+- DISCARD only the truly worthless items: obvious consequences, circular restatements, or pairs with no real concept. Those get no entry at all.
+- For everything else, RETURN it with an honest surprise score. Do NOT pre-filter the borderline ones. We apply the quality bar ourselves in code, and we may show one almost-but-not-quite item as a clearly labelled "worth a look" card. So if something is interesting but not a knockout, return it scored around 5 to 7 rather than dropping it.
+- Order does not matter; score honestly and we sort. Returning a couple of mid-scored items alongside your best one is helpful, not padding.
+
+SCORING. Score every returned item 1-10, and be honest rather than generous:
+- surprise: 10 means a founder would never have predicted the link; 8+ is a genuine "wait, what?!"; 5 to 7 is interesting but not shocking; below 5 should not be returned.
 - actionability: could a founder, marketer or creator actually do something with it.
 - commercial_value: does it reveal a new audience, product, angle, positioning or market.
-Only keep a gem if surprise is genuinely high. If surprise is mediocre, drop it regardless of the other scores.
 
 Respond ONLY with JSON: {"gems":[{"id":0,"category":"emotional_leap|behavioural_leap|commercial_leap|contradiction","surprise_score":0,"actionability_score":0,"commercial_value":0,"topic_a":"...","front_teaser":"...","reveal_finding":"...","reveal_summary":"...","opportunity":"..."}]}
 
@@ -450,12 +506,12 @@ ${JSON.stringify(items)}`;
         }
 
         if (shown.length === 0) {
-            updateGemHeader(posts.length, []);
+            updateGemHeader([]);
             grid.innerHTML = '<p class="placeholder-text">No statistically significant hidden connections were discovered in this dataset.</p>';
             return;
         }
 
-        updateGemHeader(posts.length, shown);
+        updateGemHeader(shown);
 
         grid.innerHTML = '';
         const set = (root, sel, val) => { const e = root.querySelector(sel); if (e) e.innerText = val; };
@@ -498,38 +554,6 @@ ${JSON.stringify(items)}`;
     }
 }
 
-
-
-// Build keyword -> count of semantically matching discussions. Null on failure (triggers fallback).
-async function buildGroundingMap(keywords, posts) {
-    try {
-        const postVectors = await getPostEmbeddings(posts);
-        if (postVectors.length === 0) return null;
-
-        const uniqueKeywords = [...new Set(keywords.map(k => k.toLowerCase().trim()).filter(Boolean))];
-        const keywordVectors = await embedTexts(uniqueKeywords);
-
-        const map = new Map();
-        let maxSim = 0, simSum = 0, simCount = 0; // for the calibration log
-        uniqueKeywords.forEach((kw, i) => {
-            const kv = keywordVectors[i];
-            if (!kv) { map.set(kw, 0); return; }
-            let count = 0;
-            for (const pv of postVectors) {
-                const sim = cosineSimilarity(kv, pv);
-                if (sim > maxSim) maxSim = sim;
-                simSum += sim; simCount++;
-                if (sim >= SIM_THRESHOLD) count++;
-            }
-            map.set(kw, count);
-        });
-        console.log(`[Grounding] threshold=${SIM_THRESHOLD} | max sim=${maxSim.toFixed(3)} | avg sim=${(simSum / (simCount || 1)).toFixed(3)}`);
-        return map;
-    } catch (err) {
-        console.error("Embedding grounding failed; falling back to word matching:", err);
-        return null;
-    }
-}
 
 // Unified lookup: semantic count if available, else the word-overlap fallback.
 function groundingCount(keyword, groundingMap, lowerTexts) {
@@ -4020,8 +4044,24 @@ async function runProblemFinder(options = {}) {
         setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
         setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
         setTimeout(() => generateAndRenderHistoricalSentiment(subredditQueryString), 3500);
-        setTimeout(() => generateAndRenderHiddenGems(window._filteredPosts, originalGroupName), 4000);
-
+        setTimeout(async () => {
+            let gemCorpus = window._filteredPosts || [];
+            try {
+                // Comments for the top posts. 40 keeps latency sane; raise if you want a deeper dig.
+                const topIds = gemCorpus.slice(0, 40).map(p => p.data.id);
+                const rawComments = await fetchCommentsForPosts(topIds);
+                const comments = deduplicateByContent(rawComments)
+                    .filter(c => (c.data.body || '').length >= 40); // drop "lol"-tier noise
+                gemCorpus = [...gemCorpus, ...comments];
+                console.log(`[Hidden Gems] Mining ${gemCorpus.length} items (${window._filteredPosts.length} posts + ${comments.length} comments).`);
+            } catch (e) {
+                console.warn('Hidden Gems: comment fetch failed, using posts only.', e);
+            }
+            generateAndRenderHiddenGems(gemCorpus, originalGroupName, {
+                searchedCount: gemCorpus.length,
+                searchedLabel: 'posts and comments'
+            });
+        }, 4000);
 
     } catch (err) {
         console.error("!!!!!!!! A FATAL ERROR STOPPED THE ANALYSIS !!!!!!!!", err);

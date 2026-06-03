@@ -69,11 +69,11 @@ async function embedTexts(texts, batchSize = 200) {
 // === emotionalIntensityScores, embedTexts, cosineSimilarity, OPENAI_PROXY_URL.
 // =================================================================================
 
-const GEM_MIN_LIFT       = 1.2;   // pair must co-occur at least 40% more than chance
-const GEM_MIN_CHI2       = 2.0;  // ~ p < 0.05 at 1 degree of freedom
-const GEM_MAX_SIM        = 0.55;  // drop near-synonym pairs (too alike = not surprising)
+const GEM_MIN_LIFT = 1.2;   // pair must co-occur at least 40% more than chance
+const GEM_MIN_CHI2 = 2.0;  // ~ p < 0.05 at 1 degree of freedom
+const GEM_MAX_SIM = 0.55;  // drop near-synonym pairs (too alike = not surprising)
 const GEM_VOCAB_UNIGRAMS = 120;   // how many single-word features to keep (was a flat 70 total)
-const GEM_VOCAB_PHRASES  = 90;    // how many phrase features to keep
+const GEM_VOCAB_PHRASES = 90;    // how many phrase features to keep
 
 function buildFeatureMatrix(posts) {
     const N = posts.length;
@@ -120,10 +120,11 @@ function buildFeatureMatrix(posts) {
     // percentage demands absurd frequencies and silently starves the vocab. Floors keep tiny
     // corpora usable; ceilings keep large ones from requiring dozens of mentions to qualify.
     const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-    const minDFuni    = clamp(Math.round(N * 0.01),  3, 40);
-    const boostMinDF  = clamp(Math.round(N * 0.006), 2, 25); // lower bar for emotion words
-    const minDFphrase = clamp(Math.round(N * 0.005), 2, 20); // phrases are rarer, so a lower bar
-    const maxDF       = Math.round(N * 0.5);
+    // Change these lines in buildFeatureMatrix
+    const minDFuni    = clamp(Math.round(N * 0.005), 3, 15); // Was 40 ceiling, now 15
+    const boostMinDF  = clamp(Math.round(N * 0.003), 2, 10); // Was 25 ceiling, now 10
+    const minDFphrase = clamp(Math.round(N * 0.002), 2, 8);  // Was 20 ceiling, now 8
+    const maxDF = Math.round(N * 0.5);
 
     const entries = [...df.entries()];
 
@@ -157,11 +158,8 @@ function chiSquare2x2(a, b, c, d) {
 function mineAssociations(matrix) {
     const { N, df, featurePosts, vocab } = matrix;
 
-    // Support scales with corpus size instead of a flat 4. On a small post-only corpus this
-    // relaxes to 3 (so candidates actually exist); once comments push N up, it tightens again.
-    // Clamped, not linear: floors at 3 for small corpora, ceilings at 8 so a large comment-rich
-    // corpus does not demand dozens of co-occurrences (which silently killed every pair last time).
-    const minSupport = Math.min(8, Math.max(3, Math.round(N * 0.005)));
+
+const minSupport = Math.min(5, Math.max(3, Math.round(N * 0.002))); // Was min 8, now maxes at 5
 
     const pairs = [];
     for (let i = 0; i < vocab.length; i++) {
@@ -221,11 +219,11 @@ async function generateAndRenderHiddenGems(posts, audienceContext, meta = {}) {
     }
 
     // ---- Tunables ----
-    const GEM_MAX_SIM_LOCAL  = typeof GEM_MAX_SIM !== 'undefined' ? GEM_MAX_SIM : 0.7;
+    const GEM_MAX_SIM_LOCAL = typeof GEM_MAX_SIM !== 'undefined' ? GEM_MAX_SIM : 0.7;
     const SURPRISE_THRESHOLD = 8;    // 1-10. Quality over quantity: only genuinely surprising gems show.
-    const SHORTLIST_SIZE     = 35;   // Raw candidates handed to the model (we now reject hard, so give it more to choose from).
-    const QUOTES_PER_PAIR    = 4;    // Evidence quotes per candidate, so the model verifies a pattern instead of guessing from one line.
-    const QUOTE_CHARS        = 240;  // Max length per quote.
+    const SHORTLIST_SIZE = 35;   // Raw candidates handed to the model (we now reject hard, so give it more to choose from).
+    const QUOTES_PER_PAIR = 4;    // Evidence quotes per candidate, so the model verifies a pattern instead of guessing from one line.
+    const QUOTE_CHARS = 240;  // Max length per quote.
 
     // What the header reports as "searched". This function only sees the array it is handed (the
     // distilled set), so by default it can only report posts.length. The caller should pass the true
@@ -285,34 +283,34 @@ async function generateAndRenderHiddenGems(posts, audienceContext, meta = {}) {
         // broad: articles, pronouns, modals, prepositions, conjunctions, fillers and Reddit chrome.
         const STOPWORDS = new Set([
             // articles / determiners
-            'a','an','the','this','that','these','those','my','your','his','her','its','our','their',
-            'some','any','no','every','each','all','both','few','more','most','other','such','own','same',
+            'a', 'an', 'the', 'this', 'that', 'these', 'those', 'my', 'your', 'his', 'her', 'its', 'our', 'their',
+            'some', 'any', 'no', 'every', 'each', 'all', 'both', 'few', 'more', 'most', 'other', 'such', 'own', 'same',
             // pronouns
-            'i','me','you','he','she','it','we','they','them','him','us','who','whom','whose','which','what',
-            'mine','yours','ours','theirs','myself','yourself','himself','herself','itself','ourselves',
-            'themselves','one','ones','someone','anyone','everyone','nobody','something','anything',
-            'everything','nothing',
+            'i', 'me', 'you', 'he', 'she', 'it', 'we', 'they', 'them', 'him', 'us', 'who', 'whom', 'whose', 'which', 'what',
+            'mine', 'yours', 'ours', 'theirs', 'myself', 'yourself', 'himself', 'herself', 'itself', 'ourselves',
+            'themselves', 'one', 'ones', 'someone', 'anyone', 'everyone', 'nobody', 'something', 'anything',
+            'everything', 'nothing',
             // auxiliaries / modals
-            'am','is','are','was','were','be','been','being','have','has','had','having','do','does','did',
-            'doing','will','would','shall','should','can','could','may','might','must','ought','need','dare',
-            'going','gonna','wanna',
+            'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did',
+            'doing', 'will', 'would', 'shall', 'should', 'can', 'could', 'may', 'might', 'must', 'ought', 'need', 'dare',
+            'going', 'gonna', 'wanna',
             // prepositions / conjunctions
-            'of','in','on','at','by','for','with','about','against','between','into','through','during',
-            'before','after','above','below','to','from','up','down','out','off','over','under','again',
-            'further','then','once','and','but','or','nor','so','than','too','very','as','because','while',
-            'if','though','although','unless','until','whereas',
+            'of', 'in', 'on', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into', 'through', 'during',
+            'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down', 'out', 'off', 'over', 'under', 'again',
+            'further', 'then', 'once', 'and', 'but', 'or', 'nor', 'so', 'than', 'too', 'very', 'as', 'because', 'while',
+            'if', 'though', 'although', 'unless', 'until', 'whereas',
             // common fillers / generic verbs / adjectives
-            'best','took','want','since','first','just','like','know','think','good','really','even','still',
-            'well','right','never','always','many','things','thing','make','made','take','taken','give','given',
-            'look','looked','find','found','use','used','work','worked','way','day','days','year','years',
-            'people','person','time','times','much','lot','also','actually','basically','literally','maybe',
-            'probably','definitely','etc','stuff','kind','sort','bit','able','new','old','big','little',
+            'best', 'took', 'want', 'since', 'first', 'just', 'like', 'know', 'think', 'good', 'really', 'even', 'still',
+            'well', 'right', 'never', 'always', 'many', 'things', 'thing', 'make', 'made', 'take', 'taken', 'give', 'given',
+            'look', 'looked', 'find', 'found', 'use', 'used', 'work', 'worked', 'way', 'day', 'days', 'year', 'years',
+            'people', 'person', 'time', 'times', 'much', 'lot', 'also', 'actually', 'basically', 'literally', 'maybe',
+            'probably', 'definitely', 'etc', 'stuff', 'kind', 'sort', 'bit', 'able', 'new', 'old', 'big', 'little',
             // adverbs / question words
-            'how','when','where','why','here','there','now','today','yesterday','tomorrow','soon','ever',
-            'often','sometimes','usually','around','almost','enough','quite','rather','pretty','really',
+            'how', 'when', 'where', 'why', 'here', 'there', 'now', 'today', 'yesterday', 'tomorrow', 'soon', 'ever',
+            'often', 'sometimes', 'usually', 'around', 'almost', 'enough', 'quite', 'rather', 'pretty', 'really',
             // Reddit / forum chrome
-            'edit','op','tldr','imo','imho','fyi','btw','lol','lmao','ngl','afaik','eli5','ama','post','posts',
-            'comment','comments','reddit','subreddit','sub','thread','upvote','downvote','guys','anyone'
+            'edit', 'op', 'tldr', 'imo', 'imho', 'fyi', 'btw', 'lol', 'lmao', 'ngl', 'afaik', 'eli5', 'ama', 'post', 'posts',
+            'comment', 'comments', 'reddit', 'subreddit', 'sub', 'thread', 'upvote', 'downvote', 'guys', 'anyone'
         ]);
 
         // A term is usable only if it is a real content word: at least 3 letters, alphabetic
@@ -357,7 +355,8 @@ async function generateAndRenderHiddenGems(posts, audienceContext, meta = {}) {
             p.score = p.lift * Math.log2(p.support + 1) * leap;
         });
 
-        candidates.sort((a, b) => b.score - a.score);
+        // Add a tie-breaker so the list is always in the exact same order for the AI
+        candidates.sort((a, b) => (b.score - a.score) || a.x.localeCompare(b.x));
         const shortlist = candidates.slice(0, SHORTLIST_SIZE);
 
         // MULTIPLE GROUNDING QUOTES per pair (was a single 400-char snippet).
@@ -475,9 +474,9 @@ ${JSON.stringify(items)}`;
         // Enforce the bars in code. Belt and braces: even if the model echoes a junk word like
         // "will" or rates an obvious pair highly, we drop it here. No fallback padding: if nothing
         // clears the bar, we say so rather than forcing weak findings onto the UI.
-        const ACTION_THRESHOLD    = 4;
+        const ACTION_THRESHOLD = 4;
         const NEAR_MISS_THRESHOLD = 4;  // softer surprise bar, used only to top up to MIN_SHOWN.
-        const MIN_SHOWN           = 2;  // aim to show at least this many cards when we honestly can.
+        const MIN_SHOWN = 2;  // aim to show at least this many cards when we honestly can.
 
         const labelOk = (s) => {
             const t = (s || '').toLowerCase().trim();
@@ -500,7 +499,7 @@ ${JSON.stringify(items)}`;
         const near = curated
             .filter(g => passesBase(g) &&
                 Number(g.surprise_score) >= NEAR_MISS_THRESHOLD &&
-                Number(g.surprise_score) <  SURPRISE_THRESHOLD)
+                Number(g.surprise_score) < SURPRISE_THRESHOLD)
             .sort(bySurprise);
 
         strong.forEach(g => g._tier = 'gem');
@@ -527,10 +526,10 @@ ${JSON.stringify(items)}`;
         grid.innerHTML = '';
         const set = (root, sel, val) => { const e = root.querySelector(sel); if (e) e.innerText = val; };
         const CATEGORY_LABELS = {
-            emotional_leap:   'Emotional leap',
+            emotional_leap: 'Emotional leap',
             behavioural_leap: 'Behavioural leap',
-            commercial_leap:  'Commercial leap',
-            contradiction:    'Contradiction'
+            commercial_leap: 'Commercial leap',
+            contradiction: 'Contradiction'
         };
         const TIER_LABELS = { gem: '', near: 'Worth a look' };
 

@@ -158,10 +158,11 @@ function chiSquare2x2(a, b, c, d) {
 function mineAssociations(matrix) {
     const { N, df, featurePosts, vocab } = matrix;
 
-
-const minSupport = Math.min(5, Math.max(3, Math.round(N * 0.002))); // Was min 8, now maxes at 5
+    // Scale support floor down to 2 if N is small, keeping the floor at 3 for larger datasets
+    const minSupport = N < 80 ? 2 : Math.min(5, Math.max(3, Math.round(N * 0.002)));
 
     const pairs = [];
+
     for (let i = 0; i < vocab.length; i++) {
         const X = vocab[i];
         const wordsX = new Set(X.split(' '));
@@ -313,12 +314,14 @@ async function generateAndRenderHiddenGems(posts, audienceContext, meta = {}) {
             'comment', 'comments', 'reddit', 'subreddit', 'sub', 'thread', 'upvote', 'downvote', 'guys', 'anyone'
         ]);
 
-        // A term is usable only if it is a real content word: at least 3 letters, alphabetic
-        // (allowing internal hyphen/apostrophe), and not a stopword.
-        const isValidTerm = (t) => {
-            const s = (t || '').toLowerCase().trim();
-            return s.length >= 3 && /^[a-z][a-z'-]*[a-z]$/.test(s) && !STOPWORDS.has(s);
-        };
+       // Locate this function inside generateAndRenderHiddenGems and replace it:
+const isValidTerm = (t) => {
+    const s = (t || '').toLowerCase().trim();
+    // Added \s to the character class to allow spaces in multi-word phrases
+    return s.length >= 3 && /^[a-z][a-z'\s-]*[a-z]$/.test(s) && !STOPWORDS.has(s);
+};
+       
+    
 
         candidates = candidates.filter(p => isValidTerm(p.x) && isValidTerm(p.y));
 

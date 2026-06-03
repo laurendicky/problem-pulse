@@ -130,22 +130,23 @@ function buildFeatureMatrix(posts) {
 
     // Keep unigrams and phrases in separate budgets so a flood of single words can't
     // crowd out every phrase (or vice versa).
-    const unigrams = entries
-        .filter(([f, c]) => !f.includes(' ') && c <= maxDF && (emotionTerms.has(f) ? c >= boostMinDF : c >= minDFuni))
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, GEM_VOCAB_UNIGRAMS)
-        .map(([f]) => f);
+// Keep unigrams and phrases in separate budgets, but expand the limits to prevent generic crowding
+const unigrams = entries
+.filter(([f, c]) => !f.includes(' ') && c <= maxDF && (emotionTerms.has(f) ? c >= boostMinDF : c >= minDFuni))
+.sort((a, b) => b[1] - a[1])
+.slice(0, 250) // Increased from 120 to allow niche terms to survive generic noise
+.map(([f]) => f);
 
-    const phrases = entries
-        .filter(([f, c]) => f.includes(' ') && c <= maxDF && c >= minDFphrase)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, GEM_VOCAB_PHRASES)
-        .map(([f]) => f);
+const phrases = entries
+.filter(([f, c]) => f.includes(' ') && c <= maxDF && c >= minDFphrase)
+.sort((a, b) => b[1] - a[1])
+.slice(0, 150) // Increased from 90
+.map(([f]) => f);
 
-    const vocab = [...unigrams, ...phrases];
-    const types = new Map(vocab.map(f => [f, (!f.includes(' ') && emotionTerms.has(f)) ? 'emotion' : 'topic']));
+const vocab = [...unigrams, ...phrases];
+const types = new Map(vocab.map(f => [f, (!f.includes(' ') && emotionTerms.has(f)) ? 'emotion' : 'topic']));
 
-    return { N, df, featurePosts, vocab, types };
+return { N, df, featurePosts, vocab, types };
 }
 
 function chiSquare2x2(a, b, c, d) {
@@ -477,94 +478,98 @@ ${JSON.stringify(items)}`;
         // Enforce the bars in code. Belt and braces: even if the model echoes a junk word like
         // "will" or rates an obvious pair highly, we drop it here. No fallback padding: if nothing
         // clears the bar, we say so rather than forcing weak findings onto the UI.
-        const ACTION_THRESHOLD = 4;
-        const NEAR_MISS_THRESHOLD = 4;  // softer surprise bar, used only to top up to MIN_SHOWN.
-        const MIN_SHOWN = 2;  // aim to show at least this many cards when we honestly can.
+      
+      
+      
+      // 1. Establish a single, solid quality bar (no confusing near-miss tiers)
+      const SOLID_SURPRISE_THRESHOLD = 6; 
+      const ACTION_THRESHOLD = 4;
 
-        const labelOk = (s) => {
-            const t = (s || '').toLowerCase().trim();
-            if (t.length < 3) return false;
-            const tokens = t.split(/\s+/);
-            return !(tokens.length === 1 && STOPWORDS.has(tokens[0]));
-        };
+      const labelOk = (s) => {
+          const t = (s || '').toLowerCase().trim();
+          if (t.length < 3) return false;
+          const tokens = t.split(/\s+/);
+          return !(tokens.length === 1 && STOPWORDS.has(tokens[0]));
+      };
 
-        // Base quality every shown card must meet regardless of tier.
-        const passesBase = (g) =>
-            Number(g.actionability_score) >= ACTION_THRESHOLD &&
-            labelOk(g.topic_a) && labelOk(g.reveal_finding);
+      const passesBase = (g) =>
+          Number(g.actionability_score) >= ACTION_THRESHOLD &&
+          Number(g.surprise_score) >= SOLID_SURPRISE_THRESHOLD &&
+          labelOk(g.topic_a) && labelOk(g.reveal_finding);
 
-        const bySurprise = (a, b) => Number(b.surprise_score) - Number(a.surprise_score);
+      // Filter curated items against the base quality bar
+      let qualifiedGems = curated.filter(passesBase).sort((a, b) => Number(b.surprise_score) - Number(a.surprise_score));
 
-        // Strong = cleared the full surprise bar. Near = almost (6 to <8), used only as backfill.
-        const strong = curated
-            .filter(g => passesBase(g) && Number(g.surprise_score) >= SURPRISE_THRESHOLD)
-            .sort(bySurprise);
-        const near = curated
-            .filter(g => passesBase(g) &&
-                Number(g.surprise_score) >= NEAR_MISS_THRESHOLD &&
-                Number(g.surprise_score) < SURPRISE_THRESHOLD)
-            .sort(bySurprise);
+      // 2. Client-Side Deduplication: Prevent repeating the same concepts
+      const seenConcepts = new Set();
+      const uniqueGems = [];
 
-        strong.forEach(g => g._tier = 'gem');
-        near.forEach(g => g._tier = 'near');
+      for (const gem of qualifiedGems) {
+          const conceptA = (gem.topic_a || '').toLowerCase().trim();
+          const conceptB = (gem.reveal_finding || '').toLowerCase().trim();
 
-        // If we already have enough strong gems, show only those. Otherwise top up with the best
-        // near-misses just enough to reach MIN_SHOWN. We never pad beyond that, and if nothing clears
-        // even the softer bar we show the empty state.
-        let shown;
-        if (strong.length >= MIN_SHOWN) {
-            shown = strong.slice(0, 8);
-        } else {
-            shown = [...strong, ...near.slice(0, MIN_SHOWN - strong.length)].slice(0, 8);
-        }
+          // Skip if either side of this discovery repeats an already rendered focal concept
+          if (seenConcepts.has(conceptA) || seenConcepts.has(conceptB)) {
+              continue;
+          }
 
-        if (shown.length === 0) {
-            updateGemHeader([]);
-            grid.innerHTML = '<p class="placeholder-text">No statistically significant hidden connections were discovered in this dataset.</p>';
-            return;
-        }
+          seenConcepts.add(conceptA);
+          seenConcepts.add(conceptB);
+          uniqueGems.push(gem);
 
-        updateGemHeader(shown);
+          if (uniqueGems.length >= 3) break; // Limit UI clutter to the top 3 highly distinct discoveries
+      }
 
-        grid.innerHTML = '';
-        const set = (root, sel, val) => { const e = root.querySelector(sel); if (e) e.innerText = val; };
-        const CATEGORY_LABELS = {
-            emotional_leap: 'Emotional leap',
-            behavioural_leap: 'Behavioural leap',
-            commercial_leap: 'Commercial leap',
-            contradiction: 'Contradiction'
-        };
-        const TIER_LABELS = { gem: '', near: 'Worth a look' };
+      // Set all shown items to a single consistent tier
+      uniqueGems.forEach(g => g._tier = 'gem');
 
-        shown.forEach(g => {
-            const p = shortlist[g.id] || {};
-            const card = GEM_BLUEPRINT.cloneNode(true);
-            card.classList.remove('is-flipped');
-            card.style.display = '';
-            // Styling hook so near-misses can look distinct from full gems.
-            card.classList.toggle('is-near-miss', g._tier === 'near');
+      if (uniqueGems.length === 0) {
+          updateGemHeader([]);
+          grid.innerHTML = '<p class="placeholder-text">No statistically significant hidden connections were discovered in this dataset.</p>';
+          return;
+      }
 
-            set(card, '.topic-a', g.topic_a || '');
-            set(card, '.front-summary', g.front_teaser || '');
-            set(card, '.topic-a-back', g.topic_a || '');
-            set(card, '.reveal-finding', g.reveal_finding || '');
-            set(card, '.reveal-summary', g.reveal_summary || '');
-            set(card, '.gem-opportunity', g.opportunity || '');
-            // Optional tags: only fill if your blueprint has these slots. Harmless if not.
-            set(card, '.gem-category', CATEGORY_LABELS[g.category] || '');
-            set(card, '.gem-tier', TIER_LABELS[g._tier] || '');
+      // 3. Update the header using the exact same array we are rendering
+      updateGemHeader(uniqueGems);
 
-            const stat = card.querySelector('.gem-stat');
-            if (stat && p.support) stat.innerText = `Seen together in ${p.support} discussions · ${p.lift.toFixed(1)}× more than chance`;
+      // 4. Render the deduplicated cards
+      grid.innerHTML = '';
+      const set = (root, sel, val) => { const e = root.querySelector(sel); if (e) e.innerText = val; };
+      const CATEGORY_LABELS = {
+          emotional_leap: 'Emotional leap',
+          behavioural_leap: 'Behavioural leap',
+          commercial_leap: 'Commercial leap',
+          contradiction: 'Contradiction'
+      };
 
-            card.addEventListener('click', () => card.classList.toggle('is-flipped'));
-            grid.appendChild(card);
-        });
+      uniqueGems.forEach(g => {
+          const p = shortlist[g.id] || {};
+          const card = GEM_BLUEPRINT.cloneNode(true);
+          card.classList.remove('is-flipped');
+          card.style.display = '';
 
-    } catch (error) {
-        console.error('Hidden Gems error:', error);
-        grid.innerHTML = '<p class="error-message">Could not generate hidden gems.</p>';
-    }
+          set(card, '.topic-a', g.topic_a || '');
+          set(card, '.front-summary', g.front_teaser || '');
+          set(card, '.topic-a-back', g.topic_a || '');
+          set(card, '.reveal-finding', g.reveal_finding || '');
+          set(card, '.reveal-summary', g.reveal_summary || '');
+          set(card, '.gem-opportunity', g.opportunity || '');
+          set(card, '.gem-category', CATEGORY_LABELS[g.category] || '');
+          set(card, '.gem-tier', ''); // Keep empty or assign a standard badge
+
+          const stat = card.querySelector('.gem-stat');
+          if (stat && p.support) {
+              stat.innerText = `Seen together in ${p.support} discussions · ${p.lift.toFixed(1)}× more than chance`;
+          }
+
+          card.addEventListener('click', () => card.classList.toggle('is-flipped'));
+          grid.appendChild(card);
+      });
+
+  } catch (error) {
+      console.error('Hidden Gems error:', error);
+      grid.innerHTML = '<p class="error-message">Could not generate hidden gems.</p>';
+  }
 }
 
 

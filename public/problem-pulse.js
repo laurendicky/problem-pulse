@@ -3375,7 +3375,7 @@ function _spawnBubble(field, quotes) {
     field.appendChild(el);
     setTimeout(() => el.remove(), duration * 1000);
 }
-let _bubbleInterval = null;
+
 let _bubbleLabelInterval = null;
 
 const BUBBLE_SEARCH_MESSAGES = [

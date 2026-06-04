@@ -3641,15 +3641,15 @@ async function generateAndRenderOverview(posts, audienceContext) {
 
                 <!-- Age Section -->
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px; text-align: center;">
-                    <div style="background: #1a1a1a; padding: 10px; border-radius: 8px;">
+                    <div style="background: transparent; padding: 10px; border-radius: 8px;">
                         <div style="font-size: 11px; color: #888; text-transform: uppercase;">18-24</div>
                         <div style="font-size: 18px; font-weight: bold;">${parsed.age_18_24}%</div>
                     </div>
-                    <div style="background: #1a1a1a; padding: 10px; border-radius: 8px; border: 1px solid #00a5ce;">
+                    <div style="background: transparent; padding: 10px; border-radius: 8px; border: 1px solid #00a5ce;">
                         <div style="font-size: 11px; color: #888; text-transform: uppercase;">25-45</div>
                         <div style="font-size: 18px; font-weight: bold;">${parsed.age_25_45}%</div>
                     </div>
-                    <div style="background: #1a1a1a; padding: 10px; border-radius: 8px;">
+                    <div style="background: transparent; padding: 10px; border-radius: 8px;">
                         <div style="font-size: 11px; color: #888; text-transform: uppercase;">45+</div>
                         <div style="font-size: 18px; font-weight: bold;">${parsed.age_45_plus}%</div>
                     </div>
@@ -4228,7 +4228,54 @@ function initializeDashboardInteractivity() {
     });
 }
 
+// =================================================================================
+// === COMMUNITY SEARCH: ROTATING SHIMMER LOADER ===
+// =================================================================================
+let _communityLoaderInterval = null;
 
+const COMMUNITY_LOADER_MESSAGES = [
+    "Scanning active communities...",
+    "Following the conversation trail...",
+    "Finding where your audience gathers...",
+    "Separating strong signals from noise...",
+    "Ranking communities by relevance...",
+    "Looking for recurring frustrations...",
+    "Spotting emotional patterns...",
+    "Mapping audience interests...",
+    "Detecting useful discussion threads...",
+    "Finding communities worth analysing..."
+];
+
+function startCommunityLoader(container) {
+    if (!container) return;
+    stopCommunityLoader(); // never run two at once
+
+    let i = 0;
+    container.innerHTML = `<p class="loading-text community-loader-text">${COMMUNITY_LOADER_MESSAGES[0]}</p>`;
+    const textEl = container.querySelector('.community-loader-text');
+
+    _communityLoaderInterval = setInterval(() => {
+        // If the element was replaced (results rendered) or removed, stop cleanly.
+        if (!textEl || !document.body.contains(textEl)) {
+            stopCommunityLoader();
+            return;
+        }
+        i = (i + 1) % COMMUNITY_LOADER_MESSAGES.length;
+        textEl.style.opacity = '0';
+        setTimeout(() => {
+            if (!document.body.contains(textEl)) return;
+            textEl.textContent = COMMUNITY_LOADER_MESSAGES[i];
+            textEl.style.opacity = '1';
+        }, 180);
+    }, 1000);
+}
+
+function stopCommunityLoader() {
+    if (_communityLoaderInterval) {
+        clearInterval(_communityLoaderInterval);
+        _communityLoaderInterval = null;
+    }
+}
 // =================================================================================
 // === CORE INITIALIZATION TOOL ===
 // =================================================================================
@@ -4249,6 +4296,31 @@ function initializeProblemFinderTool() {
         }
         .sankey-problem { background-color: #e0f2fe; color: #0c4a6e; }
         .sankey-offer { background-color: #ede9fe; color: #5b21b6; }
+
+        @keyframes pp-shimmer {
+            0%   { background-position: 200% center; }
+            100% { background-position: -200% center; }
+        }
+        .community-loader-text {
+            display: inline-block;
+            transition: opacity 0.18s ease;
+            background: linear-gradient(90deg, rgba(0,165,206,0.5) 0%, rgba(0,165,206,0.5) 40%, #ffffff 50%, rgba(0,165,206,0.5) 60%, rgba(0,165,206,0.5) 100%);
+            background-size: 200% auto;
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+            color: transparent;
+            animation: pp-shimmer 2.5s linear infinite;
+        }
+
+        #search-selected-btn {
+            transition: opacity 0.3s ease;
+        }
+        #search-selected-btn.pf-btn-disabled {
+            opacity: 0.35;
+            pointer-events: none;
+            cursor: not-allowed;
+        }
     `;
     document.head.appendChild(style);
 
@@ -4268,13 +4340,11 @@ function initializeProblemFinderTool() {
         console.error("Critical error: A key UI element was not found.");
         return;
     }
-
     const transitionToStep2 = () => {
         if (step2Container.classList.contains('visible')) return;
         if (welcomeDiv) { welcomeDiv.style.display = 'none'; }
         step1Container.classList.add('hidden');
         step2Container.classList.add('visible');
-        choicesContainer.innerHTML = '<p class="loading-text">Finding & ranking relevant communities...</p>';
         if (audienceTitle) audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`;
     };
 
@@ -4293,7 +4363,6 @@ function initializeProblemFinderTool() {
             if (pillsContainer) pillsContainer.classList.toggle('visible');
         });
     }
-
     findCommunitiesBtn.addEventListener("click", async (event) => {
         event.preventDefault();
         const groupName = groupInput.value.trim();
@@ -4304,6 +4373,11 @@ function initializeProblemFinderTool() {
         originalGroupName = groupName;
         window.originalGroupName = groupName;
         transitionToStep2();
+
+        // Lock the "find problems" button and start the rotating loader.
+        if (searchSelectedBtn) searchSelectedBtn.classList.add('pf-btn-disabled');
+        startCommunityLoader(choicesContainer);
+
         try {
             const initialSuggestions = await findSubredditsForGroup(groupName);
             const rankedSubreddits = await fetchAndRankSubreddits(initialSuggestions);
@@ -4311,6 +4385,11 @@ function initializeProblemFinderTool() {
         } catch (error) {
             console.error("Failed subreddit validation:", error);
             displaySubredditChoices([]);
+        } finally {
+            stopCommunityLoader();
+            // Only unlock once there are real communities to search.
+            const hasChoices = !!document.querySelector('#subreddit-choices input[type="checkbox"]');
+            if (searchSelectedBtn) searchSelectedBtn.classList.toggle('pf-btn-disabled', !hasChoices);
         }
     });
 

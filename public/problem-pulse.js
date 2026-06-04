@@ -1774,6 +1774,10 @@ function loadMoreSubreddits() {
     if (nextBatch.length > 0) {
         const newChoicesHTML = renderSubredditChoicesHTML(nextBatch);
         choicesDiv.insertAdjacentHTML('beforeend', newChoicesHTML);
+
+        // Bring the first new card into view so the user sees they arrived
+        const firstNew = choicesDiv.querySelectorAll('.subreddit-choice')[currentlyShownCount];
+        if (firstNew) firstNew.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
     const newTotalShown = choicesDiv.querySelectorAll('.subreddit-choice').length;
     if (newTotalShown >= _allRankedSubreddits.length) {
@@ -3325,7 +3329,85 @@ let SEO_CARD_BLUEPRINT = null;
 let SEO_ITEM_BLUEPRINT = null;
 let FINDING_PILL_BLUEPRINT = null;
 
+// =================================================================================
+// === SEARCHING STATE: FLOATING PROBLEM BUBBLES ===
+// =================================================================================
+let _bubbleInterval = null;
 
+const BUBBLE_FALLBACK_QUOTES = [
+    "I feel like I'm pouring everything into something that barely notices.",
+    "There has to be a better way to do this, but I can't find one.",
+    "I've tried everything and nothing actually fixes the problem.",
+    "Why is this still so hard in this day and age?",
+    "I waste so many hours every week on this.",
+    "I'd happily pay just to never deal with this again."
+];
+
+const BUBBLE_USERS = [
+    "StardustSailor", "QuantumLeaper7", "PixelPioneer", "EchoRider",
+    "SynthwaveSurfer", "CrimsonCodex", "NeonNomad22", "GildedGuardian",
+    "WhisperingWillow", "CosmicDrifter42"
+];
+
+function _bubbleFormatUpvotes(num) {
+    return num >= 1000 ? (num / 1000).toFixed(1) + 'k' : num;
+}
+
+function _spawnBubble(field, quotes) {
+    if (!field) return;
+    const el = document.createElement('div');
+    el.className = 'quote-bubble';
+
+    const quote = quotes[Math.floor(Math.random() * quotes.length)];
+    const user = BUBBLE_USERS[Math.floor(Math.random() * BUBBLE_USERS.length)];
+    const ups = Math.floor(Math.random() * 15000) + 500;
+
+    el.innerHTML = `
+        <p class="quote-text">"${quote}"</p>
+        <div class="quote-attribution">
+            <span class="upvotes">↑ ${_bubbleFormatUpvotes(ups)}</span>
+            <span class="username">u/${user}</span>
+        </div>
+    `;
+    el.style.left = `${Math.random() * 65}%`;
+    const duration = Math.random() * 8 + 14;
+    el.style.animation = `floatUp ${duration}s linear forwards`;
+    field.appendChild(el);
+    setTimeout(() => el.remove(), duration * 1000);
+}
+
+function startProblemBubbles() {
+    const container = document.getElementById('subreddit-selection-container');
+    const field = document.getElementById('pf-bubble-field');
+    if (!container || !field) return;
+
+    stopProblemBubbles();
+
+    // Pull real quotes from the live posts if we have them, else use fallbacks.
+    let quotes = BUBBLE_FALLBACK_QUOTES;
+    const posts = window._filteredPosts || [];
+    const real = posts
+        .map(p => (p.data.selftext || p.data.body || p.data.title || '').trim())
+        .filter(t => t.length > 40 && t.length < 200);
+    if (real.length >= 5) quotes = real;
+
+    field.innerHTML = `<div class="pf-searching-label">Listening to ${(window.originalGroupName || 'your audience')}...</div>`;
+    container.classList.add('is-searching');
+
+    // Seed a few immediately, then keep them coming.
+    _spawnBubble(field, quotes);
+    setTimeout(() => _spawnBubble(field, quotes), 800);
+    setTimeout(() => _spawnBubble(field, quotes), 1600);
+    _bubbleInterval = setInterval(() => _spawnBubble(field, quotes), 2200);
+}
+
+function stopProblemBubbles() {
+    const container = document.getElementById('subreddit-selection-container');
+    const field = document.getElementById('pf-bubble-field');
+    if (_bubbleInterval) { clearInterval(_bubbleInterval); _bubbleInterval = null; }
+    if (container) container.classList.remove('is-searching');
+    if (field) field.innerHTML = '';
+}
 
 
 async function generateAndRenderHookPatterns(posts, audienceContext) {
@@ -3899,6 +3981,7 @@ async function runProblemFinder(options = {}) {
         }
     }
     try {
+        if (!isUpdate) startProblemBubbles();
         console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
         const panelContent = document.getElementById('bubble-content');
         if (panelContent) {
@@ -4114,6 +4197,7 @@ async function runProblemFinder(options = {}) {
         if (resultsWrapper) { resultsWrapper.style.setProperty('display', 'flex', 'important'); resultsWrapper.style.opacity = '1'; }
     } finally {
         if (!isUpdate) {
+            stopProblemBubbles();
             searchButton.classList.remove('is-loading');
             searchButton.disabled = false;
         }

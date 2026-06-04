@@ -3352,10 +3352,24 @@ const BUBBLE_USERS = [
 function _bubbleFormatUpvotes(num) {
     return num >= 1000 ? (num / 1000).toFixed(1) + 'k' : num;
 }
+const BUBBLE_COLORS = [
+    'rgba(0, 165, 206, 0.35)',   // teal
+    'rgba(0, 192, 230, 0.35)',   // light teal
+    'rgba(214, 83, 157, 0.35)',  // pink
+    'rgba(253, 128, 199, 0.35)', // light pink
+    'rgba(104, 110, 226, 0.35)', // indigo
+    'rgba(155, 124, 255, 0.30)'  // lilac
+];
+
 function _spawnBubble(field, quotes) {
     if (!field) return;
     const el = document.createElement('div');
     el.className = 'quote-bubble';
+
+    // Random brand-coloured tint for this bubble.
+    const tint = BUBBLE_COLORS[Math.floor(Math.random() * BUBBLE_COLORS.length)];
+    el.style.background = tint;
+    el.style.borderColor = tint.replace(/0\.\d+\)/, '0.6)');
 
     const quote = quotes[Math.floor(Math.random() * quotes.length)];
     const user = BUBBLE_USERS[Math.floor(Math.random() * BUBBLE_USERS.length)];

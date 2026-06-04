@@ -4251,7 +4251,7 @@ function startCommunityLoader(container) {
     stopCommunityLoader(); // never run two at once
 
     let i = 0;
-    container.innerHTML = `<p class="loading-text community-loader-text">${COMMUNITY_LOADER_MESSAGES[0]}</p>`;
+    container.innerHTML = `<div class="community-loader-wrap"><p class="loading-text community-loader-text">${COMMUNITY_LOADER_MESSAGES[0]}</p></div>`;
     const textEl = container.querySelector('.community-loader-text');
 
     _communityLoaderInterval = setInterval(() => {

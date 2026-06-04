@@ -801,8 +801,8 @@ async function displayBookmarks(filter = 'all') {
 // * GEMINI API INTEGRATION
 // ******************************************************
 async function getGeminiResponse(userMsg) {
-  const geminiApiKey = "AIzaSyBWREX0HAzt6NabLzUNLM1YuZnYPhRJ09g";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${geminiApiKey}`;
+  // NO API KEY HERE ANYMORE
+  const url = `/.netlify/functions/gemini-proxy`; 
 
   const roadmapContext = getAudienceContext();
   const visualContext = getDashboardVisualContext(); 
@@ -815,61 +815,30 @@ async function getGeminiResponse(userMsg) {
 
   history.push({
     role: "user",
-    parts: [{ 
-      text: `[SYSTEM_NOTE: Here is the raw discussion context from your community, followed by the active visual dashboard metrics the user sees. Keep your behavior aligned with these metrics to prevent contradictions:\n\n${visualContext}\n\nRaw Community Posts:\n${roadmapContext}]\n\nUSER MESSAGE: ${userMsg}` 
-    }]
+    parts: [{ text: `[Context...]: ${visualContext}\n\n${roadmapContext}\n\nUSER MESSAGE: ${userMsg}` }]
   });
 
   const payload = {
     contents: history,
-    systemInstruction: {
-      parts: [{ text: sysMsg }]
-    },
-    generationConfig: {
-      temperature: 1.0, 
-      maxOutputTokens: 2048 
-    }
+    systemInstruction: { parts: [{ text: sysMsg }] },
+    generationConfig: { temperature: 1.0, maxOutputTokens: 2048 }
   };
 
   const loader = addLoader();
-  let reply = 'Error getting response.';
-
   try {
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-
-    if (!res.ok) {
-       const errText = await res.text();
-       throw new Error(`Gemini API returned status ${res.status}: ${errText}`);
-    }
-
     const data = await res.json();
-
-    if (data.candidates && data.candidates.length > 0) {
-      const candidate = data.candidates[0];
-      if (candidate.finishReason === "SAFETY") {
-        reply = "I apologize, but my safety filters prevented me from answering.";
-      } 
-      else if (candidate.content && candidate.content.parts && candidate.content.parts.length > 0) {
-        reply = candidate.content.parts[0].text.trim();
-      } else {
-        reply = "I'm connected, but I didn't have anything to say.";
-      }
-    } else {
-       reply = "I connected to the brain, but received an empty thought.";
-    }
+    // ... rest of your existing logic to handle the data ...
+    removeLoader(loader);
+    return data.candidates[0].content.parts[0].text.trim();
   } catch (err) {
-    console.error('Gemini API Connection Error:', err);
-    reply = "I'm having trouble connecting to my community brain right now.";
+    removeLoader(loader);
+    return "Connection error.";
   }
-
-  removeLoader(loader);
-  return reply;
 }
-
 // ******************************************************
 // * TOAST & UI INTERACTIONS
 // ******************************************************

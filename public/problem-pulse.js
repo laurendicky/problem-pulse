@@ -2644,15 +2644,11 @@ function renderHighchartsBubbleChart(signals) {
 // =================================================================================
 // === REVISED FUNCTION V2: AI MINDSET SUMMARY WITH DESCRIPTIVE POINTS ===
 // =================================================================================
-
 async function generateAndRenderMindsetSummary(posts, audienceContext) {
     const container = document.getElementById('mindset-summary-container');
     const archetypeHeadingEl = document.getElementById('archetype-heading');
     const archetypeDescEl = document.getElementById('archetype-d');
 
-    // Resolve the two real mount points: the .numbers-wrapper that holds the styled
-    // .mindset-item-template. We anchor off the old ids so document order can't trip us up,
-    // then fall back to wrapper order if those ids are gone.
     const resolveWrapper = (anchorId, index) => {
         const anchor = document.getElementById(anchorId);
         if (anchor) {
@@ -2661,7 +2657,7 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
             if (within) return within;
             const up = anchor.closest('.numbers-wrapper');
             if (up) return up;
-            return anchor; // id exists but is not tied to a numbers-wrapper, mount into it directly
+            return anchor;
         }
         return document.querySelectorAll('.numbers-wrapper')[index] || null;
     };
@@ -2675,8 +2671,6 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
         return;
     }
 
-    // Capture each column's template ONCE, before clearing anything. After the first render
-    // the wrappers hold clones, not the template, so the null guard stops us recapturing.
     if (!MINDSET_VALUES_BLUEPRINT) {
         const tpl = valuesWrapper.querySelector('.mindset-item-template');
         if (tpl) MINDSET_VALUES_BLUEPRINT = tpl.cloneNode(true);
@@ -2691,26 +2685,29 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
         return;
     }
 
-    // Loading state
     archetypeHeadingEl.textContent = 'Analyzing...';
     archetypeDescEl.textContent = '';
-    valuesWrapper.innerHTML = '<p class="loading-text">Extracting core values...</p>';
-    rejectsWrapper.innerHTML = '<p class="loading-text">Identifying dislikes...</p>';
+    valuesWrapper.innerHTML = '<p class="loading-text">Watching how they actually behave...</p>';
+    rejectsWrapper.innerHTML = '<p class="loading-text">Noticing what sets them off...</p>';
 
-    // Clone the styled template and drop the AI text into the slots Webflow already styled.
+    // Cards are now a single observational sentence (string). The old {title, description}
+    // object shape is still handled so nothing breaks if the model returns it.
     const populateItem = (blueprint, item) => {
         const clone = blueprint.cloneNode(true);
         const titleEl = clone.querySelector('.mindset-item-title, .mindset-item-heading, .mindset-item-name');
         const descEl = clone.querySelector('.mindset-item-desc');
 
-        if (titleEl && descEl) {
-            titleEl.innerText = item.title || '';
-            descEl.innerText = item.description || '';
-        } else if (descEl) {
-            // No separate title slot, so fold the title into the styled description line.
-            descEl.innerText = item.title ? `${item.title}. ${item.description || ''}`.trim() : (item.description || '');
+        const text = (typeof item === 'string')
+            ? item
+            : (item && item.title ? `${item.title}. ${item.description || ''}`.trim() : (item && item.description) || '');
+
+        if (descEl) {
+            descEl.innerText = text;
+            if (titleEl) titleEl.innerText = ''; // single-sentence cards no longer use a separate title
+        } else if (titleEl) {
+            titleEl.innerText = text;
         } else {
-            clone.innerText = item.title ? `${item.title}. ${item.description || ''}`.trim() : (item.description || '');
+            clone.innerText = text;
         }
         return clone;
     };
@@ -2727,31 +2724,36 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
     try {
         const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        const prompt = `You are an expert market psychologist specializing in the "${audienceContext}" community. Analyze the following Reddit posts to create a concise "Audience Mindset" summary.
+        const prompt = `You are a strategist who has spent months lurking inside the "${audienceContext}" community on Reddit. Below are real discussions. Write field notes, not a market research report. Be observational, psychologically sharp and specific to THIS audience. Ground every line in what the posts actually reveal.
 
-        Respond ONLY with a valid JSON object with the following keys:
-        1. "archetype": A short, 2-3 word evocative name for this audience (e.g., "The Pragmatic Dreamer").
-        2. "summary": A 1-2 sentence summary explaining the core motivation of this archetype.
-        3. "values": An array of 3 objects. Each object must have two keys: "title" (a short, 3-4 word summary of the value) and "description" (a single sentence explaining the title).
-        4. "rejects": An array of 3 objects. Each object must have two keys: "title" (a short, 3-4 word summary of the rejection) and "description" (a single sentence explaining the title).
+Respond ONLY with a valid JSON object with these keys:
 
-        Example for "values" format:
-        "values": [
-            { "title": "Value in Action, Not Theory", "description": "They respect builders, not just talkers, valuing demonstrable progress over ideas." },
-            { "title": "Authenticity is Currency", "description": "They value transparent accounts of failure as much as stories of success." }
-        ]
+1. "archetype": A short, 2-3 word evocative name for this audience (e.g. "The Practical Innovators").
 
-        Posts:
-        ${topPostsText}`;
+2. "summary": A 2 to 4 sentence character study that reads like something a journalist or strategist would write. Focus on motivations, contradictions, instincts and behaviours. Include one memorable, quotable line. Do NOT use phrases like "this audience is driven by", "they value", "they appreciate" or "they are committed to".
+   Good example for an archetype called The Practical Innovators: "They value progress over perfection. Faced with a challenge, their instinct is rarely 'Why?' but 'How do we fix it?' They get genuine satisfaction from making things work and grow frustrated when others overcomplicate simple problems."
+
+3. "values": An array of exactly 3 strings. Each is ONE observational sentence (max 20 words) about an instinct, behaviour, belief, tendency or contradiction. Write like an anthropologist who watched them in the wild, never like a brochure.
+   Avoid: "They value learning from successes and failures."
+   Better: "Most believe the best lessons come from getting something wrong first."
+   Do NOT begin a sentence with "They value", "They appreciate" or "They are committed to".
+
+4. "rejects": An array of exactly 3 strings. Each is ONE observational sentence (max 20 words) about a pet peeve, red flag, something they are sceptical of, a behaviour they dislike in others, or an idea they push back against.
+   Avoid: "They reject inefficient processes."
+   Better: "Nothing irritates them faster than a process that creates more work than it saves."
+   Do NOT begin a sentence with "They reject" or "They are frustrated by".
+
+Posts:
+${topPostsText}`;
 
         const openAIParams = {
             model: "gpt-4o",
             messages: [
-                { role: "system", content: "You are an expert market psychologist who provides structured analysis of audience mindsets in a strict JSON format." },
+                { role: "system", content: "You are a sharp cultural observer who writes psychologically specific field notes about online communities. You output only valid JSON and never sound like a marketing deck." },
                 { role: "user", content: prompt }
             ],
-            temperature: 0.3,
-            max_completion_tokens: 600,
+            temperature: 0.6,
+            max_completion_tokens: 700,
             response_format: { "type": "json_object" }
         };
 
@@ -2765,8 +2767,8 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
         archetypeHeadingEl.textContent = archetype || '';
         archetypeDescEl.textContent = summary || '';
 
-        renderSection(valuesWrapper, MINDSET_VALUES_BLUEPRINT, values, 'Could not identify key characteristics.');
-        renderSection(rejectsWrapper, MINDSET_REJECTS_BLUEPRINT, rejects, 'Could not identify dislikes.');
+        renderSection(valuesWrapper, MINDSET_VALUES_BLUEPRINT, values, 'Could not read this audience clearly enough yet.');
+        renderSection(rejectsWrapper, MINDSET_REJECTS_BLUEPRINT, rejects, 'Could not read this audience clearly enough yet.');
 
     } catch (error) {
         console.error("Mindset summary generation error:", error);
@@ -2776,30 +2778,51 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
         rejectsWrapper.innerHTML = '';
     }
 }
-
 // =================================================================================
 // === NEW FUNCTION: AI STRATEGIC PILLARS (GOALS & FEARS) ===
 // ================================================================================
-
 async function generateAndRenderStrategicPillars(posts, audienceContext) {
     const goalsContainer = document.getElementById('goals-pillar');
     const fearsContainer = document.getElementById('fears-pillar');
+    if (!goalsContainer || !fearsContainer) return;
 
-    if (!goalsContainer || !fearsContainer || !PILLAR_BLUEPRINT) return;
+    // Capture each pillar's OWN template once, before clearing. Cloning the fears column's
+    // actual template preserves its pillar-item-text .pink combo class, while goals keeps its own.
+    if (!PILLAR_GOALS_BLUEPRINT) {
+        const tpl = goalsContainer.querySelector('.pillar-item-template') || PILLAR_BLUEPRINT;
+        if (tpl) PILLAR_GOALS_BLUEPRINT = tpl.cloneNode(true);
+    }
+    if (!PILLAR_FEARS_BLUEPRINT) {
+        const tpl = fearsContainer.querySelector('.pillar-item-template') || PILLAR_BLUEPRINT;
+        if (tpl) PILLAR_FEARS_BLUEPRINT = tpl.cloneNode(true);
+    }
+    if (!PILLAR_GOALS_BLUEPRINT || !PILLAR_FEARS_BLUEPRINT) {
+        console.error("Strategic pillars aborted: .pillar-item-template not found in one or both pillars.");
+        return;
+    }
 
-    // 1. Clear the containers
     goalsContainer.innerHTML = '';
     fearsContainer.innerHTML = '';
 
     try {
         const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        const prompt = `Identify 3 core "Ultimate Goals" and 3 "Greatest Fears" for the ${audienceContext} community. Respond ONLY with JSON: {"goals": ["goal1", "goal2", "goal3"], "fears": ["fear1", "fear2", "fear3"]}`;
+        const prompt = `You have spent months inside the "${audienceContext}" community reading how they actually talk. Below are real discussions. Surface their real emotional drivers, not business objectives.
+
+"goals": 3 things they are really hoping for beneath the surface, in their own emotional terms. What they quietly want.
+"fears": 3 things that genuinely keep them awake at night.
+
+Write each as a short, specific, emotionally honest thought a real person might have, never a line from a business plan. Avoid generic statements like "achieve profitability", "secure funding", "scale the business", "adapt to market changes" or anything that sounds like a strategy deck. Around 12 words or fewer each. Ground every line in the posts.
+
+Respond ONLY with JSON: {"goals": ["...", "...", "..."], "fears": ["...", "...", "..."]}
+
+Posts:
+${topPostsText}`;
 
         const openAIParams = {
-            model: "gpt-4o-mini",
-            messages: [{ role: "system", content: "You are a market psychologist." }, { role: "user", content: prompt }],
-            temperature: 0.3,
+            model: "gpt-4o",
+            messages: [{ role: "system", content: "You are a perceptive observer of human motivation who writes honest, specific, non-corporate insight. Output only valid JSON." }, { role: "user", content: prompt }],
+            temperature: 0.6,
             response_format: { "type": "json_object" }
         };
 
@@ -2812,29 +2835,22 @@ async function generateAndRenderStrategicPillars(posts, audienceContext) {
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
-        // 2. Helper function to clone and populate
-        const populatePillars = (container, items) => {
+        const populatePillars = (container, blueprint, items) => {
             items.forEach(text => {
-                const clone = PILLAR_BLUEPRINT.cloneNode(true);
-                // Look for the text element inside the clone
+                const clone = blueprint.cloneNode(true);
                 const textNode = clone.querySelector('#pillar-item-text') || clone.querySelector('.pillar-item-text');
-                if (textNode) {
-                    textNode.innerText = text;
-                }
+                if (textNode) textNode.innerText = text;
                 container.appendChild(clone);
             });
         };
 
-        // 3. Render the lists using your Webflow design
-        if (parsed.goals) populatePillars(goalsContainer, parsed.goals);
-        if (parsed.fears) populatePillars(fearsContainer, parsed.fears);
+        if (parsed.goals) populatePillars(goalsContainer, PILLAR_GOALS_BLUEPRINT, parsed.goals);
+        if (parsed.fears) populatePillars(fearsContainer, PILLAR_FEARS_BLUEPRINT, parsed.fears);
 
     } catch (error) {
         console.error("Strategic pillars generation error:", error);
     }
 }
-
-
 
 // =================================================================================
 // === NEW FUNCTION: AI GENERATIVE PROMPT ===
@@ -3354,6 +3370,8 @@ async function generateAndRenderValueSankey(audienceName, summaries) {
 // --- 1. SAFE STORAGE FOR YOUR WEBFLOW DESIGN ---
 let PHRASE_BLUEPRINT = null;
 let PILLAR_BLUEPRINT = null;
+let PILLAR_GOALS_BLUEPRINT = null;
+let PILLAR_FEARS_BLUEPRINT = null;
 let VOICE_PILL_BLUEPRINT = null;
 let HOOK_CARD_BLUEPRINT = null;
 let HOOK_ITEM_BLUEPRINT = null;
@@ -3368,6 +3386,7 @@ let TONE_TRAIT_BLUEPRINT = null;
 let SEO_CARD_BLUEPRINT = null;
 let SEO_ITEM_BLUEPRINT = null;
 let FINDING_PILL_BLUEPRINT = null;
+
 
 // =================================================================================
 // === SEARCHING STATE: FLOATING PROBLEM BUBBLES ===

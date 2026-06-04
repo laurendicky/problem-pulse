@@ -617,3 +617,57 @@ ease forwards;
   opacity: 0.8;
 }
 .new-tag-pill .remove-pill:hover { opacity: 1; }
+.source-badge {
+  display: inline-flex;
+  align-items: center;
+  background: rgba(0, 165, 206, 0.1);
+  border: 1px solid rgba(0, 165, 206, 0.25);
+  color: #00a5ce !important;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none !important;
+  padding: 3px 8px;
+  border-radius: 12px;
+  margin: 2px 3px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+.source-badge:hover {
+  background: rgba(0, 165, 206, 0.2);
+  border-color: #00a5ce;
+  transform: translateY(-1px);
+}
+
+/* Close Icon Click Override */
+.close-icon {
+  pointer-events: auto !important; /* Forces the browser to register clicks directly on the × */
+  cursor: pointer !important;
+  z-index: 10 !important;
+}
+
+/* Paragraph & Digestibility Styling */
+.ai-paragraph {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  margin-bottom: 14px;
+  color: #201e57 !important; /* Updated brand color */
+}
+.ai-paragraph strong {
+  color: #201e57 !important;
+}
+.ai-list {
+  margin: 8px 0 16px 18px;
+  padding: 0;
+  list-style-type: disc;
+}
+.ai-bullet {
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  margin-bottom: 8px;
+  color: #201e57 !important;
+}
+.ai-bullet strong {
+  color: #201e57 !important;
+}

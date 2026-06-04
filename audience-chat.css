@@ -370,8 +370,8 @@ body {
   font-weight: 600;
   border: none;
   border-radius: var(--radius-pill);
-  background: #e0e0e0;
-  color: #201e57;
+background: #ffffffb0;
+    color: #26b3cd;
   cursor: pointer;
   transition: background 0.2s, color 0.2s;
 }

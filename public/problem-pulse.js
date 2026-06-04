@@ -3375,6 +3375,35 @@ function _spawnBubble(field, quotes) {
     field.appendChild(el);
     setTimeout(() => el.remove(), duration * 1000);
 }
+let _bubbleInterval = null;
+let _bubbleLabelInterval = null;
+
+const BUBBLE_SEARCH_MESSAGES = [
+    "Following the conversation...",
+    "Finding their struggles...",
+    "Ouch, that hurts...",
+    "Looking for recurring frustrations...",
+    "Spotting emotional patterns...",
+    "Hearing what keeps them up at night...",
+    "Finding what they wish existed...",
+    "Connecting the dots...",
+    "Digging beneath the surface...",
+    "Looking for unmet needs...",
+    "Finding moments of frustration...",
+    "Searching for hidden opportunities...",
+    "Identifying common complaints...",
+    "Looking for workarounds and hacks...",
+    "Spotting repeated questions...",
+    "Finding what they care about most...",
+    "Looking for signs of demand...",
+    "Discovering what makes them tick...",
+    "Finding the conversations that matter...",
+    "Looking for patterns in the noise...",
+    "Building an audience profile...",
+    "Almost there...",
+    "Aha, that's interesting...",
+    "Finding opportunities worth exploring..."
+];
 
 function startProblemBubbles() {
     const container = document.getElementById('subreddit-selection-container');
@@ -3391,8 +3420,31 @@ function startProblemBubbles() {
         .filter(t => t.length > 40 && t.length < 200);
     if (real.length >= 5) quotes = real;
 
-    field.innerHTML = `<div class="pf-searching-label">Listening to ${(window.originalGroupName || 'your audience')}...</div>`;
+    // First message names the audience, then we rotate through the rest.
+    const audience = window.originalGroupName || 'your audience';
+    const messages = [`Listening to ${audience}...`, ...BUBBLE_SEARCH_MESSAGES];
+
+    field.innerHTML = `<div class="pf-searching-label">${messages[0]}</div>`;
+    const labelEl = field.querySelector('.pf-searching-label');
+    if (labelEl) labelEl.style.transition = 'opacity 0.3s ease';
     container.classList.add('is-searching');
+
+    let m = 0;
+    _bubbleLabelInterval = setInterval(() => {
+        if (!labelEl || !document.body.contains(labelEl)) {
+            clearInterval(_bubbleLabelInterval);
+            _bubbleLabelInterval = null;
+            return;
+        }
+        m = (m + 1) % messages.length;
+        labelEl.style.opacity = '0';
+        setTimeout(() => {
+            if (document.body.contains(labelEl)) {
+                labelEl.textContent = messages[m];
+                labelEl.style.opacity = '1';
+            }
+        }, 280);
+    }, 2000);
 
     // Seed a few immediately, then keep them coming.
     _spawnBubble(field, quotes);
@@ -3405,6 +3457,7 @@ function stopProblemBubbles() {
     const container = document.getElementById('subreddit-selection-container');
     const field = document.getElementById('pf-bubble-field');
     if (_bubbleInterval) { clearInterval(_bubbleInterval); _bubbleInterval = null; }
+    if (_bubbleLabelInterval) { clearInterval(_bubbleLabelInterval); _bubbleLabelInterval = null; }
     if (container) container.classList.remove('is-searching');
     if (field) field.innerHTML = '';
 }

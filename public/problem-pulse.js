@@ -2781,25 +2781,22 @@ ${topPostsText}`;
 // =================================================================================
 // === NEW FUNCTION: AI STRATEGIC PILLARS (GOALS & FEARS) ===
 // ================================================================================
+
 async function generateAndRenderStrategicPillars(posts, audienceContext) {
     const goalsContainer = document.getElementById('goals-pillar');
     const fearsContainer = document.getElementById('fears-pillar');
     if (!goalsContainer || !fearsContainer) return;
 
-    // Capture each pillar's OWN template once, before clearing. Cloning the fears column's
-    // actual template preserves its pillar-item-text .pink combo class, while goals keeps its own.
-    if (!PILLAR_GOALS_BLUEPRINT) {
-        const tpl = goalsContainer.querySelector('.pillar-item-template') || PILLAR_BLUEPRINT;
-        if (tpl) PILLAR_GOALS_BLUEPRINT = tpl.cloneNode(true);
-    }
-    if (!PILLAR_FEARS_BLUEPRINT) {
-        const tpl = fearsContainer.querySelector('.pillar-item-template') || PILLAR_BLUEPRINT;
-        if (tpl) PILLAR_FEARS_BLUEPRINT = tpl.cloneNode(true);
-    }
-    if (!PILLAR_GOALS_BLUEPRINT || !PILLAR_FEARS_BLUEPRINT) {
-        console.error("Strategic pillars aborted: .pillar-item-template not found in one or both pillars.");
-        return;
-    }
+    const capturePillarBlueprint = (container, label) => {
+        const own = container.querySelector('.pillar-item-template');
+        if (own) { console.log(`[Pillars] ${label}: using its own template.`); return own.cloneNode(true); }
+        if (PILLAR_BLUEPRINT) { console.warn(`[Pillars] ${label}: no template in container, falling back to shared blueprint (pink/styling may be wrong).`); return PILLAR_BLUEPRINT.cloneNode(true); }
+        console.error(`[Pillars] ${label}: no template found at all.`); return null;
+    };
+
+    if (!PILLAR_GOALS_BLUEPRINT) PILLAR_GOALS_BLUEPRINT = capturePillarBlueprint(goalsContainer, 'goals');
+    if (!PILLAR_FEARS_BLUEPRINT) PILLAR_FEARS_BLUEPRINT = capturePillarBlueprint(fearsContainer, 'fears');
+    if (!PILLAR_GOALS_BLUEPRINT || !PILLAR_FEARS_BLUEPRINT) return;
 
     goalsContainer.innerHTML = '';
     fearsContainer.innerHTML = '';
@@ -2834,23 +2831,29 @@ ${topPostsText}`;
 
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
+        console.log('[Pillars] AI returned goals:', (parsed.goals || []).length, 'fears:', (parsed.fears || []).length);
 
         const populatePillars = (container, blueprint, items) => {
-            items.forEach(text => {
+            (items || []).forEach(text => {
                 const clone = blueprint.cloneNode(true);
-                const textNode = clone.querySelector('#pillar-item-text') || clone.querySelector('.pillar-item-text');
-                if (textNode) textNode.innerText = text;
+                clone.style.removeProperty('display'); // in case the template was hidden inline
+                const textNode =
+                    clone.querySelector('.pillar-item-text') ||
+                    clone.querySelector('[class*="pillar-item-text"]') ||
+                    clone;
+                textNode.innerText = text;
                 container.appendChild(clone);
             });
         };
 
-        if (parsed.goals) populatePillars(goalsContainer, PILLAR_GOALS_BLUEPRINT, parsed.goals);
-        if (parsed.fears) populatePillars(fearsContainer, PILLAR_FEARS_BLUEPRINT, parsed.fears);
+        populatePillars(goalsContainer, PILLAR_GOALS_BLUEPRINT, parsed.goals);
+        populatePillars(fearsContainer, PILLAR_FEARS_BLUEPRINT, parsed.fears);
 
     } catch (error) {
         console.error("Strategic pillars generation error:", error);
     }
 }
+
 
 // =================================================================================
 // === NEW FUNCTION: AI GENERATIVE PROMPT ===

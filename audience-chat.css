@@ -671,3 +671,31 @@ ease forwards;
 .ai-bullet strong {
   color: #201e57 !important;
 }
+.source-findings {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(32, 30, 87, 0.15);
+}
+.source-findings-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: #201e57;
+  opacity: 0.7;
+}
+.finding-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: #201e57;
+  background: rgba(32, 30, 87, 0.08);
+  border: 1px solid rgba(32, 30, 87, 0.18);
+  padding: 3px 9px;
+  border-radius: 12px;
+}

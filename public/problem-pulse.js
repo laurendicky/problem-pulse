@@ -3370,7 +3370,8 @@ function _spawnBubble(field, quotes) {
     `;
 
     // Spread across the full width, not just the left.
-    el.style.left = `${Math.random() * 78}%`;
+    el.style.left = `${5 + Math.random() * 90}%`;
+    el.style.marginLeft = `-140px`;
     // Slight size variation so they don't look identical.
     el.style.transform = `scale(${0.85 + Math.random() * 0.3})`;
 

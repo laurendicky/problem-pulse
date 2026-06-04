@@ -3353,13 +3353,14 @@ function _bubbleFormatUpvotes(num) {
     return num >= 1000 ? (num / 1000).toFixed(1) + 'k' : num;
 }
 const BUBBLE_COLORS = [
-    'rgba(0, 165, 206, 0.35)',   // teal
-    'rgba(0, 192, 230, 0.35)',   // light teal
-    'rgba(214, 83, 157, 0.35)',  // pink
-    'rgba(253, 128, 199, 0.35)', // light pink
-    'rgba(104, 110, 226, 0.35)', // indigo
-    'rgba(155, 124, 255, 0.30)'  // lilac
+    'rgba(0, 165, 206, 0.75)',   // teal
+    'rgba(0, 192, 230, 0.7)',    // light teal
+    'rgba(214, 83, 157, 0.75)',  // pink
+    'rgba(253, 128, 199, 0.7)',  // light pink
+    'rgba(104, 110, 226, 0.75)', // indigo
+    'rgba(155, 124, 255, 0.7)'   // lilac
 ];
+
 
 function _spawnBubble(field, quotes) {
     if (!field) return;
@@ -3384,8 +3385,9 @@ function _spawnBubble(field, quotes) {
     `;
 
     // Spread across the full width, not just the left.
-    el.style.left = `${5 + Math.random() * 90}%`;
+    el.style.left = `${Math.random() * 100}%`;
     el.style.marginLeft = `-140px`;
+
     // Slight size variation so they don't look identical.
     el.style.transform = `scale(${0.85 + Math.random() * 0.3})`;
 

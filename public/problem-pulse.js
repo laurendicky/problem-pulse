@@ -1705,7 +1705,7 @@ async function fetchAndRankSubreddits(subredditNames) {
 }
 function renderSubredditChoicesHTML(subreddits) {
     return subreddits.map(sub => {
-        const activityText = sub.activityLabel; // now plain text
+        const activityText = sub.activityLabel; // plain text
         const activityIcon = activityIconFor(activityText);
 
         return `
@@ -1713,12 +1713,12 @@ function renderSubredditChoicesHTML(subreddits) {
                 <input type="checkbox" id="sub-${sub.name}" value="${sub.name}" checked>
                 <label for="sub-${sub.name}">
                     <span class="sub-checkbox"></span>
-                    <span class="sub-name">r/${sub.name}</span>
-                    <span class="sub-pills">
-                        <span class="pill members-pill">${formatMemberCount(sub.members)}</span>
-                        <span class="pill activity-pill" data-activity="${activityText}">
-                            <span class="activity-icon">${activityIcon}</span>${activityText}
-                        </span>
+                    <span class="sub-info">
+                        <span class="sub-name">r/${sub.name}</span>
+                        <span class="sub-members">${formatMemberCount(sub.members)} members</span>
+                    </span>
+                    <span class="pill activity-pill" data-activity="${activityText}">
+                        <span class="activity-icon">${activityIcon}</span>${activityText}
                     </span>
                 </label>
             </div>

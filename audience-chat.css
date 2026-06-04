@@ -729,3 +729,18 @@ ease forwards;
   transition: background 0.2s, color 0.2s;
 }
 .clear-history-btn:hover { background: #d057a0; color: #fff; }
+.tag-choice { display: inline-flex; align-items: center; gap: 6px; }
+.tag-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 12px;
+  line-height: 1;
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s;
+}
+.tag-choice:hover .tag-delete { opacity: 0.7; }
+.tag-delete:hover { opacity: 1 !important; background: rgba(0, 0, 0, 0.15); }

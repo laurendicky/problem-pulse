@@ -1653,19 +1653,17 @@ function getActivityLabel(activeUsers, totalMembers) {
     const active = Number.isFinite(activeUsers) ? activeUsers : 0;
     const ratio = members > 0 ? active / members : 0;
 
-    // Strong live presence or a genuinely large community.
-    if (active >= 2000 || ratio >= 0.004) {
+    // Large communities, or ones with a strong live presence, read as busy.
+    if (members >= 1000000 || active >= 2000 || ratio >= 0.004) {
         return 'High Activity';
     }
-    // Smaller but proportionally busy, or a solid mid-size community.
-    if (active >= 300 || ratio >= 0.0015 || (members >= 100000 && members < 3000000)) {
+    // Mid-size communities read as engaged.
+    if (members >= 200000 || active >= 300 || ratio >= 0.0015) {
         return 'Highly Engaged';
     }
-    // Niche or deep communities, and the safe fallback when Reddit returns no
-    // active count, so nothing ever reads as "Cool".
+    // Smaller niche communities read as insight rich.
     return 'Insight Rich';
 }
-
 function activityIconFor(label) {
     switch (label) {
         case 'High Activity':  return '🔥';
@@ -4397,13 +4395,6 @@ function initializeProblemFinderTool() {
         runProblemFinder();
     });
 
-    choicesContainer.addEventListener('click', (event) => {
-        const choiceDiv = event.target.closest('.subreddit-choice');
-        if (choiceDiv) {
-            const checkbox = choiceDiv.querySelector('input[type="checkbox"]');
-            if (checkbox && event.target !== checkbox) checkbox.checked = !checkbox.checked;
-        }
-    });
 
     // Initialize logic
     initializeDashboardInteractivity();

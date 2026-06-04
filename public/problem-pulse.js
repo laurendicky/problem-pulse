@@ -2700,6 +2700,11 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
         const text = (typeof item === 'string')
             ? item
             : (item && item.title ? `${item.title}. ${item.description || ''}`.trim() : (item && item.description) || '');
+            const trimToSentences = (text, max) => {
+                if (!text) return '';
+                const parts = text.match(/[^.!?]+[.!?]+(\s|$)/g);
+                return parts ? parts.slice(0, max).join(' ').trim() : text.trim();
+            };
 
         if (descEl) {
             descEl.innerText = text;
@@ -2730,8 +2735,7 @@ Respond ONLY with a valid JSON object with these keys:
 
 1. "archetype": A short, 2-3 word evocative name for this audience (e.g. "The Practical Innovators").
 
-2. "summary": A 2 to 4 sentence character study that reads like something a journalist or strategist would write. Focus on motivations, contradictions, instincts and behaviours. Include one memorable, quotable line. Do NOT use phrases like "this audience is driven by", "they value", "they appreciate" or "they are committed to".
-   Good example for an archetype called The Practical Innovators: "They value progress over perfection. Faced with a challenge, their instinct is rarely 'Why?' but 'How do we fix it?' They get genuine satisfaction from making things work and grow frustrated when others overcomplicate simple problems."
+2. "summary": EXACTLY 2 to 3 short sentences, 45 words total maximum. A sharp character study, the kind of line a journalist would open a profile with. Build it around one instinct or contradiction and land one memorable, quotable phrase. No padding. Do NOT use "this audience is driven by", "they value", "they appreciate" or "they are committed to".
 
 3. "values": An array of exactly 3 strings. Each is ONE observational sentence (max 20 words) about an instinct, behaviour, belief, tendency or contradiction. Write like an anthropologist who watched them in the wild, never like a brochure.
    Avoid: "They value learning from successes and failures."
@@ -2765,7 +2769,8 @@ ${topPostsText}`;
         const { archetype, summary, values, rejects } = parsed;
 
         archetypeHeadingEl.textContent = archetype || '';
-        archetypeDescEl.textContent = summary || '';
+        archetypeDescEl.textContent = trimToSentences(summary, 3);
+
 
         renderSection(valuesWrapper, MINDSET_VALUES_BLUEPRINT, values, 'Could not read this audience clearly enough yet.');
         renderSection(rejectsWrapper, MINDSET_REJECTS_BLUEPRINT, rejects, 'Could not read this audience clearly enough yet.');
@@ -2833,7 +2838,7 @@ ${topPostsText}`;
         const parsed = JSON.parse(data.openaiResponse);
         console.log('[Pillars] AI returned goals:', (parsed.goals || []).length, 'fears:', (parsed.fears || []).length);
 
-        const populatePillars = (container, blueprint, items) => {
+        const populatePillars = (container, blueprint, items, extraTextClass) => {
             (items || []).forEach(text => {
                 const clone = blueprint.cloneNode(true);
                 clone.style.removeProperty('display'); // in case the template was hidden inline
@@ -2842,12 +2847,15 @@ ${topPostsText}`;
                     clone.querySelector('[class*="pillar-item-text"]') ||
                     clone;
                 textNode.innerText = text;
+                // Force the combo class so .pillar-item-text.pink resolves, regardless of which template cloned.
+                if (extraTextClass) textNode.classList.add(extraTextClass);
                 container.appendChild(clone);
             });
         };
 
         populatePillars(goalsContainer, PILLAR_GOALS_BLUEPRINT, parsed.goals);
-        populatePillars(fearsContainer, PILLAR_FEARS_BLUEPRINT, parsed.fears);
+        populatePillars(fearsContainer, PILLAR_FEARS_BLUEPRINT, parsed.fears, 'pink');
+    
 
     } catch (error) {
         console.error("Strategic pillars generation error:", error);

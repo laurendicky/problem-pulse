@@ -4292,6 +4292,18 @@ function initializeProblemFinderTool() {
     const inspireButton = document.getElementById('inspire-me-button');
     const choicesContainer = document.getElementById('subreddit-choices');
     const audienceTitle = document.getElementById('pf-audience-title');
+    const backToStep1Btn = document.getElementById('back-to-step1-btn');
+if (backToStep1Btn) {
+    backToStep1Btn.addEventListener('click', () => {
+        stopCommunityLoader();
+        if (searchSelectedBtn) searchSelectedBtn.classList.add('pf-btn-disabled');
+        step2Container.classList.remove('visible');
+        step1Container.classList.remove('hidden');
+        if (welcomeDiv) welcomeDiv.style.display = '';
+        choicesContainer.innerHTML = '';
+        if (audienceTitle) audienceTitle.innerHTML = '';
+    });
+}
 
     if (!findCommunitiesBtn || !searchSelectedBtn || !choicesContainer) {
         console.error("Critical error: A key UI element was not found.");
@@ -4302,7 +4314,7 @@ function initializeProblemFinderTool() {
         if (welcomeDiv) { welcomeDiv.style.display = 'none'; }
         step1Container.classList.add('hidden');
         step2Container.classList.add('visible');
-        if (audienceTitle) audienceTitle.textContent = `Select Subreddits For: ${originalGroupName}`;
+        if (audienceTitle) audienceTitle.innerHTML = `Select Subreddits For: <span class="pf-audience-name">${originalGroupName}</span>`;
     };
 
     if (pillsContainer) {

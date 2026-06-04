@@ -3425,15 +3425,23 @@ const BUBBLE_SEARCH_MESSAGES = [
     "Aha, that's interesting...",
     "Finding opportunities worth exploring..."
 ];
-
-function startProblemBubbles() {
-    const container = document.getElementById('subreddit-selection-container');
-    const field = document.getElementById('pf-bubble-field');
-    if (!container || !field) return;
-
+    function startProblemBubbles() {
     stopProblemBubbles();
 
-    // Pull real quotes from the live posts if we have them, else use fallbacks.
+    // Hide the whole selection step so only the bubbles and label show.
+    const step2 = document.getElementById('subreddit-selection-container');
+    if (step2) step2.style.visibility = 'hidden';
+
+    // Build a full-screen overlay so bubbles use the whole viewport.
+    const overlay = document.createElement('div');
+
+    overlay.id = 'pf-bubble-overlay';
+    overlay.innerHTML = `<div class="pf-searching-label"></div>`;
+    document.body.appendChild(overlay);
+
+    const labelEl = overlay.querySelector('.pf-searching-label');
+
+    // Quotes: real ones if we have them, else fallbacks.
     let quotes = BUBBLE_FALLBACK_QUOTES;
     const posts = window._filteredPosts || [];
     const real = posts
@@ -3441,18 +3449,14 @@ function startProblemBubbles() {
         .filter(t => t.length > 40 && t.length < 200);
     if (real.length >= 5) quotes = real;
 
-    // First message names the audience, then we rotate through the rest.
     const audience = window.originalGroupName || 'your audience';
     const messages = [`Listening to ${audience}...`, ...BUBBLE_SEARCH_MESSAGES];
-
-    field.innerHTML = `<div class="pf-searching-label">${messages[0]}</div>`;
-    const labelEl = field.querySelector('.pf-searching-label');
-    if (labelEl) labelEl.style.transition = 'opacity 0.3s ease';
-    container.classList.add('is-searching');
+    labelEl.textContent = messages[0];
+    labelEl.style.transition = 'opacity 0.3s ease';
 
     let m = 0;
     _bubbleLabelInterval = setInterval(() => {
-        if (!labelEl || !document.body.contains(labelEl)) {
+        if (!document.body.contains(labelEl)) {
             clearInterval(_bubbleLabelInterval);
             _bubbleLabelInterval = null;
             return;
@@ -3467,22 +3471,17 @@ function startProblemBubbles() {
         }, 280);
     }, 2000);
 
-    // Seed a few immediately, then keep them coming.
-// Seed a couple, spaced out, then keep them coming gently.
-_spawnBubble(field, quotes);
-setTimeout(() => _spawnBubble(field, quotes), 1400);
-_bubbleInterval = setInterval(() => _spawnBubble(field, quotes), 2000);
-
-
+    _spawnBubble(overlay, quotes);
+    setTimeout(() => _spawnBubble(overlay, quotes), 1400);
+    _bubbleInterval = setInterval(() => _spawnBubble(overlay, quotes), 2000);
 }
-
 function stopProblemBubbles() {
-    const container = document.getElementById('subreddit-selection-container');
-    const field = document.getElementById('pf-bubble-field');
     if (_bubbleInterval) { clearInterval(_bubbleInterval); _bubbleInterval = null; }
     if (_bubbleLabelInterval) { clearInterval(_bubbleLabelInterval); _bubbleLabelInterval = null; }
-    if (container) container.classList.remove('is-searching');
-    if (field) field.innerHTML = '';
+    const step2 = document.getElementById('subreddit-selection-container');
+    if (step2) step2.style.visibility = '';
+    const overlay = document.getElementById('pf-bubble-overlay');
+    if (overlay) overlay.remove();
 }
 
 

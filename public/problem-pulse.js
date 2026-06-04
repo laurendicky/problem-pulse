@@ -3352,7 +3352,6 @@ const BUBBLE_USERS = [
 function _bubbleFormatUpvotes(num) {
     return num >= 1000 ? (num / 1000).toFixed(1) + 'k' : num;
 }
-
 function _spawnBubble(field, quotes) {
     if (!field) return;
     const el = document.createElement('div');
@@ -3369,8 +3368,13 @@ function _spawnBubble(field, quotes) {
             <span class="username">u/${user}</span>
         </div>
     `;
-    el.style.left = `${Math.random() * 65}%`;
-    const duration = Math.random() * 8 + 14;
+
+    // Spread across the full width, not just the left.
+    el.style.left = `${Math.random() * 78}%`;
+    // Slight size variation so they don't look identical.
+    el.style.transform = `scale(${0.85 + Math.random() * 0.3})`;
+
+    const duration = Math.random() * 4 + 8; // 8s to 12s
     el.style.animation = `floatUp ${duration}s linear forwards`;
     field.appendChild(el);
     setTimeout(() => el.remove(), duration * 1000);
@@ -3447,10 +3451,12 @@ function startProblemBubbles() {
     }, 2000);
 
     // Seed a few immediately, then keep them coming.
-    _spawnBubble(field, quotes);
-    setTimeout(() => _spawnBubble(field, quotes), 800);
-    setTimeout(() => _spawnBubble(field, quotes), 1600);
-    _bubbleInterval = setInterval(() => _spawnBubble(field, quotes), 2200);
+// Seed a couple, spaced out, then keep them coming gently.
+_spawnBubble(field, quotes);
+setTimeout(() => _spawnBubble(field, quotes), 1400);
+_bubbleInterval = setInterval(() => _spawnBubble(field, quotes), 2000);
+
+
 }
 
 function stopProblemBubbles() {

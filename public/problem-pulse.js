@@ -970,6 +970,7 @@ async function getRelatedSearchTermsAI(audience) {
 }
 async function findSubredditsForGroup(groupName) {
     const relatedTerms = await getRelatedSearchTermsAI(groupName);
+    window._audienceTopics = Array.isArray(relatedTerms) ? relatedTerms : [];
     const allTerms = [groupName, ...relatedTerms];
     const prompt = `Based on the following audience and related keywords: [${allTerms.join(', ')}], suggest up to 20 relevant and active Reddit subreddits. Prioritize a variety of communities, including both large general ones and smaller niche ones. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`;
     const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_completion_tokens: 300, response_format: { "type": "json_object" } };
@@ -1648,11 +1649,30 @@ function formatMemberCount(num) {
     return num.toLocaleString();
 }
 function getActivityLabel(activeUsers, totalMembers) {
-    if (!totalMembers || totalMembers === 0 || activeUsers === null || activeUsers === undefined) { return '💤 Cool'; }
-    const ratio = activeUsers / totalMembers;
-    if (activeUsers > 5000 || (ratio > 0.01 && totalMembers > 1000)) { return '🔥 Hot'; }
-    if (activeUsers < 10 || (totalMembers > 20000 && activeUsers < 50)) { return '💤 Cool'; }
-    return '🌤️ Warm';
+    const members = totalMembers || 0;
+    const active = Number.isFinite(activeUsers) ? activeUsers : 0;
+    const ratio = members > 0 ? active / members : 0;
+
+    // Strong live presence or a genuinely large community.
+    if (active >= 2000 || ratio >= 0.004) {
+        return 'High Activity';
+    }
+    // Smaller but proportionally busy, or a solid mid-size community.
+    if (active >= 300 || ratio >= 0.0015 || (members >= 100000 && members < 3000000)) {
+        return 'Highly Engaged';
+    }
+    // Niche or deep communities, and the safe fallback when Reddit returns no
+    // active count, so nothing ever reads as "Cool".
+    return 'Insight Rich';
+}
+
+function activityIconFor(label) {
+    switch (label) {
+        case 'High Activity':  return '🔥';
+        case 'Highly Engaged': return '💬';
+        case 'Insight Rich':   return '🧠';
+        default:               return '✨';
+    }
 }
 async function fetchAndRankSubreddits(subredditNames) {
     console.log(`AI suggested ${subredditNames.length} subreddits. Validating and ranking in batches...`);
@@ -1686,28 +1706,35 @@ async function fetchAndRankSubreddits(subredditNames) {
     return finalResults;
 }
 function renderSubredditChoicesHTML(subreddits) {
-    // The color logic has been moved to CSS. These objects are no longer needed.
     return subreddits.map(sub => {
-        // Extract the key word (e.g., "Hot", "Warm", "Cool") from the label.
-        const activityState = sub.activityLabel.split(' ')[1];
+        const activityText = sub.activityLabel; // now plain text
+        const activityIcon = activityIconFor(activityText);
 
         return `
             <div class="subreddit-choice">
                 <input type="checkbox" id="sub-${sub.name}" value="${sub.name}" checked>
                 <label for="sub-${sub.name}">
+                    <span class="sub-checkbox"></span>
                     <span class="sub-name">r/${sub.name}</span>
                     <span class="sub-pills">
                         <span class="pill members-pill">${formatMemberCount(sub.members)}</span>
-                        
-                        <!-- The inline style is replaced with a data-attribute -->
-                        <span class="pill activity-pill" data-activity="${activityState}">
-                            ${sub.activityLabel}
+                        <span class="pill activity-pill" data-activity="${activityText}">
+                            <span class="activity-icon">${activityIcon}</span>${activityText}
                         </span>
                     </span>
                 </label>
             </div>
         `;
     }).join('');
+}
+function buildFoundSummary(count, topics) {
+    const clean = (topics || []).map(t => (t || '').toString().trim()).filter(Boolean).slice(0, 3);
+    let topicPhrase = '';
+    if (clean.length === 1) topicPhrase = ` discussing ${clean[0]}`;
+    else if (clean.length === 2) topicPhrase = ` discussing ${clean[0]} and ${clean[1]}`;
+    else if (clean.length >= 3) topicPhrase = ` discussing ${clean[0]}, ${clean[1]} and ${clean[2]}`;
+    const word = count === 1 ? 'community' : 'communities';
+    return `We found ${count} relevant ${word}${topicPhrase}.`;
 }
 function displaySubredditChoices(rankedSubreddits) {
     const choicesDiv = document.getElementById('subreddit-choices');
@@ -1717,9 +1744,13 @@ function displaySubredditChoices(rankedSubreddits) {
     loadMoreContainer.innerHTML = '';
     _allRankedSubreddits = rankedSubreddits;
 
+    const count = _allRankedSubreddits.length;
+    const summaryEl = document.getElementById('pf-found-summary');
+    const countPillEl = document.getElementById('pf-found-count-text');
+    if (summaryEl) summaryEl.textContent = count ? buildFoundSummary(count, window._audienceTopics) : '';
+    if (countPillEl) countPillEl.textContent = count ? `${count} ${count === 1 ? 'community' : 'communities'} found` : '';
+
     if (_allRankedSubreddits.length === 0) {
-        // The class 'loading-text' is already used, which is good.
-        // We will provide a specific style for it in the CSS.
         choicesDiv.innerHTML = '<p class="loading-text">No suitable communities found. Try a different group.</p>';
         return;
     }
@@ -1730,16 +1761,12 @@ function displaySubredditChoices(rankedSubreddits) {
     if (_allRankedSubreddits.length > 8) {
         const loadMoreBtn = document.createElement('button');
         loadMoreBtn.id = 'load-more-subs-btn';
-        loadMoreBtn.className = 'load-more-button'; // Added a class for styling
+        loadMoreBtn.className = 'load-more-button';
         loadMoreBtn.textContent = 'Load More Communities';
-
-        // REMOVED: The style.cssText line is now handled by the .load-more-button class in CSS.
-
         loadMoreBtn.onclick = loadMoreSubreddits;
         loadMoreContainer.appendChild(loadMoreBtn);
     }
 }
-
 function loadMoreSubreddits() {
     const choicesDiv = document.getElementById('subreddit-choices');
     const loadMoreBtn = document.getElementById('load-more-subs-btn');
@@ -1786,8 +1813,8 @@ async function renderIncludedSubreddits(subreddits) {
 
             const description = details.public_description || 'No public description available.';
             const members = formatMemberCount(details.subscribers);
-            const [activityEmoji, activityText] = getActivityLabel(details.active_user_count, details.subscribers).split(' ');
-
+            const activityText = getActivityLabel(details.active_user_count, details.subscribers);
+            const activityEmoji = activityIconFor(activityText);
             return `
                 <div class="subreddit-tag-detailed">
                     <div>
@@ -1947,7 +1974,8 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
         const tagsHTML = rankedRelatedSubs.slice(0, 10).map(sub => {
             const subDetailsString = JSON.stringify(sub).replace(/'/g, "&apos;");
             const members = formatMemberCount(sub.members);
-            const [activityEmoji, activityText] = sub.activityLabel.split(' ');
+            const activityText = sub.activityLabel;
+            const activityEmoji = activityIconFor(activityText);
             const description = sub.description.trim() ? sub.description : `A community for discussions and content related to r/${sub.name}.`;
 
             return `
@@ -4293,18 +4321,20 @@ function initializeProblemFinderTool() {
     const choicesContainer = document.getElementById('subreddit-choices');
     const audienceTitle = document.getElementById('pf-audience-title');
     const backToStep1Btn = document.getElementById('back-to-step1-btn');
-if (backToStep1Btn) {
-    backToStep1Btn.addEventListener('click', () => {
-        stopCommunityLoader();
-        if (searchSelectedBtn) searchSelectedBtn.classList.add('pf-btn-disabled');
-        step2Container.classList.remove('visible');
-        step1Container.classList.remove('hidden');
-        if (welcomeDiv) welcomeDiv.style.display = '';
-        choicesContainer.innerHTML = '';
-        if (audienceTitle) audienceTitle.innerHTML = '';
-    });
-}
+    if (backToStep1Btn) {
+        backToStep1Btn.addEventListener('click', () => {
+            stopCommunityLoader();
+            if (searchSelectedBtn) searchSelectedBtn.classList.add('pf-btn-disabled');
+            step2Container.classList.remove('visible');
+            step1Container.classList.remove('hidden');
+            if (welcomeDiv) welcomeDiv.style.display = '';
+            choicesContainer.innerHTML = '';
+            if (audienceTitle) audienceTitle.innerHTML = '';
 
+            const fs = document.getElementById('pf-found-summary'); if (fs) fs.textContent = '';
+            const fc = document.getElementById('pf-found-count-text'); if (fc) fc.textContent = '';
+        });
+    }
     if (!findCommunitiesBtn || !searchSelectedBtn || !choicesContainer) {
         console.error("Critical error: A key UI element was not found.");
         return;

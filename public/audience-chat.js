@@ -1,3 +1,86 @@
+<!-- 1) STYLE DEPENDENCIES (WITH DYNAMIC COLOR & POINTER UPDATES) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/laurendicky/problem-pulse@8119b6a/audience-chat.css">
+
+
+<!-- 2) CHAT WIDGET LAYOUT -->
+<div id="mentor-wrap">
+  <div id="chat">
+    <!-- message stream -->
+    <div id="messages"></div>
+
+    <!-- input area -->
+    <div id="chatBox">
+      <div class="input-container">
+        <textarea
+          id="userInput"
+          placeholder="Ask a question..."
+          oninput="autoResize(this)"
+          onkeydown="handleKeyDown(event)"
+        ></textarea>
+        <button id="sendButton">Send</button>
+      </div>
+
+      <!-- Bookmark Filters -->
+     <!-- Bookmark Filters -->
+     <div class="bookmark-filters">
+        <span>Show bookmarks:</span>
+        <div class="filter-scroll" id="filterScroll">
+          <button class="filter-btn active" data-filter="all">All</button>
+        </div>
+        <button id="clearHistoryBtn" class="clear-history-btn" title="Delete entire chat history">Clear chat</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Save Bookmark Popup Overlay -->
+<div class="popupOverlay" id="tagPopupOverlay">
+  <div class="popupWindow">
+    <button class="popupClose" id="tagPopupClose">×</button>
+    <div class="popupTitle" id="popupTitle">Save Bookmark</div>
+    <div class="popupSubtitle" id="popupSubtitle">Personalise your saved insight.</div>
+
+    <!-- Title Input -->
+    <label class="popupLabel" for="bookmarkTitleInput">Bookmark Title:</label>
+    <input
+      type="text"
+      id="bookmarkTitleInput"
+      class="popupInput"
+      placeholder="e.g. Marketing Strategy"
+      maxlength="40"
+    />
+
+    <!-- Interactive Tag Picker -->
+    <label class="popupLabel">Select tags:</label>
+    <div id="tagPillsContainer" class="tag-pills-container">
+      <span style="font-size:12px; color:#888;">No tags created yet. Add one below!</span>
+    </div>
+
+    <!-- Add New Tag -->
+    <label class="popupLabel" for="newTagInput" style="margin-top:15px;">Or create new tags (comma-separated):</label>
+    <input
+      type="text"
+      id="newTagInput"
+      class="popupInput"
+      placeholder="e.g. marketing, finances"
+    />
+    <div id="newTagPillsContainer" class="tag-pills-container"></div>
+
+
+    <div class="popupButtons">
+      <button class="popupButton" id="cancelTagBtn">Cancel</button>
+      <button class="popupButton" id="saveTagBtn">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- 3) THIRD PARTY UTILITIES -->
+<script src="https://www.gstatic.com/firebasejs/11.2.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/11.2.0/firebase-firestore-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/canvas-confetti"></script>
+
+<!-- 4) APPLICATION LOGIC -->
+<script>
 // ******************************************************
 // * FIREBASE CONFIGURATION
 // ******************************************************
@@ -680,11 +763,19 @@ function showBookmarkViewer(rawText) {
   win.appendChild(closeBtn);
   win.appendChild(titleEl);
   win.appendChild(bodyEl);
-
   if (tags.length > 0) {
     const tagWrap = document.createElement('div');
-    tagWrap.style.cssText = 'margin-top:16px; padding-top:14px; border-top:1px solid #eee; font-size:12px; color:#888;';
-    tagWrap.innerHTML = '🏷 ' + tags.map(t => escapeQuotes(t)).join(', ');
+    tagWrap.style.cssText = 'display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:16px; padding-top:14px; border-top:1px solid #eee;';
+    const label = document.createElement('span');
+    label.textContent = 'Tags:';
+    label.style.cssText = 'font-size:12px; font-weight:700; color:#201e57; opacity:0.7; margin-right:2px;';
+    tagWrap.appendChild(label);
+    tags.forEach(t => {
+      const pill = document.createElement('span');
+      pill.textContent = t;
+      pill.style.cssText = 'font-size:12px; font-weight:600; color:#201e57; background:rgba(32,30,87,0.08); border:1px solid rgba(32,30,87,0.18); padding:3px 9px; border-radius:12px;';
+      tagWrap.appendChild(pill);
+    });
     win.appendChild(tagWrap);
   }
 
@@ -1056,20 +1147,35 @@ async function saveTagSelection() {
 function populateFilterButtons() {
   const scrollEl = filterScrollDiv || bookmarkFiltersDiv;
   if (!scrollEl) return;
-  const existingFilterButtons = scrollEl.querySelectorAll('.filter-btn:not([data-filter="all"])');
-  existingFilterButtons.forEach(btn => btn.remove());
+  scrollEl.querySelectorAll('.filter-chip-wrap').forEach(el => el.remove());
   allExistingTags.forEach(tag => {
+    const wrap = document.createElement('div');
+    wrap.className = 'filter-chip-wrap';
+
     const btn = document.createElement('button');
     btn.className = 'filter-btn';
     btn.textContent = tag;
     btn.setAttribute('data-filter', tag);
-    scrollEl.appendChild(btn);
     btn.addEventListener('click', () => {
-      const allFilterButtons = scrollEl.querySelectorAll('.filter-btn');
-      allFilterButtons.forEach(button => button.classList.remove('active'));
+      scrollEl.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       displayBookmarks(tag);
     });
+
+    const del = document.createElement('span');
+    del.className = 'filter-delete';
+    del.textContent = '×';
+    del.title = 'Delete this tag';
+    del.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (window.confirm(`Delete the tag "${tag}" from all bookmarks?`)) {
+        await deleteTagGlobally(tag);
+      }
+    });
+
+    wrap.appendChild(btn);
+    wrap.appendChild(del);
+    scrollEl.appendChild(wrap);
   });
   const allBtn = scrollEl.querySelector('.filter-btn[data-filter="all"]');
   if (allBtn) {
@@ -1269,3 +1375,4 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 });
+</script>

@@ -2646,31 +2646,87 @@ function renderHighchartsBubbleChart(signals) {
 // =================================================================================
 
 async function generateAndRenderMindsetSummary(posts, audienceContext) {
-    // --- Find all your target Webflow elements ---
     const container = document.getElementById('mindset-summary-container');
     const archetypeHeadingEl = document.getElementById('archetype-heading');
     const archetypeDescEl = document.getElementById('archetype-d');
-    const characteristicsEl = document.getElementById('characteristics-d');
-    const rejectsEl = document.getElementById('reject-d');
 
-    // Exit if the required elements aren't on the page
-    if (!container || !archetypeHeadingEl || !archetypeDescEl || !characteristicsEl || !rejectsEl) {
-        console.error("One or more target mindset elements are missing from the page. Aborting render.");
+    // Resolve the two real mount points: the .numbers-wrapper that holds the styled
+    // .mindset-item-template. We anchor off the old ids so document order can't trip us up,
+    // then fall back to wrapper order if those ids are gone.
+    const resolveWrapper = (anchorId, index) => {
+        const anchor = document.getElementById(anchorId);
+        if (anchor) {
+            if (anchor.classList.contains('numbers-wrapper')) return anchor;
+            const within = anchor.querySelector('.numbers-wrapper');
+            if (within) return within;
+            const up = anchor.closest('.numbers-wrapper');
+            if (up) return up;
+            return anchor; // id exists but is not tied to a numbers-wrapper, mount into it directly
+        }
+        return document.querySelectorAll('.numbers-wrapper')[index] || null;
+    };
+
+    const valuesWrapper = resolveWrapper('characteristics-d', 0);
+    const rejectsWrapper = resolveWrapper('reject-d', 1);
+
+    if (!container || !archetypeHeadingEl || !archetypeDescEl || !valuesWrapper || !rejectsWrapper) {
+        console.error("Mindset render aborted: a required element (container, archetype, or a .numbers-wrapper) is missing.");
         if (container) container.innerHTML = '';
         return;
     }
 
-    // --- Set a loading state ---
+    // Capture each column's template ONCE, before clearing anything. After the first render
+    // the wrappers hold clones, not the template, so the null guard stops us recapturing.
+    if (!MINDSET_VALUES_BLUEPRINT) {
+        const tpl = valuesWrapper.querySelector('.mindset-item-template');
+        if (tpl) MINDSET_VALUES_BLUEPRINT = tpl.cloneNode(true);
+    }
+    if (!MINDSET_REJECTS_BLUEPRINT) {
+        const tpl = rejectsWrapper.querySelector('.mindset-item-template');
+        if (tpl) MINDSET_REJECTS_BLUEPRINT = tpl.cloneNode(true);
+    }
+
+    if (!MINDSET_VALUES_BLUEPRINT || !MINDSET_REJECTS_BLUEPRINT) {
+        console.error("Mindset render aborted: .mindset-item-template not found inside one or both .numbers-wrapper elements.");
+        return;
+    }
+
+    // Loading state
     archetypeHeadingEl.textContent = 'Analyzing...';
     archetypeDescEl.textContent = '';
-    characteristicsEl.innerHTML = '<p class="loading-text">Extracting core values...</p>';
-    rejectsEl.innerHTML = '<p class="loading-text">Identifying dislikes...</p>';
+    valuesWrapper.innerHTML = '<p class="loading-text">Extracting core values...</p>';
+    rejectsWrapper.innerHTML = '<p class="loading-text">Identifying dislikes...</p>';
+
+    // Clone the styled template and drop the AI text into the slots Webflow already styled.
+    const populateItem = (blueprint, item) => {
+        const clone = blueprint.cloneNode(true);
+        const titleEl = clone.querySelector('.mindset-item-title, .mindset-item-heading, .mindset-item-name');
+        const descEl = clone.querySelector('.mindset-item-desc');
+
+        if (titleEl && descEl) {
+            titleEl.innerText = item.title || '';
+            descEl.innerText = item.description || '';
+        } else if (descEl) {
+            // No separate title slot, so fold the title into the styled description line.
+            descEl.innerText = item.title ? `${item.title}. ${item.description || ''}`.trim() : (item.description || '');
+        } else {
+            clone.innerText = item.title ? `${item.title}. ${item.description || ''}`.trim() : (item.description || '');
+        }
+        return clone;
+    };
+
+    const renderSection = (wrapper, blueprint, items, emptyMsg) => {
+        wrapper.innerHTML = '';
+        if (!items || items.length === 0) {
+            wrapper.innerHTML = `<p class="placeholder-text">${emptyMsg}</p>`;
+            return;
+        }
+        items.forEach(item => wrapper.appendChild(populateItem(blueprint, item)));
+    };
 
     try {
         const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
 
-        // --- 1. THE NEW PROMPT ---
-        // This prompt now asks for an array of objects, each with a "title" and a "description".
         const prompt = `You are an expert market psychologist specializing in the "${audienceContext}" community. Analyze the following Reddit posts to create a concise "Audience Mindset" summary.
 
         Respond ONLY with a valid JSON object with the following keys:
@@ -2700,45 +2756,27 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
         };
 
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-
         if (!response.ok) throw new Error('Mindset analysis API call failed.');
 
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
         const { archetype, summary, values, rejects } = parsed;
 
-        // --- 2. THE NEW RENDERING LOGIC ---
-        // This now populates the elements based on the new "title" and "description" structure.
-        archetypeHeadingEl.textContent = archetype;
-        archetypeDescEl.textContent = summary;
+        archetypeHeadingEl.textContent = archetype || '';
+        archetypeDescEl.textContent = summary || '';
 
-        if (values && values.length > 0) {
-            // Create a list item for each object, making the title bold.
-            const characteristicsHTML = '<ol>' + values.map(item =>
-                `<li><strong>${item.title}:</strong> ${item.description}</li>`
-            ).join('') + '</ol>';
-            characteristicsEl.innerHTML = characteristicsHTML;
-        } else {
-            characteristicsEl.innerHTML = '<p>Could not identify key characteristics.</p>';
-        }
-
-        if (rejects && rejects.length > 0) {
-            const rejectsHTML = '<ol>' + rejects.map(item =>
-                `<li><strong>${item.title}:</strong> ${item.description}</li>`
-            ).join('') + '</ol>';
-            rejectsEl.innerHTML = rejectsHTML;
-        } else {
-            rejectsEl.innerHTML = '<p>Could not identify dislikes.</p>';
-        }
+        renderSection(valuesWrapper, MINDSET_VALUES_BLUEPRINT, values, 'Could not identify key characteristics.');
+        renderSection(rejectsWrapper, MINDSET_REJECTS_BLUEPRINT, rejects, 'Could not identify dislikes.');
 
     } catch (error) {
         console.error("Mindset summary generation error:", error);
         archetypeHeadingEl.textContent = 'Analysis Failed';
         archetypeDescEl.textContent = 'Could not generate the audience mindset summary. Please try again.';
-        characteristicsEl.innerHTML = '';
-        rejectsEl.innerHTML = '';
+        valuesWrapper.innerHTML = '';
+        rejectsWrapper.innerHTML = '';
     }
 }
+
 // =================================================================================
 // === NEW FUNCTION: AI STRATEGIC PILLARS (GOALS & FEARS) ===
 // ================================================================================
@@ -3320,6 +3358,8 @@ let VOICE_PILL_BLUEPRINT = null;
 let HOOK_CARD_BLUEPRINT = null;
 let HOOK_ITEM_BLUEPRINT = null;
 let MINDSET_ITEM_BLUEPRINT = null; // ADD THIS
+let MINDSET_VALUES_BLUEPRINT = null;
+let MINDSET_REJECTS_BLUEPRINT = null;
 let AVOID_SWAP_BLUEPRINT = null;   // ADD THIS
 let LANGUAGE_AVOID_BLUEPRINT = null;
 let LANGUAGE_USE_BLUEPRINT = null;
@@ -3357,7 +3397,7 @@ const BUBBLE_COLORS = [
     'rgba(0, 192, 230, 0.7)',    // light teal
     'rgba(214, 83, 157, 0.75)',  // pink
     'rgba(253, 128, 199, 0.7)',  // light pink
-    'rgba(104, 110, 226, 0.75)', // indigo
+    'rgb(243, 167, 148, 0.75)', // orange
     'rgba(155, 124, 255, 0.7)'   // lilac
 ];
 

@@ -4280,50 +4280,7 @@ function stopCommunityLoader() {
 // === CORE INITIALIZATION TOOL ===
 // =================================================================================
 function initializeProblemFinderTool() {
-    const style = document.createElement('style');
-    style.textContent = `
-        .sankey-label {
-            padding: 12px 16px;
-            border-radius: 12px;
-            font-family: 'Plus Jakarta Sans', sans-serif;
-            font-size: 15px;
-            font-weight: 500;
-            white-space: normal !important;
-            word-break: break-word !important;
-            text-align: center;
-            line-height: 1.4;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
-        }
-        .sankey-problem { background-color: #e0f2fe; color: #0c4a6e; }
-        .sankey-offer { background-color: #ede9fe; color: #5b21b6; }
-
-        @keyframes pp-shimmer {
-            0%   { background-position: 200% center; }
-            100% { background-position: -200% center; }
-        }
-        .community-loader-text {
-            display: inline-block;
-            transition: opacity 0.18s ease;
-            background: linear-gradient(90deg, rgba(0,165,206,0.5) 0%, rgba(0,165,206,0.5) 40%, #ffffff 50%, rgba(0,165,206,0.5) 60%, rgba(0,165,206,0.5) 100%);
-            background-size: 200% auto;
-            -webkit-background-clip: text;
-            background-clip: text;
-            -webkit-text-fill-color: transparent;
-            color: transparent;
-            animation: pp-shimmer 2.5s linear infinite;
-        }
-
-        #search-selected-btn {
-            transition: opacity 0.3s ease;
-        }
-        #search-selected-btn.pf-btn-disabled {
-            opacity: 0.35;
-            pointer-events: none;
-            cursor: not-allowed;
-        }
-    `;
-    document.head.appendChild(style);
-
+   
     console.log("Problem Finder elements found. Initializing...");
     const welcomeDiv = document.getElementById('welcome-div');
     const pillsContainer = document.getElementById('pf-suggestion-pills');

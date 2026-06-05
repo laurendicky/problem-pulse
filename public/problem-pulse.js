@@ -2856,7 +2856,8 @@ ${topPostsText}`;
         };
 
         populatePillars(goalsContainer, PILLAR_GOALS_BLUEPRINT, parsed.goals);
-        populatePillars(fearsContainer, PILLAR_FEARS_BLUEPRINT, parsed.fears, 'pink');
+        populatePillars(fearsContainer, PILLAR_FEARS_BLUEPRINT, parsed.fears, 'pillar-item-fear');
+
     
 
     } catch (error) {

@@ -2270,7 +2270,169 @@ async function generateAndRenderHistoricalSentiment(subredditQueryString) {
         container.innerHTML = '<p class="error-message">Could not load historical sentiment.</p>';
     }
 }
+async function generateAndRenderSubProblemChart(chartEl, finding, audienceContext) {
+    if (!chartEl || !finding) return;
 
+    // Capture the node design once, then hide the original template so only generated nodes show.
+    const tpl = chartEl.querySelector('.subproblem-node-template');
+    if (tpl) {
+        if (!SUBPROBLEM_NODE_BLUEPRINT) SUBPROBLEM_NODE_BLUEPRINT = tpl.cloneNode(true);
+        tpl.style.display = 'none';
+    }
+    if (!SUBPROBLEM_NODE_BLUEPRINT) {
+        console.error('Sub-problem chart: .subproblem-node-template not found.');
+        return;
+    }
+
+    // Hub title.
+    const hub = chartEl.querySelector('.subproblem-hub');
+    if (hub) {
+        hub.style.zIndex = '3';
+        const t = hub.querySelector('.subproblem-hub-title');
+        if (t) t.innerText = finding.title || '';
+    }
+
+    // Draws the ring of nodes plus the spokes. Pure DOM, runs off cached or fresh data.
+    const render = (subProblems) => {
+        chartEl.querySelectorAll('.sp-generated').forEach(el => el.remove());
+        if (!subProblems || subProblems.length === 0) return;
+
+        const measured = chartEl.clientWidth || chartEl.offsetWidth || 0;
+        const size = measured > 0 ? measured : SUBPROBLEM_STAGE_SIZE;
+        const center = size / 2;
+        const radius = size * 0.36; // distance of node centres from the hub; nudge this if nodes crowd or drift
+        const N = subProblems.length;
+        const placed = [];
+
+        // Spokes first, behind everything.
+        const svgNS = 'http://www.w3.org/2000/svg';
+        const svg = document.createElementNS(svgNS, 'svg');
+        svg.classList.add('sp-generated');
+        svg.setAttribute('width', size);
+        svg.setAttribute('height', size);
+        svg.style.position = 'absolute';
+        svg.style.left = '0';
+        svg.style.top = '0';
+        svg.style.pointerEvents = 'none';
+        svg.style.zIndex = '0';
+
+        subProblems.forEach((sp, i) => {
+            const angle = (-90 + i * (360 / N)) * Math.PI / 180; // start at top, go clockwise
+            const x = center + radius * Math.cos(angle);
+            const y = center + radius * Math.sin(angle);
+            placed.push({ x, y });
+
+            const line = document.createElementNS(svgNS, 'line');
+            line.setAttribute('x1', center);
+            line.setAttribute('y1', center);
+            line.setAttribute('x2', x);
+            line.setAttribute('y2', y);
+            line.setAttribute('stroke', '#c7d2e8');
+            line.setAttribute('stroke-width', '1.5');
+            svg.appendChild(line);
+        });
+        chartEl.insertBefore(svg, chartEl.firstChild);
+
+        // Nodes.
+        subProblems.forEach((sp, i) => {
+            const { x, y } = placed[i];
+            const node = SUBPROBLEM_NODE_BLUEPRINT.cloneNode(true);
+            node.classList.add('sp-generated');
+            node.classList.add(i % 2 === 0 ? 'node-green' : 'node-orange');
+            node.style.display = '';
+            node.style.position = 'absolute';
+            node.style.left = `${x}px`;
+            node.style.top = `${y}px`;
+            node.style.transform = 'translate(-50%, -50%)';
+            node.style.zIndex = '2';
+
+            const labelEl = node.querySelector('.subproblem-node-label');
+            const pctEl = node.querySelector('.subproblem-node-pct');
+            if (labelEl) labelEl.innerText = sp.label;
+            if (pctEl) pctEl.innerText = `${sp.pct}%`;
+
+            chartEl.appendChild(node);
+        });
+    };
+
+    // Cached? Render instantly, no refetch.
+    const cacheKey = finding.title;
+    if (_subProblemCache.has(cacheKey)) {
+        render(_subProblemCache.get(cacheKey));
+        return;
+    }
+
+    try {
+        // Build the corpus: this finding's posts plus their comments (the slow part, hidden behind the modal).
+        const findingPosts = (window._filteredPosts || []).filter(p => calculateRelevanceScore(p, finding) > 0);
+        const basePosts = findingPosts.length >= 8 ? findingPosts : (window._filteredPosts || []);
+        const topIds = [...basePosts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 25).map(p => p.data.id);
+
+        let comments = [];
+        try {
+            const raw = await fetchCommentsForPosts(topIds);
+            comments = deduplicateByContent(raw).filter(c => (c.data.body || '').length >= 80);
+        } catch (e) {
+            console.warn('Sub-problem chart: comment fetch failed, using posts only.', e);
+        }
+
+        const corpus = [...basePosts, ...comments];
+        const lowerTexts = corpus.map(p => `${p.data.title || p.data.link_title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase());
+        const corpusSize = corpus.length || 1;
+        const corpusText = corpus.slice(0, 60).map(p => `${p.data.title || ''} ${(p.data.selftext || p.data.body || '').substring(0, 300)}`.trim()).join('\n---\n');
+
+        const prompt = `You are analysing the "${audienceContext}" audience. The broad problem category is "${finding.title}": ${finding.body || ''}.
+From the real discussions below (posts and comments), identify 6 to 8 specific recurring sub-problems WITHIN this category. Each must be a concrete issue people actually raise, not a restatement of the category.
+For each, return a short 2 to 4 word "label" and 2 to 4 "keywords" (single words or short phrases in the audience's own language) that we can use to detect mentions in the text.
+Respond ONLY with JSON: {"sub_problems":[{"label":"...","keywords":["...","..."]}]}
+Discussions:
+${corpusText}`;
+
+        const openAIParams = {
+            model: "gpt-4o",
+            messages: [
+                { role: "system", content: "You break a problem category into concrete recurring sub-problems and output only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.2,
+            seed: 11,
+            response_format: { "type": "json_object" }
+        };
+
+        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const data = await response.json();
+        const parsed = JSON.parse(data.openaiResponse);
+        const raw = Array.isArray(parsed.sub_problems) ? parsed.sub_problems : [];
+
+        // Count mentions in code so the percentages are grounded and consistent.
+        const countMentions = (keywords) => {
+            let n = 0;
+            for (const text of lowerTexts) {
+                const hit = (keywords || []).some(kw => {
+                    const words = kw.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !stopWords.includes(w)).map(w => lemmatize(w));
+                    if (!words.length) return false;
+                    let matched = 0;
+                    for (const w of words) if (text.includes(w)) matched++;
+                    return matched / words.length >= 0.5;
+                });
+                if (hit) n++;
+            }
+            return n;
+        };
+
+        const subProblems = raw
+            .map(sp => ({ label: sp.label, pct: Math.round((countMentions(sp.keywords) / corpusSize) * 100) }))
+            .filter(sp => sp.label && sp.pct > 0)
+            .sort((a, b) => b.pct - a.pct)
+            .slice(0, 8);
+
+        _subProblemCache.set(cacheKey, subProblems);
+        render(subProblems);
+
+    } catch (error) {
+        console.error('Sub-problem chart error:', error);
+    }
+}
 function renderHistoricalSentimentChart(data) {
     const container = document.querySelector('.history-sentiment');
     if (!container) return;
@@ -2673,15 +2835,16 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
     }
 
     if (!MINDSET_VALUES_BLUEPRINT) {
-        const tpl = valuesWrapper.querySelector('.mindset-item-template');
-        if (tpl) MINDSET_VALUES_BLUEPRINT = tpl.cloneNode(true);
+        const tpls = valuesWrapper.querySelectorAll('.mindset-item-template');
+        if (tpls.length) MINDSET_VALUES_BLUEPRINT = Array.from(tpls).map(t => t.cloneNode(true));
     }
     if (!MINDSET_REJECTS_BLUEPRINT) {
-        const tpl = rejectsWrapper.querySelector('.mindset-item-template');
-        if (tpl) MINDSET_REJECTS_BLUEPRINT = tpl.cloneNode(true);
+        const tpls = rejectsWrapper.querySelectorAll('.mindset-item-template');
+        if (tpls.length) MINDSET_REJECTS_BLUEPRINT = Array.from(tpls).map(t => t.cloneNode(true));
     }
 
-    if (!MINDSET_VALUES_BLUEPRINT || !MINDSET_REJECTS_BLUEPRINT) {
+    if (!MINDSET_VALUES_BLUEPRINT || !MINDSET_VALUES_BLUEPRINT.length ||
+        !MINDSET_REJECTS_BLUEPRINT || !MINDSET_REJECTS_BLUEPRINT.length) {
         console.error("Mindset render aborted: .mindset-item-template not found inside one or both .numbers-wrapper elements.");
         return;
     }
@@ -2719,14 +2882,18 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
         }
         return clone;
     };
-
-    const renderSection = (wrapper, blueprint, items, emptyMsg) => {
+    const renderSection = (wrapper, blueprints, items, emptyMsg) => {
         wrapper.innerHTML = '';
         if (!items || items.length === 0) {
             wrapper.innerHTML = `<p class="placeholder-text">${emptyMsg}</p>`;
             return;
         }
-        items.forEach(item => wrapper.appendChild(populateItem(blueprint, item)));
+        items.forEach((item, i) => {
+            // Reuse the matching original template so its static number (1, 2, 3) is preserved.
+            // If the model ever returns more items than templates, the last template is reused.
+            const bp = blueprints[i] || blueprints[blueprints.length - 1];
+            wrapper.appendChild(populateItem(bp, item));
+        });
     };
 
     try {
@@ -3403,6 +3570,9 @@ let TONE_TRAIT_BLUEPRINT = null;
 let SEO_CARD_BLUEPRINT = null;
 let SEO_ITEM_BLUEPRINT = null;
 let FINDING_PILL_BLUEPRINT = null;
+let SUBPROBLEM_NODE_BLUEPRINT = null;
+const _subProblemCache = new Map();
+const SUBPROBLEM_STAGE_SIZE = 560;
 
 
 // =================================================================================
@@ -4167,10 +4337,24 @@ async function runProblemFinder(options = {}) {
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
         if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }
-        const topKeywords = getTopKeywords(filteredItems, 10);
-        const topPosts = filteredItems.slice(0, 30);
-        const combinedTexts = topPosts.map(post => `${post.data.title || post.data.link_title || ''}. ${getFirstTwoSentences(post.data.selftext || post.data.body || '')}`).join("\n\n");
-        const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". CRITICAL RULES FOR QUOTES: The "quotes" array must contain exactly 3 strings, and each string MUST be 63 characters or less. Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["A short quote under 63 chars.", "Another quote under 63 chars.", "A final quote under 63 chars."], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_completion_tokens: 1500, response_format: { "type": "json_object" } };
+       // Deterministic ordering so the same posts always produce the same "top" sample.
+        // A bigger sample also means a few new posts can't swing the themes.
+        const stableSorted = [...filteredItems].sort((a, b) =>
+            (b.data.ups || 0) - (a.data.ups || 0) ||
+            (b.data.created_utc || 0) - (a.data.created_utc || 0) ||
+            String(a.data.id).localeCompare(String(b.data.id))
+        );
+        // Deterministic ordering so the same posts always produce the same "top" sample.
+        // A bigger sample also means a few new posts can't swing the themes.
+        const stableSorted = [...filteredItems].sort((a, b) =>
+            (b.data.ups || 0) - (a.data.ups || 0) ||
+            (b.data.created_utc || 0) - (a.data.created_utc || 0) ||
+            String(a.data.id).localeCompare(String(b.data.id))
+        );
+        const topKeywords = getTopKeywords(stableSorted, 10);
+        const topPosts = stableSorted.slice(0, 40);
+        const combinedTexts = topPosts.map(post => `${post.data.title || post.data.link_title || ''}. ${getFirstTwoSentences(post.data.selftext || post.data.body || '')}`).join("\n\n");  
+        const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". CRITICAL RULES FOR QUOTES: The "quotes" array must contain exactly 3 strings, and each string MUST be 63 characters or less. Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Prioritise the most common, clearly recurring problems that appear across many of the posts, and avoid niche one-off complaints, so the analysis stays consistent if the tool is run again on the same audience. Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["A short quote under 63 chars.", "Another quote under 63 chars.", "A final quote under 63 chars."], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_completion_tokens: 1500, seed: 11, response_format: { "type": "json_object" } };
         const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
 
         let summaries = [];
@@ -4340,6 +4524,12 @@ async function runProblemFinder(options = {}) {
                 searchedLabel: 'posts and comments'
             });
         }, 4000);
+        setTimeout(() => {
+            const chart = document.getElementById('subproblem-chart');
+            if (chart && window._summaries && window._summaries[0]) {
+                generateAndRenderSubProblemChart(chart, window._summaries[0], originalGroupName);
+            }
+        }, 4500);
 
     } catch (err) {
         console.error("!!!!!!!! A FATAL ERROR STOPPED THE ANALYSIS !!!!!!!!", err);

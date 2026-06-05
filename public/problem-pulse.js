@@ -4344,13 +4344,6 @@ async function runProblemFinder(options = {}) {
             (b.data.created_utc || 0) - (a.data.created_utc || 0) ||
             String(a.data.id).localeCompare(String(b.data.id))
         );
-        // Deterministic ordering so the same posts always produce the same "top" sample.
-        // A bigger sample also means a few new posts can't swing the themes.
-        const stableSorted = [...filteredItems].sort((a, b) =>
-            (b.data.ups || 0) - (a.data.ups || 0) ||
-            (b.data.created_utc || 0) - (a.data.created_utc || 0) ||
-            String(a.data.id).localeCompare(String(b.data.id))
-        );
         const topKeywords = getTopKeywords(stableSorted, 10);
         const topPosts = stableSorted.slice(0, 40);
         const combinedTexts = topPosts.map(post => `${post.data.title || post.data.link_title || ''}. ${getFirstTwoSentences(post.data.selftext || post.data.body || '')}`).join("\n\n");  

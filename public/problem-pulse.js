@@ -2644,6 +2644,7 @@ function renderHighchartsBubbleChart(signals) {
 // =================================================================================
 // === REVISED FUNCTION V2: AI MINDSET SUMMARY WITH DESCRIPTIVE POINTS ===
 // =================================================================================
+
 async function generateAndRenderMindsetSummary(posts, audienceContext) {
     const container = document.getElementById('mindset-summary-container');
     const archetypeHeadingEl = document.getElementById('archetype-heading');
@@ -2690,7 +2691,14 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
     valuesWrapper.innerHTML = '<p class="loading-text">Watching how they actually behave...</p>';
     rejectsWrapper.innerHTML = '<p class="loading-text">Noticing what sets them off...</p>';
 
-    // Cards are now a single observational sentence (string). The old {title, description}
+    // Function-level helper so it is in scope wherever we call it.
+    const trimToSentences = (text, max) => {
+        if (!text) return '';
+        const parts = text.match(/[^.!?]+[.!?]+(\s|$)/g);
+        return parts ? parts.slice(0, max).join(' ').trim() : text.trim();
+    };
+
+    // Cards are a single observational sentence (string). The old {title, description}
     // object shape is still handled so nothing breaks if the model returns it.
     const populateItem = (blueprint, item) => {
         const clone = blueprint.cloneNode(true);
@@ -2700,11 +2708,6 @@ async function generateAndRenderMindsetSummary(posts, audienceContext) {
         const text = (typeof item === 'string')
             ? item
             : (item && item.title ? `${item.title}. ${item.description || ''}`.trim() : (item && item.description) || '');
-            const trimToSentences = (text, max) => {
-                if (!text) return '';
-                const parts = text.match(/[^.!?]+[.!?]+(\s|$)/g);
-                return parts ? parts.slice(0, max).join(' ').trim() : text.trim();
-            };
 
         if (descEl) {
             descEl.innerText = text;
@@ -2735,7 +2738,7 @@ Respond ONLY with a valid JSON object with these keys:
 
 1. "archetype": A short, 2-3 word evocative name for this audience (e.g. "The Practical Innovators").
 
-2. "summary": EXACTLY 2 to 3 short sentences, 45 words total maximum. A sharp character study, the kind of line a journalist would open a profile with. Build it around one instinct or contradiction and land one memorable, quotable phrase. No padding. Do NOT use "this audience is driven by", "they value", "they appreciate" or "they are committed to".
+2. "summary": EXACTLY 2 short sentences, 40 words total maximum. A sharp character study, the kind of line a journalist opens a profile with. Build it around one instinct or contradiction and land one memorable, quotable phrase. No padding. Do NOT use "this audience is driven by", "they value", "they appreciate" or "they are committed to".
 
 3. "values": An array of exactly 3 strings. Each is ONE observational sentence (max 20 words) about an instinct, behaviour, belief, tendency or contradiction. Write like an anthropologist who watched them in the wild, never like a brochure.
    Avoid: "They value learning from successes and failures."
@@ -2769,8 +2772,7 @@ ${topPostsText}`;
         const { archetype, summary, values, rejects } = parsed;
 
         archetypeHeadingEl.textContent = archetype || '';
-        archetypeDescEl.textContent = trimToSentences(summary, 3);
-
+        archetypeDescEl.textContent = trimToSentences(summary, 2);
 
         renderSection(valuesWrapper, MINDSET_VALUES_BLUEPRINT, values, 'Could not read this audience clearly enough yet.');
         renderSection(rejectsWrapper, MINDSET_REJECTS_BLUEPRINT, rejects, 'Could not read this audience clearly enough yet.');
@@ -2783,7 +2785,7 @@ ${topPostsText}`;
         rejectsWrapper.innerHTML = '';
     }
 }
-// =================================================================================
+
 // === NEW FUNCTION: AI STRATEGIC PILLARS (GOALS & FEARS) ===
 // ================================================================================
 

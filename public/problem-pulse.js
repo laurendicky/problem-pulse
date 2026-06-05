@@ -2840,17 +2840,20 @@ ${topPostsText}`;
         const parsed = JSON.parse(data.openaiResponse);
         console.log('[Pillars] AI returned goals:', (parsed.goals || []).length, 'fears:', (parsed.fears || []).length);
 
-        const populatePillars = (container, blueprint, items, extraTextClass) => {
+        const populatePillars = (container, blueprint, items, swapClass) => {
             (items || []).forEach(text => {
                 const clone = blueprint.cloneNode(true);
-                clone.style.removeProperty('display'); // in case the template was hidden inline
+                clone.style.removeProperty('display');
                 const textNode =
                     clone.querySelector('.pillar-item-text') ||
                     clone.querySelector('[class*="pillar-item-text"]') ||
                     clone;
                 textNode.innerText = text;
-                // Force the combo class so .pillar-item-text.pink resolves, regardless of which template cloned.
-                if (extraTextClass) textNode.classList.add(extraTextClass);
+                if (swapClass) {
+                    // Remove the base class so the dedicated class can't lose a specificity tie.
+                    textNode.classList.remove('pillar-item-text');
+                    textNode.classList.add(swapClass);
+                }
                 container.appendChild(clone);
             });
         };

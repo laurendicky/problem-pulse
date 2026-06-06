@@ -572,7 +572,18 @@ ${JSON.stringify(items)}`;
   }
 }
 
-
+// Builds a keyword -> mention-count map using the word-overlap counter.
+// groundingCount reads this map, falling back to a live count if a key is missing.
+async function buildGroundingMap(keywords, posts) {
+    const lowerTexts = posts.map(p =>
+        `${p.data.title || p.data.link_title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase()
+    );
+    const map = new Map();
+    (keywords || []).forEach(kw => {
+        if (kw) map.set(kw.toLowerCase().trim(), countKeywordMentions(kw, lowerTexts));
+    });
+    return map;
+}
 // Unified lookup: semantic count if available, else the word-overlap fallback.
 function groundingCount(keyword, groundingMap, lowerTexts) {
     if (!keyword) return 0;
@@ -2945,7 +2956,7 @@ ${topPostsText}`;
                 { role: "user", content: prompt }
             ],
             temperature: 0.6,
-            max_completion_tokens: 700,
+            max_completion_tokens: 1100,
             response_format: { "type": "json_object" }
         };
 

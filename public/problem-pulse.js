@@ -2323,14 +2323,21 @@ async function generateAndRenderSubProblemChart(chartEl, finding, audienceContex
     const hub = chartEl.querySelector('.subproblem-hub');
     if (hub) {
         hub.style.zIndex = '3';
+        hub.style.display = 'none';
         const t = hub.querySelector('.subproblem-hub-title');
         if (t) t.innerText = finding.title || '';
     }
+
+    // --- LOTTIE LOADER: helpers ---
+    const loader = chartEl.querySelector('.subproblem-loader');
+    const showLoader = () => { if (loader) loader.style.display = 'block'; };
+    const hideLoader = () => { if (loader) loader.style.display = 'none'; };
 
     // Draws the ring of nodes plus the spokes. Pure DOM, runs off cached or fresh data.
     const render = (subProblems) => {
         chartEl.querySelectorAll('.sp-generated').forEach(el => el.remove());
         if (!subProblems || subProblems.length === 0) return;
+        if (hub) hub.style.display = ''; 
 
         const measured = chartEl.clientWidth || chartEl.offsetWidth || 0;
         const size = measured > 0 ? measured : SUBPROBLEM_STAGE_SIZE;
@@ -2397,13 +2404,15 @@ async function generateAndRenderSubProblemChart(chartEl, finding, audienceContex
         }
     };
 
-    // Cached? Render instantly, no refetch.
+    // Cached? Render instantly, no refetch (and no spinner needed).
     const cacheKey = finding.title;
     if (_subProblemCache.has(cacheKey)) {
+        hideLoader(); // --- LOTTIE LOADER ---
         render(_subProblemCache.get(cacheKey));
         return;
     }
 
+    showLoader(); // --- LOTTIE LOADER: show while we fetch + analyse ---
     try {
         // Build the corpus: this finding's posts plus their comments.
         const findingPosts = (window._filteredPosts || []).filter(p => calculateRelevanceScore(p, finding) > 0);
@@ -2474,9 +2483,11 @@ ${corpusText}`;
             .slice(0, 8);
 
         _subProblemCache.set(cacheKey, subProblems);
+        hideLoader(); // --- LOTTIE LOADER: hide just before nodes appear ---
         render(subProblems);
 
     } catch (error) {
+        hideLoader(); // --- LOTTIE LOADER ---
         console.error('Sub-problem chart error:', error);
     }
 }

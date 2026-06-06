@@ -2270,23 +2270,20 @@ async function generateAndRenderHistoricalSentiment(subredditQueryString) {
         container.innerHTML = '<p class="error-message">Could not load historical sentiment.</p>';
     }
 }
+
 async function generateAndRenderSubProblemChart(chartEl, finding, audienceContext) {
     if (!chartEl || !finding) return;
 
-    // Capture the node design once, then hide the original template so only generated nodes show.
+    // Capture a clean node template once (preferring one with no preview colour), hide all templates.
     const tpls = chartEl.querySelectorAll('.subproblem-node-template');
     if (tpls.length) {
         if (!SUBPROBLEM_NODE_BLUEPRINT) {
-            // Prefer a template with no preview colour on it, then strip colours so the
-            // alternating green/orange logic stays clean.
             const clean = Array.from(tpls).find(t => !t.classList.contains('node-green') && !t.classList.contains('node-orange')) || tpls[0];
             SUBPROBLEM_NODE_BLUEPRINT = clean.cloneNode(true);
             SUBPROBLEM_NODE_BLUEPRINT.classList.remove('node-green', 'node-orange');
         }
         tpls.forEach(t => { t.style.display = 'none'; });
     }
-   
-   
     if (!SUBPROBLEM_NODE_BLUEPRINT) {
         console.error('Sub-problem chart: .subproblem-node-template not found.');
         return;
@@ -2308,7 +2305,7 @@ async function generateAndRenderSubProblemChart(chartEl, finding, audienceContex
         const measured = chartEl.clientWidth || chartEl.offsetWidth || 0;
         const size = measured > 0 ? measured : SUBPROBLEM_STAGE_SIZE;
         const center = size / 2;
-        const radius = size * 0.36; // distance of node centres from the hub; nudge this if nodes crowd or drift
+        const radius = size * 0.36;
         const N = subProblems.length;
         const placed = [];
 
@@ -2325,7 +2322,7 @@ async function generateAndRenderSubProblemChart(chartEl, finding, audienceContex
         svg.style.zIndex = '0';
 
         subProblems.forEach((sp, i) => {
-            const angle = (-90 + i * (360 / N)) * Math.PI / 180; // start at top, go clockwise
+            const angle = (-90 + i * (360 / N)) * Math.PI / 180;
             const x = center + radius * Math.cos(angle);
             const y = center + radius * Math.sin(angle);
             placed.push({ x, y });
@@ -2342,7 +2339,19 @@ async function generateAndRenderSubProblemChart(chartEl, finding, audienceContex
         chartEl.insertBefore(svg, chartEl.firstChild);
 
         // Nodes.
-        const labelEl = node.querySelector('.subproblem-node-label');
+        subProblems.forEach((sp, i) => {
+            const { x, y } = placed[i];
+            const node = SUBPROBLEM_NODE_BLUEPRINT.cloneNode(true);
+            node.classList.add('sp-generated');
+            node.classList.add(i % 2 === 0 ? 'node-green' : 'node-orange');
+            node.style.display = '';
+            node.style.position = 'absolute';
+            node.style.left = `${x}px`;
+            node.style.top = `${y}px`;
+            node.style.transform = 'translate(-50%, -50%)';
+            node.style.zIndex = '2';
+
+            const labelEl = node.querySelector('.subproblem-node-label');
             const pctEl = node.querySelector('.subproblem-node-pct');
             const iconEl = node.querySelector('.subproblem-node-icon');
             if (labelEl) labelEl.innerText = sp.label;
@@ -2350,16 +2359,13 @@ async function generateAndRenderSubProblemChart(chartEl, finding, audienceContex
             if (iconEl) iconEl.innerHTML = `<i data-lucide="${sp.icon}"></i>`;
 
             chartEl.appendChild(node);
-        };
+        });
 
         // Convert the <i data-lucide> placeholders into SVG icons in one pass.
         if (window.lucide && typeof window.lucide.createIcons === 'function') {
             window.lucide.createIcons();
         }
     };
-
-
-
 
     // Cached? Render instantly, no refetch.
     const cacheKey = finding.title;
@@ -2369,7 +2375,7 @@ async function generateAndRenderSubProblemChart(chartEl, finding, audienceContex
     }
 
     try {
-        // Build the corpus: this finding's posts plus their comments (the slow part, hidden behind the modal).
+        // Build the corpus: this finding's posts plus their comments.
         const findingPosts = (window._filteredPosts || []).filter(p => calculateRelevanceScore(p, finding) > 0);
         const basePosts = findingPosts.length >= 8 ? findingPosts : (window._filteredPosts || []);
         const topIds = [...basePosts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 25).map(p => p.data.id);
@@ -2386,6 +2392,7 @@ async function generateAndRenderSubProblemChart(chartEl, finding, audienceContex
         const lowerTexts = corpus.map(p => `${p.data.title || p.data.link_title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase());
         const corpusSize = corpus.length || 1;
         const corpusText = corpus.slice(0, 60).map(p => `${p.data.title || ''} ${(p.data.selftext || p.data.body || '').substring(0, 300)}`.trim()).join('\n---\n');
+
         const prompt = `You are analysing the "${audienceContext}" audience. The broad problem category is "${finding.title}": ${finding.body || ''}.
 From the real discussions below (posts and comments), identify 6 to 8 specific recurring sub-problems WITHIN this category. Each must be a concrete issue people actually raise, not a restatement of the category.
 For each, return a short 2 to 4 word "label", 2 to 4 "keywords" (single words or short phrases in the audience's own language) we can use to detect mentions, and an "icon" that best fits the sub-problem.
@@ -2393,8 +2400,6 @@ The "icon" MUST be chosen verbatim from this exact list: [${SUBPROBLEM_ICONS.joi
 Respond ONLY with JSON: {"sub_problems":[{"label":"...","keywords":["...","..."],"icon":"..."}]}
 Discussions:
 ${corpusText}`;
-
-
 
         const openAIParams = {
             model: "gpt-4o",
@@ -2412,7 +2417,6 @@ ${corpusText}`;
         const parsed = JSON.parse(data.openaiResponse);
         const raw = Array.isArray(parsed.sub_problems) ? parsed.sub_problems : [];
 
-        // Count mentions in code so the percentages are grounded and consistent.
         const countMentions = (keywords) => {
             let n = 0;
             for (const text of lowerTexts) {
@@ -2429,17 +2433,15 @@ ${corpusText}`;
         };
 
         const subProblems = raw
-        .map(sp => {
-            const icon = SUBPROBLEM_ICONS.includes((sp.icon || '').toLowerCase().trim())
-                ? sp.icon.toLowerCase().trim()
-                : 'circle-dot';
-            return { label: sp.label, icon, pct: Math.round((countMentions(sp.keywords) / corpusSize) * 100) };
-        })
-        .filter(sp => sp.label && sp.pct > 0)
-        .sort((a, b) => b.pct - a.pct)
-        .slice(0, 8);
-   
-   
+            .map(sp => {
+                const icon = SUBPROBLEM_ICONS.includes((sp.icon || '').toLowerCase().trim())
+                    ? sp.icon.toLowerCase().trim()
+                    : 'circle-dot';
+                return { label: sp.label, icon, pct: Math.round((countMentions(sp.keywords) / corpusSize) * 100) };
+            })
+            .filter(sp => sp.label && sp.pct > 0)
+            .sort((a, b) => b.pct - a.pct)
+            .slice(0, 8);
 
         _subProblemCache.set(cacheKey, subProblems);
         render(subProblems);
@@ -2448,6 +2450,7 @@ ${corpusText}`;
         console.error('Sub-problem chart error:', error);
     }
 }
+
 function renderHistoricalSentimentChart(data) {
     const container = document.querySelector('.history-sentiment');
     if (!container) return;

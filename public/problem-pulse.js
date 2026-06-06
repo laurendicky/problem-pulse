@@ -891,14 +891,23 @@ function renderPosts(posts) {
     }).join('');
 }
 
+
 function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
     if (!assignments) return;
     const finding = window._summaries[summaryIndex];
     if (!finding) return;
 
+    const container = document.getElementById(`reddit-div${summaryIndex + 1}`);
+    if (!container) return;
+
+    // Capture the card design once, before any container gets cleared.
+    if (!SAMPLE_INSIGHT_BLUEPRINT) {
+        const tpl = document.querySelector('.reddit-samples-posts .sample-insight');
+        if (tpl) SAMPLE_INSIGHT_BLUEPRINT = tpl.cloneNode(true);
+    }
+
     let relevantPosts = [];
     const addedPostIds = new Set();
-
     const addPost = (post) => {
         if (post && post.data && !usedPostIds.has(post.data.id) && !addedPostIds.has(post.data.id)) {
             relevantPosts.push(post);
@@ -926,43 +935,53 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
         }
     }
 
-    let html;
+    // Header is just the finding title now.
+    const headerEl = container.querySelector('.reddit-samples-header');
+    if (headerEl) headerEl.textContent = finding.title;
+
+    const postsWrap = container.querySelector('.reddit-samples-posts');
+    if (!postsWrap) return;
+    postsWrap.innerHTML = '';
+
     if (relevantPosts.length === 0) {
-        // Replaced inline style with a class
-        html = `<div class="no-posts-found">Could not find any highly relevant Reddit posts for this finding.</div>`;
-    } else {
-        const finalPosts = relevantPosts.slice(0, 8);
-        finalPosts.forEach(post => usedPostIds.add(post.data.id));
-        html = finalPosts.map(post => {
-            const content = post.data.selftext || post.data.body || 'No content.';
-            const title = post.data.title || post.data.link_title || 'View Comment';
-            const num_comments = post.data.num_comments ? `| 💬 ${post.data.num_comments.toLocaleString()}` : '';
-
-            // Note: The sample posts use a slightly different class "sample-insight"
-            // to allow for different styling than the main post list.
-            return `
-                <div class="sample-insight">
-                    <a href="https://www.reddit.com${post.data.permalink}" target="_blank" rel="noopener noreferrer" class="sample-insight-title">
-                        ${title}
-                    </a>
-                    <p class="sample-insight-content">
-                        ${content.substring(0, 150) + '...'}
-                    </p>
-                    <small class="sample-insight-meta">
-                        r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} ${num_comments} | 🗓️ ${formatDate(post.data.created_utc)}
-                    </small>
-                </div>
-            `;
-        }).join('');
+        postsWrap.innerHTML = `<p class="no-posts-found">Could not find any highly relevant Reddit posts for this finding.</p>`;
+        return;
+    }
+    if (!SAMPLE_INSIGHT_BLUEPRINT) {
+        console.error('Sample posts: .sample-insight template not found inside .reddit-samples-posts.');
+        return;
     }
 
-    const container = document.getElementById(`reddit-div${summaryIndex + 1}`);
-    if (container) {
-        container.innerHTML = `
-            <div class="reddit-samples-header">Real Stories from Reddit: "${finding.title}"</div>
-            <div class="reddit-samples-posts">${html}</div>
-        `;
-    }
+    const finalPosts = relevantPosts.slice(0, 8);
+    finalPosts.forEach(post => usedPostIds.add(post.data.id));
+
+    finalPosts.forEach(post => {
+        const card = SAMPLE_INSIGHT_BLUEPRINT.cloneNode(true);
+        card.style.display = '';
+
+        const content = post.data.selftext || post.data.body || 'No content.';
+        const title = post.data.title || post.data.link_title || 'View Comment';
+        const numComments = post.data.num_comments ? ` | 💬 ${post.data.num_comments.toLocaleString()}` : '';
+
+        const titleEl = card.querySelector('.sample-insight-title');
+        if (titleEl) titleEl.textContent = title;
+
+        const contentEl = card.querySelector('.sample-insight-content');
+        if (contentEl) contentEl.textContent = content.substring(0, 150) + '...';
+
+        const metaEl = card.querySelector('.sample-insight-meta');
+        if (metaEl) metaEl.textContent = `r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()}${numComments} | 🗓️ ${formatDate(post.data.created_utc)}`;
+
+        // Make it link to the post: the card if it's a link, otherwise the first link inside.
+        const link = card.matches('a') ? card : card.querySelector('a');
+        if (link) {
+            link.href = `https://www.reddit.com${post.data.permalink}`;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+        }
+
+        postsWrap.appendChild(card);
+    });
 }
 
 async function getRelatedSearchTermsAI(audience) {
@@ -2343,7 +2362,7 @@ async function generateAndRenderSubProblemChart(chartEl, finding, audienceContex
             line.setAttribute('y1', center);
             line.setAttribute('x2', x);
             line.setAttribute('y2', y);
-            line.setAttribute('stroke', '#c7d2e8');
+            line.setAttribute('stroke', '#ffffff');
             line.setAttribute('stroke-width', '1.5');
             svg.appendChild(line);
         });
@@ -3600,6 +3619,7 @@ let SEO_CARD_BLUEPRINT = null;
 let SEO_ITEM_BLUEPRINT = null;
 let FINDING_PILL_BLUEPRINT = null;
 let SUBPROBLEM_NODE_BLUEPRINT = null;
+let SAMPLE_INSIGHT_BLUEPRINT = null;
 const _subProblemCache = new Map();
 const SUBPROBLEM_STAGE_SIZE = 560;
 const SUBPROBLEM_ICONS = ['alert-triangle','heart','clock','shield','home','car','moon','sun','bone','dog','cat','dollar-sign','shopping-cart','trending-down','frown','zap','flame','droplet','scissors','wrench','lock','users','message-circle','help-circle','search','book-open','calendar','map-pin','phone','briefcase','target','lightbulb','bed','utensils','dumbbell','baby','package','truck','star','eye','brain','activity','thermometer','pill','leaf','circle-dot'];

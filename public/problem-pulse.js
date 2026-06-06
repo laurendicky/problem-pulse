@@ -4875,7 +4875,7 @@ document.addEventListener('DOMContentLoaded', waitForElementAndInit);
 // =================================================================================
 (function () {
     // Set this to the class on your "explore" button.
-    const EXPLORE_BTN_SELECTOR = '.explore-btn';
+    const EXPLORE_BTN_SELECTOR = '.see-more';
 
     document.addEventListener('click', (e) => {
         const btn = e.target.closest(EXPLORE_BTN_SELECTOR);

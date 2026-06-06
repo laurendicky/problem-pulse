@@ -1440,32 +1440,42 @@ function renderContextContent(word, posts) { const contextBox = document.getElem
 function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
 async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title || p.data.link_title || ''}\nContent: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_completion_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
 
+
 async function extractAndValidateEntities(posts, nicheContext) {
     // 1. Prepare text for counting
     const allText = posts.map(p =>
         (p.data.title || '') + " " + (p.data.selftext || p.data.body || '')
     ).join(" [SEP] ").toLowerCase();
 
-    // 2. Sample for AI with a stricter prompt
+    // 2. Sample for AI
     const sampleText = posts.slice(0, 50).map(p =>
         `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 300)}`
     ).join('\n---\n');
 
-    // THE UPDATED PROMPT: Added negative constraints and clearer definitions
-    const prompt = `You are a market research analyst for the '${nicheContext}' industry. 
-    Your task is to identify Commercial Brands and Generic Product Categories.
+    const prompt = `You are a market research analyst studying the "${nicheContext}" audience. From the text, separate real commercial BRANDS from generic PRODUCT categories.
 
-    1. BRANDS: Extract exactly 15 Commercial Brands or specific product lines (e.g., 'Kong', 'Purina', 'Milk-Bone', 'West Paw').
-    CRITICAL: Do NOT include names of individual pets, dogs, people, or Reddit users. (e.g., ignore 'Arnold', 'Peaches', 'Bella', 'Cooper'). If it is a name of a dog, skip it.
+A BRAND is a specific company, app, or trademarked product line made by a named maker, the kind of proper noun you would see on a label, a storefront, or an app store. Examples of the SHAPE of a brand: Fitbit, MyFitnessPal, Garmin, Quest, Optimum Nutrition, Huel. A brand is owned by someone.
 
-    2. PRODUCTS: Extract exactly 15 Generic Product Categories (e.g., 'Kibble', 'Harness', 'Chew Toy').
+A PRODUCT is a generic item or ingredient with no specific maker. Examples of the SHAPE of a product: protein shake, yogurt, running shoes, resistance bands, collagen, black coffee.
 
-    Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}`;
+STRICT EXCLUSIONS. Put these in NEITHER list, skip them completely:
+- Diets, methods, or approaches: keto, paleo, vegan, CICO, intermittent fasting, low carb.
+- Generic activities or exercise types: running, walking, jump rope, HIIT, cardio.
+- Personal names, first names, usernames, or public figures: Arnold, Bella, Mike, Cooper.
+- Plain descriptive words that are not a company or a buyable item.
+
+RULES:
+- If something is a generic ingredient or item with no specific maker, it is a PRODUCT, never a BRAND.
+- If you are not confident a word is a genuine commercial brand, leave it out rather than guessing.
+- Return ONLY genuine entries. It is correct to return fewer than 15 if there are not 15 real ones. Do NOT pad either list to hit a number.
+
+Extract up to 15 BRANDS and up to 15 PRODUCTS, most relevant first.
+Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}`;
 
     const openAIParams = {
         model: "gpt-4o-mini",
         messages: [
-            { role: "system", content: "You are a specialized business data extractor. You distinguish between commercial entities and personal names." },
+            { role: "system", content: "You are a specialized business data extractor. You distinguish genuine commercial brands from generic products, diets, methods, activities, and personal names, and you omit anything that is not a real brand or product rather than padding the list." },
             { role: "user", content: prompt + "\n\nText to analyze:\n" + sampleText }
         ],
         temperature: 0,
@@ -1485,7 +1495,6 @@ async function extractAndValidateEntities(posts, nicheContext) {
                 const cleanKey = name.toLowerCase().trim();
                 if (cleanKey.length < 3) return;
 
-                // Improved Regex: Handles spaces and hyphens better for brands like Milk-Bone
                 const escapedName = cleanKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                 const regex = new RegExp(`\\b${escapedName}(s|es|'s)?\\b`, 'gi');
 
@@ -1503,7 +1512,6 @@ async function extractAndValidateEntities(posts, nicheContext) {
                         };
                     }
 
-                    // Increment the count (useful for the comment-enhancement pass)
                     window._entityData[type][cleanKey].count += occurrenceCount;
 
                     const existingIds = new Set(window._entityData[type][cleanKey].posts.map(p => p.data.id));
@@ -1523,7 +1531,6 @@ async function extractAndValidateEntities(posts, nicheContext) {
         return { topBrands: [], topProducts: [] };
     }
 }
-
 
 
 

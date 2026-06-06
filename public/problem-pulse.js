@@ -1140,7 +1140,7 @@ function renderEmotionMap(data) {
                         size: 12
                     },
                     // 2. TOOLTIP BACKGROUND: HOT PINK
-                    backgroundColor: '#fd80c7',
+                    backgroundColor: '#d6539d',
                     titleColor: '#ffffff',
                     bodyColor: '#dddddd',
                 }
@@ -2604,19 +2604,22 @@ async function generateAndRenderConstellation(items) {
     const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 60);
     console.log(`[Highcharts] Prioritized top ${prioritizedItems.length} items for shopping signal extraction.`);
 
-    // Shopping-specific categories. camelCase matches the render step, which spaces
-    // them out automatically (e.g. PriceSensitivity becomes "Price Sensitivity").
     const validCategories = ["WillingnessToPay", "PriceSensitivity", "BrandLoyalty", "ResearchHabits", "Substitutes", "Dealbreakers"];
 
-    // Themes that are too vague to be useful get dropped before they ever hit the chart.
     const VAGUE_THEMES = new Set(['frustration', 'problem', 'issue', 'pain point', 'wants better', 'general complaint', 'bad experience', 'dissatisfaction', 'annoyance', 'unhappy', 'confusion']);
     const isUsefulTheme = (t) => {
         const s = (t || '').toLowerCase().trim();
-        if (s.length < 8) return false;            // a real label, not a single word
+        if (s.length < 8) return false;
         if (s.split(/\s+/).length < 2) return false;
         if (VAGUE_THEMES.has(s)) return false;
         return true;
     };
+
+    // Backstop gate. A real shopping signal mentions money, a price, a product, a brand,
+    // or an act of buying. This kills lifestyle and diet behaviour the model sometimes
+    // mislabels, e.g. "I cut out pasta", "1000-1500 cal a day", "I used CICO".
+    const COMMERCIAL_CUE = /\b(buy|buys|buying|bought|purchase[ds]?|purchasing|order(ed|ing)?|pay|pays|paid|paying|spend|spent|spending|afford|affordable|price[ds]?|pricing|cost[s]?|expensive|cheap(er)?|pricey|overpriced|worth|value|deal|discount|sale|subscription|subscribe[ds]?|brand[s]?|product[s]?|refund|return(ed|s)?|warranty|premium|budget|money|dollars?|pounds?|quid|switch(ed|ing)?|recommend(ed|ation|ations|s)?)\b|[$£€]\s?\d/i;
+    const hasCommercialCue = (q) => COMMERCIAL_CUE.test(q || '');
 
     const BATCH_SIZE = 10;
     const enrichedSignals = [];
@@ -2626,25 +2629,29 @@ async function generateAndRenderConstellation(items) {
         const batch = prioritizedItems.slice(i, i + BATCH_SIZE);
         const batchStartIndex = i;
 
-        const prompt = `You are a shopper-behaviour analyst studying how the "${window.originalGroupName || 'this'}" audience buys, what they spend on, and how they decide what to purchase.
+        const prompt = `You are a shopper-behaviour analyst studying how the "${window.originalGroupName || 'this'}" audience spends money: what they buy, what they pay for, and how they decide between products and brands.
 
-From the numbered comments below, extract ONLY quotes that reveal real shopping behaviour: what they buy or refuse to buy, what they happily pay for or think is overpriced, brands they stick with or abandon, how they research and decide, alternatives they compare, or what kills a purchase.
+From the numbered comments below, extract ONLY quotes that pass this COMMERCIAL TEST: the quote must involve an actual purchase, a price or cost, money or budget, a named product or brand, paying or subscribing, or choosing between things you can buy. If there is no money, product, brand or buying decision in the quote, it is NOT a shopping signal.
 
-STRICT RULE: Ignore anything that is not about buying, spending, products, brands, prices or purchase decisions. General complaints, emotional venting, or off-topic chat are NOT shopping signals. It is better to return fewer, sharper signals than to pad the list.
+CRITICAL: Lifestyle, diet, habit and routine choices are NOT shopping signals. Reject them even though they mention food or activities. Examples you MUST reject:
+- "I cut out pasta, bread, cookies and candy." (a diet choice, nothing is bought)
+- "I only eat around 1000-1500 Cal a day." (a habit, no purchase)
+- "I utilized CICO (calories in, calories out), and exercise." (a method, no product)
+It is far better to return fewer, genuinely commercial signals than to pad the chart.
 
 For each genuine shopping signal return an object with:
-- "quote": the exact phrase, verbatim and trimmed.
+- "quote": the exact phrase, verbatim and trimmed. It must contain a clear money, price, product, brand or buying reference.
 - "source_index": the comment number it came from.
 - "category": EXACTLY one of [${validCategories.join(', ')}].
-- "theme": a concrete 3 to 5 word shopping-behaviour label in plain language. It must describe an ACTION or PATTERN, never a feeling. Good: "Pays premium for durability", "Trusts peer reviews over ads", "Switches brand after one bad batch", "Hunts for the cheapest option". Bad: "frustration", "wants better", "bad experience".
+- "theme": a concrete 3 to 5 word shopping-behaviour label describing an action or pattern, never a feeling. Good: "Pays premium for quality", "Hunts for the cheapest option", "Switches brand after bad batch", "Trusts reviews before buying".
 
 Category definitions:
-- WillingnessToPay: happy to spend, premium choices, "worth it", "would pay more for".
-- PriceSensitivity: budget limits, "too expensive", deal hunting, cheaper alternatives.
-- BrandLoyalty: sticking with, recommending, or abandoning specific brands.
-- ResearchHabits: how they decide, reviews, recommendations, comparison shopping.
-- Substitutes: DIY versus buying, alternatives, what they use instead.
-- Dealbreakers: what stops a purchase, returns, regrets, distrust of a product.
+- WillingnessToPay: happy to spend, premium choices, "worth the money", "would pay more for".
+- PriceSensitivity: budget limits, "too expensive", deal hunting, choosing cheaper products.
+- BrandLoyalty: sticking with, recommending, or abandoning specific named brands or products.
+- ResearchHabits: how they decide what to buy, reading reviews, asking for recommendations, comparing options.
+- Substitutes: a different PRODUCT or service they buy or use instead of another product. Not a lifestyle method.
+- Dealbreakers: what stops a purchase, returns, refunds, regret over a purchase, distrust of a product.
 
 Comments:
 ${batch.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
@@ -2659,7 +2666,7 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
                     openaiPayload: {
                         model: "gpt-4o-mini",
                         messages: [
-                            { role: "system", content: "You are a precise shopper-behaviour analyst. You extract only genuine buying, spending and brand-choice signals, and you label each with a concrete shopping behaviour. You output only valid JSON." },
+                            { role: "system", content: "You are a precise shopper-behaviour analyst. You extract only genuine buying, spending and brand-choice signals that pass a strict commercial test, and you reject all lifestyle, diet, habit and routine choices. You output only valid JSON." },
                             { role: "user", content: prompt }
                         ],
                         temperature: 0.2,
@@ -2682,15 +2689,15 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
                 if (!sourceItem || !signal.quote || !signal.category || !signal.theme) return;
                 if (!validCategories.includes(signal.category)) return;
                 if (!isUsefulTheme(signal.theme)) return;
+                if (!hasCommercialCue(signal.quote)) return; // backstop: no money/product/brand cue, no signal
 
-                // De-duplicate identical themes so one behaviour does not flood the chart.
                 const themeKey = signal.theme.toLowerCase().trim();
                 if (seenThemes.has(themeKey + '|' + signal.quote.substring(0, 40))) return;
                 seenThemes.add(themeKey + '|' + signal.quote.substring(0, 40));
 
                 enrichedSignals.push({
                     quote: signal.quote,
-                    problem_theme: signal.theme,   // render keys on problem_theme, left unchanged
+                    problem_theme: signal.theme,
                     category: signal.category,
                     source: sourceItem.data
                 });
@@ -2707,8 +2714,6 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
     console.log(`[Highcharts] Extracted ${enrichedSignals.length} clean shopping signals. Rendering chart.`);
     renderHighchartsBubbleChart(enrichedSignals);
 }
-
-
  
 async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
     console.log("--- Starting 'How They Shop' Signal Analysis (in background) ---");
@@ -2793,6 +2798,7 @@ function renderHighchartsBubbleChart(signals) {
         },
         tooltip: {
             useHTML: true,
+            outside: true,     
             backgroundColor: '#FFFFFF',
             borderColor: '#E0E0E0',
             borderWidth: 1,

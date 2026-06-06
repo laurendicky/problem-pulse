@@ -2600,19 +2600,56 @@ async function fetchSentimentTrendData(brandName, subredditQueryString) {
 }
 
 async function generateAndRenderConstellation(items) {
-    console.log("[Highcharts] Starting full generation process with batching strategy...");
+    console.log("[Highcharts] Starting 'How They Shop' generation...");
     const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 60);
-    console.log(`[Highcharts] Prioritized top ${prioritizedItems.length} items for signal extraction.`);
+    console.log(`[Highcharts] Prioritized top ${prioritizedItems.length} items for shopping signal extraction.`);
+
+    // Shopping-specific categories. camelCase matches the render step, which spaces
+    // them out automatically (e.g. PriceSensitivity becomes "Price Sensitivity").
+    const validCategories = ["WillingnessToPay", "PriceSensitivity", "BrandLoyalty", "ResearchHabits", "Substitutes", "Dealbreakers"];
+
+    // Themes that are too vague to be useful get dropped before they ever hit the chart.
+    const VAGUE_THEMES = new Set(['frustration', 'problem', 'issue', 'pain point', 'wants better', 'general complaint', 'bad experience', 'dissatisfaction', 'annoyance', 'unhappy', 'confusion']);
+    const isUsefulTheme = (t) => {
+        const s = (t || '').toLowerCase().trim();
+        if (s.length < 8) return false;            // a real label, not a single word
+        if (s.split(/\s+/).length < 2) return false;
+        if (VAGUE_THEMES.has(s)) return false;
+        return true;
+    };
 
     const BATCH_SIZE = 10;
-    let rawSignals = [];
+    const enrichedSignals = [];
+    const seenThemes = new Set();
 
-    // FIX 1: Run batches sequentially instead of all at once to prevent Netlify 504 Timeouts
     for (let i = 0; i < prioritizedItems.length; i += BATCH_SIZE) {
         const batch = prioritizedItems.slice(i, i + BATCH_SIZE);
         const batchStartIndex = i;
 
-        const extractionPrompt = `You are a market research analyst. From the following list of user comments, extract up to 5 quotes that express a strong purchase intent, an unsolved problem, or a significant pain point. Focus ONLY on phrases that directly mention: Willingness to pay, Frustration with a lack of a tool, A specific, unmet need, Mentions of high cost, Comparisons to other products, or A sense of urgency. CRITICAL: IGNORE general complaints or non-commercial emotional support. Here are the comments:\n${batch.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}\nRespond ONLY with a valid JSON object: {"signals": [{"quote": "The extracted quote.", "source_index": 4}]}`;
+        const prompt = `You are a shopper-behaviour analyst studying how the "${window.originalGroupName || 'this'}" audience buys, what they spend on, and how they decide what to purchase.
+
+From the numbered comments below, extract ONLY quotes that reveal real shopping behaviour: what they buy or refuse to buy, what they happily pay for or think is overpriced, brands they stick with or abandon, how they research and decide, alternatives they compare, or what kills a purchase.
+
+STRICT RULE: Ignore anything that is not about buying, spending, products, brands, prices or purchase decisions. General complaints, emotional venting, or off-topic chat are NOT shopping signals. It is better to return fewer, sharper signals than to pad the list.
+
+For each genuine shopping signal return an object with:
+- "quote": the exact phrase, verbatim and trimmed.
+- "source_index": the comment number it came from.
+- "category": EXACTLY one of [${validCategories.join(', ')}].
+- "theme": a concrete 3 to 5 word shopping-behaviour label in plain language. It must describe an ACTION or PATTERN, never a feeling. Good: "Pays premium for durability", "Trusts peer reviews over ads", "Switches brand after one bad batch", "Hunts for the cheapest option". Bad: "frustration", "wants better", "bad experience".
+
+Category definitions:
+- WillingnessToPay: happy to spend, premium choices, "worth it", "would pay more for".
+- PriceSensitivity: budget limits, "too expensive", deal hunting, cheaper alternatives.
+- BrandLoyalty: sticking with, recommending, or abandoning specific brands.
+- ResearchHabits: how they decide, reviews, recommendations, comparison shopping.
+- Substitutes: DIY versus buying, alternatives, what they use instead.
+- Dealbreakers: what stops a purchase, returns, regrets, distrust of a product.
+
+Comments:
+${batch.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}
+
+Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"category":"...","theme":"..."}]}`;
 
         try {
             const response = await fetch(OPENAI_PROXY_URL, {
@@ -2620,9 +2657,12 @@ async function generateAndRenderConstellation(items) {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     openaiPayload: {
-                        model: "gpt-5.4-mini",
-                        messages: [{ role: "system", content: "You are a precise data extraction engine that outputs only valid JSON." }, { role: "user", content: extractionPrompt }],
-                        temperature: 0.1,
+                        model: "gpt-4o-mini",
+                        messages: [
+                            { role: "system", content: "You are a precise shopper-behaviour analyst. You extract only genuine buying, spending and brand-choice signals, and you label each with a concrete shopping behaviour. You output only valid JSON." },
+                            { role: "user", content: prompt }
+                        ],
+                        temperature: 0.2,
                         max_completion_tokens: 1500,
                         response_format: { "type": "json_object" }
                     }
@@ -2632,85 +2672,70 @@ async function generateAndRenderConstellation(items) {
             if (!response.ok) throw new Error(`Batch from index ${batchStartIndex} failed.`);
 
             const data = await response.json();
+            if (!data || !data.openaiResponse) throw new Error("Proxy timed out or returned invalid format.");
 
-            // FIX 2: Safely check if openaiResponse exists before parsing
-            if (!data || !data.openaiResponse) {
-                throw new Error("Proxy timed out or returned invalid format.");
-            }
+            const parsed = JSON.parse(data.openaiResponse);
+            if (!parsed.signals || !Array.isArray(parsed.signals)) continue;
 
-            const parsedExtraction = JSON.parse(data.openaiResponse);
-            if (parsedExtraction.signals && Array.isArray(parsedExtraction.signals)) {
-                const validSignals = parsedExtraction.signals.map(signal => ({
+            parsed.signals.forEach(signal => {
+                const sourceItem = prioritizedItems[batchStartIndex + signal.source_index];
+                if (!sourceItem || !signal.quote || !signal.category || !signal.theme) return;
+                if (!validCategories.includes(signal.category)) return;
+                if (!isUsefulTheme(signal.theme)) return;
+
+                // De-duplicate identical themes so one behaviour does not flood the chart.
+                const themeKey = signal.theme.toLowerCase().trim();
+                if (seenThemes.has(themeKey + '|' + signal.quote.substring(0, 40))) return;
+                seenThemes.add(themeKey + '|' + signal.quote.substring(0, 40));
+
+                enrichedSignals.push({
                     quote: signal.quote,
-                    sourceItem: prioritizedItems[batchStartIndex + signal.source_index]
-                })).filter(s => s.sourceItem);
-
-                rawSignals.push(...validSignals);
-            }
+                    problem_theme: signal.theme,   // render keys on problem_theme, left unchanged
+                    category: signal.category,
+                    source: sourceItem.data
+                });
+            });
         } catch (error) {
             console.error(`[Highcharts] Error processing batch starting at index ${batchStartIndex}:`, error.message);
         }
 
-        // Add a 1.5 second delay between batches to let the proxy/OpenAI breathe
         if (i + BATCH_SIZE < prioritizedItems.length) {
             await new Promise(resolve => setTimeout(resolve, 1500));
         }
     }
 
-    console.log(`[Highcharts] AI extracted a total of ${rawSignals.length} high-quality signals from all batches.`);
-    if (rawSignals.length === 0) {
-        renderHighchartsBubbleChart([]);
-        return;
-    }
-
-    const enrichedSignals = [];
-    const validCategories = ["DemandSignals", "WillingnessToPay", "Frustration", "SubstituteComparisons", "Urgency", "CostConcerns"];
-
-    for (const rawSignal of rawSignals) {
-        try {
-            const enrichmentPrompt = `You are a market research analyst. For the quote below, provide a short summary of the user's core problem and classify it into the MOST relevant category. Here are the categories: [${validCategories.join(', ')}]. Quote: "${rawSignal.quote}" Provide a JSON object with: 1. "problem_theme": A short, 4-5 word summary of the core problem. 2. "category": Classify into ONE of the categories. Respond ONLY with a valid JSON object.`;
-            const enrichmentResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a data enrichment engine that outputs only valid JSON." }, { role: "user", content: enrichmentPrompt }], temperature: 0.2, max_completion_tokens: 250, response_format: { "type": "json_object" } } }) });
-
-            if (enrichmentResponse.ok) {
-                const enrichmentData = await enrichmentResponse.json();
-
-                // FIX 3: Safety check on enrichment payload
-                if (enrichmentData && enrichmentData.openaiResponse) {
-                    const parsedEnrichment = JSON.parse(enrichmentData.openaiResponse);
-                    if (parsedEnrichment.problem_theme && parsedEnrichment.category) {
-                        enrichedSignals.push({ ...rawSignal, ...parsedEnrichment, source: rawSignal.sourceItem.data });
-                    } else {
-                        console.warn("Skipping a signal due to missing fields in AI enrichment response:", parsedEnrichment);
-                    }
-                }
-            } else {
-                console.warn(`Failed to enrich a signal. Status: ${enrichmentResponse.status}`);
-            }
-        } catch (error) {
-            console.error("CRITICAL ERROR during individual signal enrichment:", error.message);
-        }
-    }
-
-    console.log(`[Highcharts] AI successfully enriched ${enrichedSignals.length} signals. Rendering chart.`);
+    console.log(`[Highcharts] Extracted ${enrichedSignals.length} clean shopping signals. Rendering chart.`);
     renderHighchartsBubbleChart(enrichedSignals);
 }
 
+
+ 
 async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
-    console.log("--- Starting Delayed Highcharts Chart Analysis (in background) ---");
+    console.log("--- Starting 'How They Shop' Signal Analysis (in background) ---");
+
+    // Shopping-intent search terms. These pull posts about spending, value, brand
+    // choice and buying decisions, rather than generic frustration. demandSignalTerms
+    // is kept in the signature for compatibility but intentionally not used here.
+    const SHOPPING_SIGNAL_TERMS = [
+        "worth the money", "worth every penny", "happily pay", "would pay more for", "best value for money",
+        "overpriced", "too expensive", "cheaper alternative", "on a budget",
+        "my favourite brand", "switched from", "stopped buying", "always buy", "go-to",
+        "would recommend", "best one i've tried", "is it worth it", "waste of money", "regret buying", "returned it"
+    ];
+
     try {
-        const demandSignalPosts = await fetchMultipleRedditDataBatched(subredditQueryString, demandSignalTerms, 40, timeFilter, false);
-        const postIds = demandSignalPosts.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id);
+        const shoppingPosts = await fetchMultipleRedditDataBatched(subredditQueryString, SHOPPING_SIGNAL_TERMS, 40, timeFilter, false);
+        const postIds = shoppingPosts.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id);
         const highIntentComments = await fetchCommentsForPosts(postIds);
-        const allItems = [...demandSignalPosts, ...highIntentComments];
+        const allItems = [...shoppingPosts, ...highIntentComments];
         await generateAndRenderConstellation(allItems);
     } catch (error) {
-        console.error("Highcharts analysis failed in the background:", error);
+        console.error("'How They Shop' analysis failed in the background:", error);
         renderHighchartsBubbleChart([]);
     } finally {
-        console.log("--- Highcharts Analysis Complete. ---");
+        console.log("--- 'How They Shop' Analysis Complete. ---");
     }
 }
-
 function renderHighchartsBubbleChart(signals) {
     const container = document.getElementById('constellation-map-container');
     const panelContent = document.getElementById('bubble-content'); // Use the new ID
@@ -4712,10 +4737,37 @@ function renderDiscoveryList(containerId, data, title, type) {
     });
 }
 function initializeDashboardInteractivity() {
-    document.addEventListener('click', async (e) => { // Make sure this is async!
-        // ... (keep your existing back button, brief button, cloud logic) ...
+    document.addEventListener('click', async (e) => {
 
-        // --- ADD THIS BLOCK FOR FINDING PILLS ---
+        // --- BRAND / PRODUCT BRIEF: open the side modal ---
+        const briefBtn = e.target.closest('.brief-button');
+        if (briefBtn) {
+            // data-word and data-type are set on the .discovery-list-item by renderDiscoveryList.
+            const item = briefBtn.closest('.discovery-list-item') || briefBtn;
+            const itemName = item.getAttribute('data-word') || briefBtn.getAttribute('data-word');
+            const itemType = item.getAttribute('data-type') || briefBtn.getAttribute('data-type');
+
+            if (itemName && itemType) {
+                const panelId = itemType === 'brands' ? 'brand-detail-panel' : 'product-detail-panel';
+                const panel = document.getElementById(panelId);
+                if (panel) panel.classList.add('visible'); // adjust 'visible' if your Webflow uses a different show class
+
+                // Fires the generator. It shows its own loading state, then fills the panel.
+                generateAndRenderBrandBrief(itemName, itemType);
+            }
+            return;
+        }
+
+        // --- BRAND / PRODUCT BRIEF: close the side modal ---
+        // Adjust '.brief-back-btn' to whatever class your close/back control actually uses.
+        const backBtn = e.target.closest('.brief-back-btn');
+        if (backBtn) {
+            document.querySelectorAll('#brand-detail-panel, #product-detail-panel')
+                .forEach(p => p.classList.remove('visible'));
+            return;
+        }
+
+        // --- FINDING PILLS (unchanged) ---
         const pill = e.target.closest('.finding-pill');
         if (pill) {
             const pillsWrap = document.getElementById('finding-pills-wrap');
@@ -4731,7 +4783,6 @@ function initializeDashboardInteractivity() {
         }
     });
 }
-
 // =================================================================================
 // === COMMUNITY SEARCH: ROTATING SHIMMER LOADER ===
 // =================================================================================

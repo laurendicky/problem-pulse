@@ -2274,11 +2274,19 @@ async function generateAndRenderSubProblemChart(chartEl, finding, audienceContex
     if (!chartEl || !finding) return;
 
     // Capture the node design once, then hide the original template so only generated nodes show.
-    const tpl = chartEl.querySelector('.subproblem-node-template');
-    if (tpl) {
-        if (!SUBPROBLEM_NODE_BLUEPRINT) SUBPROBLEM_NODE_BLUEPRINT = tpl.cloneNode(true);
-        tpl.style.display = 'none';
+    const tpls = chartEl.querySelectorAll('.subproblem-node-template');
+    if (tpls.length) {
+        if (!SUBPROBLEM_NODE_BLUEPRINT) {
+            // Prefer a template with no preview colour on it, then strip colours so the
+            // alternating green/orange logic stays clean.
+            const clean = Array.from(tpls).find(t => !t.classList.contains('node-green') && !t.classList.contains('node-orange')) || tpls[0];
+            SUBPROBLEM_NODE_BLUEPRINT = clean.cloneNode(true);
+            SUBPROBLEM_NODE_BLUEPRINT.classList.remove('node-green', 'node-orange');
+        }
+        tpls.forEach(t => { t.style.display = 'none'; });
     }
+   
+   
     if (!SUBPROBLEM_NODE_BLUEPRINT) {
         console.error('Sub-problem chart: .subproblem-node-template not found.');
         return;
@@ -2334,26 +2342,24 @@ async function generateAndRenderSubProblemChart(chartEl, finding, audienceContex
         chartEl.insertBefore(svg, chartEl.firstChild);
 
         // Nodes.
-        subProblems.forEach((sp, i) => {
-            const { x, y } = placed[i];
-            const node = SUBPROBLEM_NODE_BLUEPRINT.cloneNode(true);
-            node.classList.add('sp-generated');
-            node.classList.add(i % 2 === 0 ? 'node-green' : 'node-orange');
-            node.style.display = '';
-            node.style.position = 'absolute';
-            node.style.left = `${x}px`;
-            node.style.top = `${y}px`;
-            node.style.transform = 'translate(-50%, -50%)';
-            node.style.zIndex = '2';
-
-            const labelEl = node.querySelector('.subproblem-node-label');
+        const labelEl = node.querySelector('.subproblem-node-label');
             const pctEl = node.querySelector('.subproblem-node-pct');
+            const iconEl = node.querySelector('.subproblem-node-icon');
             if (labelEl) labelEl.innerText = sp.label;
             if (pctEl) pctEl.innerText = `${sp.pct}%`;
+            if (iconEl) iconEl.innerHTML = `<i data-lucide="${sp.icon}"></i>`;
 
             chartEl.appendChild(node);
         });
+
+        // Convert the <i data-lucide> placeholders into SVG icons in one pass.
+        if (window.lucide && typeof window.lucide.createIcons === 'function') {
+            window.lucide.createIcons();
+        }
     };
+
+
+
 
     // Cached? Render instantly, no refetch.
     const cacheKey = finding.title;
@@ -2380,13 +2386,15 @@ async function generateAndRenderSubProblemChart(chartEl, finding, audienceContex
         const lowerTexts = corpus.map(p => `${p.data.title || p.data.link_title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase());
         const corpusSize = corpus.length || 1;
         const corpusText = corpus.slice(0, 60).map(p => `${p.data.title || ''} ${(p.data.selftext || p.data.body || '').substring(0, 300)}`.trim()).join('\n---\n');
-
         const prompt = `You are analysing the "${audienceContext}" audience. The broad problem category is "${finding.title}": ${finding.body || ''}.
 From the real discussions below (posts and comments), identify 6 to 8 specific recurring sub-problems WITHIN this category. Each must be a concrete issue people actually raise, not a restatement of the category.
-For each, return a short 2 to 4 word "label" and 2 to 4 "keywords" (single words or short phrases in the audience's own language) that we can use to detect mentions in the text.
-Respond ONLY with JSON: {"sub_problems":[{"label":"...","keywords":["...","..."]}]}
+For each, return a short 2 to 4 word "label", 2 to 4 "keywords" (single words or short phrases in the audience's own language) we can use to detect mentions, and an "icon" that best fits the sub-problem.
+The "icon" MUST be chosen verbatim from this exact list: [${SUBPROBLEM_ICONS.join(', ')}]. If none fit well, use "circle-dot".
+Respond ONLY with JSON: {"sub_problems":[{"label":"...","keywords":["...","..."],"icon":"..."}]}
 Discussions:
 ${corpusText}`;
+
+
 
         const openAIParams = {
             model: "gpt-4o",
@@ -2421,10 +2429,17 @@ ${corpusText}`;
         };
 
         const subProblems = raw
-            .map(sp => ({ label: sp.label, pct: Math.round((countMentions(sp.keywords) / corpusSize) * 100) }))
-            .filter(sp => sp.label && sp.pct > 0)
-            .sort((a, b) => b.pct - a.pct)
-            .slice(0, 8);
+        .map(sp => {
+            const icon = SUBPROBLEM_ICONS.includes((sp.icon || '').toLowerCase().trim())
+                ? sp.icon.toLowerCase().trim()
+                : 'circle-dot';
+            return { label: sp.label, icon, pct: Math.round((countMentions(sp.keywords) / corpusSize) * 100) };
+        })
+        .filter(sp => sp.label && sp.pct > 0)
+        .sort((a, b) => b.pct - a.pct)
+        .slice(0, 8);
+   
+   
 
         _subProblemCache.set(cacheKey, subProblems);
         render(subProblems);
@@ -3573,7 +3588,7 @@ let FINDING_PILL_BLUEPRINT = null;
 let SUBPROBLEM_NODE_BLUEPRINT = null;
 const _subProblemCache = new Map();
 const SUBPROBLEM_STAGE_SIZE = 560;
-
+const SUBPROBLEM_ICONS = ['alert-triangle','heart','clock','shield','home','car','moon','sun','bone','dog','cat','dollar-sign','shopping-cart','trending-down','frown','zap','flame','droplet','scissors','wrench','lock','users','message-circle','help-circle','search','book-open','calendar','map-pin','phone','briefcase','target','lightbulb','bed','utensils','dumbbell','baby','package','truck','star','eye','brain','activity','thermometer','pill','leaf','circle-dot'];
 
 // =================================================================================
 // === SEARCHING STATE: FLOATING PROBLEM BUBBLES ===
@@ -4517,12 +4532,12 @@ async function runProblemFinder(options = {}) {
                 searchedLabel: 'posts and comments'
             });
         }, 4000);
-        setTimeout(() => {
-            const chart = document.getElementById('subproblem-chart');
-            if (chart && window._summaries && window._summaries[0]) {
-                generateAndRenderSubProblemChart(chart, window._summaries[0], originalGroupName);
-            }
-        }, 4500);
+      
+      
+      
+      
+      
+      
 
     } catch (err) {
         console.error("!!!!!!!! A FATAL ERROR STOPPED THE ANALYSIS !!!!!!!!", err);
@@ -4841,3 +4856,33 @@ function waitForElementAndInit() {
 }
 
 document.addEventListener('DOMContentLoaded', waitForElementAndInit);
+// =================================================================================
+// === SUB-PROBLEM CHART: render the right chart when a finding's modal opens ===
+// =================================================================================
+(function () {
+    // Set this to the class on your "explore" button.
+    const EXPLORE_BTN_SELECTOR = '.explore-btn';
+
+    document.addEventListener('click', (e) => {
+        const btn = e.target.closest(EXPLORE_BTN_SELECTOR);
+        if (!btn) return;
+
+        // Which finding is this card? Read it from its findings-blockN wrapper.
+        const block = btn.closest('[id^="findings-block"]');
+        if (!block) return;
+        const index = parseInt(block.id.replace('findings-block', ''), 10) - 1;
+        if (isNaN(index) || index < 0) return;
+
+        const finding = (window._summaries || [])[index];
+        if (!finding) return;
+
+        // Find this finding's chart by the data-finding-index you set in Webflow.
+        const chartEl = document.querySelector(`.subproblem-chart[data-finding-index="${index}"]`);
+        if (!chartEl) return;
+
+        // Let the modal finish opening, then render.
+        requestAnimationFrame(() => {
+            generateAndRenderSubProblemChart(chartEl, finding, window.originalGroupName || '');
+        });
+    });
+})();

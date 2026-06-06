@@ -2350,7 +2350,7 @@ async function generateAndRenderSubProblemChart(chartEl, finding, audienceContex
             if (iconEl) iconEl.innerHTML = `<i data-lucide="${sp.icon}"></i>`;
 
             chartEl.appendChild(node);
-        });
+        };
 
         // Convert the <i data-lucide> placeholders into SVG icons in one pass.
         if (window.lucide && typeof window.lucide.createIcons === 'function') {

@@ -352,21 +352,17 @@ Respond ONLY with valid JSON: {"gems":[{"category":"...","topic_a":"...","reveal
 
         let parsed = [];
         try {
-            const r = await fetch(typeof OPENAI_PROXY_URL !== 'undefined' ? OPENAI_PROXY_URL : '/api/openai', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ openaiPayload: {
-                    model: "gpt-4o",
-                    messages: [
-                        { role: "system", content: "You read real online discussions and surface non-obvious, commercially useful insights. You only assert what the quotes support, never invent statistics or compare to the general population, and you output only valid JSON." },
-                        { role: "user", content: prompt }
-                    ],
-                    temperature: 0.6,
-                    max_completion_tokens: 1800,
-                    response_format: { type: "json_object" }
-                }})
-            });
-            const data = await r.json();
-            if (data && data.openaiResponse && !data.error) parsed = JSON.parse(data.openaiResponse).gems || [];
+            const data = await callOpenAIProxyWithRetry({
+                model: "gpt-4o",
+                messages: [
+                    { role: "system", content: "You read real online discussions and surface non-obvious, commercially useful insights. You only assert what the quotes support, never invent statistics or compare to the general population, and you output only valid JSON." },
+                    { role: "user", content: prompt }
+                ],
+                temperature: 0.6,
+                max_completion_tokens: 1800,
+                response_format: { type: "json_object" }
+            }, { tries: 1 });
+            if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).gems || [];
         } catch (e) {
             console.error('[Hidden Gems] AI read failed.', e);
         }
@@ -816,6 +812,33 @@ function deduplicateByContent(items) {
         return true;
     });
 }
+// Resilient proxy caller. A ~25s latency timeout is usually variance, not a hard failure:
+// each call is a fresh Netlify invocation with its own budget, so a retry typically succeeds
+// in a few seconds. This fixes timeouts WITHOUT shrinking prompts or changing models.
+async function callOpenAIProxyWithRetry(openaiPayload, { tries = 2, backoffMs = 600 } = {}) {
+    for (let attempt = 0; attempt <= tries; attempt++) {
+        try {
+            const res = await fetch(OPENAI_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ openaiPayload })
+            });
+            if (res.ok) {
+                const data = await res.json();
+                if (data && data.openaiResponse) return data;            // usable content -> done
+                if (data && data.error) console.warn(`[AI retry] proxy error (attempt ${attempt + 1}/${tries + 1}):`, data.error);
+                else console.warn(`[AI retry] empty body (attempt ${attempt + 1}/${tries + 1}) - likely the 25s latency limit; retrying.`);
+            } else {
+                console.warn(`[AI retry] proxy HTTP ${res.status} (attempt ${attempt + 1}/${tries + 1})`);
+            }
+        } catch (e) {
+            console.warn(`[AI retry] network error (attempt ${attempt + 1}/${tries + 1}):`, e && e.message);
+        }
+        if (attempt < tries) await new Promise(r => setTimeout(r, backoffMs * (attempt + 1)));
+    }
+    return null;
+}
+
 function parseAISummary(aiResponse) {
     try {
         // CRITICAL FIX: If aiResponse is missing, don't try to use .replace()
@@ -4462,13 +4485,14 @@ async function runProblemFinder(options = {}) {
         const topPosts = stableSorted.slice(0, 40);
         const combinedTexts = topPosts.map(post => `${post.data.title || post.data.link_title || ''}. ${getFirstTwoSentences(post.data.selftext || post.data.body || '')}`).join("\n\n");  
         const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". CRITICAL RULES FOR QUOTES: The "quotes" array must contain exactly 3 strings, and each string MUST be 63 characters or less. Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Prioritise the most common, clearly recurring problems that appear across many of the posts, and avoid niche one-off complaints, so the analysis stays consistent if the tool is run again on the same audience. Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["A short quote under 63 chars.", "Another quote under 63 chars.", "A final quote under 63 chars."], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_completion_tokens: 1500, seed: 11, response_format: { "type": "json_object" } };
-        const openAIResponse = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-
+        // Resilient call: retries on a timed-out/empty response (each retry gets a fresh budget),
+        // so one slow attempt no longer breaks the entire analysis.
+        const openAIData = await callOpenAIProxyWithRetry(openAIParams, { tries: 2 });
         let summaries = [];
-        if (openAIResponse.ok) {
-            const openAIData = await openAIResponse.json();
-            // This now uses our "Crash Proof" parser from Step 1
+        if (openAIData && openAIData.openaiResponse) {
             summaries = parseAISummary(openAIData.openaiResponse);
+        } else {
+            console.error("[AI DIAGNOSTIC] Core summary returned no content after retries. Most likely the proxy's 25s latency limit (a slow OpenAI call) or an OpenAI account issue. Check the openai-proxy Netlify logs for the exact message.");
         }
 
         // If AI failed or returned nothing, we create a "Fallback" summary so the UI doesn't break

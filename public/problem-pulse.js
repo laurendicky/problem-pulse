@@ -339,7 +339,6 @@ For each gem return:
 - "reveal_finding": 1-4 word label for the unexpected or commercial side
 - "front_teaser": one sentence hinting at the surprise WITHOUT giving it away
 - "reveal_summary": 1-2 plain sentences telling the real story behind it, grounded in the quote. No invented statistics, no comparison to the general population.
-- "opportunity": one actionable sentence - a concrete product, positioning or marketing angle a founder could pursue
 - "quote": a SHORT verbatim quote (<=160 chars) copied EXACTLY from ONE item that proves the gem
 - "source_index": the [index] number that quote came from
 - "surprise_score": integer 1-10, honest (only return gems >=6)
@@ -348,7 +347,7 @@ For each gem return:
 Items:
 ${itemsText}
 
-Respond ONLY with valid JSON: {"gems":[{"category":"...","topic_a":"...","reveal_finding":"...","front_teaser":"...","reveal_summary":"...","opportunity":"...","quote":"...","source_index":0,"surprise_score":8,"commercial_value":7}]}`;
+Respond ONLY with valid JSON: {"gems":[{"category":"...","topic_a":"...","reveal_finding":"...","front_teaser":"...","reveal_summary":"...","quote":"...","source_index":0,"surprise_score":8,"commercial_value":7}]}`;
 
         let parsed = [];
         try {
@@ -373,7 +372,7 @@ Respond ONLY with valid JSON: {"gems":[{"category":"...","topic_a":"...","reveal
 
         const validated = [];
         parsed.forEach(g => {
-            if (!g || !g.topic_a || !g.reveal_finding || !g.front_teaser || !g.reveal_summary || !g.opportunity || !g.quote) return;
+            if (!g || !g.topic_a || !g.reveal_finding || !g.front_teaser || !g.reveal_summary || !g.quote) return;
             if (!CATEGORY_LABELS[g.category]) return;
             if (!labelOk(g.topic_a) || !labelOk(g.reveal_finding)) return;
 
@@ -396,7 +395,6 @@ Respond ONLY with valid JSON: {"gems":[{"category":"...","topic_a":"...","reveal
                 reveal_finding: String(g.reveal_finding).trim(),
                 front_teaser: String(g.front_teaser).trim(),
                 reveal_summary: String(g.reveal_summary).trim(),
-                opportunity: String(g.opportunity).trim(),
                 quote: String(g.quote).trim().slice(0, 200),
                 surprise_score: Number(g.surprise_score) || 0,
                 commercial_value: Number(g.commercial_value) || 0,
@@ -442,7 +440,6 @@ Respond ONLY with valid JSON: {"gems":[{"category":"...","topic_a":"...","reveal
             set(card, '.topic-a-back', g.topic_a);
             set(card, '.reveal-finding', g.reveal_finding);
             set(card, '.reveal-summary', g.reveal_summary);
-            set(card, '.gem-opportunity', g.opportunity);
             set(card, '.gem-category', CATEGORY_LABELS[g.category] || '');
             set(card, '.gem-tier', g._tier === 'near' ? 'Worth a look' : '');
             const stat = card.querySelector('.gem-stat');
@@ -455,7 +452,7 @@ Respond ONLY with valid JSON: {"gems":[{"category":"...","topic_a":"...","reveal
             grid.appendChild(card);
         });
 
-        // Feed the commercial-opportunity panel from the same grounded insights.
+        // Feed the stats panel from the same grounded insights.
         renderHiddenStatsFromGems(validated, posts, audienceContext);
 
     } catch (error) {

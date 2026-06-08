@@ -470,6 +470,14 @@ function renderHiddenStatsFromGems(gems, posts, audienceContext) {
     const c = document.getElementById('hidden-stats');
     if (!c) return;
 
+    // Capture a Webflow blueprint of .hidden-stat-card the first time, so we clone the
+    // user's designed card instead of injecting inline-styled HTML.
+    if (!window._hiddenStatBlueprint) {
+        const bp = c.querySelector('.hidden-stat-card');
+        if (bp) window._hiddenStatBlueprint = bp.cloneNode(true);
+    }
+    const STAT_BLUEPRINT = window._hiddenStatBlueprint;
+
     const texts = (posts || []).map(p =>
         `${p.data.title || p.data.link_title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase()
     );
@@ -488,9 +496,7 @@ function renderHiddenStatsFromGems(gems, posts, audienceContext) {
     };
     const both = (a, b) => texts.reduce((n, t) => n + ((t.includes(a) && t.includes(b)) ? 1 : 0), 0);
 
-    // Pick the label's significant word that ACTUALLY appears most in the corpus, so matches
-    // are real (an AI label like "remote monitoring" resolves to whichever of its words the
-    // posts truly use). Returns null if none of the words appear.
+    // Pick the label's significant word that ACTUALLY appears most in the corpus.
     const salient = (label) => {
         const words = (label || '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/)
             .filter(w => w.length > 2 && !GEN.has(w) && !AUD.has(w))
@@ -501,38 +507,37 @@ function renderHiddenStatsFromGems(gems, posts, audienceContext) {
         return best;
     };
 
+    // ONE shared set: a concept (and its keyword) may appear in AT MOST one stat anywhere,
+    // whether as a lift pair or a prevalence stat. No repetition.
+    const used = new Set();
     const liftCards = [], prevCards = [];
-    const seenPair = new Set(), seenConcept = new Set();
 
     for (const g of (gems || [])) {
         const ka = salient(g.topic_a), kb = salient(g.reveal_finding);
 
-        // Co-occurrence (lift) stat - the most interesting kind.
-        if (ka && kb && ka !== kb) {
-            const key = [ka, kb].sort().join('|');
-            if (!seenPair.has(key)) {
-                const dfA = df(ka), dfB = df(kb), bo = both(ka, kb);
-                if (bo >= 2 && dfA > 0 && dfB > 0) {
-                    const lift = (bo / N) / ((dfA / N) * (dfB / N));
-                    if (isFinite(lift) && lift >= 1.3) {
-                        seenPair.add(key);
-                        liftCards.push({
-                            number: `${lift.toFixed(1)}x`,
-                            sentence: `Among ${audienceContext}, discussions about ${g.topic_a} are far more likely to also mention ${g.reveal_finding}.`,
-                            sort: lift * Math.log2(bo + 1)
-                        });
-                    }
+        // Co-occurrence (lift) stat - the most interesting kind. Both concepts must be unused.
+        if (ka && kb && ka !== kb && !used.has(ka) && !used.has(kb)) {
+            const dfA = df(ka), dfB = df(kb), bo = both(ka, kb);
+            if (bo >= 2 && dfA > 0 && dfB > 0) {
+                const lift = (bo / N) / ((dfA / N) * (dfB / N));
+                if (isFinite(lift) && lift >= 1.3) {
+                    used.add(ka); used.add(kb);
+                    liftCards.push({
+                        number: `${lift.toFixed(1)}x`,
+                        sentence: `Among ${audienceContext}, discussions about ${g.topic_a} are far more likely to also mention ${g.reveal_finding}.`,
+                        sort: lift * Math.log2(bo + 1)
+                    });
+                    continue; // this gem became a lift card; do not also make prevalence stats from it
                 }
             }
         }
 
-        // Prevalence stat for each interesting concept - reliable fill, still non-obvious
-        // because the concept itself came from a vetted gem (not the most-common word).
+        // Prevalence fallback for any concept not already used in a stat.
         for (const [label, kw] of [[g.topic_a, ka], [g.reveal_finding, kb]]) {
-            if (!kw || seenConcept.has(kw)) continue;
+            if (!kw || used.has(kw)) continue;
             const share = df(kw) / N;
             if (share >= 0.04 && share <= 0.7) {
-                seenConcept.add(kw);
+                used.add(kw);
                 prevCards.push({
                     number: `${Math.round(share * 100)}%`,
                     sentence: `of ${audienceContext} discussions touch on ${label}.`,
@@ -548,17 +553,32 @@ function renderHiddenStatsFromGems(gems, posts, audienceContext) {
     for (const p of prevCards) { if (out.length >= 4) break; out.push(p); }
     const top = out.slice(0, 4);
 
-    const esc = (t) => (t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     if (top.length === 0) {
         c.innerHTML = '<p class="placeholder-text">No standout audience stats this time.</p>';
         return;
     }
-    c.innerHTML = top.map(s => `
-        <div class="hidden-stat-card" style="display:flex; gap:14px; align-items:center; padding:14px 16px; margin-bottom:10px; background:rgba(0,165,206,0.06); border-radius:12px;">
-            <div class="hidden-stat-number" style="font-size:1.6rem; font-weight:700; color:#00a5ce; white-space:nowrap;">${s.number}</div>
-            <div class="hidden-stat-text" style="font-size:0.98rem; line-height:1.4; color:#1f2937;">${esc(s.sentence)}</div>
-        </div>
-    `).join('');
+
+    // Render. Prefer the Webflow blueprint; fall back to inline-styled markup if none was built.
+    if (STAT_BLUEPRINT) {
+        c.innerHTML = '';
+        top.forEach(s => {
+            const card = STAT_BLUEPRINT.cloneNode(true);
+            card.style.display = '';
+            const numEl = card.querySelector('.hidden-stat-number');
+            const txtEl = card.querySelector('.hidden-stat-text');
+            if (numEl) numEl.innerText = s.number;
+            if (txtEl) txtEl.innerText = s.sentence;
+            c.appendChild(card);
+        });
+    } else {
+        const esc = (t) => (t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        c.innerHTML = top.map(s => `
+            <div class="hidden-stat-card" style="display:flex; gap:14px; align-items:center; padding:14px 16px; margin-bottom:10px; background:rgba(0,165,206,0.06); border-radius:12px;">
+                <div class="hidden-stat-number" style="font-size:1.6rem; font-weight:700; color:#00a5ce; white-space:nowrap;">${esc(s.number)}</div>
+                <div class="hidden-stat-text" style="font-size:0.98rem; line-height:1.4; color:#1f2937;">${esc(s.sentence)}</div>
+            </div>
+        `).join('');
+    }
 }
 
 

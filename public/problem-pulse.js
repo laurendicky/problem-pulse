@@ -1602,6 +1602,71 @@ async function enhanceDiscoveryWithComments(initialPosts, nicheContext) {
     }
 }
 
+// Honest empty-state for the "How They Shop" brands panel: shown only when an audience
+// genuinely doesn't discuss brands, instead of leaving the panel blank.
+function setBrandsEmptyState(show, message) {
+    const container = document.getElementById('top-brands-container');
+    if (!container) return;
+    let note = container.querySelector('.discovery-empty-state');
+    if (show) {
+        if (!note) {
+            note = document.createElement('div');
+            note.className = 'discovery-empty-state';
+            note.style.cssText = 'padding:1.5rem 1.25rem; text-align:center; color:#6b7280; font-size:0.95rem; line-height:1.5;';
+            container.appendChild(note);
+        }
+        note.textContent = message;
+        note.style.display = 'block';
+    } else if (note) {
+        note.style.display = 'none';
+    }
+}
+
+// Brand-recovery pass. The main discovery lists are mined from the PROBLEM search, where
+// some audiences (e.g. first-time parents) rarely name brands. When brands come back thin,
+// we re-run extraction over purchase/recommendation-intent threads - the place brands
+// actually get named - so we surface brands that genuinely exist before giving up.
+async function recoverBrandsWithShopping(subredditQueryString, timeFilter, nicheContext) {
+    try {
+        const currentBrandCount = window._entityData ? Object.keys(window._entityData.brands || {}).length : 0;
+        if (currentBrandCount >= 5) { setBrandsEmptyState(false); return; } // already healthy, no extra calls
+
+        console.log(`[Discovery] Brands thin (${currentBrandCount}). Running shopping-intent brand recovery...`);
+
+        // Purchase/recommendation-intent terms surface the threads where specific brands get named.
+        const BRAND_DISCOVERY_TERMS = [
+            "recommend", "recommendations", "which brand", "best brand", "what brand",
+            "worth it", "worth the money", "favourite", "go-to", "i use", "i bought",
+            "switched to", "holy grail", "best one", "anyone tried", "any recommendations"
+        ];
+
+        const shoppingPosts = await fetchMultipleRedditDataBatched(subredditQueryString, BRAND_DISCOVERY_TERMS, 60, timeFilter, false);
+        const items = deduplicatePosts(shoppingPosts);
+
+        // Comments from the top shopping threads are where brands are named most explicitly.
+        const postIds = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 80).map(p => p.data.id);
+        const comments = await fetchCommentsForPosts(postIds);
+        const recoveryCorpus = [...items, ...comments];
+        if (recoveryCorpus.length) {
+            await extractAndValidateEntities(recoveryCorpus, nicheContext);
+        }
+
+        const finalBrands = Object.entries(window._entityData.brands).sort((a, b) => b[1].count - a[1].count).slice(0, 8);
+        const finalProducts = Object.entries(window._entityData.products).sort((a, b) => b[1].count - a[1].count).slice(0, 8);
+        renderDiscoveryList('top-brands-container', finalBrands, 'Top Brands', 'brands');
+        renderDiscoveryList('top-products-container', finalProducts, 'Top Products', 'products');
+
+        if (finalBrands.length === 0) {
+            setBrandsEmptyState(true, `No standout brands came up for "${nicheContext}" - this audience shops more by product category than by brand. See the Products list for what they actually buy.`);
+        } else {
+            setBrandsEmptyState(false);
+        }
+    } catch (error) {
+        console.error("Brand recovery pass failed:", error);
+    }
+}
+
+
 
 
 
@@ -4659,6 +4724,7 @@ async function runProblemFinder(options = {}) {
         setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
         setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
         setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
+        setTimeout(() => recoverBrandsWithShopping(subredditQueryString, selectedTime, originalGroupName), 9000);
         setTimeout(() => generateAndRenderHistoricalSentiment(subredditQueryString), 3500);
         setTimeout(async () => {
             let gemCorpus = window._filteredPosts || [];

@@ -628,6 +628,127 @@ ${JSON.stringify(items)}`;
   }
 }
 
+
+// =================================================================================
+// === HIDDEN STATS: data-grounded audience stat cards for #hidden-stats ===========
+// === All numbers are computed from the real corpus (prevalence + co-occurrence
+// === lift) and are NEVER invented by the AI. The AI only selects and phrases the
+// === most interesting ones. Because the maths is local, this still renders even
+// === when the OpenAI proxy is down - a reliable companion to Hidden Gems.
+// =================================================================================
+async function generateAndRenderHiddenStats(posts, audienceContext) {
+    const container = document.getElementById('hidden-stats');
+    if (!container) return;
+
+    if (!posts || posts.length < 20) {
+        container.innerHTML = '<p class="placeholder-text">Not enough discussions yet for audience stats.</p>';
+        return;
+    }
+
+    container.innerHTML = '<p class="loading-text">Calculating audience stats... <span class="loader-dots"></span></p>';
+
+    const STATS_STOP = new Set([
+        'the','and','for','that','this','with','have','just','like','know','think','really','people','time',
+        'thing','things','stuff','want','need','make','get','got','going','one','way','day','lot','said','say',
+        'call','use','work','look','feel','good','best','even','still','much','about','your','their','they','them'
+    ]);
+    const cleanLabel = (t) => {
+        const s = (t || '').toLowerCase().trim();
+        if (s.length < 3) return false;
+        return !s.split(/\s+/).every(w => STATS_STOP.has(w) || (typeof stopWords !== 'undefined' && stopWords.includes(w)));
+    };
+
+    try {
+        const matrix = buildFeatureMatrix(posts);
+        const { N, df, vocab } = matrix;
+
+        // Prevalence: share of discussions that mention a concept (6%..85% = notable, not trivial/ubiquitous).
+        const prevalence = vocab
+            .filter(cleanLabel)
+            .map(f => ({ term: f, share: (df.get(f) || 0) / N }))
+            .filter(s => s.share >= 0.06 && s.share <= 0.85)
+            .sort((a, b) => b.share - a.share)
+            .slice(0, 6);
+
+        // Co-occurrence lift: "mentioning X => N more likely to also mention Y" (within this audience).
+        const pairs = mineAssociations(matrix)
+            .filter(p => cleanLabel(p.x) && cleanLabel(p.y) && p.lift >= 1.6)
+            .sort((a, b) => (b.lift * Math.log2(b.support + 1)) - (a.lift * Math.log2(a.support + 1)))
+            .slice(0, 8);
+
+        const candidates = [];
+        pairs.forEach(p => candidates.push({
+            a: p.x, b: p.y,
+            number: `${p.lift.toFixed(1)}x`,
+            fallback: `Among ${audienceContext}, discussions mentioning "${p.x}" are ${p.lift.toFixed(1)}x more likely to also bring up "${p.y}".`
+        }));
+        prevalence.forEach(s => candidates.push({
+            a: s.term, b: null,
+            number: `${Math.round(s.share * 100)}%`,
+            fallback: `${Math.round(s.share * 100)}% of ${audienceContext} discussions mention "${s.term}".`
+        }));
+
+        if (candidates.length === 0) {
+            container.innerHTML = '<p class="placeholder-text">No standout audience stats this time. Try a Deep search or longer time frame.</p>';
+            return;
+        }
+
+        // Optional AI pass: pick & phrase the most interesting. The numbers are FIXED, never altered.
+        let finalStats = null;
+        try {
+            const aiList = candidates.map((c, i) => ({ id: i, number: c.number, concept_a: c.a, concept_b: c.b }));
+            const prompt = `You are writing punchy, surprising audience-insight stat lines for the "${audienceContext}" audience, for a "Hidden Gems" panel.
+You are given pre-computed stats. Each "number" is FIXED and TRUE - you MUST keep it exactly and must NOT invent any new number or comparison.
+For each item write ONE short, scroll-stopping sentence using the number and concept(s) in plain English. An item with concept_b means: among this audience, people who mention concept_a are <number> more likely to also mention concept_b. An item with only concept_a and a % means that % of the audience's discussions mention concept_a.
+Choose only the ${Math.min(6, aiList.length)} MOST surprising/interesting items. Skip the obvious or boring ones. NEVER compare to the general population - every stat is within this audience only.
+Items: ${JSON.stringify(aiList)}
+Respond ONLY with JSON: {"stats":[{"id":0,"sentence":"..."}]}`;
+
+            const r = await fetch(OPENAI_PROXY_URL, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ openaiPayload: {
+                    model: "gpt-4o-mini",
+                    messages: [
+                        { role: "system", content: "You write short, punchy, accurate audience stat lines. You never alter or invent numbers, and you never compare to the general population. Output only valid JSON." },
+                        { role: "user", content: prompt }
+                    ],
+                    temperature: 0.4,
+                    max_completion_tokens: 600,
+                    response_format: { type: "json_object" }
+                }})
+            });
+            const data = await r.json();
+            if (data && data.openaiResponse) {
+                const picked = JSON.parse(data.openaiResponse).stats || [];
+                finalStats = picked
+                    .filter(p => candidates[p.id] && p.sentence)
+                    .slice(0, 6)
+                    .map(p => ({ number: candidates[p.id].number, sentence: p.sentence }));
+            }
+        } catch (e) {
+            console.warn('[Hidden Stats] AI phrasing failed, using grounded fallback sentences.', e);
+        }
+
+        // Resilient fallback: if the AI is unavailable, render the templated sentences (real numbers).
+        if (!finalStats || finalStats.length === 0) {
+            finalStats = candidates.slice(0, 6).map(c => ({ number: c.number, sentence: c.fallback }));
+        }
+
+        container.innerHTML = finalStats.map(s => `
+            <div class="hidden-stat-card" style="display:flex; gap:14px; align-items:center; padding:14px 16px; margin-bottom:10px; background:rgba(0,165,206,0.06); border-radius:12px;">
+                <div class="hidden-stat-number" style="font-size:1.6rem; font-weight:700; color:#00a5ce; white-space:nowrap;">${s.number}</div>
+                <div class="hidden-stat-text" style="font-size:0.98rem; line-height:1.4; color:#1f2937;">${s.sentence}</div>
+            </div>
+        `).join('');
+
+        console.log(`[Hidden Stats] Rendered ${finalStats.length} grounded audience stats.`);
+    } catch (error) {
+        console.error('[Hidden Stats] failed:', error);
+        container.innerHTML = '<p class="placeholder-text">Could not calculate audience stats.</p>';
+    }
+}
+
+
 // Builds a keyword -> mention-count map using the word-overlap counter.
 // groundingCount reads this map, falling back to a live count if a key is missing.
 async function buildGroundingMap(keywords, posts) {
@@ -4690,6 +4811,7 @@ async function runProblemFinder(options = {}) {
                 searchedCount: gemCorpus.length,
                 searchedLabel: 'posts and comments'
             });
+            generateAndRenderHiddenStats(gemCorpus, originalGroupName);
         }, 4000);
       
       

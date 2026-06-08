@@ -428,6 +428,7 @@ Respond ONLY with valid JSON: {"gems":[{"category":"...","topic_a":"...","reveal
         }
 
         updateGemHeader(shown);
+        window._exportData = window._exportData || {}; window._exportData.gems = shown;
 
         grid.innerHTML = '';
         const set = (root, sel, val) => { const e = root.querySelector(sel); if (e) e.innerText = val; };
@@ -552,6 +553,7 @@ function renderHiddenStatsFromGems(gems, posts, audienceContext) {
     const out = [...liftCards];
     for (const p of prevCards) { if (out.length >= 4) break; out.push(p); }
     const top = out.slice(0, 4);
+    window._exportData = window._exportData || {}; window._exportData.stats = top;
 
     if (top.length === 0) {
         c.innerHTML = '<p class="placeholder-text">No standout audience stats this time.</p>';
@@ -2623,6 +2625,97 @@ ${corpusText}`;
     }
 }
 
+
+// Headless sub-problem computation: same logic as the chart, but no DOM/loader. Caches into
+// _subProblemCache so opening a chart renders instantly, and so the spreadsheet export is complete.
+async function computeSubProblems(finding, audienceContext) {
+    if (!finding || !finding.title) return [];
+    const cacheKey = finding.title;
+    if (_subProblemCache.has(cacheKey)) return _subProblemCache.get(cacheKey);
+    try {
+        const findingPosts = (window._filteredPosts || []).filter(p => calculateRelevanceScore(p, finding) > 0);
+        const basePosts = findingPosts.length >= 8 ? findingPosts : (window._filteredPosts || []);
+        const topIds = [...basePosts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 15).map(p => p.data.id);
+
+        let comments = [];
+        try {
+            const raw = await fetchCommentsForPosts(topIds);
+            comments = deduplicateByContent(raw).filter(c => (c.data.body || '').length >= 80);
+        } catch (e) { /* posts only */ }
+
+        const corpus = [...basePosts, ...comments];
+        const lowerTexts = corpus.map(p => `${p.data.title || p.data.link_title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase());
+        const corpusSize = corpus.length || 1;
+        const corpusText = corpus.slice(0, 60).map(p => `${p.data.title || ''} ${(p.data.selftext || p.data.body || '').substring(0, 300)}`.trim()).join('\n---\n');
+
+        const prompt = `You are analysing the "${audienceContext}" audience. The broad problem category is "${finding.title}": ${finding.body || ''}.
+From the real discussions below (posts and comments), identify 6 to 8 specific recurring sub-problems WITHIN this category. Each must be a concrete issue people actually raise, not a restatement of the category.
+For each, return a short 2 to 4 word "label", 2 to 4 "keywords" (single words or short phrases in the audience's own language) we can use to detect mentions, and an "icon" that best fits the sub-problem.
+The "icon" MUST be chosen verbatim from this exact list: [${SUBPROBLEM_ICONS.join(', ')}]. If none fit well, use "circle-dot".
+Respond ONLY with JSON: {"sub_problems":[{"label":"...","keywords":["...","..."],"icon":"..."}]}
+Discussions:
+${corpusText}`;
+
+        const data = await callOpenAIProxyWithRetry({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You break a problem category into concrete recurring sub-problems and output only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.2,
+            seed: 11,
+            max_completion_tokens: 1200,
+            response_format: { "type": "json_object" }
+        }, { tries: 1 });
+        if (!data || !data.openaiResponse) return [];
+
+        const parsed = JSON.parse(data.openaiResponse);
+        const raw = Array.isArray(parsed.sub_problems) ? parsed.sub_problems : [];
+
+        const countMentions = (keywords) => {
+            let n = 0;
+            for (const text of lowerTexts) {
+                const hit = (keywords || []).some(kw => {
+                    const words = kw.toLowerCase().split(/\s+/).filter(w => w.length > 2 && !stopWords.includes(w)).map(w => lemmatize(w));
+                    if (!words.length) return false;
+                    let matched = 0;
+                    for (const w of words) if (text.includes(w)) matched++;
+                    return matched / words.length >= 0.5;
+                });
+                if (hit) n++;
+            }
+            return n;
+        };
+
+        const subProblems = raw
+            .map(sp => {
+                const icon = SUBPROBLEM_ICONS.includes((sp.icon || '').toLowerCase().trim()) ? sp.icon.toLowerCase().trim() : 'circle-dot';
+                return { label: sp.label, icon, pct: Math.round((countMentions(sp.keywords) / corpusSize) * 100) };
+            })
+            .filter(sp => sp.label && sp.pct > 0)
+            .sort((a, b) => b.pct - a.pct)
+            .slice(0, 8);
+
+        _subProblemCache.set(cacheKey, subProblems);
+        return subProblems;
+    } catch (e) {
+        console.warn('[Sub-Problems] compute failed for "' + finding.title + '":', e && e.message);
+        return [];
+    }
+}
+
+// Pre-generate sub-problems for EVERY finding (background, gentle concurrency) so the export
+// is always complete and charts open instantly. Runs after the main analysis.
+async function pregenerateAllSubProblems(audienceContext) {
+    const findings = window._summaries || [];
+    if (!findings.length) return;
+    const CONC = 2;
+    for (let i = 0; i < findings.length; i += CONC) {
+        await Promise.all(findings.slice(i, i + CONC).map(f => computeSubProblems(f, audienceContext)));
+    }
+    console.log(`[Sub-Problems] Pre-generated for ${findings.length} findings (export now complete).`);
+}
+
 function renderHistoricalSentimentChart(data) {
     const container = document.querySelector('.history-sentiment');
     if (!container) return;
@@ -2859,6 +2952,7 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
         await Promise.all(starts.slice(i, i + CONCURRENCY).map(processBatch));
     }
 
+    window._exportData = window._exportData || {}; window._exportData.signals = enrichedSignals;
     renderProgress(true); // final render (applies reserve top-up / honest empty-state)
     if (failedBatches === starts.length && starts.length > 0) {
         console.error("[Highcharts] ALL batches failed - this is almost certainly an API key or proxy problem, not the data.");
@@ -4485,6 +4579,7 @@ async function runProblemFinder(options = {}) {
         const filteredItems = filterPosts(allItems, selectedMinUpvotes);
         if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
         window._filteredPosts = filteredItems;
+        window._exportData = {}; // collected findings for the spreadsheet export
         window._growthTabLoaded = false; // Growth Plan tab regenerates its content on next open
         generateAndRenderOverview(filteredItems, originalGroupName);
         renderPosts(filteredItems);
@@ -4684,6 +4779,7 @@ async function runProblemFinder(options = {}) {
                 searchedLabel: 'posts and comments'
             });
         }, 4000);
+        setTimeout(() => pregenerateAllSubProblems(originalGroupName), 7000);
       
       
       
@@ -5054,6 +5150,117 @@ function waitForElementAndInit() {
         }
     }, 100);
 }
+
+// ============================================================================
+// === EXPORT FINDINGS TO SPREADSHEET (client-side, multi-sheet .xlsx) =========
+// Wire a button with id="export-findings-btn" (or class "export-findings-btn")
+// anywhere on the page. On click it gathers every finding from page state and
+// downloads an Excel workbook. No server needed.
+// ============================================================================
+function loadSheetJS() {
+    return new Promise((resolve, reject) => {
+        if (window.XLSX) return resolve(window.XLSX);
+        const sc = document.createElement('script');
+        sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+        sc.onload = () => resolve(window.XLSX);
+        sc.onerror = () => reject(new Error('Failed to load the spreadsheet library.'));
+        document.head.appendChild(sc);
+    });
+}
+
+async function exportFindingsToSpreadsheet() {
+    const ed = window._exportData || {};
+    const audience = window.originalGroupName || 'audience';
+    try {
+        const XLSX = await loadSheetJS();
+        const wb = XLSX.utils.book_new();
+        const addSheet = (name, rows) => {
+            if (!rows || !rows.length) return;
+            const ws = XLSX.utils.json_to_sheet(rows);
+            XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
+        };
+
+        // Problems / pain points
+        addSheet('Problems', (window._summaries || []).map(s => ({
+            Problem: s.title || '',
+            Description: s.body || '',
+            Mentions: s.count || '',
+            Quotes: (s.quotes || []).join('  |  '),
+            Keywords: (s.keywords || []).join(', ')
+        })));
+
+        // Sub-problems (only those that have been generated by opening a problem's chart)
+        const subRows = [];
+        try {
+            if (typeof _subProblemCache !== 'undefined') {
+                for (const [title, subs] of _subProblemCache.entries()) {
+                    (subs || []).forEach(sp => subRows.push({
+                        Problem: title,
+                        Sub_Problem: sp.label || '',
+                        Prevalence_Pct: sp.pct != null ? sp.pct + '%' : ''
+                    }));
+                }
+            }
+        } catch (e) { /* sub-problem cache unavailable */ }
+        addSheet('Sub-Problems', subRows);
+
+        // Brands & Products
+        const ent = window._entityData || { brands: {}, products: {} };
+        const entRows = (obj) => Object.values(obj || {})
+            .sort((a, b) => b.count - a.count)
+            .map((e, i) => ({ Rank: i + 1, Name: e.originalName, Mentions: e.count }));
+        addSheet('Top Brands', entRows(ent.brands));
+        addSheet('Top Products', entRows(ent.products));
+
+        // Demand signals (How They Shop)
+        addSheet('Demand Signals', (ed.signals || []).map(s => ({
+            Theme: s.problem_theme || '',
+            Category: s.category || '',
+            Quote: s.quote || '',
+            Subreddit: s.source ? 'r/' + s.source.subreddit : '',
+            Upvotes: s.source ? (s.source.ups || 0) : ''
+        })));
+
+        // Hidden gems
+        addSheet('Hidden Gems', (ed.gems || []).map(g => ({
+            Category: g.category || '',
+            Topic: g.topic_a || '',
+            Connection: g.reveal_finding || '',
+            Teaser: g.front_teaser || '',
+            Insight: g.reveal_summary || '',
+            Evidence_Quote: g.quote || '',
+            Source: g.source ? 'r/' + g.source.subreddit : '',
+            Surprise: g.surprise_score || '',
+            Commercial_Value: g.commercial_value || ''
+        })));
+
+        // Audience stats
+        addSheet('Audience Stats', (ed.stats || []).map(s => ({
+            Stat: s.number || '',
+            Detail: s.sentence || ''
+        })));
+
+        if (!wb.SheetNames.length) {
+            alert('No findings to export yet. Run an analysis first.');
+            return;
+        }
+
+        const safe = audience.replace(/[^a-z0-9]+/gi, '-').replace(/^-+|-+$/g, '').toLowerCase() || 'audience';
+        const stamp = new Date().toISOString().slice(0, 10);
+        XLSX.writeFile(wb, `problempop-${safe}-${stamp}.xlsx`);
+    } catch (err) {
+        console.error('Export failed:', err);
+        alert('Sorry, the export could not be generated. Please try again.');
+    }
+}
+
+// Delegated click handler so the export button can live anywhere on the page.
+document.addEventListener('click', (e) => {
+    const btn = e.target.closest('#export-findings-btn, .export-findings-btn');
+    if (!btn) return;
+    e.preventDefault();
+    exportFindingsToSpreadsheet();
+});
 
 document.addEventListener('DOMContentLoaded', waitForElementAndInit);
 // =================================================================================

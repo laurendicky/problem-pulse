@@ -347,8 +347,23 @@ async function generateAndRenderHiddenGems(posts, audienceContext, meta = {}) {
         ]);
 
        // Locate this function inside generateAndRenderHiddenGems and replace it:
+// Reject measurement/unit phrases ("per day", "years old") that are artifacts not concepts,
+// and the audience's OWN defining topic (for "sneaker buyers", the word "sneaker(s)"), which
+// makes any pair self-referential and obvious.
+const UNIT_PHRASE = /\b(per|a|each)\s+(day|week|month|year|hour|night)\b|\byears?\s+old\b|\btimes?\s+a\b/i;
+const GENERIC_AUD = new Set(['buyers','buyer','lovers','lover','owners','owner','fans','fan','enthusiasts','enthusiast','users','user','people','adults','adult','community','shoppers','shopper','collectors','collector','addicts','addict','nerds','geeks','parents','parent','moms','dads','professionals','folks','gamers','readers','members']);
+const AUD_CORE = (() => {
+    const set = new Set();
+    (audienceContext || '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/)
+        .filter(w => w.length > 2 && !GENERIC_AUD.has(w))
+        .forEach(w => { set.add(w); set.add(w.endsWith('s') ? w.slice(0, -1) : w + 's'); });
+    return set;
+})();
+const hasAudCore = (s) => s.split(/\s+/).some(w => AUD_CORE.has(w));
 const isValidTerm = (t) => {
     const s = (t || '').toLowerCase().trim();
+    if (UNIT_PHRASE.test(s)) return false;
+    if (hasAudCore(s)) return false;
     // Added \s to the character class to allow spaces in multi-word phrases
     return s.length >= 3 && /^[a-z][a-z'\s-]*[a-z]$/.test(s) && !STOPWORDS.has(s);
 };
@@ -440,6 +455,8 @@ REJECT these, they are obvious, circular or too closely related to be a discover
 - "Sudden pet loss" and "regret" (grief obviously follows loss)
 - "Persistent begging" and "food brand loyalty" (obvious, both are just about food)
 - Anything where term B is the predictable feeling, restatement or direct consequence of term A.
+- Measurement or unit phrases such as "per day", "a week", "years old" - these are artifacts, not concepts (e.g. "coffee" and "per day" is NOT a gem).
+- The audience's OWN defining topic (for sneaker buyers, the word "sneakers" itself). A pair that includes it is self-referential and obvious.
 
 KEEP findings that leap between two different worlds. Examples of the right shape:
 - Reactive dogs and social isolation
@@ -455,6 +472,7 @@ Every kept gem must fit exactly ONE category:
 4. contradiction: the audience says one thing but does another (asks for expert advice yet ignores trainers; says price matters yet picks premium).
 
 HARD RULES:
+- Prefer quality over statistical strength: a 3x surprising, product-relevant insight beats a 20x obvious one. A very high co-occurrence multiplier is usually two halves of the same phrase, a unit, or the audience's own topic - distrust it.
 - Some raw terms are meaningless function words (e.g. "will", "their", "about"). NEVER output a raw term as a label and NEVER build a gem around a word that carries no concept. Identify the real concept the QUOTES are about and label that. If you cannot find a real, concrete concept for BOTH sides in the quotes, DISCARD the item entirely.
 - READ THE QUOTES. Only assert what the quotes plus the co-occurrence actually support.
 - Do NOT invent comparative statistics like "more than average owners". You have no baseline population. Phrase findings as connections within this audience only.
@@ -521,6 +539,8 @@ ${JSON.stringify(items)}`;
       const labelOk = (s) => {
           const t = (s || '').toLowerCase().trim();
           if (t.length < 3) return false;
+          if (UNIT_PHRASE.test(t)) return false;   // "per day", "years old" etc.
+          if (hasAudCore(t)) return false;          // the audience's own topic
           const tokens = t.split(/\s+/);
           return !(tokens.length === 1 && STOPWORDS.has(tokens[0]));
       };
@@ -661,10 +681,22 @@ async function generateAndRenderHiddenStats(posts, audienceContext) {
         'youtu','watch','reddit','redd','imgur','gyazo','jpg','jpeg','png','gif','webp','pdf','mp4',
         'redact','redacted','deleted','removed','mass','overwritten','powerdeletesuite','utm','href','url','ref']);
     const isJunkLabel = (t) => (t || '').toLowerCase().split(/\s+/).some(w => JUNK_TOKENS.has(w));
+    // Reject unit/measurement phrases and the audience's OWN defining topic (self-referential).
+    const UNIT_PHRASE = /\b(per|a|each)\s+(day|week|month|year|hour|night)\b|\byears?\s+old\b|\btimes?\s+a\b/i;
+    const GENERIC_AUD = new Set(['buyers','buyer','lovers','lover','owners','owner','fans','fan','enthusiasts','enthusiast','users','user','people','adults','adult','community','shoppers','shopper','collectors','collector','addicts','addict','nerds','geeks','parents','parent','moms','dads','professionals','folks','gamers','readers','members']);
+    const AUD_CORE = (() => {
+        const set = new Set();
+        (audienceContext || '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/)
+            .filter(w => w.length > 2 && !GENERIC_AUD.has(w))
+            .forEach(w => { set.add(w); set.add(w.endsWith('s') ? w.slice(0, -1) : w + 's'); });
+        return set;
+    })();
     const cleanLabel = (t) => {
         const s = (t || '').toLowerCase().trim();
         if (s.length < 3) return false;
         if (isJunkLabel(s)) return false;
+        if (UNIT_PHRASE.test(s)) return false;
+        if (s.split(/\s+/).some(w => AUD_CORE.has(w))) return false; // audience's own topic
         return !s.split(/\s+/).every(w => STATS_STOP.has(w) || (typeof stopWords !== 'undefined' && stopWords.includes(w)));
     };
 
@@ -720,12 +752,12 @@ async function generateAndRenderHiddenStats(posts, audienceContext) {
         const pairCandidates = pairs.map(p => ({
             a: p.x, b: p.y,
             number: `${p.lift.toFixed(1)}x`,
-            fallback: `Among ${audienceContext}, discussions mentioning "${p.x}" are ${p.lift.toFixed(1)}x more likely to also bring up "${p.y}".`
+            fallback: `Among ${audienceContext}, discussions mentioning "${p.x}" also tend to bring up "${p.y}".`
         }));
         const prevCandidates = prevalence.map(s => ({
             a: s.term, b: null,
             number: `${Math.round(s.share * 100)}%`,
-            fallback: `${Math.round(s.share * 100)}% of ${audienceContext} discussions mention "${s.term}".`
+            fallback: `A notable share of ${audienceContext} discussions mention "${s.term}".`
         }));
         const candidates = [...pairCandidates, ...prevCandidates]; // pairs first - the screenshot-worthy ones
 
@@ -751,7 +783,7 @@ REJECT and DO NOT RETURN any item that is:
 - merely the predictable feeling that follows a topic.
 Apply this test to EVERY item: "Could this help someone build, market or position a product?" If no, discard it.
 
-It is correct to return FEWER items (even 2 or 3) than to include weak ones. Do NOT pad. Write each kept item as one short, plain-English, scroll-stopping sentence.
+It is correct to return FEWER items (even 2 or 3) than to include weak ones. Do NOT pad. Write each kept item as one short, plain-English, scroll-stopping sentence. Do NOT write the number/multiplier inside the sentence - it is displayed separately as a big figure, so describe ONLY the connection.
 Items: ${JSON.stringify(aiList)}
 Respond ONLY with JSON: {"stats":[{"id":0,"sentence":"..."}]}`;
 

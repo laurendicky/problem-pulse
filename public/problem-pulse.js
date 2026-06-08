@@ -856,6 +856,26 @@ async function callOpenAIProxyWithRetry(openaiPayload, { tries = 2, backoffMs = 
     return null;
 }
 
+// Renders #count-header by filling the user's Webflow-designed blueprint. The author builds
+// the header layout/wording in Webflow and drops in three elements the JS fills:
+//   .count-insights  -> number of distilled insights
+//   .count-posts     -> number of posts searched
+//   .count-audience  -> the audience name
+// If no blueprint was captured (element empty/not built yet), it falls back to default markup.
+function renderCountHeader(insightsCount, postsCount, audience) {
+    const ch = document.getElementById('count-header');
+    if (!ch) return;
+    if (window._countHeaderBlueprint) {
+        ch.innerHTML = window._countHeaderBlueprint;
+        const set = (sel, val) => { const e = ch.querySelector(sel); if (e) e.innerText = val; };
+        set('.count-insights', Number(insightsCount).toLocaleString());
+        set('.count-posts', Number(postsCount).toLocaleString());
+        set('.count-audience', audience || '');
+    } else {
+        ch.innerHTML = `Distilled <span class="header-pill pill-insights">${Number(insightsCount).toLocaleString()}</span> insights from <span class="header-pill pill-posts">${Number(postsCount).toLocaleString()}</span> posts for <span class="header-pill pill-audience">${audience}</span>`;
+    }
+}
+
 function parseAISummary(aiResponse) {
     try {
         // CRITICAL FIX: If aiResponse is missing, don't try to use .replace()
@@ -4481,7 +4501,7 @@ async function runProblemFinder(options = {}) {
         // only when #growth-tab-link is first opened (see setupGrowthKitInteraction).
         showBrandLoader();
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
-        if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }
+        renderCountHeader(filteredItems.length, allItems.length, originalGroupName);
        // Deterministic ordering so the same posts always produce the same "top" sample.
         // A bigger sample also means a few new posts can't swing the themes.
         const stableSorted = [...filteredItems].sort((a, b) =>
@@ -5019,6 +5039,11 @@ function waitForElementAndInit() {
         const keyElement = document.getElementById(keyElementId);
         if (keyElement) {
             clearInterval(intervalId);
+            // Capture the author's #count-header design so we can refill it after resets/loaders.
+            if (!window._countHeaderBlueprint) {
+                const ch = document.getElementById('count-header');
+                if (ch && ch.innerHTML.trim()) window._countHeaderBlueprint = ch.innerHTML;
+            }
             initializeProblemFinderTool();
         } else {
             retries++;

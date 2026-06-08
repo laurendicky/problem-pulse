@@ -2259,8 +2259,13 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
                     s.textContent = JSON.stringify(trendResult);
                     targetPanel.querySelector('.brief-content').appendChild(s);
                 } else {
-                    document.getElementById('brand-momentum-chart').innerHTML = '<span>Not enough data.</span>';
+                    const chartEl = document.getElementById('brand-momentum-chart');
+                    if (chartEl) chartEl.innerHTML = '<span>Not enough historical data to chart.</span>';
                 }
+            }).catch(err => {
+                console.error('Momentum trend failed:', err);
+                const chartEl = document.getElementById('brand-momentum-chart');
+                if (chartEl) chartEl.innerHTML = '<span>Could not load momentum data.</span>';
             });
         }
     } catch (error) {
@@ -2700,16 +2705,26 @@ async function fetchSentimentTrendData(brandName, subredditQueryString) {
             console.warn(`Could not fetch data for period: ${periodLabel}`);
             return null;
         }
-        const uniquePosts = deduplicatePosts(result.value);
-        const [sentimentResults, contextSummary] = await Promise.all([
-            classifySentimentWithAI(uniquePosts),
-            generateSentimentContextWithAI(uniquePosts, brandName)
-        ]);
-        const positiveMentions = sentimentResults.filter(s => s === 'Positive').length;
-        const negativeMentions = sentimentResults.filter(s => s === 'Negative').length;
-        const totalMentions = positiveMentions + negativeMentions;
-        const positivePercentage = totalMentions > 0 ? Math.round((positiveMentions / totalMentions) * 100) : 50;
-        return { period: periodLabel, positivePercentage, context: contextSummary };
+        // Wrapped so a single failed/rate-limited AI call returns null for THIS period only,
+        // instead of rejecting Promise.all and hanging the whole Momentum chart on its loader.
+        try {
+            const uniquePosts = deduplicatePosts(result.value);
+            const [sentimentSettled, contextSettled] = await Promise.allSettled([
+                classifySentimentWithAI(uniquePosts),
+                generateSentimentContextWithAI(uniquePosts, brandName)
+            ]);
+            const sentimentResults = sentimentSettled.status === 'fulfilled' ? (sentimentSettled.value || []) : [];
+            const contextSummary = contextSettled.status === 'fulfilled' ? contextSettled.value : null;
+            const positiveMentions = sentimentResults.filter(s => s === 'Positive').length;
+            const negativeMentions = sentimentResults.filter(s => s === 'Negative').length;
+            const totalMentions = positiveMentions + negativeMentions;
+            if (totalMentions === 0 && !contextSummary) return null; // nothing usable this period
+            const positivePercentage = totalMentions > 0 ? Math.round((positiveMentions / totalMentions) * 100) : 50;
+            return { period: periodLabel, positivePercentage, context: contextSummary };
+        } catch (err) {
+            console.warn(`Momentum period "${periodLabel}" failed:`, err && err.message);
+            return null;
+        }
     }));
 
     // Ordered oldest -> newest (matches revisedTimePeriods order); drop periods with no data.

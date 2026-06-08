@@ -1492,7 +1492,7 @@ async function generateAndRenderToneMap(posts, audienceContext) {
 
 function renderContextContent(word, posts) { const contextBox = document.getElementById('context-box'); if (!contextBox) return; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = ` <div class="context-header"> <h3 class="context-title">Context for: "${word}"</h3> <button class="context-close-btn" id="context-close-btn">×</button> </div> `; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : "Snippet not available."; const metaHTML = ` <div class="context-snippet-meta"> <span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span> </div> `; return ` <div class="context-snippet"> <p class="context-snippet-text">... ${textToShow} ...</p> ${metaHTML} </div> `; }).join(''); contextBox.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; contextBox.style.display = 'block'; const closeBtn = document.getElementById('context-close-btn'); if (closeBtn) { closeBtn.addEventListener('click', () => { contextBox.style.display = 'none'; contextBox.innerHTML = ''; }); } contextBox.scrollIntoView({ behavior: 'smooth', block: 'center' }); }
 function showSlidingPanel(word, posts, category) { const positivePanel = document.getElementById('positive-context-box'); const negativePanel = document.getElementById('negative-context-box'); const overlay = document.getElementById('context-overlay'); if (!positivePanel || !negativePanel || !overlay) { console.error("Sliding context panels or overlay not found in the DOM. Add the new HTML elements."); renderContextContent(word, posts); return; } const targetPanel = category === 'positive' ? positivePanel : negativePanel; const otherPanel = category === 'positive' ? negativePanel : positivePanel; const highlightRegex = new RegExp(`\\b(${word.replace(/ /g, '\\s')}[a-z]*)\\b`, 'gi'); const headerHTML = `<div class="context-header"><h3 class="context-title">Context for: "${word}"</h3><button class="context-close-btn">×</button></div>`; const snippetsHTML = posts.slice(0, 10).map(post => { const fullText = `${post.data.title || post.data.link_title || ''}. ${post.data.selftext || post.data.body || ''}`; const sentences = fullText.match(/[^.!?]+[.!?]+/g) || []; const keywordRegex = new RegExp(`\\b${word.replace(/ /g, '\\s')}[a-z]*\\b`, 'i'); let relevantSentence = sentences.find(s => keywordRegex.test(s)); if (!relevantSentence) { relevantSentence = getFirstTwoSentences(fullText); } const textToShow = relevantSentence ? relevantSentence.replace(highlightRegex, `<strong>$1</strong>`) : 'No relevant snippet found.'; const metaHTML = `<div class="context-snippet-meta"><span>r/${post.data.subreddit} | 👍 ${post.data.ups.toLocaleString()} | 🗓️ ${formatDate(post.data.created_utc)}</span></div>`; return `<div class="context-snippet"><p class="context-snippet-text">... ${textToShow} ...</p>${metaHTML}</div>`; }).join(''); targetPanel.innerHTML = headerHTML + `<div class="context-snippets-wrapper">${snippetsHTML}</div>`; const close = () => { targetPanel.classList.remove('visible'); overlay.classList.remove('visible'); }; targetPanel.querySelector('.context-close-btn').onclick = close; overlay.onclick = close; otherPanel.classList.remove('visible'); targetPanel.classList.add('visible'); overlay.classList.add('visible'); }
-async function generateFAQs(posts) { const topPostsText = posts.slice(0, 20).map(p => `Title: ${p.data.title || p.data.link_title || ''}\nContent: ${(p.data.selftext || p.data.body || '').substring(0, 500)}`).join('\n---\n'); const prompt = `Analyze the following Reddit posts from the "${originalGroupName}" community. Identify and extract up to 5 frequently asked questions. Respond ONLY with a JSON object with a single key "faqs", which is an array of strings. Example: {"faqs": ["How do I start with X?"]}\n\nPosts:\n${topPostsText}`; const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert at identifying user questions from text. Output only JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_completion_tokens: 500, response_format: { "type": "json_object" } }; try { const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) throw new Error('OpenAI FAQ generation failed.'); const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); return parsed.faqs || []; } catch (error) { console.error("FAQ generation error:", error); return []; } }
+// (generateFAQs removed - FAQ section retired)
 
 
 async function extractAndValidateEntities(posts, nicheContext) {
@@ -1717,39 +1717,7 @@ async function recoverBrandsWithShopping(subredditQueryString, timeFilter, niche
 
 
 
-function renderFAQs(faqs) {
-    const container = document.getElementById('faq-container');
-    if (!container) return;
-
-    // Replaced inline style with a class
-    let faqItems = '<p class="faq-placeholder">Could not generate common questions from the text.</p>';
-
-    if (faqs.length > 0) {
-        faqItems = faqs.map((faq) => `
-            <div class="faq-item">
-                <button class="faq-question">${faq}</button>
-                <div class="faq-answer">
-                    <div class="faq-answer-content">
-                        <em>This question was commonly found in discussions. Addressing it in your content or product can directly meet user needs.</em>
-                    </div>
-                </div>
-            </div>
-        `).join('');
-    }
-
-    container.innerHTML = `
-        <h3 class="dashboard-section-title">Frequently Asked Questions</h3>
-        ${faqItems}
-    `;
-
-    // REFACTORED: JS now only toggles a class. CSS handles all animation.
-    container.querySelectorAll('.faq-question').forEach(button => {
-        button.addEventListener('click', () => {
-            const faqItem = button.closest('.faq-item'); // Get the parent container
-            faqItem.classList.toggle('active');
-        });
-    });
-}
+// (renderFAQs removed - FAQ section retired)
 
 // =================================================================================
 // === SUBREDDIT VALIDATION & DISPLAY FUNCTIONS ===
@@ -3740,84 +3708,7 @@ async function generateProblemOfferPairsAI(summaries) {
     }
 }
 
-// =================================================================================
-// === PASTE THIS ENTIRE CORRECTED FUNCTION ========================================
-// =================================================================================
-async function generateAndRenderValueSankey(audienceName, summaries) {
-    const container = document.getElementById('value-tree');
-    if (!container) return;
-
-    container.innerHTML = '<p class="loading-text">Generating AI value propositions... <span class="loader-dots"></span></p>';
-
-    const pairs = await generateProblemOfferPairsAI(summaries);
-    const validatedPairs = pairs.filter(p => p.problem && p.offer && p.problem.trim() !== "" && p.offer.trim() !== "");
-
-    if (validatedPairs.length === 0) {
-        container.innerHTML = '<p class="placeholder-text">Could not generate any offer angles.</p>';
-        return;
-    }
-
-    const sankeyData = [];
-    const sankeyNodes = [];
-    const addedNodes = new Set();
-
-    validatedPairs.forEach(pair => {
-        // Create the link from problem to offer
-        sankeyData.push([pair.problem, pair.offer, 1]); // Weight of 1 for uniform lines
-
-        // Add the problem node if it doesn't exist
-        if (!addedNodes.has(pair.problem)) {
-            // --- THIS IS THE FIX: Add the 'name' property ---
-            sankeyNodes.push({ id: pair.problem, name: pair.problem, column: 0, type: 'problem' });
-            addedNodes.add(pair.problem);
-        }
-        // Add the offer node if it doesn't exist
-        if (!addedNodes.has(pair.offer)) {
-            // --- THIS IS THE FIX: Add the 'name' property ---
-            sankeyNodes.push({ id: pair.offer, name: pair.offer, column: 1, type: 'offer' });
-            addedNodes.add(pair.offer);
-        }
-    });
-    // =================================================================================
-    // === PASTE THIS ENTIRE FINAL CHART CONFIGURATION =================================
-    // =================================================================================
-    Highcharts.chart('value-tree', {
-        chart: {
-            type: 'sankey',
-            backgroundColor: 'transparent',
-            margin: [20, 20, 20, 20] // Added slightly more margin
-        },
-        title: { text: null },
-        credits: { enabled: false },
-        tooltip: { enabled: false },
-        series: [{
-            keys: ['from', 'to', 'weight'],
-            data: sankeyData,
-            nodes: sankeyNodes,
-            nodePadding: 25, // Vertical space between nodes
-
-            // Link styling
-            link: {
-                color: 'rgba(94, 209, 216, 0.6)',
-                linkOpacity: 0.6
-            },
-
-            // --- THIS IS THE DEFINITIVE FIX ---
-            // We use the standard 'formatter' and remove all conflicting properties.
-            dataLabels: {
-                enabled: true,
-                useHTML: true,
-                formatter: function () {
-                    // 'this.point' correctly refers to the node data
-                    const point = this.point;
-                    const className = point.type === 'problem' ? 'sankey-problem' : 'sankey-offer';
-                    // Return the custom HTML div, which will now be rendered correctly
-                    return `<div class="sankey-label ${className}">${point.name}</div>`;
-                }
-            },
-        }]
-    });
-}
+// (generateAndRenderValueSankey removed - #value-tree no longer used)
 
 // --- 1. SAFE STORAGE FOR YOUR WEBFLOW DESIGN ---
 let PHRASE_BLUEPRINT = null;
@@ -4557,7 +4448,7 @@ async function runProblemFinder(options = {}) {
     const countHeaderDiv = document.getElementById("count-header");
     if (!isUpdate) {
         if (resultsWrapper) { resultsWrapper.style.display = 'none'; resultsWrapper.style.opacity = '0'; }
-        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "overview-div", "faq-container", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases", "value-tree"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
+        ["count-header", "filter-header", "pulse-results", "posts-container", "emotion-map-container", "overview-div", "included-subreddits-container", "similar-subreddits-container", "context-box", "positive-context-box", "negative-context-box", "power-phrases"].forEach(id => { const el = document.getElementById(id); if (el) el.innerHTML = ""; });
         if (resultsMessageDiv) resultsMessageDiv.innerHTML = "";
         for (let i = 1; i <= 5; i++) {
             const block = document.getElementById(`findings-block${i}`);
@@ -4590,6 +4481,7 @@ async function runProblemFinder(options = {}) {
         const filteredItems = filterPosts(allItems, selectedMinUpvotes);
         if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
         window._filteredPosts = filteredItems;
+        window._growthTabLoaded = false; // Growth Plan tab regenerates its content on next open
         generateAndRenderOverview(filteredItems, originalGroupName);
         renderPosts(filteredItems);
         generateAndRenderHybridSentiment(filteredItems, originalGroupName);
@@ -4601,11 +4493,10 @@ async function runProblemFinder(options = {}) {
         generateAndRenderToneMap(filteredItems, originalGroupName);
         generateAndRenderMindsetSummary(filteredItems, originalGroupName);
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);
-        generateAndRenderAIPrompt(filteredItems, originalGroupName);
-        generateAndRenderSeoSunburst(filteredItems, window.originalGroupName || '');
+        // Deferred to the Growth Plan tab: AI prompt + SEO content plan/sunburst now run
+        // only when #growth-tab-link is first opened (see setupGrowthKitInteraction).
         showBrandLoader();
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
-        generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
         if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }
        // Deterministic ordering so the same posts always produce the same "top" sample.
         // A bigger sample also means a few new posts can't swing the themes.
@@ -4742,8 +4633,6 @@ async function runProblemFinder(options = {}) {
             for (let i = 1; i <= 5; i++) { const redditDiv = document.getElementById(`reddit-div${i}`); if (redditDiv) { redditDiv.innerHTML = `<div style="font-style: italic; color: #999;">Could not load sample posts.</div>`; } }
         }
 
-        // This is the single, correct call for the new mind map
-        generateAndRenderValueSankey(originalGroupName, window._summaries);
 
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {
             if (resultsWrapper) {
@@ -4863,6 +4752,23 @@ function setupGrowthKitInteraction() {
             growthTabLink.click();   // Switch to the Growth Plan tab
         }
     });
+
+    // --- Lazy-load the Growth Plan tab's heavy work only when the tab is opened ---
+    // While the tab is hidden / under construction, the SEO content plan + sunburst and the
+    // AI prompt stay dormant. They fire the first time #growth-tab-link is opened after a
+    // search, and the guard resets on each new search so fresh data regenerates them.
+    const growthTabLinkLazy = document.getElementById('growth-tab-link');
+    if (growthTabLinkLazy) {
+        growthTabLinkLazy.addEventListener('click', () => {
+            if (window._growthTabLoaded) return;
+            const posts = window._filteredPosts;
+            if (!posts || !posts.length) return; // nothing analysed yet
+            window._growthTabLoaded = true;
+            const audience = window.originalGroupName || '';
+            generateAndRenderAIPrompt(posts, audience);
+            generateAndRenderSeoSunburst(posts, audience);
+        });
+    }
 
     // --- Listen for clicks inside the Dropdown Header itself ---
     if (dropdownList) {

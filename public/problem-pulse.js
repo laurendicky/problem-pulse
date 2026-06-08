@@ -330,7 +330,16 @@ async function generateAndRenderHiddenGems(posts, audienceContext, meta = {}) {
             'often', 'sometimes', 'usually', 'around', 'almost', 'enough', 'quite', 'rather', 'pretty', 'really',
             // Reddit / forum chrome
             'edit', 'op', 'tldr', 'imo', 'imho', 'fyi', 'btw', 'lol', 'lmao', 'ngl', 'afaik', 'eli5', 'ama', 'post', 'posts',
-            'comment', 'comments', 'reddit', 'subreddit', 'sub', 'thread', 'upvote', 'downvote', 'guys', 'anyone'
+            'comment', 'comments', 'reddit', 'subreddit', 'sub', 'thread', 'upvote', 'downvote', 'guys', 'anyone',
+            // generic verbs / vague nouns that read as nonsense gem labels (e.g. "call", "get", "thing")
+            'call', 'called', 'calls', 'calling', 'get', 'gets', 'getting', 'got', 'gotten', 'go', 'goes', 'went',
+            'gone', 'come', 'comes', 'came', 'coming', 'say', 'says', 'said', 'saying', 'tell', 'tells', 'told',
+            'ask', 'asks', 'asked', 'asking', 'put', 'puts', 'putting', 'let', 'lets', 'letting', 'feel', 'feels',
+            'felt', 'feeling', 'turn', 'turns', 'turned', 'keep', 'keeps', 'kept', 'keeping', 'try', 'tries', 'tried',
+            'trying', 'run', 'runs', 'ran', 'running', 'set', 'sets', 'setting', 'show', 'shows', 'showed', 'shown',
+            'move', 'moves', 'moved', 'moving', 'start', 'starts', 'started', 'starting', 'stop', 'stops', 'stopped',
+            'help', 'helps', 'helped', 'helping', 'seem', 'seems', 'seemed', 'happen', 'happens', 'happened',
+            'mean', 'means', 'meant', 'guy', 'getting', 'thing', 'things', 'stuff', 'something', 'anything', 'everything', 'nothing'
         ]);
 
        // Locate this function inside generateAndRenderHiddenGems and replace it:
@@ -345,7 +354,7 @@ const isValidTerm = (t) => {
         candidates = candidates.filter(p => isValidTerm(p.x) && isValidTerm(p.y));
 
         if (candidates.length === 0) {
-            grid.innerHTML = '<p class="placeholder-text">No statistically significant hidden connections were discovered in this dataset.</p>';
+            grid.innerHTML = '<p class="placeholder-text">No clear hidden connections stood out this time. Try a Deep search or a longer time frame to surface more.</p>';
             return;
         }
 
@@ -541,9 +550,36 @@ ${JSON.stringify(items)}`;
       // Set all shown items to a single consistent tier
       uniqueGems.forEach(g => g._tier = 'gem');
 
+      // Graceful backfill: rather than show an empty panel when nothing clears the strict bar,
+      // surface the best "worth a look" near-misses (still real, just less of a knockout). These are
+      // tiered 'near' so the header's "found" count stays honest and the cards can be badged.
+      if (uniqueGems.length === 0) {
+          const NEAR_SURPRISE = 4;
+          const NEAR_ACTION = 3;
+          const passesNear = (g) =>
+              Number(g.surprise_score) >= NEAR_SURPRISE &&
+              Number(g.actionability_score) >= NEAR_ACTION &&
+              labelOk(g.topic_a) && labelOk(g.reveal_finding);
+
+          const nearCandidates = curated
+              .filter(passesNear)
+              .sort((a, b) => Number(b.surprise_score) - Number(a.surprise_score));
+
+          for (const gem of nearCandidates) {
+              const conceptA = (gem.topic_a || '').toLowerCase().trim();
+              const conceptB = (gem.reveal_finding || '').toLowerCase().trim();
+              if (seenConcepts.has(conceptA) || seenConcepts.has(conceptB)) continue;
+              seenConcepts.add(conceptA);
+              seenConcepts.add(conceptB);
+              gem._tier = 'near';
+              uniqueGems.push(gem);
+              if (uniqueGems.length >= 2) break; // a small, honest "worth a look" set
+          }
+      }
+
       if (uniqueGems.length === 0) {
           updateGemHeader([]);
-          grid.innerHTML = '<p class="placeholder-text">No statistically significant hidden connections were discovered in this dataset.</p>';
+          grid.innerHTML = '<p class="placeholder-text">No clear hidden connections stood out this time. Try a Deep search or a longer time frame to surface more.</p>';
           return;
       }
 
@@ -573,7 +609,7 @@ ${JSON.stringify(items)}`;
           set(card, '.reveal-summary', g.reveal_summary || '');
           set(card, '.gem-opportunity', g.opportunity || '');
           set(card, '.gem-category', CATEGORY_LABELS[g.category] || '');
-          set(card, '.gem-tier', ''); // Keep empty or assign a standard badge
+          set(card, '.gem-tier', g._tier === 'near' ? 'Worth a look' : '');
 
           const stat = card.querySelector('.gem-stat');
           if (stat && p.support) {
@@ -1622,6 +1658,11 @@ function setBrandsEmptyState(show, message) {
     }
 }
 
+// Loader for the brands & products panel: shown while the multi-pass discovery is still
+// filling in, hidden once the final (shopping-recovery) pass has completed.
+function showBrandLoader() { const el = document.getElementById('brand-load-msg'); if (el) el.style.display = 'flex'; }
+function hideBrandLoader() { const el = document.getElementById('brand-load-msg'); if (el) el.style.display = 'none'; }
+
 // Brand-recovery pass. The main discovery lists are mined from the PROBLEM search, where
 // some audiences (e.g. first-time parents) rarely name brands. When brands come back thin,
 // we re-run extraction over purchase/recommendation-intent threads - the place brands
@@ -1663,6 +1704,8 @@ async function recoverBrandsWithShopping(subredditQueryString, timeFilter, niche
         }
     } catch (error) {
         console.error("Brand recovery pass failed:", error);
+    } finally {
+        hideBrandLoader();
     }
 }
 
@@ -4560,6 +4603,7 @@ async function runProblemFinder(options = {}) {
         generateAndRenderStrategicPillars(filteredItems, originalGroupName);
         generateAndRenderAIPrompt(filteredItems, originalGroupName);
         generateAndRenderSeoSunburst(filteredItems, window.originalGroupName || '');
+        showBrandLoader();
         extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         generateFAQs(filteredItems).then(faqs => renderFAQs(faqs));
         if (countHeaderDiv) { countHeaderDiv.innerHTML = `Distilled <span class="header-pill pill-insights">${filteredItems.length.toLocaleString()}</span> insights from <span class="header-pill pill-posts">${allItems.length.toLocaleString()}</span> posts for <span class="header-pill pill-audience">${originalGroupName}</span>`; }
@@ -4723,8 +4767,10 @@ async function runProblemFinder(options = {}) {
         }
         setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
         setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
-        setTimeout(() => enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName), 5000);
-        setTimeout(() => recoverBrandsWithShopping(subredditQueryString, selectedTime, originalGroupName), 9000);
+        setTimeout(() => {
+            Promise.resolve(enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName))
+                .finally(() => recoverBrandsWithShopping(subredditQueryString, selectedTime, originalGroupName));
+        }, 5000);
         setTimeout(() => generateAndRenderHistoricalSentiment(subredditQueryString), 3500);
         setTimeout(async () => {
             let gemCorpus = window._filteredPosts || [];

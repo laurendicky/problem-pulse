@@ -2687,37 +2687,29 @@ async function fetchSentimentTrendData(brandName, subredditQueryString) {
     );
     const results = await Promise.allSettled(fetchPromises);
 
-    const trendData = [];
-
-    for (let i = 0; i < results.length; i++) {
-        const result = results[i];
+    // Process every time period concurrently, and run each period's two AI calls (sentiment +
+    // context) in parallel too. This turns ~8 sequential calls into one parallel wave, cutting
+    // the momentum chart from ~20s to a few seconds. Order is preserved via the map index.
+    const perPeriod = await Promise.all(results.map(async (result, i) => {
         const periodLabel = revisedTimePeriods[i].label;
-
-        if (result.status === 'fulfilled' && result.value.length > 0) {
-            const uniquePosts = deduplicatePosts(result.value);
-            const sentimentResults = await classifySentimentWithAI(uniquePosts);
-
-            // --- KEY CHANGE 1: Generate context for this time period ---
-            const contextSummary = await generateSentimentContextWithAI(uniquePosts, brandName);
-
-            const positiveMentions = sentimentResults.filter(s => s === 'Positive').length;
-            const negativeMentions = sentimentResults.filter(s => s === 'Negative').length;
-            const totalMentions = positiveMentions + negativeMentions;
-            const positivePercentage = totalMentions > 0 ? Math.round((positiveMentions / totalMentions) * 100) : 50;
-
-            trendData.push({
-                period: periodLabel,
-                positivePercentage: positivePercentage,
-                context: contextSummary // Attach the context to the data point
-            });
-        } else {
+        if (result.status !== 'fulfilled' || !result.value || result.value.length === 0) {
             console.warn(`Could not fetch data for period: ${periodLabel}`);
+            return null;
         }
-    }
+        const uniquePosts = deduplicatePosts(result.value);
+        const [sentimentResults, contextSummary] = await Promise.all([
+            classifySentimentWithAI(uniquePosts),
+            generateSentimentContextWithAI(uniquePosts, brandName)
+        ]);
+        const positiveMentions = sentimentResults.filter(s => s === 'Positive').length;
+        const negativeMentions = sentimentResults.filter(s => s === 'Negative').length;
+        const totalMentions = positiveMentions + negativeMentions;
+        const positivePercentage = totalMentions > 0 ? Math.round((positiveMentions / totalMentions) * 100) : 50;
+        return { period: periodLabel, positivePercentage, context: contextSummary };
+    }));
 
-    // --- KEY CHANGE 2: REMOVED .reverse() TO FIX X-AXIS ORDER ---
-    // The data is now naturally ordered from oldest to newest.
-    return trendData;
+    // Ordered oldest -> newest (matches revisedTimePeriods order); drop periods with no data.
+    return perPeriod.filter(Boolean);
 }
 
 async function generateAndRenderConstellation(items) {
@@ -2737,28 +2729,37 @@ async function generateAndRenderConstellation(items) {
     };
 
     // Soft commercial cue. Used to RANK signals (strong vs weak), NOT to hard-reject.
-    // A generic money/buy word is a strong cue, but its ABSENCE no longer kills a signal,
-    // because genuine brand/product signals often just name the product
-    // (e.g. "I stick with Royal Canin", "switched to the Ruffwear harness").
     const COMMERCIAL_CUE = /\b(buy|buys|buying|bought|purchase[ds]?|purchasing|order(ed|ing)?|pay|pays|paid|paying|spend|spent|spending|afford|affordable|price[ds]?|pricing|cost[s]?|expensive|cheap(er)?|pricey|overpriced|worth|value|deal|discount|sale|subscription|subscribe[ds]?|brand[s]?|product[s]?|refund|return(ed|s)?|warranty|premium|budget|money|dollars?|pounds?|quid|switch(ed|ing)?|recommend(ed|ation|ations|s)?)\b|[$£€]\s?\d/i;
     const hasCommercialCue = (q) => COMMERCIAL_CUE.test(q || '');
 
-    // Denylist backstop. Instead of demanding proof a quote is commercial, we only
-    // reject the specific lifestyle/diet/habit noise gpt sometimes mislabels
-    // (e.g. "I cut out pasta", "1000-1500 cal a day", "I used CICO"). A quote is
-    // dropped ONLY if it looks like lifestyle noise AND carries no commercial cue.
+    // Denylist backstop: drop a quote ONLY if it looks like lifestyle/diet noise AND has no commercial cue.
     const LIFESTYLE_NOISE = /\b(calorie[s]?|\d{3,4}\s*cal\b|cico|cut out (carbs|bread|pasta|sugar|cookies|candy)|intermittent fasting|fasting|macros|reps|sets|workout[s]?|jog(ged|ging)?|run(ning)? \d|step count|water intake|meditat(e|ion|ing)|portion control)\b/i;
     const isLifestyleNoise = (q) => LIFESTYLE_NOISE.test(q || '');
 
-    const BATCH_SIZE = 10;
-    const enrichedSignals = [];   // strong: clear commercial cue
-    const backupSignals = [];     // weaker but valid (LLM-tagged, no generic cue) - used to top up
+    const BATCH_SIZE = 20;          // bigger batches => fewer round-trips (80 items => 4 calls)
+    const CONCURRENCY = 4;          // run up to 4 batches at once (no sleeps) to slash wall-clock time
+    const MIN_SIGNALS = 12;
+    const enrichedSignals = [];     // strong: clear commercial cue
+    const backupSignals = [];       // weaker but valid - used to top up
     const seenThemes = new Set();
+    let failedBatches = 0;
 
-    for (let i = 0; i < prioritizedItems.length; i += BATCH_SIZE) {
-        const batch = prioritizedItems.slice(i, i + BATCH_SIZE);
-        const batchStartIndex = i;
+    // Progressive render: redraw the chart as each batch lands so bubbles appear fast,
+    // instead of waiting for the whole run. Guards against redundant redraws.
+    let lastRenderCount = -1;
+    const renderProgress = (final = false) => {
+        const display = enrichedSignals.slice();
+        if (display.length < MIN_SIGNALS && backupSignals.length) {
+            display.push(...backupSignals.slice(0, MIN_SIGNALS - display.length));
+        }
+        if (!final && display.length === lastRenderCount) return;
+        lastRenderCount = display.length;
+        if (display.length) renderHighchartsBubbleChart(display);
+        else if (final) renderHighchartsBubbleChart([]); // honest empty-state only at the very end
+    };
 
+    const processBatch = async (startIndex) => {
+        const batch = prioritizedItems.slice(startIndex, startIndex + BATCH_SIZE);
         const prompt = `You are a shopper-behaviour analyst studying how the "${window.originalGroupName || 'this'}" audience spends money: what they buy, what they pay for, and how they decide between products and brands.
 
 From the numbered comments below, extract EVERY quote that reveals a shopping or buying behaviour: an actual purchase, a price or cost, money or budget, a named product or brand, paying or subscribing, choosing between things you can buy, recommending or abandoning a product, or how they decide what to buy. Aim to surface 4-8 genuine signals per batch when the material supports it - do not be stingy, but never invent signals that are not in the text.
@@ -2805,21 +2806,19 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
                 })
             });
 
-            if (!response.ok) throw new Error(`Batch from index ${batchStartIndex} failed.`);
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
             const data = await response.json();
-            if (!data || !data.openaiResponse) throw new Error("Proxy timed out or returned invalid format.");
+            if (!data || !data.openaiResponse) throw new Error("Proxy timed out or returned invalid format (check API key / proxy).");
 
             const parsed = JSON.parse(data.openaiResponse);
-            if (!parsed.signals || !Array.isArray(parsed.signals)) continue;
+            if (!parsed.signals || !Array.isArray(parsed.signals)) return;
 
             parsed.signals.forEach(signal => {
-                const sourceItem = prioritizedItems[batchStartIndex + signal.source_index];
+                const sourceItem = prioritizedItems[startIndex + signal.source_index];
                 if (!sourceItem || !signal.quote || !signal.category || !signal.theme) return;
                 if (!validCategories.includes(signal.category)) return;
                 if (!isUsefulTheme(signal.theme)) return;
-
-                // Hard-reject only clear lifestyle/diet noise that also lacks any commercial cue.
                 if (isLifestyleNoise(signal.quote) && !hasCommercialCue(signal.quote)) return;
 
                 const dedupKey = signal.theme.toLowerCase().trim() + '|' + signal.quote.substring(0, 40);
@@ -2832,36 +2831,30 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
                     category: signal.category,
                     source: sourceItem.data
                 };
-
-                // Strong signals (explicit commercial cue) go straight in; weaker ones are
-                // held in reserve so the chart can still fill out if strong signals are thin.
-                if (hasCommercialCue(signal.quote)) {
-                    enrichedSignals.push(enriched);
-                } else {
-                    backupSignals.push(enriched);
-                }
+                if (hasCommercialCue(signal.quote)) enrichedSignals.push(enriched);
+                else backupSignals.push(enriched);
             });
         } catch (error) {
-            console.error(`[Highcharts] Error processing batch starting at index ${batchStartIndex}:`, error.message);
+            failedBatches++;
+            console.error(`[Highcharts] Batch at index ${startIndex} failed:`, error.message);
         }
+        renderProgress(); // draw what we have so far
+    };
 
-        if (i + BATCH_SIZE < prioritizedItems.length) {
-            await new Promise(resolve => setTimeout(resolve, 1500));
-        }
+    // Build batch start indices, then run them with a concurrency cap (no inter-batch sleeps).
+    const starts = [];
+    for (let i = 0; i < prioritizedItems.length; i += BATCH_SIZE) starts.push(i);
+    for (let i = 0; i < starts.length; i += CONCURRENCY) {
+        await Promise.all(starts.slice(i, i + CONCURRENCY).map(processBatch));
     }
 
-    // Top up with reserved signals so a sparse-but-valid result still renders a full chart.
-    const MIN_SIGNALS = 12;
-    if (enrichedSignals.length < MIN_SIGNALS && backupSignals.length) {
-        const needed = MIN_SIGNALS - enrichedSignals.length;
-        enrichedSignals.push(...backupSignals.slice(0, needed));
+    renderProgress(true); // final render (applies reserve top-up / honest empty-state)
+    if (failedBatches === starts.length && starts.length > 0) {
+        console.error("[Highcharts] ALL batches failed - this is almost certainly an API key or proxy problem, not the data.");
     }
-
-    console.log(`[Highcharts] Extracted ${enrichedSignals.length} shopping signals (${backupSignals.length} held in reserve). Rendering chart.`);
-    renderHighchartsBubbleChart(enrichedSignals);
+    console.log(`[Highcharts] Extracted ${enrichedSignals.length} shopping signals (${backupSignals.length} reserve, ${failedBatches}/${starts.length} batches failed).`);
 }
- 
-async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
+ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
     console.log("--- Starting 'How They Shop' Signal Analysis (in background) ---");
 
     // Shopping-intent search terms. These pull posts about spending, value, brand
@@ -2899,7 +2892,7 @@ function renderHighchartsBubbleChart(signals) {
 
     if (!signals || signals.length === 0) {
         if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
-        Highcharts.chart(container, { chart: { type: 'packedbubble' }, title: { text: '' }, series: [] });
+        Highcharts.chart(container, { chart: { type: 'packedbubble', backgroundColor: 'transparent' }, title: { text: '' }, credits: { enabled: false }, series: [] });
         return;
     }
 

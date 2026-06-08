@@ -2711,9 +2711,17 @@ async function pregenerateAllSubProblems(audienceContext) {
     if (!findings.length) return;
     const CONC = 2;
     for (let i = 0; i < findings.length; i += CONC) {
-        await Promise.all(findings.slice(i, i + CONC).map(f => computeSubProblems(f, audienceContext)));
+        await Promise.all(findings.slice(i, i + CONC).map(async (f, j) => {
+            await computeSubProblems(f, audienceContext);
+            // Auto-render the chart as soon as its data is ready - no "See more" click required.
+            const idx = i + j;
+            const chartEl = document.querySelector(`.subproblem-chart[data-finding-index="${idx}"]`);
+            if (chartEl) {
+                try { await generateAndRenderSubProblemChart(chartEl, f, audienceContext); } catch (e) { /* render is non-critical */ }
+            }
+        }));
     }
-    console.log(`[Sub-Problems] Pre-generated for ${findings.length} findings (export now complete).`);
+    console.log(`[Sub-Problems] Pre-generated & auto-rendered for ${findings.length} findings.`);
 }
 
 function renderHistoricalSentimentChart(data) {
@@ -3058,10 +3066,13 @@ function renderHighchartsBubbleChart(signals) {
                 fontFamily: "'Plus Jakarta Sans', sans-serif"
             },
             formatter: function () {
+                // Parent (category) bubbles and any sourceless node have no quote/source -> skip tooltip.
+                const src = this.point.options && this.point.options.source;
+                if (this.point.isParentNode || !src) return false;
                 return `
                     <div style="font-weight: bold; font-size: 1rem; margin-bottom: 8px; border-bottom: 1px solid #E0E0E0; padding-bottom: 6px;">${this.point.name}</div>
-                    <div style="font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote}”</div>
-                    <a href="https://www.reddit.com${this.point.options.source.permalink}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #555555; text-decoration: none;">r/${this.point.options.source.subreddit} | 👍 ${this.point.options.source.ups.toLocaleString()}</a>
+                    <div style="font-size: 0.9rem; margin-bottom: 8px; max-width: 300px; white-space: normal;">“${this.point.options.quote || ''}”</div>
+                    <a href="https://www.reddit.com${src.permalink || ''}" target="_blank" rel="noopener noreferrer" style="font-size: 0.8rem; color: #555555; text-decoration: none;">r/${src.subreddit || ''} | 👍 ${(src.ups || 0).toLocaleString()}</a>
                 `;
             }
         },

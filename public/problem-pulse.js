@@ -672,41 +672,62 @@ async function generateAndRenderHiddenStats(posts, audienceContext) {
         const matrix = buildFeatureMatrix(posts);
         const { N, df, vocab } = matrix;
 
-        // Prevalence: share of discussions that mention a concept (6%..85% = notable, not trivial/ubiquitous).
-        const prevalence = vocab
-            .filter(cleanLabel)
-            .map(f => ({ term: f, share: (df.get(f) || 0) / N }))
-            .filter(s => s.share >= 0.06 && s.share <= 0.85)
-            .sort((a, b) => b.share - a.share)
-            .slice(0, 6);
-
-        // Co-occurrence lift: "mentioning X => N more likely to also mention Y" (within this audience).
-        // Cap lift at 12 and require support >= 4: anything higher is almost always mechanical
-        // co-occurrence (two halves of the same phrase/URL), not a real insight.
-        const rankedPairs = mineAssociations(matrix)
+        // Co-occurrence lift candidates: "mentioning X => N more likely to also mention Y" (within audience).
+        // Cap lift at 12 and require support >= 4 to avoid mechanical co-occurrence.
+        let rankedPairs = mineAssociations(matrix)
             .filter(p => cleanLabel(p.x) && cleanLabel(p.y) && p.lift >= 1.6 && p.lift <= 12 && p.support >= 4)
             .sort((a, b) => (b.lift * Math.log2(b.support + 1)) - (a.lift * Math.log2(a.support + 1)));
+
+        // Drop tautological / near-synonym pairs ("age" <-> "years", "heartbreak" <-> "emotions").
+        // Keep only pairs whose two sides sit in DIFFERENT semantic worlds - that is what makes a
+        // stat surprising and product-relevant instead of a restatement. Degrades gracefully if the
+        // embeddings endpoint is unavailable.
+        try {
+            const feats = [...new Set(rankedPairs.flatMap(p => [p.x, p.y]))].slice(0, 60);
+            if (feats.length) {
+                const vecs = await embedTexts(feats);
+                const vmap = new Map(feats.map((f, i) => [f, vecs[i]]));
+                rankedPairs = rankedPairs.filter(p => {
+                    const vx = vmap.get(p.x), vy = vmap.get(p.y);
+                    if (!vx || !vy) return true;
+                    return cosineSimilarity(vx, vy) <= 0.55; // too alike => tautology => drop
+                });
+            }
+        } catch (e) {
+            console.warn('[Hidden Stats] semantic de-duplication skipped (embeddings unavailable).', e);
+        }
+
+        // One stat per concept: top distinct cross-domain pairs.
         const usedConcepts = new Set();
         const pairs = [];
         for (const p of rankedPairs) {
             const a = (p.x || '').toLowerCase(), b = (p.y || '').toLowerCase();
-            if (usedConcepts.has(a) || usedConcepts.has(b)) continue; // no repeated concepts -> no near-duplicate stats
+            if (usedConcepts.has(a) || usedConcepts.has(b)) continue;
             usedConcepts.add(a); usedConcepts.add(b);
             pairs.push(p);
-            if (pairs.length >= 5) break;
+            if (pairs.length >= 8) break;
         }
 
-        const candidates = [];
-        pairs.forEach(p => candidates.push({
+        // Prevalence is a weak signal (often states the obvious), so keep only a small reserve;
+        // the AI is told to reject prevalence about the audience's own defining subject.
+        const prevalence = vocab
+            .filter(cleanLabel)
+            .map(f => ({ term: f, share: (df.get(f) || 0) / N }))
+            .filter(s => s.share >= 0.1 && s.share <= 0.55)
+            .sort((a, b) => b.share - a.share)
+            .slice(0, 3);
+
+        const pairCandidates = pairs.map(p => ({
             a: p.x, b: p.y,
             number: `${p.lift.toFixed(1)}x`,
             fallback: `Among ${audienceContext}, discussions mentioning "${p.x}" are ${p.lift.toFixed(1)}x more likely to also bring up "${p.y}".`
         }));
-        prevalence.forEach(s => candidates.push({
+        const prevCandidates = prevalence.map(s => ({
             a: s.term, b: null,
             number: `${Math.round(s.share * 100)}%`,
             fallback: `${Math.round(s.share * 100)}% of ${audienceContext} discussions mention "${s.term}".`
         }));
+        const candidates = [...pairCandidates, ...prevCandidates]; // pairs first - the screenshot-worthy ones
 
         if (candidates.length === 0) {
             container.innerHTML = '<p class="placeholder-text">No standout audience stats this time. Try a Deep search or longer time frame.</p>';
@@ -717,10 +738,20 @@ async function generateAndRenderHiddenStats(posts, audienceContext) {
         let finalStats = null;
         try {
             const aiList = candidates.map((c, i) => ({ id: i, number: c.number, concept_a: c.a, concept_b: c.b }));
-            const prompt = `You are writing punchy, surprising audience-insight stat lines for the "${audienceContext}" audience, for a "Hidden Gems" panel.
-You are given pre-computed stats. Each "number" is FIXED and TRUE - you MUST keep it exactly and must NOT invent any new number or comparison.
-For each item write ONE short, scroll-stopping sentence using the number and concept(s) in plain English. An item with concept_b means: among this audience, people who mention concept_a are <number> more likely to also mention concept_b. An item with only concept_a and a % means that % of the audience's discussions mention concept_a.
-Choose only the ${Math.min(6, aiList.length)} MOST surprising/interesting items. Skip the obvious or boring ones. NEVER compare to the general population - every stat is within this audience only.
+            const prompt = `You are selecting and phrasing screenshot-worthy audience-insight stat lines for the "${audienceContext}" audience, for a "Hidden Gems" panel.
+Each item has a FIXED, TRUE "number" you MUST keep EXACTLY. Never invent or alter numbers. Never compare to the general population - every stat is within this audience only.
+An item with concept_b means: among this audience, people who mention concept_a are <number> more likely to also mention concept_b. An item with only concept_a and a % means that % of discussions mention concept_a.
+
+PRIORITISE insights that reveal an UNEXPECTED connection between two different worlds: a problem and an emotion, a behaviour and a product, a life event and a purchase, an emotion and a buying decision, or one topic and an adjacent topic the reader would never predict. The best ones are actionable, surprising and product-relevant (e.g. "owners discussing separation anxiety are far more likely to mention cameras or remote monitoring").
+
+REJECT and DO NOT RETURN any item that is:
+- a tautology or restatement (e.g. "people talking about age mention years", "heartbreak relates to emotions").
+- self-evident for this audience (e.g. for dog owners, that discussions mention dogs or pets).
+- vague (e.g. "life" linked to "quality" - quality of what?).
+- merely the predictable feeling that follows a topic.
+Apply this test to EVERY item: "Could this help someone build, market or position a product?" If no, discard it.
+
+It is correct to return FEWER items (even 2 or 3) than to include weak ones. Do NOT pad. Write each kept item as one short, plain-English, scroll-stopping sentence.
 Items: ${JSON.stringify(aiList)}
 Respond ONLY with JSON: {"stats":[{"id":0,"sentence":"..."}]}`;
 
@@ -751,7 +782,8 @@ Respond ONLY with JSON: {"stats":[{"id":0,"sentence":"..."}]}`;
 
         // Resilient fallback: if the AI is unavailable, render the templated sentences (real numbers).
         if (!finalStats || finalStats.length === 0) {
-            finalStats = candidates.slice(0, 6).map(c => ({ number: c.number, sentence: c.fallback }));
+            const safe = (pairCandidates.length ? pairCandidates : prevCandidates).slice(0, 6);
+            finalStats = safe.map(c => ({ number: c.number, sentence: c.fallback }));
         }
 
         container.innerHTML = finalStats.map(s => `

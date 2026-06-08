@@ -429,7 +429,7 @@ Respond ONLY with valid JSON: {"gems":[{"category":"...","topic_a":"...","reveal
         if (shown.length === 0) {
             updateGemHeader([]);
             grid.innerHTML = '<p class="placeholder-text">No clear hidden gems stood out this time. Try a Deep search or a longer time frame to surface more.</p>';
-            renderHiddenOpportunities([], audienceContext);
+            renderHiddenStatsFromGems([], posts, audienceContext);
             return;
         }
 
@@ -460,7 +460,7 @@ Respond ONLY with valid JSON: {"gems":[{"category":"...","topic_a":"...","reveal
         });
 
         // Feed the commercial-opportunity panel from the same grounded insights.
-        renderHiddenOpportunities(validated, audienceContext);
+        renderHiddenStatsFromGems(validated, posts, audienceContext);
 
     } catch (error) {
         console.error('Hidden Gems error:', error);
@@ -468,30 +468,63 @@ Respond ONLY with valid JSON: {"gems":[{"category":"...","topic_a":"...","reveal
     }
 }
 
-// Commercial-opportunity panel (#hidden-stats), fed by the grounded Hidden Gems insights.
-function renderHiddenOpportunities(insights, audienceContext) {
+// Stats panel (#hidden-stats): real, computed co-occurrence numbers attached to the
+// VETTED interesting concept pairs the gem engine surfaced. Interesting because the pairs
+// come from the gems; credible because every number is counted from the corpus, not invented.
+function renderHiddenStatsFromGems(gems, posts, audienceContext) {
     const c = document.getElementById('hidden-stats');
     if (!c) return;
-    const esc = (t) => (t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const opps = (insights || [])
-        .filter(g => g.opportunity && Number(g.commercial_value) >= 6)
-        .sort((a, b) => Number(b.commercial_value) - Number(a.commercial_value));
+
+    const texts = (posts || []).map(p =>
+        `${p.data.title || p.data.link_title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase()
+    );
+    const N = texts.length || 1;
+
+    const GEN = new Set(['the','and','for','that','with','have','your','their','about','this','from','they','them',
+        'what','when','will','would','people','really','very','just','like','some','more','most']);
+    const AUD = new Set((audienceContext || '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean));
+    // longest distinctive word of a label, stemmed for plural matching
+    const salient = (label) => {
+        const words = (label || '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/)
+            .filter(w => w.length > 2 && !GEN.has(w) && !AUD.has(w));
+        if (!words.length) return null;
+        let w = words.sort((a, b) => b.length - a.length)[0];
+        if (w.length > 4 && w.endsWith('s') && !w.endsWith('ss')) w = w.slice(0, -1); // camera(s), bed(s)
+        return w;
+    };
+    const countWith = (kw) => kw ? texts.reduce((n, t) => n + (t.includes(kw) ? 1 : 0), 0) : 0;
+    const countBoth = (a, b) => (a && b) ? texts.reduce((n, t) => n + ((t.includes(a) && t.includes(b)) ? 1 : 0), 0) : 0;
+
+    const cards = [];
     const seen = new Set();
-    const unique = [];
-    for (const o of opps) {
-        const key = (o.opportunity || '').toLowerCase().slice(0, 50);
+    for (const g of (gems || [])) {
+        const ka = salient(g.topic_a), kb = salient(g.reveal_finding);
+        if (!ka || !kb || ka === kb) continue;
+        const key = [ka, kb].sort().join('|');
         if (seen.has(key)) continue;
-        seen.add(key); unique.push(o);
-        if (unique.length >= 4) break;
+        const dfA = countWith(ka), dfB = countWith(kb), both = countBoth(ka, kb);
+        if (both < 3 || dfA === 0 || dfB === 0) continue;           // need real, countable support
+        const lift = (both / N) / ((dfA / N) * (dfB / N));
+        if (!isFinite(lift) || lift < 1.5) continue;
+        seen.add(key);
+        cards.push({
+            number: `${lift.toFixed(1)}x`,
+            sentence: `Among ${audienceContext}, discussions about ${g.topic_a} are far more likely to also mention ${g.reveal_finding}.`,
+            sort: lift * Math.log2(both + 1)
+        });
     }
-    if (unique.length === 0) {
-        c.innerHTML = '<p class="placeholder-text">No standout commercial opportunities surfaced this time.</p>';
+    cards.sort((a, b) => b.sort - a.sort);
+    const top = cards.slice(0, 4);
+
+    const esc = (t) => (t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    if (top.length === 0) {
+        c.innerHTML = '<p class="placeholder-text">No standout audience stats this time.</p>';
         return;
     }
-    c.innerHTML = unique.map(o => `
-        <div class="hidden-stat-card" style="display:flex; gap:14px; align-items:flex-start; padding:14px 16px; margin-bottom:10px; background:rgba(0,165,206,0.06); border-radius:12px;">
-            <div class="hidden-stat-number" style="font-size:1.3rem; line-height:1.2;">\u{1F4A1}</div>
-            <div class="hidden-stat-text" style="font-size:0.98rem; line-height:1.45; color:#1f2937;">${esc(o.opportunity)}</div>
+    c.innerHTML = top.map(s => `
+        <div class="hidden-stat-card" style="display:flex; gap:14px; align-items:center; padding:14px 16px; margin-bottom:10px; background:rgba(0,165,206,0.06); border-radius:12px;">
+            <div class="hidden-stat-number" style="font-size:1.6rem; font-weight:700; color:#00a5ce; white-space:nowrap;">${s.number}</div>
+            <div class="hidden-stat-text" style="font-size:0.98rem; line-height:1.4; color:#1f2937;">${esc(s.sentence)}</div>
         </div>
     `).join('');
 }

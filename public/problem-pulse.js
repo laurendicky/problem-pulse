@@ -1470,22 +1470,26 @@ async function extractAndValidateEntities(posts, nicheContext) {
         `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 600)}`
     ).join('\n---\n');
 
-    const prompt = `You are a market research analyst studying the "${nicheContext}" audience. From the text, separate real commercial BRANDS from generic PRODUCT categories.
+    const prompt = `You are a shopping-behaviour analyst studying what the "${nicheContext}" audience BUYS. This feeds a "How They Shop" report, so every item you return MUST be something a person can actually buy, use, or shop for. Separate the real commercial BRANDS from the generic buyable PRODUCT categories.
 
-A BRAND is a specific company, app, or trademarked product line made by a named maker, the kind of proper noun you would see on a label, a storefront, or an app store. Examples of the SHAPE of a brand: Fitbit, MyFitnessPal, Garmin, Quest, Optimum Nutrition, Huel. A brand is owned by someone.
+A BRAND is a specific company, retailer, app, marketplace, medication, or trademarked product line made or sold by a named maker — the kind of proper noun you would see on a label, a storefront, or an app store. Examples of the SHAPE of a brand: Nike, Chewy, Kong, Purina, Adderall, Vyvanse, Fitbit, Notion, Amazon. A brand is owned by someone. Think about THIS audience's specific market and include the niche retailers, apps, supplement makers, medications, gear makers and product lines they actually mention — even small or unfamiliar ones.
 
-A PRODUCT is a generic item or ingredient with no specific maker. Examples of the SHAPE of a product: protein shake, yogurt, running shoes, resistance bands, collagen, black coffee.
+A PRODUCT is a generic, buyable item, gear category or service with no specific maker. Examples of the SHAPE of a product: dog treats, chew toys, running shoes, noise-cancelling headphones, planner, weighted blanket, supplements.
 
-STRICT EXCLUSIONS. Put these in NEITHER list, skip them completely:
-- Diets, methods, or approaches: keto, paleo, vegan, CICO, intermittent fasting, low carb.
+STRICT EXCLUSIONS — put these in NEITHER list, skip them completely:
+- Medical conditions, symptoms, diagnoses or mental states: depression, anxiety, ADHD, autism, insomnia, burnout, brain fog, executive dysfunction, fatigue, stress.
+- Emotions, feelings or abstract states: motivation, focus, productivity, procrastination, guilt, overwhelm, mood, energy.
+- Generic life concepts: health, sleep, time, money, life, wellness, habits, routine.
+- Diets, methods or approaches: keto, paleo, vegan, CICO, intermittent fasting, low carb.
 - Generic activities or exercise types: running, walking, jump rope, HIIT, cardio.
 - Personal names, first names, usernames, or public figures: Arnold, Bella, Mike, Cooper.
 - Plain descriptive words that are not a company or a buyable item.
+If something cannot be bought, used, or shopped for, it does NOT belong in either list, no matter how often it is mentioned.
 
 RULES:
-- If something is a generic ingredient or item with no specific maker, it is a PRODUCT, never a BRAND.
-- Be thorough: include niche, small, or unfamiliar brands too. If a word names a specific product line, company, app or maker, treat it as a BRAND even if you do not personally recognise it. A capitalised proper-noun product name is almost always a brand.
-- Only leave something out if it is clearly a generic item, a diet/method/activity, or a personal name (per the exclusions above). When a word is plausibly a real named brand, INCLUDE it rather than dropping it.
+- If something is a generic buyable item with no specific maker, it is a PRODUCT, never a BRAND.
+- Be thorough on brands: include niche, small, or unfamiliar brands too. If a word names a specific product line, company, retailer, app or medication, treat it as a BRAND even if you do not recognise it. A capitalised proper-noun product name is almost always a brand.
+- When a word is plausibly a real named brand this audience shops with, INCLUDE it rather than dropping it.
 
 Extract up to 20 BRANDS and up to 20 PRODUCTS, most relevant first, and surface every specific named brand you can find in the text.
 Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}`;
@@ -1493,7 +1497,7 @@ Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}
     const openAIParams = {
         model: "gpt-4o-mini",
         messages: [
-            { role: "system", content: "You are a specialized business data extractor. You distinguish genuine commercial brands from generic products, diets, methods, activities, and personal names. You surface every specific named brand present in the text, including niche or unfamiliar ones, and only omit clear non-entities (generic items, diets/methods, personal names)." },
+            { role: "system", content: "You are a specialized shopping-data extractor for a 'How They Shop' report. Every brand or product you return must be something the audience can actually buy, use, or shop for. You surface every specific named brand present in the text, including niche or unfamiliar ones, and you NEVER return medical conditions, symptoms, emotions, feelings, abstract states, diets, methods, activities or personal names." },
             { role: "user", content: prompt + "\n\nText to analyze:\n" + sampleText }
         ],
         temperature: 0,
@@ -1507,11 +1511,23 @@ Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}
 
         if (!window._entityData) window._entityData = { brands: {}, products: {} };
 
+        // Backstop for the "How They Shop" tab: these are never things you can buy, so they
+        // must never appear as a brand or product even if the model mislabels them.
+        const NON_PRODUCT_TERMS = new Set([
+            'depression','anxiety','adhd','add','autism','asd','ocd','ptsd','bipolar','bpd',
+            'stress','burnout','insomnia','fatigue','brain fog','executive dysfunction',
+            'dopamine','serotonin','motivation','focus','productivity','procrastination',
+            'overwhelm','guilt','shame','anger','sadness','loneliness','mood','energy',
+            'health','wellness','life','time','money','sleep','pain','weight','symptoms',
+            'symptom','diagnosis','disorder','condition','therapy','treatment','medication','meds'
+        ]);
+
         ['brands', 'products'].forEach(type => {
             if (!parsed[type]) return;
             parsed[type].forEach(name => {
                 const cleanKey = name.toLowerCase().trim();
                 if (cleanKey.length < 3) return;
+                if (NON_PRODUCT_TERMS.has(cleanKey)) return; // not buyable -> not a shopping entity
 
                 const escapedName = cleanKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                 // Global regex for counting all occurrences across the corpus.

@@ -468,9 +468,11 @@ Respond ONLY with valid JSON: {"gems":[{"category":"...","topic_a":"...","reveal
     }
 }
 
-// Stats panel (#hidden-stats): real, computed co-occurrence numbers attached to the
-// VETTED interesting concept pairs the gem engine surfaced. Interesting because the pairs
-// come from the gems; credible because every number is counted from the corpus, not invented.
+// Stats panel (#hidden-stats): real, computed numbers attached to the VETTED interesting
+// concepts the gem engine surfaced. Interesting because the concepts come from the gems;
+// credible because every number is counted from the corpus, never invented. Uses a robust
+// matcher (the gem word that actually appears most) and falls back to prevalence so the
+// panel reliably shows something useful.
 function renderHiddenStatsFromGems(gems, posts, audienceContext) {
     const c = document.getElementById('hidden-stats');
     if (!c) return;
@@ -481,40 +483,77 @@ function renderHiddenStatsFromGems(gems, posts, audienceContext) {
     const N = texts.length || 1;
 
     const GEN = new Set(['the','and','for','that','with','have','your','their','about','this','from','they','them',
-        'what','when','will','would','people','really','very','just','like','some','more','most']);
+        'what','when','will','would','people','really','very','just','like','some','more','most','also','they']);
     const AUD = new Set((audienceContext || '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean));
-    // longest distinctive word of a label, stemmed for plural matching
+
+    const dfCache = new Map();
+    const df = (kw) => {
+        if (!kw) return 0;
+        if (dfCache.has(kw)) return dfCache.get(kw);
+        const n = texts.reduce((a, t) => a + (t.includes(kw) ? 1 : 0), 0);
+        dfCache.set(kw, n); return n;
+    };
+    const both = (a, b) => texts.reduce((n, t) => n + ((t.includes(a) && t.includes(b)) ? 1 : 0), 0);
+
+    // Pick the label's significant word that ACTUALLY appears most in the corpus, so matches
+    // are real (an AI label like "remote monitoring" resolves to whichever of its words the
+    // posts truly use). Returns null if none of the words appear.
     const salient = (label) => {
         const words = (label || '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/)
-            .filter(w => w.length > 2 && !GEN.has(w) && !AUD.has(w));
+            .filter(w => w.length > 2 && !GEN.has(w) && !AUD.has(w))
+            .map(w => (w.length > 4 && w.endsWith('s') && !w.endsWith('ss')) ? w.slice(0, -1) : w);
         if (!words.length) return null;
-        let w = words.sort((a, b) => b.length - a.length)[0];
-        if (w.length > 4 && w.endsWith('s') && !w.endsWith('ss')) w = w.slice(0, -1); // camera(s), bed(s)
-        return w;
+        let best = null, bestDf = 0;
+        for (const w of words) { const d = df(w); if (d > bestDf) { bestDf = d; best = w; } }
+        return best;
     };
-    const countWith = (kw) => kw ? texts.reduce((n, t) => n + (t.includes(kw) ? 1 : 0), 0) : 0;
-    const countBoth = (a, b) => (a && b) ? texts.reduce((n, t) => n + ((t.includes(a) && t.includes(b)) ? 1 : 0), 0) : 0;
 
-    const cards = [];
-    const seen = new Set();
+    const liftCards = [], prevCards = [];
+    const seenPair = new Set(), seenConcept = new Set();
+
     for (const g of (gems || [])) {
         const ka = salient(g.topic_a), kb = salient(g.reveal_finding);
-        if (!ka || !kb || ka === kb) continue;
-        const key = [ka, kb].sort().join('|');
-        if (seen.has(key)) continue;
-        const dfA = countWith(ka), dfB = countWith(kb), both = countBoth(ka, kb);
-        if (both < 3 || dfA === 0 || dfB === 0) continue;           // need real, countable support
-        const lift = (both / N) / ((dfA / N) * (dfB / N));
-        if (!isFinite(lift) || lift < 1.5) continue;
-        seen.add(key);
-        cards.push({
-            number: `${lift.toFixed(1)}x`,
-            sentence: `Among ${audienceContext}, discussions about ${g.topic_a} are far more likely to also mention ${g.reveal_finding}.`,
-            sort: lift * Math.log2(both + 1)
-        });
+
+        // Co-occurrence (lift) stat - the most interesting kind.
+        if (ka && kb && ka !== kb) {
+            const key = [ka, kb].sort().join('|');
+            if (!seenPair.has(key)) {
+                const dfA = df(ka), dfB = df(kb), bo = both(ka, kb);
+                if (bo >= 2 && dfA > 0 && dfB > 0) {
+                    const lift = (bo / N) / ((dfA / N) * (dfB / N));
+                    if (isFinite(lift) && lift >= 1.3) {
+                        seenPair.add(key);
+                        liftCards.push({
+                            number: `${lift.toFixed(1)}x`,
+                            sentence: `Among ${audienceContext}, discussions about ${g.topic_a} are far more likely to also mention ${g.reveal_finding}.`,
+                            sort: lift * Math.log2(bo + 1)
+                        });
+                    }
+                }
+            }
+        }
+
+        // Prevalence stat for each interesting concept - reliable fill, still non-obvious
+        // because the concept itself came from a vetted gem (not the most-common word).
+        for (const [label, kw] of [[g.topic_a, ka], [g.reveal_finding, kb]]) {
+            if (!kw || seenConcept.has(kw)) continue;
+            const share = df(kw) / N;
+            if (share >= 0.04 && share <= 0.7) {
+                seenConcept.add(kw);
+                prevCards.push({
+                    number: `${Math.round(share * 100)}%`,
+                    sentence: `of ${audienceContext} discussions touch on ${label}.`,
+                    sort: share
+                });
+            }
+        }
     }
-    cards.sort((a, b) => b.sort - a.sort);
-    const top = cards.slice(0, 4);
+
+    liftCards.sort((a, b) => b.sort - a.sort);
+    prevCards.sort((a, b) => b.sort - a.sort);
+    const out = [...liftCards];
+    for (const p of prevCards) { if (out.length >= 4) break; out.push(p); }
+    const top = out.slice(0, 4);
 
     const esc = (t) => (t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     if (top.length === 0) {

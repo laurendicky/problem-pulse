@@ -241,9 +241,9 @@ async function generateAndRenderHiddenGems(posts, audienceContext, meta = {}) {
     // ---- Tunables ----
     const GEM_MAX_SIM_LOCAL = typeof GEM_MAX_SIM !== 'undefined' ? GEM_MAX_SIM : 0.7;
     const SURPRISE_THRESHOLD = 8;    // 1-10. Quality over quantity: only genuinely surprising gems show.
-    const SHORTLIST_SIZE = 35;   // Raw candidates handed to the model (we now reject hard, so give it more to choose from).
-    const QUOTES_PER_PAIR = 4;    // Evidence quotes per candidate, so the model verifies a pattern instead of guessing from one line.
-    const QUOTE_CHARS = 240;  // Max length per quote.
+    const SHORTLIST_SIZE = 20;   // Trimmed from 35: a smaller prompt avoids the proxy timeout that was returning empty.
+    const QUOTES_PER_PAIR = 2;    // Trimmed from 4: two grounding quotes are enough to verify a pattern.
+    const QUOTE_CHARS = 160;  // Trimmed from 240: shorter quotes, much smaller payload, faster call.
 
     // What the header reports as "searched". This function only sees the array it is handed (the
     // distilled set), so by default it can only report posts.length. The caller should pass the true
@@ -490,6 +490,7 @@ ${JSON.stringify(items)}`;
                             { role: "user", content: prompt }
                         ],
                         temperature: 0.5, // Lower than before. This is a judging task, so we want consistent rejection, not invention.
+                        max_completion_tokens: 1500,
                         response_format: { type: "json_object" }
                     }
                 })
@@ -501,6 +502,7 @@ ${JSON.stringify(items)}`;
         } catch (e) {
             console.error('Hidden Gems curation failed.', e);
         }
+        console.log(`[Hidden Gems] AI curation returned ${curated.length} candidate gems (0 here usually means the proxy timed out / API key issue).`);
 
         // Enforce the bars in code. Belt and braces: even if the model echoes a junk word like
         // "will" or rates an obvious pair highly, we drop it here. No fallback padding: if nothing
@@ -2191,8 +2193,8 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
     }
 
     const postsForAnalysis = (window._entityData?.[itemType]?.[itemName]?.posts || []);
-    const top50Posts = postsForAnalysis.slice(0, 50);
-    const topPostsText = top50Posts.map(p => `"${p.data.title || ''} - ${p.data.selftext || p.data.body || ''}"`).join('\n');
+    const topPosts = postsForAnalysis.slice(0, 20);
+    const topPostsText = topPosts.map(p => `"${p.data.title || ''} - ${(p.data.selftext || p.data.body || '').substring(0, 300)}"`).join('\n');
 
     try {
         const prompt = isBrand ?
@@ -2203,6 +2205,7 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
             model: "gpt-5.4-mini",
             messages: [{ role: "system", content: "You are a fast market analyst. Output JSON." }, { role: "user", content: prompt }],
             temperature: 0.1,
+            max_completion_tokens: 800,
             response_format: { "type": "json_object" }
         };
 
@@ -2538,7 +2541,7 @@ async function generateAndRenderSubProblemChart(chartEl, finding, audienceContex
         // Build the corpus: this finding's posts plus their comments.
         const findingPosts = (window._filteredPosts || []).filter(p => calculateRelevanceScore(p, finding) > 0);
         const basePosts = findingPosts.length >= 8 ? findingPosts : (window._filteredPosts || []);
-        const topIds = [...basePosts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 25).map(p => p.data.id);
+        const topIds = [...basePosts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 15).map(p => p.data.id);
 
         let comments = [];
         try {
@@ -2562,13 +2565,14 @@ Discussions:
 ${corpusText}`;
 
         const openAIParams = {
-            model: "gpt-4o",
+            model: "gpt-4o-mini",
             messages: [
                 { role: "system", content: "You break a problem category into concrete recurring sub-problems and output only valid JSON." },
                 { role: "user", content: prompt }
             ],
             temperature: 0.2,
             seed: 11,
+            max_completion_tokens: 1200,
             response_format: { "type": "json_object" }
         };
 

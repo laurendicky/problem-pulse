@@ -12,7 +12,25 @@ const LENIENT_MIN_ACTIVE_USERS = 0;
 let originalGroupName = '';
 let _allRankedSubreddits = [];
 
-const suggestions = ["Dog Lovers", "Start-up Founders", "Fitness Freaks", "AI Enthusiasts", "Home Bakers", "Gamers", "Content Creators", "Software Developers", "Brides To Be"];
+const suggestions = [  "Dog Owners",
+
+"ADHD Adults",
+
+"Sneaker Buyers",
+
+"First-Time Parents",
+
+"Software Developers",
+
+"Small Business Owners",
+
+"Teachers",
+
+"Remote Workers",
+
+"Homeowners",
+
+"Freelancers"];
 const positiveColors = ['#00a5ce', '#0090b5', '#00c0e6', '#7bd9ec', '#b3e8f3', '#006d85'];
 const negativeColors = ['#fd80c7', '#d6539d', '#ff4fa3', '#ff99d6', '#fbb6ce', '#f472b6'];
 const lemmaMap = { 'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': 'love', 'loving': 'love', 'hates': 'hate', 'wishes': 'wish', 'wishing': 'wish', 'solutions': 'solution', 'challenges': 'challenge', 'recommended': 'recommend', 'disappointed': 'disappoint', 'frustrated': 'frustrate', 'annoyed': 'annoy' };
@@ -2608,7 +2626,7 @@ async function fetchSentimentTrendData(brandName, subredditQueryString) {
 
 async function generateAndRenderConstellation(items) {
     console.log("[Highcharts] Starting 'How They Shop' generation...");
-    const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 60);
+    const prioritizedItems = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 80);
     console.log(`[Highcharts] Prioritized top ${prioritizedItems.length} items for shopping signal extraction.`);
 
     const validCategories = ["WillingnessToPay", "PriceSensitivity", "BrandLoyalty", "ResearchHabits", "Substitutes", "Dealbreakers"];
@@ -2622,14 +2640,23 @@ async function generateAndRenderConstellation(items) {
         return true;
     };
 
-    // Backstop gate. A real shopping signal mentions money, a price, a product, a brand,
-    // or an act of buying. This kills lifestyle and diet behaviour the model sometimes
-    // mislabels, e.g. "I cut out pasta", "1000-1500 cal a day", "I used CICO".
+    // Soft commercial cue. Used to RANK signals (strong vs weak), NOT to hard-reject.
+    // A generic money/buy word is a strong cue, but its ABSENCE no longer kills a signal,
+    // because genuine brand/product signals often just name the product
+    // (e.g. "I stick with Royal Canin", "switched to the Ruffwear harness").
     const COMMERCIAL_CUE = /\b(buy|buys|buying|bought|purchase[ds]?|purchasing|order(ed|ing)?|pay|pays|paid|paying|spend|spent|spending|afford|affordable|price[ds]?|pricing|cost[s]?|expensive|cheap(er)?|pricey|overpriced|worth|value|deal|discount|sale|subscription|subscribe[ds]?|brand[s]?|product[s]?|refund|return(ed|s)?|warranty|premium|budget|money|dollars?|pounds?|quid|switch(ed|ing)?|recommend(ed|ation|ations|s)?)\b|[$£€]\s?\d/i;
     const hasCommercialCue = (q) => COMMERCIAL_CUE.test(q || '');
 
+    // Denylist backstop. Instead of demanding proof a quote is commercial, we only
+    // reject the specific lifestyle/diet/habit noise gpt sometimes mislabels
+    // (e.g. "I cut out pasta", "1000-1500 cal a day", "I used CICO"). A quote is
+    // dropped ONLY if it looks like lifestyle noise AND carries no commercial cue.
+    const LIFESTYLE_NOISE = /\b(calorie[s]?|\d{3,4}\s*cal\b|cico|cut out (carbs|bread|pasta|sugar|cookies|candy)|intermittent fasting|fasting|macros|reps|sets|workout[s]?|jog(ged|ging)?|run(ning)? \d|step count|water intake|meditat(e|ion|ing)|portion control)\b/i;
+    const isLifestyleNoise = (q) => LIFESTYLE_NOISE.test(q || '');
+
     const BATCH_SIZE = 10;
-    const enrichedSignals = [];
+    const enrichedSignals = [];   // strong: clear commercial cue
+    const backupSignals = [];     // weaker but valid (LLM-tagged, no generic cue) - used to top up
     const seenThemes = new Set();
 
     for (let i = 0; i < prioritizedItems.length; i += BATCH_SIZE) {
@@ -2638,16 +2665,15 @@ async function generateAndRenderConstellation(items) {
 
         const prompt = `You are a shopper-behaviour analyst studying how the "${window.originalGroupName || 'this'}" audience spends money: what they buy, what they pay for, and how they decide between products and brands.
 
-From the numbered comments below, extract ONLY quotes that pass this COMMERCIAL TEST: the quote must involve an actual purchase, a price or cost, money or budget, a named product or brand, paying or subscribing, or choosing between things you can buy. If there is no money, product, brand or buying decision in the quote, it is NOT a shopping signal.
+From the numbered comments below, extract EVERY quote that reveals a shopping or buying behaviour: an actual purchase, a price or cost, money or budget, a named product or brand, paying or subscribing, choosing between things you can buy, recommending or abandoning a product, or how they decide what to buy. Aim to surface 4-8 genuine signals per batch when the material supports it - do not be stingy, but never invent signals that are not in the text.
 
-CRITICAL: Lifestyle, diet, habit and routine choices are NOT shopping signals. Reject them even though they mention food or activities. Examples you MUST reject:
+The ONLY things you must reject are pure lifestyle, diet, habit and routine choices where nothing is bought and no product or brand is involved. Examples you MUST reject:
 - "I cut out pasta, bread, cookies and candy." (a diet choice, nothing is bought)
 - "I only eat around 1000-1500 Cal a day." (a habit, no purchase)
 - "I utilized CICO (calories in, calories out), and exercise." (a method, no product)
-It is far better to return fewer, genuinely commercial signals than to pad the chart.
 
 For each genuine shopping signal return an object with:
-- "quote": the exact phrase, verbatim and trimmed. It must contain a clear money, price, product, brand or buying reference.
+- "quote": the exact phrase, verbatim and trimmed.
 - "source_index": the comment number it came from.
 - "category": EXACTLY one of [${validCategories.join(', ')}].
 - "theme": a concrete 3 to 5 word shopping-behaviour label describing an action or pattern, never a feeling. Good: "Pays premium for quality", "Hunts for the cheapest option", "Switches brand after bad batch", "Trusts reviews before buying".
@@ -2673,11 +2699,11 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
                     openaiPayload: {
                         model: "gpt-4o-mini",
                         messages: [
-                            { role: "system", content: "You are a precise shopper-behaviour analyst. You extract only genuine buying, spending and brand-choice signals that pass a strict commercial test, and you reject all lifestyle, diet, habit and routine choices. You output only valid JSON." },
+                            { role: "system", content: "You are a precise shopper-behaviour analyst. You extract genuine buying, spending, brand-choice and product-research signals, and you reject only pure lifestyle, diet, habit and routine choices where nothing is bought. You output only valid JSON." },
                             { role: "user", content: prompt }
                         ],
                         temperature: 0.2,
-                        max_completion_tokens: 1500,
+                        max_completion_tokens: 2500,
                         response_format: { "type": "json_object" }
                     }
                 })
@@ -2696,18 +2722,28 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
                 if (!sourceItem || !signal.quote || !signal.category || !signal.theme) return;
                 if (!validCategories.includes(signal.category)) return;
                 if (!isUsefulTheme(signal.theme)) return;
-                if (!hasCommercialCue(signal.quote)) return; // backstop: no money/product/brand cue, no signal
 
-                const themeKey = signal.theme.toLowerCase().trim();
-                if (seenThemes.has(themeKey + '|' + signal.quote.substring(0, 40))) return;
-                seenThemes.add(themeKey + '|' + signal.quote.substring(0, 40));
+                // Hard-reject only clear lifestyle/diet noise that also lacks any commercial cue.
+                if (isLifestyleNoise(signal.quote) && !hasCommercialCue(signal.quote)) return;
 
-                enrichedSignals.push({
+                const dedupKey = signal.theme.toLowerCase().trim() + '|' + signal.quote.substring(0, 40);
+                if (seenThemes.has(dedupKey)) return;
+                seenThemes.add(dedupKey);
+
+                const enriched = {
                     quote: signal.quote,
                     problem_theme: signal.theme,
                     category: signal.category,
                     source: sourceItem.data
-                });
+                };
+
+                // Strong signals (explicit commercial cue) go straight in; weaker ones are
+                // held in reserve so the chart can still fill out if strong signals are thin.
+                if (hasCommercialCue(signal.quote)) {
+                    enrichedSignals.push(enriched);
+                } else {
+                    backupSignals.push(enriched);
+                }
             });
         } catch (error) {
             console.error(`[Highcharts] Error processing batch starting at index ${batchStartIndex}:`, error.message);
@@ -2718,7 +2754,14 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
         }
     }
 
-    console.log(`[Highcharts] Extracted ${enrichedSignals.length} clean shopping signals. Rendering chart.`);
+    // Top up with reserved signals so a sparse-but-valid result still renders a full chart.
+    const MIN_SIGNALS = 12;
+    if (enrichedSignals.length < MIN_SIGNALS && backupSignals.length) {
+        const needed = MIN_SIGNALS - enrichedSignals.length;
+        enrichedSignals.push(...backupSignals.slice(0, needed));
+    }
+
+    console.log(`[Highcharts] Extracted ${enrichedSignals.length} shopping signals (${backupSignals.length} held in reserve). Rendering chart.`);
     renderHighchartsBubbleChart(enrichedSignals);
 }
  
@@ -2736,8 +2779,8 @@ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms,
     ];
 
     try {
-        const shoppingPosts = await fetchMultipleRedditDataBatched(subredditQueryString, SHOPPING_SIGNAL_TERMS, 40, timeFilter, false);
-        const postIds = shoppingPosts.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 40).map(p => p.data.id);
+        const shoppingPosts = await fetchMultipleRedditDataBatched(subredditQueryString, SHOPPING_SIGNAL_TERMS, 60, timeFilter, false);
+        const postIds = shoppingPosts.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 60).map(p => p.data.id);
         const highIntentComments = await fetchCommentsForPosts(postIds);
         const allItems = [...shoppingPosts, ...highIntentComments];
         await generateAndRenderConstellation(allItems);

@@ -5174,9 +5174,19 @@ async function exportFindingsToSpreadsheet() {
     try {
         const XLSX = await loadSheetJS();
         const wb = XLSX.utils.book_new();
+        // Auto-size columns to their content (clamped) so long text is readable, not clipped.
+        const autoWidth = (rows) => {
+            const keys = Object.keys(rows[0]);
+            return keys.map(k => {
+                let max = k.length;
+                rows.forEach(r => { const v = r[k] == null ? '' : String(r[k]); if (v.length > max) max = v.length; });
+                return { wch: Math.min(Math.max(max + 2, 12), 70) };
+            });
+        };
         const addSheet = (name, rows) => {
             if (!rows || !rows.length) return;
             const ws = XLSX.utils.json_to_sheet(rows);
+            ws['!cols'] = autoWidth(rows);
             XLSX.utils.book_append_sheet(wb, ws, name.slice(0, 31));
         };
 

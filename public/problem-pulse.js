@@ -1466,8 +1466,8 @@ async function extractAndValidateEntities(posts, nicheContext) {
     ).join(" [SEP] ").toLowerCase();
 
     // 2. Sample for AI
-    const sampleText = posts.slice(0, 50).map(p =>
-        `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 300)}`
+    const sampleText = posts.slice(0, 80).map(p =>
+        `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 600)}`
     ).join('\n---\n');
 
     const prompt = `You are a market research analyst studying the "${nicheContext}" audience. From the text, separate real commercial BRANDS from generic PRODUCT categories.
@@ -1484,16 +1484,16 @@ STRICT EXCLUSIONS. Put these in NEITHER list, skip them completely:
 
 RULES:
 - If something is a generic ingredient or item with no specific maker, it is a PRODUCT, never a BRAND.
-- If you are not confident a word is a genuine commercial brand, leave it out rather than guessing.
-- Return ONLY genuine entries. It is correct to return fewer than 15 if there are not 15 real ones. Do NOT pad either list to hit a number.
+- Be thorough: include niche, small, or unfamiliar brands too. If a word names a specific product line, company, app or maker, treat it as a BRAND even if you do not personally recognise it. A capitalised proper-noun product name is almost always a brand.
+- Only leave something out if it is clearly a generic item, a diet/method/activity, or a personal name (per the exclusions above). When a word is plausibly a real named brand, INCLUDE it rather than dropping it.
 
-Extract up to 15 BRANDS and up to 15 PRODUCTS, most relevant first.
+Extract up to 20 BRANDS and up to 20 PRODUCTS, most relevant first, and surface every specific named brand you can find in the text.
 Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}`;
 
     const openAIParams = {
         model: "gpt-4o-mini",
         messages: [
-            { role: "system", content: "You are a specialized business data extractor. You distinguish genuine commercial brands from generic products, diets, methods, activities, and personal names, and you omit anything that is not a real brand or product rather than padding the list." },
+            { role: "system", content: "You are a specialized business data extractor. You distinguish genuine commercial brands from generic products, diets, methods, activities, and personal names. You surface every specific named brand present in the text, including niche or unfamiliar ones, and only omit clear non-entities (generic items, diets/methods, personal names)." },
             { role: "user", content: prompt + "\n\nText to analyze:\n" + sampleText }
         ],
         temperature: 0,
@@ -1514,12 +1514,16 @@ Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}
                 if (cleanKey.length < 3) return;
 
                 const escapedName = cleanKey.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                const regex = new RegExp(`\\b${escapedName}(s|es|'s)?\\b`, 'gi');
+                // Global regex for counting all occurrences across the corpus.
+                const countRegex = new RegExp(`\\b${escapedName}(s|es|'s)?\\b`, 'gi');
+                // Separate NON-global regex for per-post .test() — a global regex carries
+                // lastIndex between calls and would skip posts, dropping real matches.
+                const testRegex = new RegExp(`\\b${escapedName}(s|es|'s)?\\b`, 'i');
 
-                const occurrenceMatch = allText.match(regex);
+                const occurrenceMatch = allText.match(countRegex);
                 const occurrenceCount = occurrenceMatch ? occurrenceMatch.length : 0;
 
-                const relevantPosts = posts.filter(p => regex.test((p.data.title || '') + " " + (p.data.selftext || p.data.body || '')));
+                const relevantPosts = posts.filter(p => testRegex.test((p.data.title || '') + " " + (p.data.selftext || p.data.body || '')));
 
                 if (occurrenceCount > 0) {
                     if (!window._entityData[type][cleanKey]) {
@@ -1556,7 +1560,7 @@ async function enhanceDiscoveryWithComments(initialPosts, nicheContext) {
     console.log("Enhancing with comments...");
     try {
         // Higher post count for comments to find those hidden brand mentions
-        const postIds = initialPosts.slice(0, 60).map(p => p.data.id);
+        const postIds = initialPosts.slice(0, 80).map(p => p.data.id);
         const comments = await fetchCommentsForPosts(postIds);
         if (!comments || comments.length < 5) return;
 
@@ -2780,7 +2784,7 @@ async function runConstellationAnalysis(subredditQueryString, demandSignalTerms,
 
     try {
         const shoppingPosts = await fetchMultipleRedditDataBatched(subredditQueryString, SHOPPING_SIGNAL_TERMS, 60, timeFilter, false);
-        const postIds = shoppingPosts.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 60).map(p => p.data.id);
+        const postIds = shoppingPosts.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 80).map(p => p.data.id);
         const highIntentComments = await fetchCommentsForPosts(postIds);
         const allItems = [...shoppingPosts, ...highIntentComments];
         await generateAndRenderConstellation(allItems);

@@ -106,7 +106,11 @@ function buildFeatureMatrix(posts) {
     ].map(w => lemmatize(w)));
 
     posts.forEach((post, idx) => {
-        const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase();
+        const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase()
+            .replace(/https?:\/\/\S+/g, ' ')                                                  // strip full URLs
+            .replace(/\b[a-z0-9-]+\.(com|org|net|io|co|uk|gg|tv|ly|me|dev|app|gov|edu)\b\S*/g, ' ') // strip bare domains (youtube.com, redact.dev)
+            .replace(/this (comment|post) was mass deleted[^.]*\.?/g, ' ')                     // PowerDeleteSuite boilerplate
+            .replace(/\b(redact|redacted|powerdeletesuite|overwritten)\b/g, ' ');
         const cleanWords = text.replace(/[^a-z\s']/g, ' ').split(/\s+/).filter(Boolean);
 
         // One Set per post so document frequency counts unique posts, not raw occurrences.
@@ -652,9 +656,15 @@ async function generateAndRenderHiddenStats(posts, audienceContext) {
         'thing','things','stuff','want','need','make','get','got','going','one','way','day','lot','said','say',
         'call','use','work','look','feel','good','best','even','still','much','about','your','their','they','them'
     ]);
+    // Reject URL fragments / Reddit chrome that survive tokenisation and create nonsense pairs.
+    const JUNK_TOKENS = new Set(['http','https','www','com','org','net','io','co','html','htm','youtube',
+        'youtu','watch','reddit','redd','imgur','gyazo','jpg','jpeg','png','gif','webp','pdf','mp4',
+        'redact','redacted','deleted','removed','mass','overwritten','powerdeletesuite','utm','href','url','ref']);
+    const isJunkLabel = (t) => (t || '').toLowerCase().split(/\s+/).some(w => JUNK_TOKENS.has(w));
     const cleanLabel = (t) => {
         const s = (t || '').toLowerCase().trim();
         if (s.length < 3) return false;
+        if (isJunkLabel(s)) return false;
         return !s.split(/\s+/).every(w => STATS_STOP.has(w) || (typeof stopWords !== 'undefined' && stopWords.includes(w)));
     };
 
@@ -671,10 +681,20 @@ async function generateAndRenderHiddenStats(posts, audienceContext) {
             .slice(0, 6);
 
         // Co-occurrence lift: "mentioning X => N more likely to also mention Y" (within this audience).
-        const pairs = mineAssociations(matrix)
-            .filter(p => cleanLabel(p.x) && cleanLabel(p.y) && p.lift >= 1.6)
-            .sort((a, b) => (b.lift * Math.log2(b.support + 1)) - (a.lift * Math.log2(a.support + 1)))
-            .slice(0, 8);
+        // Cap lift at 12 and require support >= 4: anything higher is almost always mechanical
+        // co-occurrence (two halves of the same phrase/URL), not a real insight.
+        const rankedPairs = mineAssociations(matrix)
+            .filter(p => cleanLabel(p.x) && cleanLabel(p.y) && p.lift >= 1.6 && p.lift <= 12 && p.support >= 4)
+            .sort((a, b) => (b.lift * Math.log2(b.support + 1)) - (a.lift * Math.log2(a.support + 1)));
+        const usedConcepts = new Set();
+        const pairs = [];
+        for (const p of rankedPairs) {
+            const a = (p.x || '').toLowerCase(), b = (p.y || '').toLowerCase();
+            if (usedConcepts.has(a) || usedConcepts.has(b)) continue; // no repeated concepts -> no near-duplicate stats
+            usedConcepts.add(a); usedConcepts.add(b);
+            pairs.push(p);
+            if (pairs.length >= 5) break;
+        }
 
         const candidates = [];
         pairs.forEach(p => candidates.push({

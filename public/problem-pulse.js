@@ -235,36 +235,17 @@ async function generateAndRenderHiddenGems(posts, audienceContext, meta = {}) {
         return;
     }
 
-    grid.innerHTML = '<p class="loading-text">Mining for hidden connections...</p>';
+    grid.innerHTML = '<p class="loading-text">Reading discussions for hidden gems...</p>';
 
     if (!posts || posts.length < 25) {
         grid.innerHTML = '<p class="placeholder-text">Not enough discussions yet for reliable hidden gems. Try a Deep search or a longer time frame.</p>';
         return;
     }
 
-    // ---- Tunables ----
-    const GEM_MAX_SIM_LOCAL = typeof GEM_MAX_SIM !== 'undefined' ? GEM_MAX_SIM : 0.7;
-    const SURPRISE_THRESHOLD = 8;    // 1-10. Quality over quantity: only genuinely surprising gems show.
-    const SHORTLIST_SIZE = 20;   // Trimmed from 35: a smaller prompt avoids the proxy timeout that was returning empty.
-    const QUOTES_PER_PAIR = 2;    // Trimmed from 4: two grounding quotes are enough to verify a pattern.
-    const QUOTE_CHARS = 160;  // Trimmed from 240: shorter quotes, much smaller payload, faster call.
-
-    // What the header reports as "searched". This function only sees the array it is handed (the
-    // distilled set), so by default it can only report posts.length. The caller should pass the true
-    // corpus size and wording, e.g. meta = { searchedCount: 315, searchedLabel: 'posts and comments' }.
     const searchedCount = Number.isFinite(meta.searchedCount) ? meta.searchedCount : posts.length;
     const searchedLabel = meta.searchedLabel || 'discussions';
 
-    // ---- Header / summary helpers ----
-    // These populate the elements outside the card grid: the search statement, the disclaimer,
-    // and the highlights bar (count found, surprise level, commercial opportunities). They query
-    // the document directly and no-op safely if a slot is missing, so they will not throw if the
-    // markup changes.
-    const setText = (sel, val) => {
-        const el = document.querySelector(sel);
-        if (el) el.innerText = val;
-    };
-
+    const setText = (sel, val) => { const el = document.querySelector(sel); if (el) el.innerText = val; };
     const surpriseLabel = (scores) => {
         if (!scores.length) return '';
         const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
@@ -272,24 +253,15 @@ async function generateAndRenderHiddenGems(posts, audienceContext, meta = {}) {
         if (avg >= 8) return 'High';
         return 'Medium';
     };
-
     const disclaimerText = (n) => {
         if (n === 0) return 'None were strong enough to make the cut this time.';
         if (n === 1) return 'Only 1 hidden gem was strong enough to make the cut.';
-        return `Only ${n} hidden gems were strong enough to make the cut.`;
+        return `${n} hidden gems made the cut.`;
     };
-
     const updateGemHeader = (shownGems) => {
-        // Only gems that truly cleared the bar count as "found". Near-miss backfill cards carry their
-        // own label and are not counted here, so the headline number stays honest.
         const madeCut = shownGems.filter(g => g._tier !== 'near').length;
-        // A commercial opportunity = any shown gem scored highly for commercial value, not just the
-        // ones filed under commercial_leap. An emotional or behavioural leap can still be a buying angle.
-        const commercial = shownGems.filter(g =>
-            Number(g.commercial_value) >= 7 || g.category === 'commercial_leap'
-        ).length;
+        const commercial = shownGems.filter(g => Number(g.commercial_value) >= 7 || g.category === 'commercial_leap').length;
         const scores = shownGems.map(g => Number(g.surprise_score)).filter(s => !isNaN(s));
-
         setText('.gem-search-statement', `We Searched ${Number(searchedCount).toLocaleString()} ${searchedLabel}`);
         setText('.gem-search-disclaimer', disclaimerText(madeCut));
         setText('.number-found', String(madeCut));
@@ -297,391 +269,7 @@ async function generateAndRenderHiddenGems(posts, audienceContext, meta = {}) {
         setText('.com-oppertunites', String(commercial));
     };
 
-    try {
-        const matrix = buildFeatureMatrix(posts);
-        let candidates = mineAssociations(matrix);
-
-        // Junk filter. The single biggest cause of nonsense gems (e.g. "will") is that features are
-        // single words, so common function words sneak in and co-occur with everything. Until the
-        // matrix produces real phrases, we aggressively strip stopwords here. This list is deliberately
-        // broad: articles, pronouns, modals, prepositions, conjunctions, fillers and Reddit chrome.
-        const STOPWORDS = new Set([
-            // articles / determiners
-            'a', 'an', 'the', 'this', 'that', 'these', 'those', 'my', 'your', 'his', 'her', 'its', 'our', 'their',
-            'some', 'any', 'no', 'every', 'each', 'all', 'both', 'few', 'more', 'most', 'other', 'such', 'own', 'same',
-            // pronouns
-            'i', 'me', 'you', 'he', 'she', 'it', 'we', 'they', 'them', 'him', 'us', 'who', 'whom', 'whose', 'which', 'what',
-            'mine', 'yours', 'ours', 'theirs', 'myself', 'yourself', 'himself', 'herself', 'itself', 'ourselves',
-            'themselves', 'one', 'ones', 'someone', 'anyone', 'everyone', 'nobody', 'something', 'anything',
-            'everything', 'nothing',
-            // auxiliaries / modals
-            'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did',
-            'doing', 'will', 'would', 'shall', 'should', 'can', 'could', 'may', 'might', 'must', 'ought', 'need', 'dare',
-            'going', 'gonna', 'wanna',
-            // prepositions / conjunctions
-            'of', 'in', 'on', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into', 'through', 'during',
-            'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down', 'out', 'off', 'over', 'under', 'again',
-            'further', 'then', 'once', 'and', 'but', 'or', 'nor', 'so', 'than', 'too', 'very', 'as', 'because', 'while',
-            'if', 'though', 'although', 'unless', 'until', 'whereas',
-            // common fillers / generic verbs / adjectives
-            'best', 'took', 'want', 'since', 'first', 'just', 'like', 'know', 'think', 'good', 'really', 'even', 'still',
-            'well', 'right', 'never', 'always', 'many', 'things', 'thing', 'make', 'made', 'take', 'taken', 'give', 'given',
-            'look', 'looked', 'find', 'found', 'use', 'used', 'work', 'worked', 'way', 'day', 'days', 'year', 'years',
-            'people', 'person', 'time', 'times', 'much', 'lot', 'also', 'actually', 'basically', 'literally', 'maybe',
-            'probably', 'definitely', 'etc', 'stuff', 'kind', 'sort', 'bit', 'able', 'new', 'old', 'big', 'little',
-            // adverbs / question words
-            'how', 'when', 'where', 'why', 'here', 'there', 'now', 'today', 'yesterday', 'tomorrow', 'soon', 'ever',
-            'often', 'sometimes', 'usually', 'around', 'almost', 'enough', 'quite', 'rather', 'pretty', 'really',
-            // Reddit / forum chrome
-            'edit', 'op', 'tldr', 'imo', 'imho', 'fyi', 'btw', 'lol', 'lmao', 'ngl', 'afaik', 'eli5', 'ama', 'post', 'posts',
-            'comment', 'comments', 'reddit', 'subreddit', 'sub', 'thread', 'upvote', 'downvote', 'guys', 'anyone',
-            // generic verbs / vague nouns that read as nonsense gem labels (e.g. "call", "get", "thing")
-            'call', 'called', 'calls', 'calling', 'get', 'gets', 'getting', 'got', 'gotten', 'go', 'goes', 'went',
-            'gone', 'come', 'comes', 'came', 'coming', 'say', 'says', 'said', 'saying', 'tell', 'tells', 'told',
-            'ask', 'asks', 'asked', 'asking', 'put', 'puts', 'putting', 'let', 'lets', 'letting', 'feel', 'feels',
-            'felt', 'feeling', 'turn', 'turns', 'turned', 'keep', 'keeps', 'kept', 'keeping', 'try', 'tries', 'tried',
-            'trying', 'run', 'runs', 'ran', 'running', 'set', 'sets', 'setting', 'show', 'shows', 'showed', 'shown',
-            'move', 'moves', 'moved', 'moving', 'start', 'starts', 'started', 'starting', 'stop', 'stops', 'stopped',
-            'help', 'helps', 'helped', 'helping', 'seem', 'seems', 'seemed', 'happen', 'happens', 'happened',
-            'mean', 'means', 'meant', 'guy', 'getting', 'thing', 'things', 'stuff', 'something', 'anything', 'everything', 'nothing'
-        ]);
-
-       // Locate this function inside generateAndRenderHiddenGems and replace it:
-// Reject measurement/unit phrases ("per day", "years old") that are artifacts not concepts,
-// and the audience's OWN defining topic (for "sneaker buyers", the word "sneaker(s)"), which
-// makes any pair self-referential and obvious.
-const UNIT_PHRASE = /\b(per|a|each)\s+(day|week|month|year|hour|night)\b|\byears?\s+old\b|\btimes?\s+a\b/i;
-const GENERIC_AUD = new Set(['buyers','buyer','lovers','lover','owners','owner','fans','fan','enthusiasts','enthusiast','users','user','people','adults','adult','community','shoppers','shopper','collectors','collector','addicts','addict','nerds','geeks','parents','parent','moms','dads','professionals','folks','gamers','readers','members']);
-const AUD_CORE = (() => {
-    const set = new Set();
-    (audienceContext || '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/)
-        .filter(w => w.length > 2 && !GENERIC_AUD.has(w))
-        .forEach(w => { set.add(w); set.add(w.endsWith('s') ? w.slice(0, -1) : w + 's'); });
-    return set;
-})();
-const hasAudCore = (s) => s.split(/\s+/).some(w => AUD_CORE.has(w));
-const isValidTerm = (t) => {
-    const s = (t || '').toLowerCase().trim();
-    if (UNIT_PHRASE.test(s)) return false;
-    if (hasAudCore(s)) return false;
-    // Added \s to the character class to allow spaces in multi-word phrases
-    return s.length >= 3 && /^[a-z][a-z'\s-]*[a-z]$/.test(s) && !STOPWORDS.has(s);
-};
-       
-    
-
-        candidates = candidates.filter(p => isValidTerm(p.x) && isValidTerm(p.y));
-
-        if (candidates.length === 0) {
-            grid.innerHTML = '<p class="placeholder-text">No clear hidden connections stood out this time. Try a Deep search or a longer time frame to surface more.</p>';
-            return;
-        }
-
-        // Embeddings: drop near-synonyms, and keep the distance as our "two different worlds" signal.
-        const featuresInPlay = [...new Set(candidates.flatMap(p => [p.x, p.y]))];
-        const vectors = await embedTexts(featuresInPlay);
-        const vecMap = new Map(featuresInPlay.map((f, i) => [f, vectors[i]]));
-
-        candidates = candidates.map(p => {
-            const vx = vecMap.get(p.x), vy = vecMap.get(p.y);
-            const sim = (vx && vy) ? cosineSimilarity(vx, vy) : 0;
-            return { ...p, sim, distance: 1 - sim };
-        }).filter(p => p.sim <= GEM_MAX_SIM_LOCAL);
-
-        if (candidates.length === 0) {
-            grid.innerHTML = '<p class="placeholder-text">Connections found, but too predictable to call hidden gems.</p>';
-            return;
-        }
-
-        // RESCORED FOR LEAPS, NOT FOR EMOTIONAL CONSEQUENCES.
-        // The old scorer multiplied by up to 1.6x whenever one side was an emotion, which pushed
-        // obvious "topic -> its predictable feeling" pairs to the top (pet loss -> regret).
-        // We now reward semantic distance hard (distance squared) so genuine cross-category jumps
-        // rise, and we stop privileging emotion pairs. A useful side effect: terms like "loss" and
-        // "regret" sit close in embedding space and sink on their own, while "dog training" and
-        // "home security" sit far apart and rise.
-        candidates.forEach(p => {
-            const leap = Math.pow(p.distance, 2);
-            p.score = p.lift * Math.log2(p.support + 1) * leap;
-        });
-
-        // Add a tie-breaker so the list is always in the exact same order for the AI
-        candidates.sort((a, b) => (b.score - a.score) || a.x.localeCompare(b.x));
-        const shortlist = candidates.slice(0, SHORTLIST_SIZE);
-
-        // MULTIPLE GROUNDING QUOTES per pair (was a single 400-char snippet).
-        // More evidence lets the model confirm a pattern is real, not a one-off, and name the
-        // underlying concept honestly instead of confabulating from one line.
-        shortlist.forEach(p => {
-            const setX = matrix.featurePosts.get(p.x), setY = matrix.featurePosts.get(p.y);
-            const quotes = [];
-            if (setX && setY) {
-                for (const idx of setX) {
-                    if (setY.has(idx)) {
-                        const ex = posts[idx];
-                        const txt = `${ex.data.title || ''} ${ex.data.selftext || ex.data.body || ''}`
-                            .trim().replace(/\s+/g, ' ');
-                        if (txt) quotes.push(txt.length > QUOTE_CHARS ? txt.slice(0, QUOTE_CHARS - 3) + '...' : txt);
-                        if (quotes.length >= QUOTES_PER_PAIR) break;
-                    }
-                }
-            }
-            p.quotes = quotes;
-        });
-
-        const items = shortlist.map((p, i) => ({
-            id: i,
-            term_a: p.x,
-            term_b: p.y,
-            times_together: p.support,
-            lift: Number(p.lift.toFixed(1)),
-            quotes: p.quotes || []
-        }));
-
-        // PROMPT: built around the "wait, what?!" test, the four leap types, explicit rejection of
-        // obvious or circular findings, a hard rule against echoing raw words, and three numeric
-        // scores (surprise / actionability / commercial) we enforce in code. Distance is supplied
-        // objectively from embeddings rather than asked of the model.
-        const prompt = `You are a ruthless consumer-intelligence analyst studying the "${audienceContext}" audience for a founder who wants non-obvious market insight. Hidden Gems is meant to be the most interesting part of the product. If a finding would not make a founder stop scrolling and think "that is fascinating", it does not belong here.
-
-Below are pairs of terms that co-occur in real discussions far more often than chance, each with sample quotes.
-
-THE ONE TEST THAT MATTERS:
-Would a smart human naturally expect these two things to be connected? If YES, reject it. If NO, and the quotes support it, that is a Hidden Gem. You are not answering "what is mentioned together", you are answering "what would genuinely surprise a smart reader".
-
-REJECT these, they are obvious, circular or too closely related to be a discovery:
-- "Pet illness" and "anxiety about illness" (circular, same idea twice)
-- "Dog training" and "frustration" (obvious feeling)
-- "Sudden pet loss" and "regret" (grief obviously follows loss)
-- "Persistent begging" and "food brand loyalty" (obvious, both are just about food)
-- Anything where term B is the predictable feeling, restatement or direct consequence of term A.
-- Measurement or unit phrases such as "per day", "a week", "years old" - these are artifacts, not concepts (e.g. "coffee" and "per day" is NOT a gem).
-- The audience's OWN defining topic (for sneaker buyers, the word "sneakers" itself). A pair that includes it is self-referential and obvious.
-
-KEEP findings that leap between two different worlds. Examples of the right shape:
-- Reactive dogs and social isolation
-- Dog anxiety and home security purchases
-- Owners seeking training help and distrust of professional trainers
-- Budget-conscious buyers and premium brand loyalty
-- Frequent runners and appearance or fake-tan products
-
-Every kept gem must fit exactly ONE category:
-1. emotional_leap: the audience seems to discuss one thing but is really driven by a deeper, non-obvious worry (training problems are really about personal failure).
-2. behavioural_leap: an unexpected overlap with another interest, community or behaviour (dog owners and home security).
-3. commercial_leap: an adjacent buying opportunity nobody would guess (dog anxiety and CCTV products).
-4. contradiction: the audience says one thing but does another (asks for expert advice yet ignores trainers; says price matters yet picks premium).
-
-HARD RULES:
-- Prefer quality over statistical strength: a 3x surprising, product-relevant insight beats a 20x obvious one. A very high co-occurrence multiplier is usually two halves of the same phrase, a unit, or the audience's own topic - distrust it.
-- Some raw terms are meaningless function words (e.g. "will", "their", "about"). NEVER output a raw term as a label and NEVER build a gem around a word that carries no concept. Identify the real concept the QUOTES are about and label that. If you cannot find a real, concrete concept for BOTH sides in the quotes, DISCARD the item entirely.
-- READ THE QUOTES. Only assert what the quotes plus the co-occurrence actually support.
-- Do NOT invent comparative statistics like "more than average owners". You have no baseline population. Phrase findings as connections within this audience only.
-
-WHAT TO RETURN (this matters):
-- DISCARD only the truly worthless items: obvious consequences, circular restatements, or pairs with no real concept. Those get no entry at all.
-- For everything else, RETURN it with an honest surprise score. Do NOT pre-filter the borderline ones. We apply the quality bar ourselves in code, and we may show one almost-but-not-quite item as a clearly labelled "worth a look" card. So if something is interesting but not a knockout, return it scored around 5 to 7 rather than dropping it.
-- Order does not matter; score honestly and we sort. Returning a couple of mid-scored items alongside your best one is helpful, not padding.
-
-SCORING. Score every returned item 1-10, and be honest rather than generous:
-- surprise: 10 means a founder would never have predicted the link; 8+ is a genuine "wait, what?!"; 5 to 7 is interesting but not shocking; below 5 should not be returned.
-- actionability: could a founder, marketer or creator actually do something with it.
-- commercial_value: does it reveal a new audience, product, angle, positioning or market.
-
-Respond ONLY with JSON: {"gems":[{"id":0,"category":"emotional_leap|behavioural_leap|commercial_leap|contradiction","surprise_score":0,"actionability_score":0,"commercial_value":0,"topic_a":"...","front_teaser":"...","reveal_finding":"...","reveal_summary":"...","opportunity":"..."}]}
-
-Field rules:
-- "id": match the source id.
-- "topic_a": clean 1-3 word label for the surface topic. A real concept, never a function word.
-- "front_teaser": ONE sentence hinting at the surprise without revealing it (e.g. "Owners of reactive dogs keep circling back to a worry that has nothing to do with the dog...").
-- "reveal_finding": clean 1-4 word label for the unexpected side. A real concept, never a function word.
-- "reveal_summary": Tell the STORY behind the connection in one or two plain sentences, not the bare correlation. Never write "discussions about X mention Y" or "X frequently mentions Y", that just restates the data. Instead explain what is really going on: what the surface topic quietly turns into, or what the audience is actually seeking underneath it. Right shape: "Food discussions often turn into conversations about belonging and community rather than nutrition." or "Owners researching premium food keep gravitating to dog parks, meetups and new friendships, so the real pull looks like social connection, not diet." Ground every claim in the quotes. Do NOT fabricate comparisons to "the average owner" or any baseline population you were not given.
-- "opportunity": ONE actionable sentence telling a founder or marketer how to act on this finding. Focus on positioning, messaging or product angle, not a restatement of the insight. Examples of the right shape: "Lead with reassurance and upskilling, not just product features." or "Position around peace of mind and safety, not obedience or training." Never use em dash characters; use commas or full stops.
-
-Items:
-${JSON.stringify(items)}`;
-
-        let curated = [];
-        try {
-            const fetchUrl = typeof OPENAI_PROXY_URL !== 'undefined' ? OPENAI_PROXY_URL : '/api/openai';
-            const r = await fetch(fetchUrl, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-                    openaiPayload: {
-                        model: "gpt-4o",
-                        messages: [
-                            { role: "system", content: "You are a ruthless consumer-intelligence analyst. You surface only genuinely surprising, cross-category, commercially useful insights, and you aggressively discard anything that reads as an obvious consequence." },
-                            { role: "user", content: prompt }
-                        ],
-                        temperature: 0.5, // Lower than before. This is a judging task, so we want consistent rejection, not invention.
-                        max_completion_tokens: 1500,
-                        response_format: { type: "json_object" }
-                    }
-                })
-            });
-            const data = await r.json();
-            if (data && data.openaiResponse && !data.error) {
-                curated = JSON.parse(data.openaiResponse).gems || [];
-            }
-        } catch (e) {
-            console.error('Hidden Gems curation failed.', e);
-        }
-        console.log(`[Hidden Gems] AI curation returned ${curated.length} candidate gems (0 here usually means the proxy timed out / API key issue).`);
-
-        // Enforce the bars in code. Belt and braces: even if the model echoes a junk word like
-        // "will" or rates an obvious pair highly, we drop it here. No fallback padding: if nothing
-        // clears the bar, we say so rather than forcing weak findings onto the UI.
-      
-      
-      
-      // 1. Establish a single, solid quality bar (no confusing near-miss tiers)
-      const SOLID_SURPRISE_THRESHOLD = 6; 
-      const ACTION_THRESHOLD = 4;
-
-      const labelOk = (s) => {
-          const t = (s || '').toLowerCase().trim();
-          if (t.length < 3) return false;
-          if (UNIT_PHRASE.test(t)) return false;   // "per day", "years old" etc.
-          if (hasAudCore(t)) return false;          // the audience's own topic
-          const tokens = t.split(/\s+/);
-          return !(tokens.length === 1 && STOPWORDS.has(tokens[0]));
-      };
-
-      const passesBase = (g) =>
-          Number(g.actionability_score) >= ACTION_THRESHOLD &&
-          Number(g.surprise_score) >= SOLID_SURPRISE_THRESHOLD &&
-          labelOk(g.topic_a) && labelOk(g.reveal_finding);
-
-      // Filter curated items against the base quality bar
-      let qualifiedGems = curated.filter(passesBase).sort((a, b) => Number(b.surprise_score) - Number(a.surprise_score));
-
-      // 2. Client-Side Deduplication: Prevent repeating the same concepts
-      const seenConcepts = new Set();
-      const uniqueGems = [];
-
-      for (const gem of qualifiedGems) {
-          const conceptA = (gem.topic_a || '').toLowerCase().trim();
-          const conceptB = (gem.reveal_finding || '').toLowerCase().trim();
-
-          // Skip if either side of this discovery repeats an already rendered focal concept
-          if (seenConcepts.has(conceptA) || seenConcepts.has(conceptB)) {
-              continue;
-          }
-
-          seenConcepts.add(conceptA);
-          seenConcepts.add(conceptB);
-          uniqueGems.push(gem);
-
-          if (uniqueGems.length >= 3) break; // Limit UI clutter to the top 3 highly distinct discoveries
-      }
-
-      // Set all shown items to a single consistent tier
-      uniqueGems.forEach(g => g._tier = 'gem');
-
-      // Graceful backfill: rather than show an empty panel when nothing clears the strict bar,
-      // surface the best "worth a look" near-misses (still real, just less of a knockout). These are
-      // tiered 'near' so the header's "found" count stays honest and the cards can be badged.
-      if (uniqueGems.length === 0) {
-          const NEAR_SURPRISE = 4;
-          const NEAR_ACTION = 3;
-          const passesNear = (g) =>
-              Number(g.surprise_score) >= NEAR_SURPRISE &&
-              Number(g.actionability_score) >= NEAR_ACTION &&
-              labelOk(g.topic_a) && labelOk(g.reveal_finding);
-
-          const nearCandidates = curated
-              .filter(passesNear)
-              .sort((a, b) => Number(b.surprise_score) - Number(a.surprise_score));
-
-          for (const gem of nearCandidates) {
-              const conceptA = (gem.topic_a || '').toLowerCase().trim();
-              const conceptB = (gem.reveal_finding || '').toLowerCase().trim();
-              if (seenConcepts.has(conceptA) || seenConcepts.has(conceptB)) continue;
-              seenConcepts.add(conceptA);
-              seenConcepts.add(conceptB);
-              gem._tier = 'near';
-              uniqueGems.push(gem);
-              if (uniqueGems.length >= 2) break; // a small, honest "worth a look" set
-          }
-      }
-
-      if (uniqueGems.length === 0) {
-          updateGemHeader([]);
-          grid.innerHTML = '<p class="placeholder-text">No clear hidden connections stood out this time. Try a Deep search or a longer time frame to surface more.</p>';
-          return;
-      }
-
-      // 3. Update the header using the exact same array we are rendering
-      updateGemHeader(uniqueGems);
-
-      // 4. Render the deduplicated cards
-      grid.innerHTML = '';
-      const set = (root, sel, val) => { const e = root.querySelector(sel); if (e) e.innerText = val; };
-      const CATEGORY_LABELS = {
-          emotional_leap: 'Emotional leap',
-          behavioural_leap: 'Behavioural leap',
-          commercial_leap: 'Commercial leap',
-          contradiction: 'Contradiction'
-      };
-
-      uniqueGems.forEach(g => {
-          const p = shortlist[g.id] || {};
-          const card = GEM_BLUEPRINT.cloneNode(true);
-          card.classList.remove('is-flipped');
-          card.style.display = '';
-
-          set(card, '.topic-a', g.topic_a || '');
-          set(card, '.front-summary', g.front_teaser || '');
-          set(card, '.topic-a-back', g.topic_a || '');
-          set(card, '.reveal-finding', g.reveal_finding || '');
-          set(card, '.reveal-summary', g.reveal_summary || '');
-          set(card, '.gem-opportunity', g.opportunity || '');
-          set(card, '.gem-category', CATEGORY_LABELS[g.category] || '');
-          set(card, '.gem-tier', g._tier === 'near' ? 'Worth a look' : '');
-
-          const stat = card.querySelector('.gem-stat');
-          if (stat && p.support) {
-              stat.innerText = `Seen together in ${p.support} discussions · ${p.lift.toFixed(1)}× more than chance`;
-          }
-
-          card.addEventListener('click', () => card.classList.toggle('is-flipped'));
-          grid.appendChild(card);
-      });
-
-  } catch (error) {
-      console.error('Hidden Gems error:', error);
-      grid.innerHTML = '<p class="error-message">Could not generate hidden gems.</p>';
-  }
-}
-
-
-// =================================================================================
-// === HIDDEN STATS: data-grounded audience stat cards for #hidden-stats ===========
-// === All numbers are computed from the real corpus (prevalence + co-occurrence
-// === lift) and are NEVER invented by the AI. The AI only selects and phrases the
-// === most interesting ones. Because the maths is local, this still renders even
-// === when the OpenAI proxy is down - a reliable companion to Hidden Gems.
-// =================================================================================
-async function generateAndRenderHiddenStats(posts, audienceContext) {
-    const container = document.getElementById('hidden-stats');
-    if (!container) return;
-
-    if (!posts || posts.length < 20) {
-        container.innerHTML = '<p class="placeholder-text">Not enough discussions yet for audience stats.</p>';
-        return;
-    }
-
-    container.innerHTML = '<p class="loading-text">Calculating audience stats... <span class="loader-dots"></span></p>';
-
-    const STATS_STOP = new Set([
-        'the','and','for','that','this','with','have','just','like','know','think','really','people','time',
-        'thing','things','stuff','want','need','make','get','got','going','one','way','day','lot','said','say',
-        'call','use','work','look','feel','good','best','even','still','much','about','your','their','they','them'
-    ]);
-    // Reject URL fragments / Reddit chrome that survive tokenisation and create nonsense pairs.
-    const JUNK_TOKENS = new Set(['http','https','www','com','org','net','io','co','html','htm','youtube',
-        'youtu','watch','reddit','redd','imgur','gyazo','jpg','jpeg','png','gif','webp','pdf','mp4',
-        'redact','redacted','deleted','removed','mass','overwritten','powerdeletesuite','utm','href','url','ref']);
-    const isJunkLabel = (t) => (t || '').toLowerCase().split(/\s+/).some(w => JUNK_TOKENS.has(w));
-    // Reject unit/measurement phrases and the audience's OWN defining topic (self-referential).
+    // ---- Label hygiene: reject units, the audience's own topic, and bare function words ----
     const UNIT_PHRASE = /\b(per|a|each)\s+(day|week|month|year|hour|night)\b|\byears?\s+old\b|\btimes?\s+a\b/i;
     const GENERIC_AUD = new Set(['buyers','buyer','lovers','lover','owners','owner','fans','fan','enthusiasts','enthusiast','users','user','people','adults','adult','community','shoppers','shopper','collectors','collector','addicts','addict','nerds','geeks','parents','parent','moms','dads','professionals','folks','gamers','readers','members']);
     const AUD_CORE = (() => {
@@ -691,145 +279,221 @@ async function generateAndRenderHiddenStats(posts, audienceContext) {
             .forEach(w => { set.add(w); set.add(w.endsWith('s') ? w.slice(0, -1) : w + 's'); });
         return set;
     })();
-    const cleanLabel = (t) => {
-        const s = (t || '').toLowerCase().trim();
-        if (s.length < 3) return false;
-        if (isJunkLabel(s)) return false;
-        if (UNIT_PHRASE.test(s)) return false;
-        if (s.split(/\s+/).some(w => AUD_CORE.has(w))) return false; // audience's own topic
-        return !s.split(/\s+/).every(w => STATS_STOP.has(w) || (typeof stopWords !== 'undefined' && stopWords.includes(w)));
+    const FUNC_WORDS = new Set(['the','a','an','this','that','it','they','them','will','would','about','your','their','get','got','getting','rid','thing','things','stuff','really','very','just','like','some','any','more','most','want','need']);
+    const labelOk = (s) => {
+        const t = (s || '').toLowerCase().trim();
+        if (t.length < 3) return false;
+        if (UNIT_PHRASE.test(t)) return false;
+        if (t.split(/\s+/).some(w => AUD_CORE.has(w))) return false;
+        if (t.split(/\s+/).every(w => FUNC_WORDS.has(w))) return false;
+        if (!/[a-z]/i.test(t)) return false;
+        return true;
+    };
+
+    const CATEGORY_LABELS = {
+        emotional_leap: 'Emotional leap',
+        behavioural_leap: 'Behavioural leap',
+        commercial_leap: 'Commercial leap',
+        contradiction: 'Contradiction'
     };
 
     try {
-        const matrix = buildFeatureMatrix(posts);
-        const { N, df, vocab } = matrix;
+        // ---- Curate a high-signal sample of REAL discussions for the model to read ----
+        const scored = posts.map(p => {
+            const text = (p.data.selftext || p.data.body || '').trim();
+            const title = p.data.title || p.data.link_title || '';
+            return { p, text, title, ups: p.data.ups || 0, len: text.length + title.length };
+        }).filter(s => s.len >= 60);
+        scored.sort((a, b) => (b.ups + b.len * 0.4) - (a.ups + a.len * 0.4));
+        const sample = scored.slice(0, 45);
 
-        // Co-occurrence lift candidates: "mentioning X => N more likely to also mention Y" (within audience).
-        // Cap lift at 12 and require support >= 4 to avoid mechanical co-occurrence.
-        let rankedPairs = mineAssociations(matrix)
-            .filter(p => cleanLabel(p.x) && cleanLabel(p.y) && p.lift >= 1.6 && p.lift <= 12 && p.support >= 4)
-            .sort((a, b) => (b.lift * Math.log2(b.support + 1)) - (a.lift * Math.log2(a.support + 1)));
-
-        // Drop tautological / near-synonym pairs ("age" <-> "years", "heartbreak" <-> "emotions").
-        // Keep only pairs whose two sides sit in DIFFERENT semantic worlds - that is what makes a
-        // stat surprising and product-relevant instead of a restatement. Degrades gracefully if the
-        // embeddings endpoint is unavailable.
-        try {
-            const feats = [...new Set(rankedPairs.flatMap(p => [p.x, p.y]))].slice(0, 60);
-            if (feats.length) {
-                const vecs = await embedTexts(feats);
-                const vmap = new Map(feats.map((f, i) => [f, vecs[i]]));
-                rankedPairs = rankedPairs.filter(p => {
-                    const vx = vmap.get(p.x), vy = vmap.get(p.y);
-                    if (!vx || !vy) return true;
-                    return cosineSimilarity(vx, vy) <= 0.55; // too alike => tautology => drop
-                });
-            }
-        } catch (e) {
-            console.warn('[Hidden Stats] semantic de-duplication skipped (embeddings unavailable).', e);
-        }
-
-        // One stat per concept: top distinct cross-domain pairs.
-        const usedConcepts = new Set();
-        const pairs = [];
-        for (const p of rankedPairs) {
-            const a = (p.x || '').toLowerCase(), b = (p.y || '').toLowerCase();
-            if (usedConcepts.has(a) || usedConcepts.has(b)) continue;
-            usedConcepts.add(a); usedConcepts.add(b);
-            pairs.push(p);
-            if (pairs.length >= 8) break;
-        }
-
-        // Prevalence is a weak signal (often states the obvious), so keep only a small reserve;
-        // the AI is told to reject prevalence about the audience's own defining subject.
-        const prevalence = vocab
-            .filter(cleanLabel)
-            .map(f => ({ term: f, share: (df.get(f) || 0) / N }))
-            .filter(s => s.share >= 0.1 && s.share <= 0.55)
-            .sort((a, b) => b.share - a.share)
-            .slice(0, 3);
-
-        const pairCandidates = pairs.map(p => ({
-            a: p.x, b: p.y,
-            number: `${p.lift.toFixed(1)}x`,
-            fallback: `Among ${audienceContext}, discussions mentioning "${p.x}" also tend to bring up "${p.y}".`
-        }));
-        const prevCandidates = prevalence.map(s => ({
-            a: s.term, b: null,
-            number: `${Math.round(s.share * 100)}%`,
-            fallback: `A notable share of ${audienceContext} discussions mention "${s.term}".`
-        }));
-        const candidates = [...pairCandidates, ...prevCandidates]; // pairs first - the screenshot-worthy ones
-
-        if (candidates.length === 0) {
-            container.innerHTML = '<p class="placeholder-text">No standout audience stats this time. Try a Deep search or longer time frame.</p>';
+        if (sample.length < 8) {
+            grid.innerHTML = '<p class="placeholder-text">Not enough substantial discussion to mine. Try a Deep search or a longer time frame.</p>';
             return;
         }
 
-        // Optional AI pass: pick & phrase the most interesting. The numbers are FIXED, never altered.
-        let finalStats = null;
+        const itemsText = sample.map((s, i) =>
+            `[${i}] (r/${s.p.data.subreddit || '?'}, ${s.ups} ups) ${`${s.title} ${s.text}`.replace(/\s+/g, ' ').trim().slice(0, 420)}`
+        ).join('\n');
+
+        const prompt = `You are a sharp consumer-insight analyst studying the "${audienceContext}" audience by READING the real Reddit discussions below. Each item has an index, subreddit and score.
+
+Find the 3 to 5 MOST surprising or commercially valuable "hidden gems" - insights a founder would screenshot. Each gem must be EITHER:
+- a genuinely SURPRISING connection (an unexpected link between a behaviour, emotion, life event, product, brand, frustration or purchase), OR
+- a clear COMMERCIAL OPPORTUNITY (an unmet need, a product or positioning angle, a willingness to pay, or a workaround people hack together).
+
+THE TEST for every gem: would a smart founder think "huh, that's interesting" AND be able to act on it? If not, drop it.
+
+REJECT and never return:
+- Obvious or self-evident things (for ${audienceContext}, that they discuss their own core topic).
+- Tautologies or restatements (a thing linked to its own synonym or predictable feeling).
+- Vague or generic observations ("people want quality", "users get frustrated").
+- Measurement/unit artifacts ("per day", "years old").
+- Anything you cannot back with a real quote from the items below.
+
+Prefer quality over quantity: 3 strong gems beat 5 weak ones. A 3x surprising, actionable insight is worth more than an obvious one. If fewer than 3 are genuinely strong, return only the strong ones.
+
+For each gem return:
+- "category": one of emotional_leap | behavioural_leap | commercial_leap | contradiction
+- "topic_a": 1-3 word label for the surface topic (a real concept; never a function word, unit, or the audience's own topic)
+- "reveal_finding": 1-4 word label for the unexpected or commercial side
+- "front_teaser": one sentence hinting at the surprise WITHOUT giving it away
+- "reveal_summary": 1-2 plain sentences telling the real story behind it, grounded in the quote. No invented statistics, no comparison to the general population.
+- "opportunity": one actionable sentence - a concrete product, positioning or marketing angle a founder could pursue
+- "quote": a SHORT verbatim quote (<=160 chars) copied EXACTLY from ONE item that proves the gem
+- "source_index": the [index] number that quote came from
+- "surprise_score": integer 1-10, honest (only return gems >=6)
+- "commercial_value": integer 1-10
+
+Items:
+${itemsText}
+
+Respond ONLY with valid JSON: {"gems":[{"category":"...","topic_a":"...","reveal_finding":"...","front_teaser":"...","reveal_summary":"...","opportunity":"...","quote":"...","source_index":0,"surprise_score":8,"commercial_value":7}]}`;
+
+        let parsed = [];
         try {
-            const aiList = candidates.map((c, i) => ({ id: i, number: c.number, concept_a: c.a, concept_b: c.b }));
-            const prompt = `You are selecting and phrasing screenshot-worthy audience-insight stat lines for the "${audienceContext}" audience, for a "Hidden Gems" panel.
-Each item has a FIXED, TRUE "number" you MUST keep EXACTLY. Never invent or alter numbers. Never compare to the general population - every stat is within this audience only.
-An item with concept_b means: among this audience, people who mention concept_a are <number> more likely to also mention concept_b. An item with only concept_a and a % means that % of discussions mention concept_a.
-
-PRIORITISE insights that reveal an UNEXPECTED connection between two different worlds: a problem and an emotion, a behaviour and a product, a life event and a purchase, an emotion and a buying decision, or one topic and an adjacent topic the reader would never predict. The best ones are actionable, surprising and product-relevant (e.g. "owners discussing separation anxiety are far more likely to mention cameras or remote monitoring").
-
-REJECT and DO NOT RETURN any item that is:
-- a tautology or restatement (e.g. "people talking about age mention years", "heartbreak relates to emotions").
-- self-evident for this audience (e.g. for dog owners, that discussions mention dogs or pets).
-- vague (e.g. "life" linked to "quality" - quality of what?).
-- merely the predictable feeling that follows a topic.
-Apply this test to EVERY item: "Could this help someone build, market or position a product?" If no, discard it.
-
-It is correct to return FEWER items (even 2 or 3) than to include weak ones. Do NOT pad. Write each kept item as one short, plain-English, scroll-stopping sentence. Do NOT write the number/multiplier inside the sentence - it is displayed separately as a big figure, so describe ONLY the connection.
-Items: ${JSON.stringify(aiList)}
-Respond ONLY with JSON: {"stats":[{"id":0,"sentence":"..."}]}`;
-
-            const r = await fetch(OPENAI_PROXY_URL, {
+            const r = await fetch(typeof OPENAI_PROXY_URL !== 'undefined' ? OPENAI_PROXY_URL : '/api/openai', {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ openaiPayload: {
-                    model: "gpt-4o-mini",
+                    model: "gpt-4o",
                     messages: [
-                        { role: "system", content: "You write short, punchy, accurate audience stat lines. You never alter or invent numbers, and you never compare to the general population. Output only valid JSON." },
+                        { role: "system", content: "You read real online discussions and surface non-obvious, commercially useful insights. You only assert what the quotes support, never invent statistics or compare to the general population, and you output only valid JSON." },
                         { role: "user", content: prompt }
                     ],
-                    temperature: 0.4,
-                    max_completion_tokens: 600,
+                    temperature: 0.6,
+                    max_completion_tokens: 1800,
                     response_format: { type: "json_object" }
                 }})
             });
             const data = await r.json();
-            if (data && data.openaiResponse) {
-                const picked = JSON.parse(data.openaiResponse).stats || [];
-                finalStats = picked
-                    .filter(p => candidates[p.id] && p.sentence)
-                    .slice(0, 6)
-                    .map(p => ({ number: candidates[p.id].number, sentence: p.sentence }));
-            }
+            if (data && data.openaiResponse && !data.error) parsed = JSON.parse(data.openaiResponse).gems || [];
         } catch (e) {
-            console.warn('[Hidden Stats] AI phrasing failed, using grounded fallback sentences.', e);
+            console.error('[Hidden Gems] AI read failed.', e);
+        }
+        console.log(`[Hidden Gems] AI returned ${parsed.length} raw gems (0 here usually means a proxy timeout / API key issue).`);
+
+        const norm = (str) => (str || '').toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim();
+        const sampleNorm = sample.map(s => norm(`${s.title} ${s.text}`));
+
+        const validated = [];
+        parsed.forEach(g => {
+            if (!g || !g.topic_a || !g.reveal_finding || !g.front_teaser || !g.reveal_summary || !g.opportunity || !g.quote) return;
+            if (!CATEGORY_LABELS[g.category]) return;
+            if (!labelOk(g.topic_a) || !labelOk(g.reveal_finding)) return;
+
+            // Grounding: the quote must actually appear in the sample, so we never show fabricated evidence.
+            const qn = norm(g.quote);
+            if (qn.length < 6) return;
+            let idx = Number.isInteger(g.source_index) ? g.source_index : -1;
+            let srcData = (idx >= 0 && sample[idx]) ? sample[idx].p.data : null;
+            const probe = qn.slice(0, 40);
+            const groundedAtIdx = srcData && sampleNorm[idx] && sampleNorm[idx].includes(probe);
+            if (!groundedAtIdx) {
+                const foundIdx = sampleNorm.findIndex(t => t.includes(probe));
+                if (foundIdx === -1) return;       // quote not found anywhere -> reject as ungrounded
+                srcData = sample[foundIdx].p.data;
+            }
+
+            validated.push({
+                category: g.category,
+                topic_a: String(g.topic_a).trim(),
+                reveal_finding: String(g.reveal_finding).trim(),
+                front_teaser: String(g.front_teaser).trim(),
+                reveal_summary: String(g.reveal_summary).trim(),
+                opportunity: String(g.opportunity).trim(),
+                quote: String(g.quote).trim().slice(0, 200),
+                surprise_score: Number(g.surprise_score) || 0,
+                commercial_value: Number(g.commercial_value) || 0,
+                source: srcData
+            });
+        });
+
+        // Dedupe by concept; split into solid (>=6) and near-miss (>=5) to avoid an empty panel.
+        const seen = new Set();
+        const dedupe = (arr) => arr.filter(g => {
+            const a = norm(g.topic_a), b = norm(g.reveal_finding);
+            if (seen.has(a) || seen.has(b)) return false;
+            seen.add(a); seen.add(b); return true;
+        });
+
+        const solid = dedupe(validated.filter(g => g.surprise_score >= 6).sort((x, y) => y.surprise_score - x.surprise_score));
+        let shown = solid.slice(0, 4);
+        shown.forEach(g => g._tier = 'gem');
+
+        if (shown.length === 0) {
+            const near = dedupe(validated.filter(g => g.surprise_score >= 5).sort((x, y) => y.surprise_score - x.surprise_score)).slice(0, 2);
+            near.forEach(g => g._tier = 'near');
+            shown = near;
         }
 
-        // Resilient fallback: if the AI is unavailable, render the templated sentences (real numbers).
-        if (!finalStats || finalStats.length === 0) {
-            const safe = (pairCandidates.length ? pairCandidates : prevCandidates).slice(0, 6);
-            finalStats = safe.map(c => ({ number: c.number, sentence: c.fallback }));
+        if (shown.length === 0) {
+            updateGemHeader([]);
+            grid.innerHTML = '<p class="placeholder-text">No clear hidden gems stood out this time. Try a Deep search or a longer time frame to surface more.</p>';
+            renderHiddenOpportunities([], audienceContext);
+            return;
         }
 
-        container.innerHTML = finalStats.map(s => `
-            <div class="hidden-stat-card" style="display:flex; gap:14px; align-items:center; padding:14px 16px; margin-bottom:10px; background:rgba(0,165,206,0.06); border-radius:12px;">
-                <div class="hidden-stat-number" style="font-size:1.6rem; font-weight:700; color:#00a5ce; white-space:nowrap;">${s.number}</div>
-                <div class="hidden-stat-text" style="font-size:0.98rem; line-height:1.4; color:#1f2937;">${s.sentence}</div>
-            </div>
-        `).join('');
+        updateGemHeader(shown);
 
-        console.log(`[Hidden Stats] Rendered ${finalStats.length} grounded audience stats.`);
+        grid.innerHTML = '';
+        const set = (root, sel, val) => { const e = root.querySelector(sel); if (e) e.innerText = val; };
+        shown.forEach(g => {
+            const card = GEM_BLUEPRINT.cloneNode(true);
+            card.classList.remove('is-flipped');
+            card.style.display = '';
+            set(card, '.topic-a', g.topic_a);
+            set(card, '.front-summary', g.front_teaser);
+            set(card, '.topic-a-back', g.topic_a);
+            set(card, '.reveal-finding', g.reveal_finding);
+            set(card, '.reveal-summary', g.reveal_summary);
+            set(card, '.gem-opportunity', g.opportunity);
+            set(card, '.gem-category', CATEGORY_LABELS[g.category] || '');
+            set(card, '.gem-tier', g._tier === 'near' ? 'Worth a look' : '');
+            const stat = card.querySelector('.gem-stat');
+            if (stat) {
+                const src = g.source;
+                const q = g.quote.length > 120 ? g.quote.slice(0, 117) + '...' : g.quote;
+                stat.innerText = src ? `“${q}” — r/${src.subreddit}` : `“${q}”`;
+            }
+            card.addEventListener('click', () => card.classList.toggle('is-flipped'));
+            grid.appendChild(card);
+        });
+
+        // Feed the commercial-opportunity panel from the same grounded insights.
+        renderHiddenOpportunities(validated, audienceContext);
+
     } catch (error) {
-        console.error('[Hidden Stats] failed:', error);
-        container.innerHTML = '<p class="placeholder-text">Could not calculate audience stats.</p>';
+        console.error('Hidden Gems error:', error);
+        grid.innerHTML = '<p class="error-message">Could not generate hidden gems.</p>';
     }
+}
+
+// Commercial-opportunity panel (#hidden-stats), fed by the grounded Hidden Gems insights.
+function renderHiddenOpportunities(insights, audienceContext) {
+    const c = document.getElementById('hidden-stats');
+    if (!c) return;
+    const esc = (t) => (t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const opps = (insights || [])
+        .filter(g => g.opportunity && Number(g.commercial_value) >= 6)
+        .sort((a, b) => Number(b.commercial_value) - Number(a.commercial_value));
+    const seen = new Set();
+    const unique = [];
+    for (const o of opps) {
+        const key = (o.opportunity || '').toLowerCase().slice(0, 50);
+        if (seen.has(key)) continue;
+        seen.add(key); unique.push(o);
+        if (unique.length >= 4) break;
+    }
+    if (unique.length === 0) {
+        c.innerHTML = '<p class="placeholder-text">No standout commercial opportunities surfaced this time.</p>';
+        return;
+    }
+    c.innerHTML = unique.map(o => `
+        <div class="hidden-stat-card" style="display:flex; gap:14px; align-items:flex-start; padding:14px 16px; margin-bottom:10px; background:rgba(0,165,206,0.06); border-radius:12px;">
+            <div class="hidden-stat-number" style="font-size:1.3rem; line-height:1.2;">\u{1F4A1}</div>
+            <div class="hidden-stat-text" style="font-size:0.98rem; line-height:1.45; color:#1f2937;">${esc(o.opportunity)}</div>
+        </div>
+    `).join('');
 }
 
 
@@ -4895,7 +4559,6 @@ async function runProblemFinder(options = {}) {
                 searchedCount: gemCorpus.length,
                 searchedLabel: 'posts and comments'
             });
-            generateAndRenderHiddenStats(gemCorpus, originalGroupName);
         }, 4000);
       
       

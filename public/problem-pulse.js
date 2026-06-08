@@ -360,7 +360,7 @@ Respond ONLY with valid JSON: {"gems":[{"category":"...","topic_a":"...","reveal
                 temperature: 0.6,
                 max_completion_tokens: 1800,
                 response_format: { type: "json_object" }
-            }, { tries: 1 });
+            }, { tries: 2 });
             if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).gems || [];
         } catch (e) {
             console.error('[Hidden Gems] AI read failed.', e);
@@ -2737,7 +2737,7 @@ async function generateAndRenderConstellation(items) {
     const isLifestyleNoise = (q) => LIFESTYLE_NOISE.test(q || '');
 
     const BATCH_SIZE = 20;          // bigger batches => fewer round-trips (80 items => 4 calls)
-    const CONCURRENCY = 4;          // run up to 4 batches at once (no sleeps) to slash wall-clock time
+    const CONCURRENCY = 2;          // 2 at a time: fast, but gentle enough to avoid proxy rate limits
     const MIN_SIGNALS = 12;
     const enrichedSignals = [];     // strong: clear commercial cue
     const backupSignals = [];       // weaker but valid - used to top up
@@ -2789,27 +2789,18 @@ ${batch.map((item, index) => `${index}. ${((item.data.body || item.data.selftext
 Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"category":"...","theme":"..."}]}`;
 
         try {
-            const response = await fetch(OPENAI_PROXY_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    openaiPayload: {
-                        model: "gpt-4o-mini",
-                        messages: [
-                            { role: "system", content: "You are a precise shopper-behaviour analyst. You extract genuine buying, spending, brand-choice and product-research signals, and you reject only pure lifestyle, diet, habit and routine choices where nothing is bought. You output only valid JSON." },
-                            { role: "user", content: prompt }
-                        ],
-                        temperature: 0.2,
-                        max_completion_tokens: 2500,
-                        response_format: { "type": "json_object" }
-                    }
-                })
-            });
+            const data = await callOpenAIProxyWithRetry({
+                model: "gpt-4o-mini",
+                messages: [
+                    { role: "system", content: "You are a precise shopper-behaviour analyst. You extract genuine buying, spending, brand-choice and product-research signals, and you reject only pure lifestyle, diet, habit and routine choices where nothing is bought. You output only valid JSON." },
+                    { role: "user", content: prompt }
+                ],
+                temperature: 0.2,
+                max_completion_tokens: 2500,
+                response_format: { "type": "json_object" }
+            }, { tries: 2 });
 
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-
-            const data = await response.json();
-            if (!data || !data.openaiResponse) throw new Error("Proxy timed out or returned invalid format (check API key / proxy).");
+            if (!data || !data.openaiResponse) throw new Error("Proxy returned no content after retries (timeout / rate limit / API key).");
 
             const parsed = JSON.parse(data.openaiResponse);
             if (!parsed.signals || !Array.isArray(parsed.signals)) return;

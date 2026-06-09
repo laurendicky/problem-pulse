@@ -1511,6 +1511,27 @@ async function extractAndValidateEntities(posts, nicheContext) {
         `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 600)}`
     ).join('\n---\n');
 
+    // 2b. Frequent capitalised proper-noun candidates from the FULL corpus (original case), so
+    // common brands (e.g. "Kong" for dog owners) get classified even if they sit deep in the data
+    // and never make the sample above. The model decides which are real brands vs generic vs noise.
+    const caseText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
+    const AUD_WORDS = new Set((nicheContext || '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean));
+    const CAP_SKIP = new Set(['the','this','that','these','those','here','there','what','when','where','why','how','who',
+        'and','but','for','nor','yet','our','your','his','her','its','their','they','them','you','she','it','we','my','me',
+        'just','also','then','than','some','any','all','one','two','reddit','edit','update','tldr','imo','imho','dog','dogs','cat','cats','pet','pets']);
+    const capFreq = {};
+    (caseText.match(/\b[A-Z][A-Za-z0-9'&-]{2,}\b/g) || []).forEach(tok => {
+        const low = tok.toLowerCase();
+        if (low.length < 3 || stopWords.includes(low) || CAP_SKIP.has(low) || AUD_WORDS.has(low)) return;
+        capFreq[tok] = (capFreq[tok] || 0) + 1;
+    });
+    const candidateList = Object.entries(capFreq)
+        .filter(([k, c]) => c >= 3)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 50)
+        .map(([k, c]) => `${k} (${c})`)
+        .join(', ');
+
     const prompt = `You are a shopping-behaviour analyst studying what the "${nicheContext}" audience BUYS. This feeds a "How They Shop" report, so every item you return MUST be something a person can actually buy, use, or shop for. Separate the real commercial BRANDS from the generic buyable PRODUCT categories.
 
 A BRAND is a specific company, retailer, app, marketplace, medication, or trademarked product line made or sold by a named maker — the kind of proper noun you would see on a label, a storefront, or an app store. Examples of the SHAPE of a brand: Nike, Chewy, Kong, Purina, Adderall, Vyvanse, Fitbit, Notion, Amazon. A brand is owned by someone. Think about THIS audience's specific market and include the niche retailers, apps, supplement makers, medications, gear makers and product lines they actually mention — even small or unfamiliar ones.
@@ -1539,7 +1560,7 @@ Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}
         model: "gpt-4o-mini",
         messages: [
             { role: "system", content: "You are a specialized shopping-data extractor for a 'How They Shop' report. Every brand or product you return must be something the audience can actually buy, use, or shop for. You surface every specific named brand present in the text, including niche or unfamiliar ones, and you NEVER return medical conditions, symptoms, emotions, feelings, abstract states, diets, methods, activities or personal names." },
-            { role: "user", content: prompt + "\n\nText to analyze:\n" + sampleText }
+            { role: "user", content: prompt + "\n\nFREQUENT CAPITALISED TERMS across ALL discussions (name (count)). Go through EVERY one: put each real commercial brand into \"brands\" and each generic buyable item into \"products\"; ignore the rest. NEVER skip a genuine brand just because it is also a common word (e.g. Kong is a dog-toy brand, Apple is a tech brand):\n" + (candidateList || "(none detected)") + "\n\nText to analyze:\n" + sampleText }
         ],
         temperature: 0,
         response_format: { "type": "json_object" }
@@ -2984,7 +3005,11 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
         const shoppingPosts = await fetchMultipleRedditDataBatched(subredditQueryString, SHOPPING_SIGNAL_TERMS, 60, timeFilter, false);
         const postIds = shoppingPosts.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 80).map(p => p.data.id);
         const highIntentComments = await fetchCommentsForPosts(postIds);
-        const allItems = [...shoppingPosts, ...highIntentComments];
+        // Supplement with the main analysed corpus so the chart still has plenty to mine when the
+        // narrow shopping-phrase search returns little (purchase mentions live in general posts too).
+        const generalPosts = window._filteredPosts || [];
+        const allItems = deduplicatePosts([...shoppingPosts, ...highIntentComments, ...generalPosts]);
+        console.log(`[Constellation] shopping=${shoppingPosts.length} comments=${highIntentComments.length} general=${generalPosts.length} -> corpus=${allItems.length}`);
         await generateAndRenderConstellation(allItems);
     } catch (error) {
         console.error("'How They Shop' analysis failed in the background:", error);

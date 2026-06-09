@@ -5100,19 +5100,8 @@ function setupGrowthKitInteraction() {
 //   .podcast-link   -> optional <a> chevron - JS sets href to the Apple Podcasts page
 // Names are AI-extracted but VERIFIED against the corpus; artwork only attaches on a name match.
 // =================================================================================
-function itunesPodcastLookup(name) {
-    return new Promise((resolve) => {
-        const cb = '_itunes_cb_' + Math.random().toString(36).slice(2);
-        let script;
-        const cleanup = () => { try { delete window[cb]; } catch (e) {} if (script && script.parentNode) script.parentNode.removeChild(script); };
-        const timer = setTimeout(() => { cleanup(); resolve(null); }, 6000);
-        window[cb] = (data) => { clearTimeout(timer); cleanup(); resolve((data && data.results && data.results[0]) || null); };
-        script = document.createElement('script');
-        script.src = `https://itunes.apple.com/search?term=${encodeURIComponent(name)}&entity=podcast&limit=1&callback=${cb}`;
-        script.onerror = () => { clearTimeout(timer); cleanup(); resolve(null); };
-        document.head.appendChild(script);
-    });
-}
+
+
 
 async function generateAndRenderPodcasts(posts, audienceContext, subredditQueryString, timeFilter) {
     const container = document.getElementById('podcasts');
@@ -5124,13 +5113,13 @@ async function generateAndRenderPodcasts(posts, audienceContext, subredditQueryS
     const blueprint = window._podcastBlueprint;
     if (!blueprint) { console.warn('[Media] no .podcasts-list-item template found in #podcasts.'); return; }
 
-    // Expanded matching to catch podcasts, videos, channels, books, newsletters, blogs, and reads
+    // Broad matching filters to look for media and written content mentions
     const mediaMatch = /\b(podcast|podcasts|episode|episodes|youtube|yt|channel|channels|video|videos|watch|vlog|vlogs|show|shows|book|books|newsletter|newsletters|substack|blog|blogs|read|reading|article|articles)\b/i;
     let pool = (posts || []).filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
 
     try {
         if (subredditQueryString) {
-            // High-volume single-word queries instead of restrictive multi-word terms
+            // Simplified, high-volume single-word queries instead of restrictive multi-word terms
             const searched = await fetchMultipleRedditDataBatched(
                 subredditQueryString, 
                 ['recommend', 'podcast', 'youtube', 'book', 'blog', 'channel', 'read'], 
@@ -5152,18 +5141,14 @@ async function generateAndRenderPodcasts(posts, audienceContext, subredditQueryS
         `[${i}] ${`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.replace(/\s+/g, ' ').slice(0, 600)}`
     ).join('\n');
 
-    const prompt = `From these "${audienceContext}" discussions, extract the specific MEDIA, PUBLICATIONS, and RESOURCES this audience consumes and recommends.
-This includes:
-- Podcasts and Audio Shows
-- YouTube channels, Video creators, and Vlogs
-- Books, Newsletters, Substacks, and Blogs
+    const prompt = `From these "${audienceContext}" discussions, extract the specific SHOWS, CHANNELS, & READING resources this audience follows: PODCASTS, YOUTUBE channels, and books/newsletters they mention watching, listening to, or recommending.
 
 For each item, return:
 - "type": "podcast", "youtube", "book", "newsletter", or "blog".
-- "name": the actual title / channel / creator name exactly as mentioned (verbatim) - a real proper name, NEVER a descriptive phrase or sentence fragment.
+- "name": the actual title / channel name / book title exactly as mentioned - a real proper name, NEVER a descriptive phrase or sentence fragment.
 - "focus": a SHORT phrase for what it is about (genre/topic), ONLY if clearly stated; otherwise "".
 
-RULES: Only return real, specific resources actually NAMED in the text. NEVER invent names or numbers, and never return generic phrases or fragments. If none are clearly named, return an empty list.
+RULES: Only include real, specific resources actually NAMED in the text. NEVER invent names or descriptions. If none are named, return an empty list.
 
 Discussions:
 ${sampleText}
@@ -5204,42 +5189,22 @@ Respond ONLY with valid JSON: {"media":[{"type":"youtube","name":"...","focus":"
         items.push({ type, name, focus: (w.focus || '').trim(), count });
     });
     items.sort((a, b) => b.count - a.count);
-    const top = items.slice(0, 16);
-
-    // Verify Podcasts against Apple Podcasts API to grab real cover art
-    const out = [];
-    await Promise.all(top.map(async it => {
-        if (it.type === 'podcast') {
-            try {
-                const r = await itunesPodcastLookup(it.name);
-                if (r && r.collectionName) {
-                    const a = it.name.toLowerCase(), b = r.collectionName.toLowerCase();
-                    if (b.includes(a) || a.includes(b)) {
-                        it.image = r.artworkUrl600 || r.artworkUrl100 || '';
-                        it.link = r.collectionViewUrl || '';
-                        it.name = r.collectionName;
-                        it.focus = it.focus || r.primaryGenreName || '';
-                        out.push(it);
-                        return;
-                    }
-                }
-            } catch (e) { /* best-effort */ }
-            return; // drop unverified podcasts to keep the visual list accurate
-        }
-        
-        // Generate fallback links based on the media type
+    
+    // No external API calls are made. We immediately map web search fallback links
+    const top = items.slice(0, 8);
+    top.forEach(it => {
         if (it.type === 'youtube') {
             it.link = `https://www.youtube.com/results?search_query=${encodeURIComponent(it.name)}`;
         } else if (it.type === 'book') {
             it.link = `https://www.google.com/search?tbm=bks&q=${encodeURIComponent(it.name)}`;
+        } else if (it.type === 'podcast') {
+            it.link = `https://www.google.com/search?q=${encodeURIComponent(it.name + ' podcast')}`;
         } else {
             it.link = `https://www.google.com/search?q=${encodeURIComponent(it.name)}`;
         }
-        out.push(it);
-    }));
-    out.sort((a, b) => b.count - a.count);
-    console.log(`[Media] ${out.length} kept (podcasts verified, other resources grounded).`);
-    renderPodcasts(container, blueprint, out.slice(0, 8));
+    });
+
+    renderPodcasts(container, blueprint, top);
 }
 
 function renderPodcasts(container, blueprint, items) {
@@ -5281,33 +5246,15 @@ function renderPodcasts(container, blueprint, items) {
         set('.podcast-focus', it.focus ? `Focus: ${it.focus}` : `Type: ${typeLabel}`);
         set('.podcast-meta', `Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}`);
         
+        // Bypassing the cover image element simplifies rendering and avoids alignment issues
         const img = node.querySelector('.podcast-image');
         if (img) {
-            img.style.display = ''; // Reset display
-            if (it.image) {
-                if (img.tagName === 'IMG') img.src = it.image; else img.style.backgroundImage = `url("${it.image}")`;
-            } else {
-                // Branded CSS placeholders (prevents Webflow visual collapse)
-                let gradient = 'linear-gradient(135deg, #00a5ce, #7bd9ec)'; // Teal (default / podcast)
-                if (it.type === 'youtube') {
-                    gradient = 'linear-gradient(135deg, #ff4fa3, #fd80c7)'; // Pink (vlogs / youtube)
-                } else if (it.type === 'book') {
-                    gradient = 'linear-gradient(135deg, #9B7CFF, #6AA9FF)'; // Purple (books)
-                } else if (it.type === 'newsletter' || it.type === 'blog') {
-                    gradient = 'linear-gradient(135deg, #5ED1B8, #aecbfa)'; // Green/Blue (newsletters/blogs)
-                }
-                
-                if (img.tagName === 'IMG') {
-                    const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="%23ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" fill="%2300a5ce"/><polygon points="10 8 16 12 10 16 10 8" fill="%23ffffff"/></svg>`;
-                    img.src = `data:image/svg+xml;utf8,${encodeURIComponent(svgIcon)}`;
-                } else {
-                    img.style.background = gradient;
-                }
-            }
+            img.style.display = 'none'; 
         }
+        
         const link = node.querySelector('.podcast-link');
         if (link) {
-            link.style.display = ''; // Reset display
+            link.style.display = ''; 
             if (it.link) {
                 link.setAttribute('href', it.link);
                 link.setAttribute('target', '_blank');

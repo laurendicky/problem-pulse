@@ -3108,6 +3108,7 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
         const _corpus = window._fullCorpus || window._filteredPosts || [];
         try { renderSocialSplitChart(_corpus); } catch (e) { console.warn('[Social Split] failed', e); }
         try { generateAndRenderWaterholes(_corpus, window.originalGroupName || ''); } catch (e) { console.warn('[Waterholes] failed', e); }
+        try { generateAndRenderPodcasts(_corpus, window.originalGroupName || ''); } catch (e) { console.warn('[Podcasts] failed', e); }
     }
 }
 // =================================================================================
@@ -5059,6 +5060,139 @@ function setupGrowthKitInteraction() {
 // =================================================================================
 // =================================================================================
 // =================================================================================
+// =================================================================================
+// === PODCASTS: shows the audience names, enriched with REAL Apple cover art ========
+// Build ONE .podcasts-list-item inside #podcasts in Webflow, containing:
+//   .podcast-image  -> an <img> (or a div) - JS sets the real iTunes artwork
+//   .podcast-name   -> show name
+//   .podcast-focus  -> "Focus: <genre/topic>" (real genre from iTunes, or stated focus)
+//   .podcast-meta   -> "Mentioned N times" (real count; downloads can't be sourced honestly)
+//   .podcast-link   -> optional <a> chevron - JS sets href to the Apple Podcasts page
+// Names are AI-extracted but VERIFIED against the corpus; artwork only attaches on a name match.
+// =================================================================================
+function itunesPodcastLookup(name) {
+    return new Promise((resolve) => {
+        const cb = '_itunes_cb_' + Math.random().toString(36).slice(2);
+        let script;
+        const cleanup = () => { try { delete window[cb]; } catch (e) {} if (script && script.parentNode) script.parentNode.removeChild(script); };
+        const timer = setTimeout(() => { cleanup(); resolve(null); }, 6000);
+        window[cb] = (data) => { clearTimeout(timer); cleanup(); resolve((data && data.results && data.results[0]) || null); };
+        script = document.createElement('script');
+        script.src = `https://itunes.apple.com/search?term=${encodeURIComponent(name)}&entity=podcast&limit=1&callback=${cb}`;
+        script.onerror = () => { clearTimeout(timer); cleanup(); resolve(null); };
+        document.head.appendChild(script);
+    });
+}
+
+async function generateAndRenderPodcasts(posts, audienceContext) {
+    const container = document.getElementById('podcasts');
+    if (!container) return;
+    if (!window._podcastBlueprint) {
+        const bp = container.querySelector('.podcasts-list-item');
+        if (bp) window._podcastBlueprint = bp.cloneNode(true);
+    }
+    const blueprint = window._podcastBlueprint;
+    if (!blueprint) { console.warn('[Podcasts] no .podcasts-list-item template found in #podcasts.'); return; }
+
+    const corpus = posts || [];
+    if (corpus.length < 5) return;
+    const sampleText = corpus.slice(0, 70).map((p, i) =>
+        `[${i}] ${`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.replace(/\s+/g, ' ').slice(0, 500)}`
+    ).join('\n');
+
+    const prompt = `From these "${audienceContext}" discussions, extract the PODCASTS and audio shows people mention listening to or recommending.
+For each, return:
+- "name": the podcast/show name exactly as mentioned (verbatim).
+- "focus": a SHORT phrase for what it is about, ONLY if clearly stated; otherwise "".
+RULES: Only include shows actually NAMED in the text. NEVER invent names, download numbers or descriptions. If none are mentioned, return an empty list.
+Discussions:
+${sampleText}
+Respond ONLY with JSON: {"podcasts":[{"name":"...","focus":"..."}]}`;
+
+    let parsed = [];
+    try {
+        const data = await callOpenAIProxyWithRetry({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You extract only explicitly-named podcasts / audio shows from text. You never invent names, numbers or descriptions, and you output only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.1,
+            max_completion_tokens: 700,
+            response_format: { type: "json_object" }
+        }, { tries: 2 });
+        if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).podcasts || [];
+    } catch (e) {
+        console.warn('[Podcasts] extraction failed:', e && e.message);
+    }
+
+    const allText = corpus.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' [SEP] ').toLowerCase();
+    const seen = new Set();
+    const items = [];
+    (parsed || []).forEach(w => {
+        if (!w || !w.name) return;
+        const name = String(w.name).trim();
+        const key = name.toLowerCase();
+        if (key.length < 3 || seen.has(key)) return;
+        const esc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const m = allText.match(new RegExp(`\\b${esc}\\b`, 'gi'));
+        const count = m ? m.length : 0;
+        if (count === 0) return;
+        seen.add(key);
+        items.push({ name, focus: (w.focus || '').trim(), count });
+    });
+    items.sort((a, b) => b.count - a.count);
+    const top = items.slice(0, 8);
+
+    // Enrich with REAL cover art + genre from iTunes - only when the title actually matches.
+    await Promise.all(top.map(async it => {
+        try {
+            const r = await itunesPodcastLookup(it.name);
+            if (!r || !r.collectionName) return;
+            const a = it.name.toLowerCase(), b = r.collectionName.toLowerCase();
+            if (b.includes(a) || a.includes(b)) {
+                it.image = r.artworkUrl600 || r.artworkUrl100 || '';
+                it.appleUrl = r.collectionViewUrl || '';
+                it.name = r.collectionName;
+                if (!it.focus && r.primaryGenreName) it.focus = r.primaryGenreName;
+            }
+        } catch (e) { /* best-effort */ }
+    }));
+
+    renderPodcasts(container, blueprint, top);
+}
+
+function renderPodcasts(container, blueprint, items) {
+    container.querySelectorAll('.podcasts-list-item').forEach(el => el.remove());
+    if (!items || !items.length) {
+        const empty = blueprint.cloneNode(true);
+        empty.style.display = '';
+        const n = empty.querySelector('.podcast-name'); if (n) n.innerText = 'No podcasts were named in these discussions.';
+        ['.podcast-focus', '.podcast-meta'].forEach(sel => { const e = empty.querySelector(sel); if (e) e.innerText = ''; });
+        const img = empty.querySelector('.podcast-image'); if (img) img.style.display = 'none';
+        container.appendChild(empty);
+        return;
+    }
+    items.forEach(it => {
+        const node = blueprint.cloneNode(true);
+        node.style.display = '';
+        const set = (sel, val) => { const e = node.querySelector(sel); if (e) e.innerText = val; };
+        set('.podcast-name', it.name);
+        set('.podcast-focus', it.focus ? `Focus: ${it.focus}` : '');
+        set('.podcast-meta', `Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}`);
+        const img = node.querySelector('.podcast-image');
+        if (img) {
+            if (it.image) {
+                if (img.tagName === 'IMG') img.src = it.image; else img.style.backgroundImage = `url("${it.image}")`;
+                img.style.display = '';
+            } else { img.style.display = 'none'; }
+        }
+        const link = node.querySelector('.podcast-link');
+        if (link && it.appleUrl) link.setAttribute('href', it.appleUrl);
+        container.appendChild(node);
+    });
+}
+
 // === SOCIAL SPLIT DONUT: where the audience hangs out, by platform ================
 // Add an empty <div id="social-split-chart"></div> in Webflow. Pure CSS conic-gradient
 // donut + legend, computed by counting platform mentions in the corpus (no AI, instant).

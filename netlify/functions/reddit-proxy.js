@@ -1,25 +1,88 @@
+// =============================================================================
+// reddit-proxy.js  (Netlify function)  — upgraded
+//
+// Two changes vs. the old version:
+//   1. TOKEN CACHING. The old proxy minted a brand-new OAuth token on EVERY request
+//      (two round-trips per call). Tokens are valid for hours, so we now cache each
+//      app's token in module scope (survives warm invocations) and only refresh when
+//      it's near expiry. This roughly halves Reddit latency on its own.
+//   2. OPTIONAL MULTI-APP POOL. Add a second Reddit app's creds as REDDIT_CLIENT_ID_2
+//      / REDDIT_CLIENT_SECRET_2 in Netlify and the proxy round-robins across both,
+//      doubling your effective ~100 req/min ceiling for multiple simultaneous users.
+//      If you don't set the _2 vars, it runs on the single app exactly as before.
+//
+// No client-side changes needed — same request/response shape.
+// =============================================================================
 
+const UA = process.env.REDDIT_USER_AGENT;
 
-const { REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USER_AGENT } = process.env;
+// Build the app pool from env. App #1 is required; #2 is optional.
+const APPS = [
+    { id: process.env.REDDIT_CLIENT_ID,   secret: process.env.REDDIT_CLIENT_SECRET },
+    { id: process.env.REDDIT_CLIENT_ID_2, secret: process.env.REDDIT_CLIENT_SECRET_2 }
+].filter(a => a.id && a.secret);
 
-async function getRedditToken() {
-    const auth = Buffer.from(`${REDDIT_CLIENT_ID}:${REDDIT_CLIENT_SECRET}`).toString('base64');
+// Per-app token cache: id -> { token, expiresAt(ms) }. Persists across warm invocations.
+const tokenCache = new Map();
+let rr = 0; // round-robin cursor
+
+async function getToken(app, forceRefresh = false) {
+    const cached = tokenCache.get(app.id);
+    // Reuse a cached token until 60s before it expires.
+    if (!forceRefresh && cached && cached.expiresAt > Date.now() + 60000) {
+        return cached.token;
+    }
+    const auth = Buffer.from(`${app.id}:${app.secret}`).toString('base64');
     const response = await fetch('https://www.reddit.com/api/v1/access_token', {
         method: 'POST',
         headers: {
             'Authorization': `Basic ${auth}`,
             'Content-Type': 'application/x-www-form-urlencoded',
-            'User-Agent': REDDIT_USER_AGENT
+            'User-Agent': UA
         },
         body: 'grant_type=client_credentials'
     });
     if (!response.ok) {
         const errorBody = await response.text();
-        console.error("Reddit Token Error:", errorBody);
+        console.error('Reddit Token Error:', errorBody);
         throw new Error('Failed to retrieve Reddit API token');
     }
     const data = await response.json();
+    const ttlMs = (data.expires_in || 3600) * 1000;
+    tokenCache.set(app.id, { token: data.access_token, expiresAt: Date.now() + ttlMs });
     return data.access_token;
+}
+
+// Build the Reddit URL for a given request body (unchanged routing logic).
+function buildUrl(body) {
+    if (body.type === 'about') {
+        if (!body.subreddit) throw new Error("A 'subreddit' name is required for 'about' details.");
+        return `https://oauth.reddit.com/r/${body.subreddit}/about`;
+    }
+    if (body.type === 'comments') {
+        if (!body.postId) throw new Error("A 'postId' is required for fetching comments.");
+        return `https://oauth.reddit.com/comments/${body.postId}?limit=500&depth=10`;
+    }
+    if (body.searchTerm) {
+        const { searchTerm, niche, limit, timeFilter, after } = body;
+        const query = encodeURIComponent(`( ${niche} ) ${searchTerm}`);
+        let url = `https://oauth.reddit.com/search?q=${query}&limit=${limit}&t=${timeFilter}&sort=relevance`;
+        if (after) url += `&after=${after}`;
+        return url;
+    }
+    throw new Error('Invalid request payload.');
+}
+
+// One Reddit call with a cached token. On a 401 (token rejected), refresh once and retry —
+// so a stale cached token never causes a hard failure.
+async function redditFetch(app, url) {
+    let token = await getToken(app);
+    let res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': UA } });
+    if (res.status === 401) {
+        token = await getToken(app, true);
+        res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': UA } });
+    }
+    return res;
 }
 
 exports.handler = async (event) => {
@@ -28,76 +91,37 @@ exports.handler = async (event) => {
         'Access-Control-Allow-Headers': 'Content-Type',
         'Access-Control-Allow-Methods': 'POST, OPTIONS'
     };
-    
+
     if (event.httpMethod === 'OPTIONS') {
         return { statusCode: 204, headers: corsHeaders, body: '' };
     }
 
     try {
+        if (!APPS.length) throw new Error('No Reddit app credentials configured.');
+
         const body = JSON.parse(event.body);
-        const token = await getRedditToken();
-        let url;
+        const url = buildUrl(body);
 
-        // --- Main routing logic ---
-        if (body.type === 'about') {
-            if (!body.subreddit) throw new Error("A 'subreddit' name is required for 'about' details.");
-            url = `https://oauth.reddit.com/r/${body.subreddit}/about`;
-        } else if (body.type === 'comments') {
-            if (!body.postId) throw new Error("A 'postId' is required for fetching comments.");
-            url = `https://oauth.reddit.com/comments/${body.postId}?limit=500&depth=10`;
-        } else if (body.searchTerm) {
-            const { searchTerm, niche, limit, timeFilter, after } = body;
-            const query = encodeURIComponent(`( ${niche} ) ${searchTerm}`);
-            url = `https://oauth.reddit.com/search?q=${query}&limit=${limit}&t=${timeFilter}&sort=relevance`;
-            if (after) {
-                url += `&after=${after}`;
-            }
-        } else {
-            throw new Error("Invalid request payload.");
-        }
-        
-        const redditResponse = await fetch(url, {
-            headers: { 
-                'Authorization': `Bearer ${token}`, 
-                'User-Agent': REDDIT_USER_AGENT 
-            }
-        });
+        // Pick an app round-robin across the pool (1 app => always the same one).
+        const app = APPS[rr++ % APPS.length];
 
-        // ======================================================================
-        // *** THE FINAL FIX IS HERE: Handle ANY failure for 'about' requests ***
-        // ======================================================================
+        const redditResponse = await redditFetch(app, url);
+
         if (!redditResponse.ok) {
-            // If this was an 'about' request, any failure (404, 403, etc.) simply means
-            // the subreddit is not accessible. This is expected and not a server error.
+            // 'about' failures (404/403/etc.) just mean the subreddit isn't accessible — not an error.
             if (body.type === 'about') {
-                return {
-                    statusCode: 200, // Return a success code
-                    headers: corsHeaders,
-                    body: JSON.stringify(null) // Signal to the front-end that this one is invalid.
-                };
+                return { statusCode: 200, headers: corsHeaders, body: JSON.stringify(null) };
             }
-
-            // For any OTHER type of request (search, comments), a non-OK status IS a server problem.
             const errorText = await redditResponse.text();
-            console.error("Reddit API Error:", errorText);
+            console.error('Reddit API Error:', errorText);
             throw new Error(`Reddit API failed with status: ${redditResponse.status} for URL: ${url}`);
         }
-        // ======================================================================
 
         const data = await redditResponse.json();
-
-        return {
-            statusCode: 200,
-            headers: corsHeaders,
-            body: JSON.stringify(data)
-        };
+        return { statusCode: 200, headers: corsHeaders, body: JSON.stringify(data) };
 
     } catch (error) {
         console.error('Proxy Error:', error);
-        return {
-            statusCode: 500,
-            headers: corsHeaders,
-            body: JSON.stringify({ error: error.message })
-        };
+        return { statusCode: 500, headers: corsHeaders, body: JSON.stringify({ error: error.message }) };
     }
 };

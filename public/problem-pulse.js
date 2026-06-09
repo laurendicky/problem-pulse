@@ -5124,16 +5124,16 @@ async function generateAndRenderPodcasts(posts, audienceContext, subredditQueryS
     const blueprint = window._podcastBlueprint;
     if (!blueprint) { console.warn('[Media] no .podcasts-list-item template found in #podcasts.'); return; }
 
-    // Expanded regex to capture podcasts, videos, channels, books, newsletters, blogs, and reads
+    // Broad matching filters to look for media and written content mentions
     const mediaMatch = /\b(podcast|podcasts|episode|episodes|youtube|yt|channel|channels|video|videos|watch|vlog|vlogs|show|shows|book|books|newsletter|newsletters|substack|blog|blogs|read|reading|article|articles)\b/i;
     let pool = (posts || []).filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
 
     try {
         if (subredditQueryString) {
-            // Broad search queries to fetch high-intent recommendations
+            // FIX: Simplified, high-volume single-word queries instead of complex multi-word terms
             const searched = await fetchMultipleRedditDataBatched(
                 subredditQueryString, 
-                ['podcast', 'youtube channel', 'book recommendation', 'newsletter substack', 'favourite blog'], 
+                ['recommend', 'podcast', 'youtube', 'book', 'blog', 'channel', 'read'], 
                 30, 
                 timeFilter || 'all', 
                 false
@@ -5158,7 +5158,7 @@ This includes:
 - YouTube channels, Video creators, and Vlogs
 - Books, Newsletters, Substacks, and Blogs
 
-For each, return:
+For each item, return:
 - "type": "podcast", "youtube", "book", "newsletter", or "blog".
 - "name": the actual title / channel / creator name exactly as mentioned (verbatim) - a real proper name, NEVER a descriptive phrase or sentence fragment.
 - "focus": a SHORT phrase for what it is about (genre/topic), ONLY if clearly stated; otherwise "".
@@ -5175,7 +5175,7 @@ Respond ONLY with valid JSON: {"media":[{"type":"youtube","name":"...","focus":"
         const data = await callOpenAIProxyWithRetry({
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "You extract explicitly-named podcasts, books, newsletters, blogs, and video channels from text. You never invent names, and you output only valid JSON." },
+                { role: "system", content: "You extract only explicitly-named podcasts, books, newsletters, blogs, and video channels from text. You never invent names, and you output only valid JSON." },
                 { role: "user", content: prompt }
             ],
             temperature: 0.1,
@@ -5247,9 +5247,23 @@ function renderPodcasts(container, blueprint, items) {
     if (!items || !items.length) {
         const empty = blueprint.cloneNode(true);
         empty.style.display = '';
-        const n = empty.querySelector('.podcast-name'); if (n) n.innerText = 'No resources or media were named in these discussions.';
-        ['.podcast-focus', '.podcast-meta'].forEach(sel => { const e = empty.querySelector(sel); if (e) e.innerText = ''; });
-        const img = empty.querySelector('.podcast-image'); if (img) img.style.display = 'none';
+        
+        // Populate the placeholder message safely
+        const n = empty.querySelector('.podcast-name'); 
+        if (n) n.innerText = 'No resources or media were named in these discussions.';
+        
+        // FIX: Clean up and hide empty UI elements so they don't overlap awkwardly
+        ['.podcast-focus', '.podcast-meta'].forEach(sel => { 
+            const e = empty.querySelector(sel); 
+            if (e) e.style.display = 'none'; 
+        });
+        
+        const img = empty.querySelector('.podcast-image'); 
+        if (img) img.style.display = 'none';
+        
+        const link = empty.querySelector('.podcast-link'); 
+        if (link) link.style.display = 'none';
+        
         container.appendChild(empty);
         return;
     }
@@ -5257,27 +5271,27 @@ function renderPodcasts(container, blueprint, items) {
         const node = blueprint.cloneNode(true);
         node.style.display = '';
         
-        // We set the dynamic type as an attribute so Webflow can style icons (e.g. data-media-type="book")
+        // Dynamic media type attribute (allows Webflow to hook custom icons)
         node.setAttribute('data-media-type', it.type || 'podcast'); 
         
         const set = (sel, val) => { const e = node.querySelector(sel); if (e) e.innerText = val; };
         set('.podcast-name', it.name);
         
-        // Use Type as fallback focus label if no specific focus is returned
+        // Use Media Type as dynamic label if specific focus isn't returned
         const typeLabel = it.type ? it.type.charAt(0).toUpperCase() + it.type.slice(1) : 'Resource';
         set('.podcast-focus', it.focus ? `Focus: ${it.focus}` : `Type: ${typeLabel}`);
         set('.podcast-meta', `Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}`);
         
         const img = node.querySelector('.podcast-image');
         if (img) {
+            img.style.display = ''; // Ensure display is reset
             if (it.image) {
                 if (img.tagName === 'IMG') img.src = it.image; else img.style.backgroundImage = `url("${it.image}")`;
-                img.style.display = '';
             } else {
-                // Generates beautiful CSS gradient placeholders to prevent Webflow layout collapsing when cover art isn't found
-                let gradient = 'linear-gradient(135deg, #00a5ce, #7bd9ec)'; // Teal (podcast / default)
+                // Branded CSS placeholder gradients (replaces empty spaces with visual blocks)
+                let gradient = 'linear-gradient(135deg, #00a5ce, #7bd9ec)'; // Teal (default / podcast)
                 if (it.type === 'youtube') {
-                    gradient = 'linear-gradient(135deg, #ff4fa3, #fd80c7)'; // Pink (video/vlogs)
+                    gradient = 'linear-gradient(135deg, #ff4fa3, #fd80c7)'; // Pink (vlogs / youtube)
                 } else if (it.type === 'book') {
                     gradient = 'linear-gradient(135deg, #9B7CFF, #6AA9FF)'; // Purple (books)
                 } else if (it.type === 'newsletter' || it.type === 'blog') {
@@ -5285,20 +5299,22 @@ function renderPodcasts(container, blueprint, items) {
                 }
                 
                 if (img.tagName === 'IMG') {
-                    // SVG fallback icon
                     const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="%23ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" fill="%2300a5ce"/><polygon points="10 8 16 12 10 16 10 8" fill="%23ffffff"/></svg>`;
                     img.src = `data:image/svg+xml;utf8,${encodeURIComponent(svgIcon)}`;
                 } else {
                     img.style.background = gradient;
                 }
-                img.style.display = '';
             }
         }
+        
         const link = node.querySelector('.podcast-link');
-        if (link && it.link) {
-            link.setAttribute('href', it.link);
-            link.setAttribute('target', '_blank');
-            link.setAttribute('rel', 'noopener noreferrer');
+        if (link) {
+            link.style.display = ''; // Ensure display is reset
+            if (it.link) {
+                link.setAttribute('href', it.link);
+                link.setAttribute('target', '_blank');
+                link.setAttribute('rel', 'noopener noreferrer');
+            }
         }
         container.appendChild(node);
     });

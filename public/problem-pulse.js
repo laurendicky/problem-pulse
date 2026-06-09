@@ -684,7 +684,7 @@ async function classifySentimentWithAI(posts) {
         ${JSON.stringify(postsForAI)}`;
 
         const openAIParams = {
-            model: "gpt-5.4-mini",
+            model: "gpt-4o-mini",
             messages: [{ role: "system", content: "You are a precise JSON-only sentiment classifier." }, { role: "user", content: prompt }],
             temperature: 0,
             max_completion_tokens: 1500,
@@ -751,7 +751,7 @@ async function generateSentimentContextWithAI(posts, brandName) {
     ${postsForAI}`;
 
     const openAIParams = {
-        model: "gpt-5.4-mini",
+        model: "gpt-4o-mini",
         messages: [{ role: "system", content: "You are a concise market analyst outputting only JSON." }, { role: "user", content: prompt }],
         temperature: 0.1,
         max_completion_tokens: 300,
@@ -834,7 +834,24 @@ function deduplicateByContent(items) {
 // Resilient proxy caller. A ~25s latency timeout is usually variance, not a hard failure:
 // each call is a fresh Netlify invocation with its own budget, so a retry typically succeeds
 // in a few seconds. This fixes timeouts WITHOUT shrinking prompts or changing models.
+// Global limiter: never let more than a few proxy calls run at once. Bursting (constellation
+// batches + gems + sub-problems + summary all firing together) is what trips the proxy's
+// rate / 25s-latency limit and leaves features empty. This serialises the load gracefully.
+let _proxyActive = 0;
+const _proxyWaiters = [];
+const PROXY_MAX_CONCURRENT = 3;
+function _acquireProxySlot() {
+    if (_proxyActive < PROXY_MAX_CONCURRENT) { _proxyActive++; return Promise.resolve(); }
+    return new Promise(resolve => _proxyWaiters.push(resolve));
+}
+function _releaseProxySlot() {
+    if (_proxyWaiters.length) { const next = _proxyWaiters.shift(); next(); }
+    else _proxyActive = Math.max(0, _proxyActive - 1);
+}
+
 async function callOpenAIProxyWithRetry(openaiPayload, { tries = 2, backoffMs = 600 } = {}) {
+    await _acquireProxySlot();
+    try {
     for (let attempt = 0; attempt <= tries; attempt++) {
         try {
             const res = await fetch(OPENAI_PROXY_URL, {
@@ -856,6 +873,9 @@ async function callOpenAIProxyWithRetry(openaiPayload, { tries = 2, backoffMs = 
         if (attempt < tries) await new Promise(r => setTimeout(r, backoffMs * (attempt + 1)));
     }
     return null;
+    } finally {
+        _releaseProxySlot();
+    }
 }
 
 // Renders #count-header by filling the user's Webflow-designed blueprint. The author builds
@@ -909,7 +929,7 @@ function getFirstTwoSentences(text) { if (!text) return ''; const sentences = te
 async function assignPostsToFindings(summaries, posts) {
     const postsForAI = posts.slice(0, 50);
     const prompt = `You are an expert data analyst. Your task is to categorize Reddit posts into the most relevant "Finding" from a provided list.\n\nHere are the ${summaries.length} findings:\n${summaries.map((s, i) => `Finding ${i + 1}: ${s.title}`).join('\n')}\n\nHere are the ${postsForAI.length} Reddit posts:\n${postsForAI.map((p, i) => `Post ${i + 1}: ${(p.data.title || p.data.link_title || '').substring(0, 150)}`).join('\n')}\n\nINSTRUCTIONS: For each post, assign it to the most relevant Finding (from 1 to ${summaries.length}). Respond ONLY with a JSON object with a single key "assignments", which is an array of objects like {"postNumber": 1, "finding": 2}.`;
-    const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a precise data categorization engine that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_completion_tokens: 1500, response_format: { "type": "json_object" } };
+    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data categorization engine that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_completion_tokens: 1500, response_format: { "type": "json_object" } };
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error(`OpenAI API Error for assignments: ${response.statusText}`);
@@ -1045,7 +1065,7 @@ function showSamplePosts(summaryIndex, assignments, allPosts, usedPostIds) {
 
 async function getRelatedSearchTermsAI(audience) {
     const prompt = `Given the target audience "${audience}", generate up to 5 related but distinct search terms or concepts that would help find communities for them. Think about activities, problems, life stages, and related interests. Respond ONLY with a valid JSON object with a single key "terms", which is an array of strings.`;
-    const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a creative brainstorming assistant that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0.4, max_completion_tokens: 150, response_format: { "type": "json_object" } };
+    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a creative brainstorming assistant that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0.4, max_completion_tokens: 150, response_format: { "type": "json_object" } };
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('AI keyword generation failed.');
@@ -1062,7 +1082,7 @@ async function findSubredditsForGroup(groupName) {
     window._audienceTopics = Array.isArray(relatedTerms) ? relatedTerms : [];
     const allTerms = [groupName, ...relatedTerms];
     const prompt = `Based on the following audience and related keywords: [${allTerms.join(', ')}], suggest up to 20 relevant and active Reddit subreddits. Prioritize a variety of communities, including both large general ones and smaller niche ones. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`;
-    const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_completion_tokens: 300, response_format: { "type": "json_object" } };
+    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_completion_tokens: 300, response_format: { "type": "json_object" } };
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('OpenAI API request failed.');
@@ -1356,7 +1376,7 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
     if (candidatePhrases.length > 0) {
         try {
             const prompt = `You are a market research analyst. Below is a list of common phrases from the "${audienceContext}" community. Your task is to filter this list. Identify phrases that express clear **positive sentiment** and **negative sentiment**. Ignore neutral phrases. Respond ONLY with a valid JSON object with two keys: "positive_phrases" and "negative_phrases", holding an array of the relevant strings you selected. Candidate Phrases: ${JSON.stringify(candidatePhrases)}`;
-            const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert sentiment filter that only outputs JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_completion_tokens: 1000, response_format: { "type": "json_object" } };
+            const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert sentiment filter that only outputs JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_completion_tokens: 1000, response_format: { "type": "json_object" } };
             const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
             if (response.ok) {
                 const data = await response.json();
@@ -1522,22 +1542,35 @@ async function extractAndValidateEntities(posts, nicheContext) {
     // 2b. Frequent capitalised proper-noun candidates from the FULL corpus (original case), so
     // common brands (e.g. "Kong" for dog owners) get classified even if they sit deep in the data
     // and never make the sample above. The model decides which are real brands vs generic vs noise.
-    const caseText = posts.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
+    // Scan the FULL corpus (main posts + this pass), deduped, so brands surface wherever they live.
+    const _seenCand = new Set();
+    const candCorpus = [...(window._filteredPosts || []), ...posts].filter(p => {
+        const id = p && p.data && p.data.id; if (!id) return true;
+        if (_seenCand.has(id)) return false; _seenCand.add(id); return true;
+    });
+    const caseText = candCorpus.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' ');
     const AUD_WORDS = new Set((nicheContext || '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean));
     const CAP_SKIP = new Set(['the','this','that','these','those','here','there','what','when','where','why','how','who',
         'and','but','for','nor','yet','our','your','his','her','its','their','they','them','you','she','it','we','my','me',
         'just','also','then','than','some','any','all','one','two','reddit','edit','update','tldr','imo','imho','dog','dogs','cat','cats','pet','pets']);
+    const skip = (w) => w.length < 3 || stopWords.includes(w) || CAP_SKIP.has(w) || AUD_WORDS.has(w);
+    // (a) Capitalised proper-nouns (strong brand signal), keyed lowercase to merge "Kong"/"KONG".
     const capFreq = {};
     (caseText.match(/\b[A-Z][A-Za-z0-9'&-]{2,}\b/g) || []).forEach(tok => {
-        const low = tok.toLowerCase();
-        if (low.length < 3 || stopWords.includes(low) || CAP_SKIP.has(low) || AUD_WORDS.has(low)) return;
-        capFreq[tok] = (capFreq[tok] || 0) + 1;
+        const low = tok.toLowerCase(); if (skip(low)) return;
+        capFreq[low] = (capFreq[low] || 0) + 1;
     });
-    const candidateList = Object.entries(capFreq)
-        .filter(([k, c]) => c >= 2)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 60)
-        .map(([k, c]) => `${k} (${c})`)
+    // (b) Frequent lowercase tokens - catches brands users type in lowercase (e.g. "kong", "purina").
+    const lowFreq = {};
+    (caseText.toLowerCase().match(/\b[a-z][a-z'&-]{2,}\b/g) || []).forEach(w => {
+        if (skip(w)) return;
+        lowFreq[w] = (lowFreq[w] || 0) + 1;
+    });
+    const topCap = Object.entries(capFreq).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).slice(0, 40).map(([k]) => k);
+    const topLow = Object.entries(lowFreq).filter(([, c]) => c >= 5).sort((a, b) => b[1] - a[1]).slice(0, 45).map(([k]) => k);
+    const candidateList = [...new Set([...topCap, ...topLow])]
+        .slice(0, 75)
+        .map(k => `${k} (${lowFreq[k] || capFreq[k] || 0})`)
         .join(', ');
 
     const prompt = `You are a shopping-behaviour analyst studying what the "${nicheContext}" audience BUYS. This feeds a "How They Shop" report, so every item you return MUST be something a person can actually buy, use, or shop for. Separate the real commercial BRANDS from the generic buyable PRODUCT categories.
@@ -2047,7 +2080,7 @@ async function renderIncludedSubreddits(subreddits) {
 async function findRelatedSubredditsAI(analyzedSubsData, audienceContext) {
     const subNames = analyzedSubsData.map(d => d.name).join(', ');
     const prompt = `You are a Reddit discovery expert. A user is analyzing communities for the audience "${audienceContext}", including: ${subNames}. Your task is to suggest up to 20 NEW, related subreddits that explore NICHE or ADJACENT topics. Think outside the box. For example, if the user is analyzing 'weddingplanning', suggest 'bridezillas', 'weddingdress', 'honeymoons', or 'UKweddings' instead of just another general wedding sub. CRITICAL: Do NOT include any of the original subreddits in your suggestions: ${subNames}. Provide your response ONLY as a JSON object with a single key "subreddits", containing an array of subreddit names (without "r/").`;
-    const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.4, max_completion_tokens: 300, response_format: { "type": "json_object" } };
+    const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.4, max_completion_tokens: 300, response_format: { "type": "json_object" } };
     try {
         const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('OpenAI related subreddits request failed.');
@@ -2234,7 +2267,7 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
             `Analyze category "${itemName}" based on: ${topPostsText}. Return JSON with: what_it_is, job_to_be_done, table_stakes (array), disruption_opportunities (array).`;
 
         const openAIParams = {
-            model: "gpt-5.4-mini",
+            model: "gpt-4o-mini",
             messages: [{ role: "system", content: "You are a fast market analyst. Output JSON." }, { role: "user", content: prompt }],
             temperature: 0.1,
             max_completion_tokens: 800,
@@ -2738,7 +2771,7 @@ ${corpusText}`;
 async function pregenerateAllSubProblems(audienceContext) {
     const findings = window._summaries || [];
     if (!findings.length) return;
-    const CONC = 2;
+    const CONC = 1;
     for (let i = 0; i < findings.length; i += CONC) {
         await Promise.all(findings.slice(i, i + CONC).map(async (f, j) => {
             await computeSubProblems(f, audienceContext);
@@ -2868,13 +2901,15 @@ async function generateAndRenderConstellation(items) {
     console.log(`[Highcharts] Prioritized top ${prioritizedItems.length} items for shopping signal extraction.`);
 
     const validCategories = ["WillingnessToPay", "PriceSensitivity", "BrandLoyalty", "ResearchHabits", "Substitutes", "Dealbreakers"];
+    // Normalised lookup so "Willingness to Pay", "willingness_to_pay" etc. all map to the canonical key.
+    const CATEGORY_LOOKUP = {};
+    validCategories.forEach(c => { CATEGORY_LOOKUP[c.toLowerCase()] = c; });
 
     const VAGUE_THEMES = new Set(['frustration', 'problem', 'issue', 'pain point', 'wants better', 'general complaint', 'bad experience', 'dissatisfaction', 'annoyance', 'unhappy', 'confusion']);
     const isUsefulTheme = (t) => {
         const s = (t || '').toLowerCase().trim();
-        if (s.length < 8) return false;
-        if (s.split(/\s+/).length < 2) return false;
-        if (VAGUE_THEMES.has(s)) return false;
+        if (s.length < 4) return false;            // was 8 - allow concise themes like "budget"
+        if (VAGUE_THEMES.has(s)) return false;     // single-word themes are now allowed
         return true;
     };
 
@@ -2887,7 +2922,7 @@ async function generateAndRenderConstellation(items) {
     const isLifestyleNoise = (q) => LIFESTYLE_NOISE.test(q || '');
 
     const BATCH_SIZE = 20;          // bigger batches => fewer round-trips (80 items => 4 calls)
-    const CONCURRENCY = 2;          // 2 at a time: fast, but gentle enough to avoid proxy rate limits
+    const CONCURRENCY = 1;          // sequential: gentlest on the proxy so signals reliably land
     const MIN_SIGNALS = 20;
     const enrichedSignals = [];     // strong: clear commercial cue
     const backupSignals = [];       // weaker but valid - used to top up
@@ -2956,9 +2991,16 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
             if (!parsed.signals || !Array.isArray(parsed.signals)) return;
 
             parsed.signals.forEach(signal => {
-                const sourceItem = prioritizedItems[startIndex + signal.source_index];
+                // FIX: the model often returns source_index as a STRING ("3"); "20" + "3" would
+                // concatenate to "203" and look up undefined, silently dropping every signal.
+                const sourceIndex = parseInt(signal.source_index, 10);
+                const sourceItem = Number.isInteger(sourceIndex) ? prioritizedItems[startIndex + sourceIndex] : null;
                 if (!sourceItem || !signal.quote || !signal.category || !signal.theme) return;
-                if (!validCategories.includes(signal.category)) return;
+                // FIX: accept natural-language category variants ("Willingness to Pay") by matching
+                // on a normalised key, then snap to the canonical name used downstream.
+                const canonicalCategory = CATEGORY_LOOKUP[String(signal.category).toLowerCase().replace(/[^a-z]/g, '')];
+                if (!canonicalCategory) return;
+                signal.category = canonicalCategory;
                 if (!isUsefulTheme(signal.theme)) return;
                 if (isLifestyleNoise(signal.quote) && !hasCommercialCue(signal.quote)) return;
 
@@ -3440,7 +3482,7 @@ async function generateAndRenderAIPrompt(posts, audienceContext) {
         Sample Posts:\n${topPostsText}`;
 
         const openAIParams = {
-            model: "gpt-5.4-mini",
+            model: "gpt-4o-mini",
             messages: [
                 { role: "system", content: "You are a brand strategist who creates structured JSON output for AI prompts." },
                 { role: "user", content: prompt }
@@ -4339,7 +4381,7 @@ async function generateAndRenderOverview(posts, audienceContext) {
         Text: ${topPostsText}`;
 
         const openAIParams = {
-            model: "gpt-5.4-mini",
+            model: "gpt-4o-mini",
             messages: [{ role: "system", content: "You are a precise demographic estimator." }, { role: "user", content: prompt }],
             temperature: 0.1, // Lower temperature makes it more consistent
             response_format: { "type": "json_object" }
@@ -4651,7 +4693,7 @@ async function runProblemFinder(options = {}) {
         const topKeywords = getTopKeywords(stableSorted, 10);
         const topPosts = stableSorted.slice(0, 40);
         const combinedTexts = topPosts.map(post => `${post.data.title || post.data.link_title || ''}. ${getFirstTwoSentences(post.data.selftext || post.data.body || '')}`).join("\n\n");  
-        const openAIParams = { model: "gpt-5.4-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". CRITICAL RULES FOR QUOTES: The "quotes" array must contain exactly 3 strings, and each string MUST be 63 characters or less. Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Prioritise the most common, clearly recurring problems that appear across many of the posts, and avoid niche one-off complaints, so the analysis stays consistent if the tool is run again on the same audience. Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["A short quote under 63 chars.", "Another quote under 63 chars.", "A final quote under 63 chars."], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_completion_tokens: 1500, seed: 11, response_format: { "type": "json_object" } };
+        const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". CRITICAL RULES FOR QUOTES: The "quotes" array must contain exactly 3 strings, and each string MUST be 63 characters or less. Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Prioritise the most common, clearly recurring problems that appear across many of the posts, and avoid niche one-off complaints, so the analysis stays consistent if the tool is run again on the same audience. Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["A short quote under 63 chars.", "Another quote under 63 chars.", "A final quote under 63 chars."], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_completion_tokens: 1500, seed: 11, response_format: { "type": "json_object" } };
         // Resilient call: retries on a timed-out/empty response (each retry gets a fresh budget),
         // so one slow attempt no longer breaks the entire analysis.
         const openAIData = await callOpenAIProxyWithRetry(openAIParams, { tries: 2 });
@@ -4823,7 +4865,7 @@ async function runProblemFinder(options = {}) {
                 searchedLabel: 'posts and comments'
             });
         }, 4000);
-        setTimeout(() => pregenerateAllSubProblems(originalGroupName), 7000);
+        setTimeout(() => pregenerateAllSubProblems(originalGroupName), 14000);
       
       
       
@@ -4941,7 +4983,18 @@ function renderDiscoveryList(containerId, data, title, type) {
     const container = document.getElementById(containerId);
     if (!container) return;
 
-    const slots = container.querySelectorAll('.discovery-list-item');
+    let slots = container.querySelectorAll('.discovery-list-item');
+
+    // If the data has more entries than the Webflow template provides slots for, clone the last
+    // slot so nothing gets capped (e.g. only 3 static rows but 8 brands found).
+    if (slots.length && data && data.length > slots.length) {
+        const template = slots[slots.length - 1];
+        for (let k = slots.length; k < data.length; k++) {
+            const clone = template.cloneNode(true);
+            template.parentNode.appendChild(clone);
+        }
+        slots = container.querySelectorAll('.discovery-list-item');
+    }
 
     // Reset state: Hide everything first
     slots.forEach(slot => {

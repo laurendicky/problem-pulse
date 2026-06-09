@@ -4914,6 +4914,8 @@ async function runProblemFinder(options = {}) {
         }
         setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
         setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
+        setTimeout(() => generateAndRenderWaterholes(window._filteredPosts, originalGroupName), 9000);
+        setTimeout(() => renderSocialSplitChart(window._filteredPosts), 1500);
         setTimeout(() => {
             Promise.resolve(enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName))
                 .finally(() => recoverBrandsWithShopping(subredditQueryString, selectedTime, originalGroupName));
@@ -5051,6 +5053,186 @@ function setupGrowthKitInteraction() {
 // =================================================================================
 // === UPDATED DISCOVERY LIST RENDERER (Fills Webflow Elements) ===
 // =================================================================================
+// =================================================================================
+// =================================================================================
+// === SOCIAL SPLIT DONUT: where the audience hangs out, by platform ================
+// Add an empty <div id="social-split-chart"></div> in Webflow. Pure CSS conic-gradient
+// donut + legend, computed by counting platform mentions in the corpus (no AI, instant).
+// =================================================================================
+function renderSocialSplitChart(posts) {
+    const el = document.getElementById('social-split-chart');
+    if (!el) return;
+    const texts = (posts || []).map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase());
+    if (!texts.length) return;
+
+    const PLATFORMS = [
+        { name: 'Instagram',   color: '#FF6FB5', keys: ['instagram'] },
+        { name: 'TikTok',      color: '#36E0D0', keys: ['tiktok', 'tik tok'] },
+        { name: 'YouTube',     color: '#FF8C66', keys: ['youtube'] },
+        { name: 'Facebook',    color: '#6C8CFF', keys: ['facebook'] },
+        { name: 'X / Twitter', color: '#7CC7FF', keys: ['twitter', 'x.com'] },
+        { name: 'Discord',     color: '#8B7CFF', keys: ['discord'] },
+        { name: 'Telegram',    color: '#5ED1D8', keys: ['telegram'] },
+        { name: 'WhatsApp',    color: '#57D9A3', keys: ['whatsapp'] },
+        { name: 'Snapchat',    color: '#FFD56B', keys: ['snapchat'] },
+        { name: 'Pinterest',   color: '#FF8FA3', keys: ['pinterest'] },
+        { name: 'LinkedIn',    color: '#5B9BD5', keys: ['linkedin'] }
+    ];
+
+    let data = PLATFORMS.map(pl => {
+        const count = texts.reduce((n, t) => n + (pl.keys.some(k => t.includes(k)) ? 1 : 0), 0);
+        return { name: pl.name, color: pl.color, count };
+    }).filter(d => d.count > 0).sort((a, b) => b.count - a.count);
+
+    if (data.length === 0) {
+        el.innerHTML = '<p class="placeholder-text" style="text-align:center; color:#9ca3af;">No clear social-platform mentions in these discussions.</p>';
+        return;
+    }
+    if (data.length > 8) {
+        const otherCount = data.slice(8).reduce((n, d) => n + d.count, 0);
+        data = data.slice(0, 8);
+        if (otherCount > 0) data.push({ name: 'Other', color: '#C9C9D6', count: otherCount });
+    }
+    const total = data.reduce((n, d) => n + d.count, 0) || 1;
+    data.forEach(d => { d.pct = Math.round((d.count / total) * 100); });
+
+    // Conic-gradient with thin white gaps between slices for a segmented, contemporary look.
+    const GAP = data.length > 1 ? 1.6 : 0;
+    let acc = 0;
+    const stops = [];
+    data.forEach((d) => {
+        const start = acc;
+        const end = start + (d.count / total) * 360;
+        stops.push(`${d.color} ${start}deg ${Math.max(start, end - GAP)}deg`);
+        if (GAP) stops.push(`#ffffff ${Math.max(start, end - GAP)}deg ${end}deg`);
+        acc = end;
+    });
+    const gradient = `conic-gradient(from -90deg, ${stops.join(', ')})`;
+    const top = data[0];
+
+    el.innerHTML = `
+      <div class="social-split" style="display:flex; gap:28px; align-items:center; flex-wrap:wrap; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
+        <div class="social-split-donut" style="position:relative; width:190px; height:190px; flex:0 0 auto; border-radius:50%; background:${gradient}; box-shadow:0 12px 30px rgba(124,92,255,0.20);">
+          <div class="social-split-center" style="position:absolute; inset:27%; border-radius:50%; background:rgba(255,255,255,0.85); backdrop-filter:blur(6px); display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; box-shadow:inset 0 1px 5px rgba(0,0,0,0.06);">
+            <div style="font-size:1.55rem; font-weight:800; color:#1f2937; line-height:1;">${top.pct}%</div>
+            <div style="font-size:0.72rem; font-weight:600; color:#6b7280; margin-top:3px; padding:0 6px;">${top.name}</div>
+          </div>
+        </div>
+        <div class="social-split-legend" style="display:flex; flex-direction:column; gap:9px; min-width:170px;">
+          ${data.map(d => `
+            <div class="social-split-chip" style="display:flex; align-items:center; gap:10px; font-size:0.95rem; color:#1f2937;">
+              <span style="width:12px; height:12px; border-radius:50%; background:${d.color}; flex:0 0 auto; box-shadow:0 1px 3px rgba(0,0,0,0.15);"></span>
+              <span style="flex:1;">${d.name}</span>
+              <b style="color:#374151;">${d.pct}%</b>
+            </div>`).join('')}
+        </div>
+      </div>`;
+}
+
+// === WATERING HOLES: non-Reddit communities & chat groups the audience names ======
+// Build ONE .watering-holes-list-item inside #watering-holes in Webflow, containing:
+//   .waterhole-platform  -> platform label (Discord / Slack / Telegram / Forum / Other)
+//   .waterhole-name      -> the community name
+//   .waterhole-meta      -> short context, or "Mentioned N times"
+// The cloned item also gets a data-platform attribute (e.g. "discord") for icon styling.
+// Names are AI-extracted but VERIFIED against the corpus, and counts are real - nothing invented.
+// =================================================================================
+async function generateAndRenderWaterholes(posts, audienceContext) {
+    const container = document.getElementById('watering-holes');
+    if (!container) return;
+    if (!window._waterholeBlueprint) {
+        const bp = container.querySelector('.watering-holes-list-item');
+        if (bp) window._waterholeBlueprint = bp.cloneNode(true);
+    }
+    const blueprint = window._waterholeBlueprint;
+    if (!blueprint) { console.warn('[Waterholes] no .watering-holes-list-item template found in #watering-holes.'); return; }
+
+    const corpus = posts || [];
+    if (corpus.length < 5) return;
+    const sampleText = corpus.slice(0, 60).map((p, i) =>
+        `[${i}] ${`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.replace(/\s+/g, ' ').slice(0, 500)}`
+    ).join('\n');
+
+    const prompt = `From these "${audienceContext}" discussions, find WHERE THIS AUDIENCE ACTUALLY HANGS OUT outside of Reddit - their "watering holes". Look across EVERY kind of gathering place they mention, not just chat apps:
+- Chat groups: Discord servers, Slack workspaces, Telegram groups/channels.
+- Social groups: Facebook Groups, WhatsApp groups, Instagram pages/hashtags, YouTube channels/communities, TikTok, X/Twitter communities.
+- Sites & apps: dedicated forums, niche websites, blogs, or apps where they congregate.
+- Real life: recurring in-person meetups, clubs, events, conventions, or local groups.
+
+For each place return:
+- "platform": the kind of place, e.g. "Discord", "Slack", "Telegram", "Facebook", "Instagram", "YouTube", "TikTok", "Forum", "Website", "App", "In-person", or "Other".
+- "name": the place's name exactly as it appears (verbatim).
+- "context": a SHORT phrase for what it is about, ONLY if clearly stated; otherwise "".
+
+RULES: Only include places actually NAMED in the text. NEVER invent names, member counts or descriptions. Reddit and subreddits do NOT count (those are shown elsewhere). If they genuinely name no off-Reddit places, return an empty list.
+Discussions:
+${sampleText}
+Respond ONLY with JSON: {"waterholes":[{"platform":"Facebook","name":"...","context":"..."}]}`;
+
+    let parsed = [];
+    try {
+        const data = await callOpenAIProxyWithRetry({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You find where an audience gathers OFF Reddit - any named community, group, forum, site, app, social account, or in-person meetup - across every platform, not just chat apps. You never invent names, numbers or descriptions, and you output only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.1,
+            max_completion_tokens: 800,
+            response_format: { type: "json_object" }
+        }, { tries: 2 });
+        if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).waterholes || [];
+    } catch (e) {
+        console.warn('[Waterholes] extraction failed:', e && e.message);
+    }
+
+    // Ground each name in the FULL corpus + count real mentions; dedupe.
+    const allText = corpus.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' [SEP] ').toLowerCase();
+    const seen = new Set();
+    const items = [];
+    (parsed || []).forEach(w => {
+        if (!w || !w.name) return;
+        const name = String(w.name).trim();
+        const key = name.toLowerCase();
+        if (key.length < 2 || seen.has(key)) return;
+        const esc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const m = allText.match(new RegExp(`\\b${esc}\\b`, 'gi'));
+        const count = m ? m.length : 0;
+        if (count === 0) return; // not grounded in the text -> skip
+        seen.add(key);
+        const platform = (w.platform && String(w.platform).trim()) ? String(w.platform).trim() : 'Other';
+        items.push({ platform, name, context: (w.context || '').trim(), count });
+    });
+    items.sort((a, b) => b.count - a.count);
+
+    renderWaterholes(container, blueprint, items.slice(0, 8));
+}
+
+function renderWaterholes(container, blueprint, items) {
+    container.querySelectorAll('.watering-holes-list-item').forEach(el => el.remove());
+    if (!items || !items.length) {
+        const empty = blueprint.cloneNode(true);
+        empty.style.display = '';
+        const nameEl = empty.querySelector('.waterhole-name');
+        const set = (sel, val) => { const e = empty.querySelector(sel); if (e) e.innerText = val; };
+        set('.waterhole-platform', '');
+        set('.waterhole-meta', '');
+        if (nameEl) nameEl.innerText = 'No non-Reddit communities were named in these discussions.';
+        container.appendChild(empty);
+        return;
+    }
+    items.forEach(it => {
+        const node = blueprint.cloneNode(true);
+        node.style.display = '';
+        node.setAttribute('data-platform', it.platform.toLowerCase());
+        const set = (sel, val) => { const e = node.querySelector(sel); if (e) e.innerText = val; };
+        set('.waterhole-platform', it.platform);
+        set('.waterhole-name', it.name);
+        set('.waterhole-meta', it.context || `Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}`);
+        container.appendChild(node);
+    });
+}
+
 function renderDiscoveryList(containerId, data, title, type) {
     const container = document.getElementById(containerId);
     if (!container) return;

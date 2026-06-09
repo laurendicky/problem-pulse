@@ -5126,37 +5126,42 @@ async function generateAndRenderPodcasts(posts, audienceContext) {
 
     const corpus = posts || [];
     if (corpus.length < 5) return;
-    // Focus the model on the items that actually MENTION podcasts - the rest never name any,
-    // so feeding the whole corpus just returns nothing.
-    const podcastMatch = /\b(podcast|podcasts|episode|episodes)\b/i;
-    const focused = corpus.filter(p => podcastMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
+
+    // Broadened regex to capture video channels, creators, YouTube, and streams
+    const mediaMatch = /\b(podcast|podcasts|episode|episodes|youtube|channel|channels|watch|video|videos|creator|creators|vlog|vloggers?|stream|streamers?|show|shows)\b/i;
+    const focused = corpus.filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
+    
     if (focused.length === 0) { renderPodcasts(container, blueprint, []); return; }
-    const sampleText = focused.slice(0, 70).map((p, i) =>
+    const sampleText = focused.slice(0, 75).map((p, i) =>
         `[${i}] ${`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.replace(/\s+/g, ' ').slice(0, 600)}`
     ).join('\n');
 
-    const prompt = `From these "${audienceContext}" discussions (already filtered to ones that mention podcasts), extract the PODCASTS and audio shows people mention listening to or recommending.
-For each, return:
-- "name": the podcast/show name exactly as mentioned (verbatim).
-- "focus": a SHORT phrase for what it is about, ONLY if clearly stated; otherwise "".
-RULES: Only include shows actually NAMED in the text. NEVER invent names, download numbers or descriptions. If none are mentioned, return an empty list.
+    const prompt = `From these "${audienceContext}" discussions, extract the PODCASTS, YOUTUBE CHANNELS, and VIDEO CREATORS that people mention watching, listening to, or recommending.
+
+For each item, return:
+- "name": the show, channel, or creator name exactly as mentioned (verbatim).
+- "platform": "Podcast" or "YouTube" or "Video" depending on what it is.
+- "focus": a SHORT phrase for what it is about (genre/topic), e.g. "Dog Training", "Tech Reviews", "Comedy". Only if clearly stated or highly obvious; otherwise "".
+
+RULES: Only include real, specific shows/channels/creators actually NAMED in the text. NEVER invent names or descriptions.
 Discussions:
 ${sampleText}
-Respond ONLY with JSON: {"podcasts":[{"name":"...","focus":"..."}]}`;
+
+Respond ONLY with valid JSON: {"media":[{"name":"...","platform":"...","focus":"..."}]}`;
 
     let parsed = [];
     try {
         const data = await callOpenAIProxyWithRetry({
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "You extract only explicitly-named podcasts / audio shows from text. You never invent names, numbers or descriptions, and you output only valid JSON." },
+                { role: "system", content: "You extract explicitly-named podcasts, YouTube channels, and video creators from text. You never invent names or descriptions, and you output only valid JSON." },
                 { role: "user", content: prompt }
             ],
             temperature: 0.1,
-            max_completion_tokens: 700,
+            max_completion_tokens: 1000,
             response_format: { type: "json_object" }
         }, { tries: 2 });
-        if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).podcasts || [];
+        if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).media || [];
     } catch (e) {
         console.warn('[Podcasts] extraction failed:', e && e.message);
     }
@@ -5174,27 +5179,92 @@ Respond ONLY with JSON: {"podcasts":[{"name":"...","focus":"..."}]}`;
         const count = m ? m.length : 0;
         if (count === 0) return;
         seen.add(key);
-        items.push({ name, focus: (w.focus || '').trim(), count });
+        items.push({ 
+            name, 
+            platform: w.platform || 'Other',
+            focus: (w.focus || '').trim(), 
+            count 
+        });
     });
     items.sort((a, b) => b.count - a.count);
     const top = items.slice(0, 8);
 
-    // Enrich with REAL cover art + genre from iTunes - only when the title actually matches.
+    // Only query iTunes artwork for Audio Podcasts
     await Promise.all(top.map(async it => {
-        try {
-            const r = await itunesPodcastLookup(it.name);
-            if (!r || !r.collectionName) return;
-            const a = it.name.toLowerCase(), b = r.collectionName.toLowerCase();
-            if (b.includes(a) || a.includes(b)) {
-                it.image = r.artworkUrl600 || r.artworkUrl100 || '';
-                it.appleUrl = r.collectionViewUrl || '';
-                it.name = r.collectionName;
-                if (!it.focus && r.primaryGenreName) it.focus = r.primaryGenreName;
-            }
-        } catch (e) { /* best-effort */ }
+        if (it.platform === 'Podcast') {
+            try {
+                const r = await itunesPodcastLookup(it.name);
+                if (r && r.collectionName) {
+                    const a = it.name.toLowerCase(), b = r.collectionName.toLowerCase();
+                    if (b.includes(a) || a.includes(b)) {
+                        it.image = r.artworkUrl600 || r.artworkUrl100 || '';
+                        it.appleUrl = r.collectionViewUrl || '';
+                        it.name = r.collectionName;
+                        if (!it.focus && r.primaryGenreName) it.focus = r.primaryGenreName;
+                    }
+                }
+            } catch (e) { /* best-effort */ }
+        }
     }));
 
     renderPodcasts(container, blueprint, top);
+}
+
+function renderPodcasts(container, blueprint, items) {
+    container.querySelectorAll('.podcasts-list-item').forEach(el => el.remove());
+    if (!items || !items.length) {
+        const empty = blueprint.cloneNode(true);
+        empty.style.display = '';
+        const n = empty.querySelector('.podcast-name'); if (n) n.innerText = 'No podcasts or video channels were named in these discussions.';
+        ['.podcast-focus', '.podcast-meta'].forEach(sel => { const e = empty.querySelector(sel); if (e) e.innerText = ''; });
+        const img = empty.querySelector('.podcast-image'); if (img) img.style.display = 'none';
+        container.appendChild(empty);
+        return;
+    }
+    items.forEach(it => {
+        const node = blueprint.cloneNode(true);
+        node.style.display = '';
+        const set = (sel, val) => { const e = node.querySelector(sel); if (e) e.innerText = val; };
+        set('.podcast-name', it.name);
+        set('.podcast-focus', it.focus ? `Focus: ${it.focus}` : (it.platform ? `Platform: ${it.platform}` : ''));
+        set('.podcast-meta', `Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}`);
+        
+        const img = node.querySelector('.podcast-image');
+        if (img) {
+            if (it.image) {
+                if (img.tagName === 'IMG') img.src = it.image; else img.style.backgroundImage = `url("${it.image}")`;
+                img.style.display = '';
+            } else {
+                // Layout safe graphic fallback instead of setting display: none
+                const isYT = it.platform === 'YouTube';
+                const iconColor = isYT ? '%23ff0000' : '%2300a5ce'; 
+                const svgIcon = isYT 
+                    ? `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>`
+                    : `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`;
+                
+                if (img.tagName === 'IMG') {
+                    img.src = `data:image/svg+xml;utf8,${encodeURIComponent(svgIcon)}`;
+                } else {
+                    img.style.background = isYT 
+                        ? 'linear-gradient(135deg, #ff4fa3, #fd80c7)' 
+                        : 'linear-gradient(135deg, #00a5ce, #7bd9ec)'; 
+                }
+                img.style.display = '';
+            }
+        }
+        
+        const link = node.querySelector('.podcast-link');
+        if (link) {
+            const targetUrl = it.appleUrl || (it.platform === 'YouTube' 
+                ? `https://www.youtube.com/results?search_query=${encodeURIComponent(it.name)}`
+                : `https://www.google.com/search?q=${encodeURIComponent(it.name)}`);
+            
+            link.setAttribute('href', targetUrl);
+            link.setAttribute('target', '_blank');
+            link.setAttribute('rel', 'noopener noreferrer');
+        }
+        container.appendChild(node);
+    });
 }
 
 function renderPodcasts(container, blueprint, items) {

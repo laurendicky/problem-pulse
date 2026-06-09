@@ -3138,7 +3138,7 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
         const _corpus = window._fullCorpus || window._filteredPosts || [];
         try { renderSocialSplitChart(_corpus); } catch (e) { console.warn('[Social Split] failed', e); }
         try { generateAndRenderWaterholes(_corpus, window.originalGroupName || ''); } catch (e) { console.warn('[Waterholes] failed', e); }
-        try { generateAndRenderPodcasts(_corpus, window.originalGroupName || '', subredditQueryString, timeFilter); } catch (e) { console.warn('[Podcasts] failed', e); }
+        try { generateAndRenderPodcasts(_corpus, window.originalGroupName || ''); } catch (e) { console.warn('[Podcasts] failed', e); }
     }
 }
 // =================================================================================
@@ -5124,13 +5124,20 @@ async function generateAndRenderPodcasts(posts, audienceContext, subredditQueryS
     const blueprint = window._podcastBlueprint;
     if (!blueprint) { console.warn('[Media] no .podcasts-list-item template found in #podcasts.'); return; }
 
-    // Broadened: podcasts AND YouTube channels / video shows the audience follows.
-    const mediaMatch = /\b(podcast|podcasts|episode|episodes|youtube|yt|channel|channels|video|videos|watch|series|show|shows)\b/i;
+    // Expanded regex to capture podcasts, videos, channels, books, newsletters, blogs, and reads
+    const mediaMatch = /\b(podcast|podcasts|episode|episodes|youtube|yt|channel|channels|video|videos|watch|vlog|vlogs|show|shows|book|books|newsletter|newsletters|substack|blog|blogs|read|reading|article|articles)\b/i;
     let pool = (posts || []).filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
 
     try {
         if (subredditQueryString) {
-            const searched = await fetchMultipleRedditDataBatched(subredditQueryString, ['podcast', 'youtube channel', 'recommend youtube', 'best podcast', 'favourite channel'], 30, timeFilter || 'all', false);
+            // Broad search queries to fetch high-intent recommendations
+            const searched = await fetchMultipleRedditDataBatched(
+                subredditQueryString, 
+                ['podcast', 'youtube channel', 'book recommendation', 'newsletter substack', 'favourite blog'], 
+                30, 
+                timeFilter || 'all', 
+                false
+            );
             const ids = searched.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 25).map(p => p.data.id);
             const comments = await fetchCommentsForPosts(ids);
             pool = deduplicatePosts([...pool, ...searched, ...comments]);
@@ -5138,33 +5145,41 @@ async function generateAndRenderPodcasts(posts, audienceContext, subredditQueryS
     } catch (e) { console.warn('[Media] search failed:', e && e.message); }
 
     pool = pool.filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
-    console.log(`[Media] ${pool.length} media-mentioning items to mine.`);
+    console.log(`[Media] ${pool.length} media/resource items to mine.`);
     if (pool.length === 0) { renderPodcasts(container, blueprint, []); return; }
 
     const sampleText = pool.slice(0, 70).map((p, i) =>
         `[${i}] ${`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.replace(/\s+/g, ' ').slice(0, 600)}`
     ).join('\n');
 
-    const prompt = `From these "${audienceContext}" discussions, extract the SHOWS & CHANNELS this audience follows: PODCASTS, YOUTUBE channels, and audio/video shows they mention watching, listening to, or recommending.
+    const prompt = `From these "${audienceContext}" discussions, extract the specific MEDIA, PUBLICATIONS, and RESOURCES this audience consumes and recommends.
+This includes:
+- Podcasts and Audio Shows
+- YouTube channels, Video creators, and Vlogs
+- Books, Newsletters, Substacks, and Blogs
+
 For each, return:
-- "type": "podcast", "youtube", or "show".
-- "name": the actual TITLE / channel name exactly as mentioned - a real proper name, NEVER a descriptive phrase or sentence fragment.
-- "focus": a SHORT phrase for what it is about, ONLY if clearly stated; otherwise "".
-RULES: Only return real, clearly-named shows or channels. NEVER invent names or numbers, and never return generic phrases or fragments. If none are clearly named, return an empty list.
+- "type": "podcast", "youtube", "book", "newsletter", or "blog".
+- "name": the actual title / channel / creator name exactly as mentioned (verbatim) - a real proper name, NEVER a descriptive phrase or sentence fragment.
+- "focus": a SHORT phrase for what it is about (genre/topic), ONLY if clearly stated; otherwise "".
+
+RULES: Only return real, specific resources actually NAMED in the text. NEVER invent names or numbers, and never return generic phrases or fragments. If none are clearly named, return an empty list.
+
 Discussions:
 ${sampleText}
-Respond ONLY with JSON: {"media":[{"type":"youtube","name":"...","focus":"..."}]}`;
+
+Respond ONLY with valid JSON: {"media":[{"type":"youtube","name":"...","focus":"..."}]}`;
 
     let parsed = [];
     try {
         const data = await callOpenAIProxyWithRetry({
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "You extract only explicitly-named podcasts, YouTube channels and shows from text. You never invent names, numbers or descriptions, and you output only valid JSON." },
+                { role: "system", content: "You extract explicitly-named podcasts, books, newsletters, blogs, and video channels from text. You never invent names, and you output only valid JSON." },
                 { role: "user", content: prompt }
             ],
             temperature: 0.1,
-            max_completion_tokens: 800,
+            max_completion_tokens: 1000,
             response_format: { type: "json_object" }
         }, { tries: 2 });
         if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).media || [];
@@ -5185,14 +5200,13 @@ Respond ONLY with JSON: {"media":[{"type":"youtube","name":"...","focus":"..."}]
         const count = m ? m.length : 0;
         if (count === 0) return;
         seen.add(key);
-        const type = ['podcast', 'youtube', 'show'].includes(String(w.type || '').toLowerCase()) ? String(w.type).toLowerCase() : 'show';
+        const type = ['podcast', 'youtube', 'book', 'newsletter', 'blog'].includes(String(w.type || '').toLowerCase()) ? String(w.type).toLowerCase() : 'blog';
         items.push({ type, name, focus: (w.focus || '').trim(), count });
     });
     items.sort((a, b) => b.count - a.count);
     const top = items.slice(0, 16);
 
-    // Podcasts: verify against Apple + attach real cover art (drops fragments). YouTube/shows:
-    // keep grounded, no image, link to a YouTube search (no API key needed).
+    // Verify Podcasts against Apple Podcasts API to grab real cover art
     const out = [];
     await Promise.all(top.map(async it => {
         if (it.type === 'podcast') {
@@ -5210,13 +5224,21 @@ Respond ONLY with JSON: {"media":[{"type":"youtube","name":"...","focus":"..."}]
                     }
                 }
             } catch (e) { /* best-effort */ }
-            return; // unverified podcast -> drop
+            return; // drop unverified podcasts to keep the visual list accurate
         }
-        it.link = `https://www.youtube.com/results?search_query=${encodeURIComponent(it.name)}`;
+        
+        // Generate fallback links based on the media type
+        if (it.type === 'youtube') {
+            it.link = `https://www.youtube.com/results?search_query=${encodeURIComponent(it.name)}`;
+        } else if (it.type === 'book') {
+            it.link = `https://www.google.com/search?tbm=bks&q=${encodeURIComponent(it.name)}`;
+        } else {
+            it.link = `https://www.google.com/search?q=${encodeURIComponent(it.name)}`;
+        }
         out.push(it);
     }));
     out.sort((a, b) => b.count - a.count);
-    console.log(`[Media] ${out.length} kept (podcasts verified, channels grounded).`);
+    console.log(`[Media] ${out.length} kept (podcasts verified, other resources grounded).`);
     renderPodcasts(container, blueprint, out.slice(0, 8));
 }
 
@@ -5225,7 +5247,7 @@ function renderPodcasts(container, blueprint, items) {
     if (!items || !items.length) {
         const empty = blueprint.cloneNode(true);
         empty.style.display = '';
-        const n = empty.querySelector('.podcast-name'); if (n) n.innerText = 'No podcasts were named in these discussions.';
+        const n = empty.querySelector('.podcast-name'); if (n) n.innerText = 'No resources or media were named in these discussions.';
         ['.podcast-focus', '.podcast-meta'].forEach(sel => { const e = empty.querySelector(sel); if (e) e.innerText = ''; });
         const img = empty.querySelector('.podcast-image'); if (img) img.style.display = 'none';
         container.appendChild(empty);
@@ -5234,20 +5256,50 @@ function renderPodcasts(container, blueprint, items) {
     items.forEach(it => {
         const node = blueprint.cloneNode(true);
         node.style.display = '';
-        node.setAttribute('data-media-type', it.type || 'podcast'); // "podcast" | "youtube" | "show" for icon styling
+        
+        // We set the dynamic type as an attribute so Webflow can style icons (e.g. data-media-type="book")
+        node.setAttribute('data-media-type', it.type || 'podcast'); 
+        
         const set = (sel, val) => { const e = node.querySelector(sel); if (e) e.innerText = val; };
         set('.podcast-name', it.name);
-        set('.podcast-focus', it.focus ? `Focus: ${it.focus}` : '');
+        
+        // Use Type as fallback focus label if no specific focus is returned
+        const typeLabel = it.type ? it.type.charAt(0).toUpperCase() + it.type.slice(1) : 'Resource';
+        set('.podcast-focus', it.focus ? `Focus: ${it.focus}` : `Type: ${typeLabel}`);
         set('.podcast-meta', `Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}`);
+        
         const img = node.querySelector('.podcast-image');
         if (img) {
             if (it.image) {
                 if (img.tagName === 'IMG') img.src = it.image; else img.style.backgroundImage = `url("${it.image}")`;
                 img.style.display = '';
-            } else { img.style.display = 'none'; }
+            } else {
+                // Generates beautiful CSS gradient placeholders to prevent Webflow layout collapsing when cover art isn't found
+                let gradient = 'linear-gradient(135deg, #00a5ce, #7bd9ec)'; // Teal (podcast / default)
+                if (it.type === 'youtube') {
+                    gradient = 'linear-gradient(135deg, #ff4fa3, #fd80c7)'; // Pink (video/vlogs)
+                } else if (it.type === 'book') {
+                    gradient = 'linear-gradient(135deg, #9B7CFF, #6AA9FF)'; // Purple (books)
+                } else if (it.type === 'newsletter' || it.type === 'blog') {
+                    gradient = 'linear-gradient(135deg, #5ED1B8, #aecbfa)'; // Green/Blue (newsletters/blogs)
+                }
+                
+                if (img.tagName === 'IMG') {
+                    // SVG fallback icon
+                    const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="%23ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" fill="%2300a5ce"/><polygon points="10 8 16 12 10 16 10 8" fill="%23ffffff"/></svg>`;
+                    img.src = `data:image/svg+xml;utf8,${encodeURIComponent(svgIcon)}`;
+                } else {
+                    img.style.background = gradient;
+                }
+                img.style.display = '';
+            }
         }
         const link = node.querySelector('.podcast-link');
-        if (link && it.link) link.setAttribute('href', it.link);
+        if (link && it.link) {
+            link.setAttribute('href', it.link);
+            link.setAttribute('target', '_blank');
+            link.setAttribute('rel', 'noopener noreferrer');
+        }
         container.appendChild(node);
     });
 }

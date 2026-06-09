@@ -3154,17 +3154,16 @@ function renderPlatformPanels(corpus, subredditQueryString, timeFilter) {
     ];
 
     try {
-        const shoppingPosts = await fetchMultipleRedditDataBatched(subredditQueryString, SHOPPING_SIGNAL_TERMS, 60, timeFilter, false);
-        // Was 80 comment threads — the heaviest single Reddit fetch per run. 35 is plenty; the
-        // corpus is topped up with the general filtered posts just below.
-        const postIds = shoppingPosts.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 35).map(p => p.data.id);
-        const highIntentComments = await fetchCommentsForPosts(postIds);
-        // Supplement with the main analysed corpus so the chart still has plenty to mine when the
-        // narrow shopping-phrase search returns little (purchase mentions live in general posts too).
+        // SPEED: reuse the discussions we ALREADY pulled instead of running a second dedicated
+        // shopping search (that search was ~15-25s of the demand-signals delay). We mine the
+        // filtered posts plus comments for their top threads; those comment fetches also warm the
+        // cache for the gems/brands passes that run shortly after.
         const generalPosts = window._filteredPosts || [];
-        const allItems = deduplicatePosts([...shoppingPosts, ...highIntentComments, ...generalPosts]);
-        window._fullCorpus = allItems; // richest corpus (posts + comments + general) for the platform panels
-        console.log(`[Constellation] shopping=${shoppingPosts.length} comments=${highIntentComments.length} general=${generalPosts.length} -> corpus=${allItems.length}`);
+        const topIds = [...generalPosts].sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 35).map(p => p.data.id);
+        const highIntentComments = await fetchCommentsForPosts(topIds);
+        const allItems = deduplicatePosts([...generalPosts, ...highIntentComments]);
+        window._fullCorpus = allItems; // posts + comments — feeds the constellation and platform panels
+        console.log(`[Constellation] reused corpus: general=${generalPosts.length} comments=${highIntentComments.length} -> corpus=${allItems.length}`);
         // Render the social / media / waterhole panels NOW, on the rich corpus, BEFORE the slow
         // shopping-signal AI batching below. Previously these sat in `finally`, so they only
         // appeared AFTER generateAndRenderConstellation finished — minutes later. Now they run
@@ -5051,19 +5050,25 @@ async function runProblemFinder(options = {}) {
                 btn.onclick = () => showSamplePosts(index, window._assignments, window._filteredPosts, window._usedPostIds);
             }
         });
-        try {
-            window._postsForAssignment = filteredItems.slice(0, 75);
-            window._usedPostIds = new Set();
-            const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment);
-            window._assignments = assignments;
-            for (let i = 0; i < window._summaries.length; i++) {
-                if (i >= 5) break;
-                showSamplePosts(i, assignments, filteredItems, window._usedPostIds);
+        // SPEED: post-assignment only fills the sample posts UNDER each finding, so it must NOT
+        // block the results reveal. Run it fire-and-forget — the findings show immediately and the
+        // sample posts populate a few seconds later. This shaves the assignment AI call (~10-15s)
+        // off time-to-first-result.
+        window._postsForAssignment = filteredItems.slice(0, 75);
+        window._usedPostIds = new Set();
+        (async () => {
+            try {
+                const assignments = await assignPostsToFindings(window._summaries, window._postsForAssignment);
+                window._assignments = assignments;
+                for (let i = 0; i < window._summaries.length; i++) {
+                    if (i >= 5) break;
+                    showSamplePosts(i, assignments, filteredItems, window._usedPostIds);
+                }
+            } catch (err) {
+                console.error("CRITICAL (but isolated): Failed to assign posts to findings.", err);
+                for (let i = 1; i <= 5; i++) { const redditDiv = document.getElementById(`reddit-div${i}`); if (redditDiv) { redditDiv.innerHTML = `<div style="font-style: italic; color: #999;">Could not load sample posts.</div>`; } }
             }
-        } catch (err) {
-            console.error("CRITICAL (but isolated): Failed to assign posts to findings.", err);
-            for (let i = 1; i <= 5; i++) { const redditDiv = document.getElementById(`reddit-div${i}`); if (redditDiv) { redditDiv.innerHTML = `<div style="font-style: italic; color: #999;">Could not load sample posts.</div>`; } }
-        }
+        })();
 
 
         if (countHeaderDiv && countHeaderDiv.textContent.trim() !== "") {

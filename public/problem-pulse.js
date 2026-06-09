@@ -282,10 +282,21 @@ async function generateAndRenderHiddenGems(posts, audienceContext, meta = {}) {
     const FUNC_WORDS = new Set(['the','a','an','this','that','it','they','them','will','would','about','your','their','get','got','getting','rid','thing','things','stuff','really','very','just','like','some','any','more','most','want','need']);
     const labelOk = (s) => {
         const t = (s || '').toLowerCase().trim();
+        const cleanAudience = (audienceContext || '').toLowerCase().trim();
+
         if (t.length < 3) return false;
         if (UNIT_PHRASE.test(t)) return false;
-        if (t.split(/\s+/).some(w => AUD_CORE.has(w))) return false;
-        if (t.split(/\s+/).every(w => FUNC_WORDS.has(w))) return false;
+
+        // Reject only an EXACT match of the audience name (singular/plural), not any phrase that
+        // merely contains an audience word - so "developer burnout", "software updates" survive.
+        if (t === cleanAudience) return false;
+        if (t === cleanAudience.replace(/s$/, '')) return false;
+
+        // A bare single audience word on its own ("developer") is still not an insight.
+        const words = t.split(/\s+/);
+        if (words.length === 1 && AUD_CORE.has(words[0])) return false;
+
+        if (words.every(w => FUNC_WORDS.has(w))) return false;
         if (!/[a-z]/i.test(t)) return false;
         return true;
     };
@@ -298,7 +309,21 @@ async function generateAndRenderHiddenGems(posts, audienceContext, meta = {}) {
     };
 
     try {
-        // ---- Curate a high-signal sample of REAL discussions for the model to read ----
+        // 1. Run the statistical co-occurrence engine over the corpus (Lift / Chi-Square / Support).
+        let statisticalContext = '';
+        try {
+            const featureMatrix = buildFeatureMatrix(posts);
+            const strongestPairs = mineAssociations(featureMatrix)
+                .sort((a, b) => b.chi2 - a.chi2)
+                .slice(0, 15);
+            statisticalContext = strongestPairs
+                .map(p => `- Unusual link: "${p.x}" is heavily correlated with "${p.y}" (co-occurs far more than chance)`)
+                .join('\n');
+        } catch (mErr) {
+            console.warn('[Hidden Gems] statistical pass skipped:', mErr && mErr.message);
+        }
+
+        // 2. Curate a high-signal sample of REAL discussions for the model to read.
         const scored = posts.map(p => {
             const text = (p.data.selftext || p.data.body || '').trim();
             const title = p.data.title || p.data.link_title || '';
@@ -316,11 +341,14 @@ async function generateAndRenderHiddenGems(posts, audienceContext, meta = {}) {
             `[${i}] (r/${s.p.data.subreddit || '?'}, ${s.ups} ups) ${`${s.title} ${s.text}`.replace(/\s+/g, ' ').trim().slice(0, 420)}`
         ).join('\n');
 
-        const prompt = `You are a sharp consumer-insight analyst studying the "${audienceContext}" audience by READING the real Reddit discussions below. Each item has an index, subreddit and score.
+        // 3. Anchor the model to the mathematically unusual correlations, then have it EXPLAIN them
+        //    with grounded quotes - instead of guessing what is surprising.
+        const prompt = `You are a sharp consumer-insight analyst studying the "${audienceContext}" audience by reading real Reddit discussions.
 
-Find the 3 to 5 MOST surprising or commercially valuable "hidden gems" - insights a founder would screenshot. Each gem must be EITHER:
-- a genuinely SURPRISING connection (an unexpected link between a behaviour, emotion, life event, product, brand, frustration or purchase), OR
-- a clear COMMERCIAL OPPORTUNITY (an unmet need, a product or positioning angle, a willingness to pay, or a workaround people hack together).
+We ran a statistical association engine (Lift / Chi-Square) over these discussions and surfaced unusual, non-obvious term correlations. Inspect the posts and explain the underlying BEHAVIOURAL reason behind 3 to 5 of these relationships (or other genuinely surprising connections you find in the posts).
+
+STATISTICALLY SIGNIFICANT PAIRS (co-occur far more than chance):
+${statisticalContext || "(No strong correlations surfaced; analyse the posts for other unexpected connections.)"}
 
 THE TEST for every gem: would a smart founder think "huh, that's interesting" AND be able to act on it? If not, drop it.
 
@@ -330,8 +358,6 @@ REJECT and never return:
 - Vague or generic observations ("people want quality", "users get frustrated").
 - Measurement/unit artifacts ("per day", "years old").
 - Anything you cannot back with a real quote from the items below.
-
-Prefer quality over quantity: 3 strong gems beat 5 weak ones. A 3x surprising, actionable insight is worth more than an obvious one. If fewer than 3 are genuinely strong, return only the strong ones.
 
 For each gem return:
 - "category": one of emotional_leap | behavioural_leap | commercial_leap | contradiction
@@ -354,10 +380,10 @@ Respond ONLY with valid JSON: {"gems":[{"category":"...","topic_a":"...","reveal
             const data = await callOpenAIProxyWithRetry({
                 model: "gpt-4o",
                 messages: [
-                    { role: "system", content: "You read real online discussions and surface non-obvious, commercially useful insights. You only assert what the quotes support, never invent statistics or compare to the general population, and you output only valid JSON." },
+                    { role: "system", content: "You read real online discussions and explain statistically significant correlations with qualitative insights. You only assert what the quotes support, never invent statistics or compare to the general population, and you output only valid JSON." },
                     { role: "user", content: prompt }
                 ],
-                temperature: 0.6,
+                temperature: 0.4,
                 max_completion_tokens: 1800,
                 response_format: { type: "json_object" }
             }, { tries: 2 });
@@ -715,14 +741,41 @@ async function classifySentimentWithAI(posts) {
 }
 function countSentimentWords(posts) {
     let positive = 0, negative = 0;
+
+    // Common English negations.
+    const negations = new Set([
+        'not', 'no', 'never', 'dont', 'doesnt', 'isnt', 'arent',
+        'wasnt', 'werent', 'havent', 'hadnt', 'cannot', 'cant', 'without'
+    ]);
+
     posts.forEach(post => {
         const text = `${post.data.title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase();
-        const words = text.replace(/[^a-z\s']/g, '').split(/\s+/);
-        words.forEach(rawWord => {
+        const words = text.replace(/[^a-z\s']/g, '').split(/\s+/).filter(Boolean);
+
+        words.forEach((rawWord, idx) => {
             if (rawWord.length < 3) return;
             const lemma = lemmatize(rawWord);
-            if (positiveWords.has(lemma)) positive++;
-            else if (negativeWords.has(lemma)) negative++;
+
+            const isPositive = positiveWords.has(lemma);
+            const isNegative = negativeWords.has(lemma);
+
+            if (isPositive || isNegative) {
+                // Look-back: was either of the 2 preceding words a negation?
+                let isNegated = false;
+                const startLookback = Math.max(0, idx - 2);
+                for (let j = startLookback; j < idx; j++) {
+                    if (negations.has(words[j])) { isNegated = true; break; }
+                }
+
+                if (isNegated) {
+                    // Flip sentiment if negated (e.g. "not great" -> negative).
+                    if (isPositive) negative++;
+                    if (isNegative) positive++;
+                } else {
+                    if (isPositive) positive++;
+                    if (isNegative) negative++;
+                }
+            }
         });
     });
     return { positive, negative };
@@ -2847,51 +2900,38 @@ async function fetchSentimentTrendData(brandName, subredditQueryString) {
     if (brandName.toLowerCase() === 'openai') {
         searchTerms.push('"gpt-4o"', '"chatgpt"', '"gpt-5"');
     }
-
     const revisedTimePeriods = [
         { label: 'Past 6 Mos', value: '6month' },
         { label: 'Past 3 Mos', value: '3month' },
         { label: 'Last 30 Days', value: 'month' },
         { label: 'Last 7 Days', value: 'week' },
     ];
-
+    // 1. Fetch the raw Reddit posts for each time frame in parallel.
     const fetchPromises = revisedTimePeriods.map(period =>
         fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 50, period.value)
     );
     const results = await Promise.allSettled(fetchPromises);
-
-    // Process every time period concurrently, and run each period's two AI calls (sentiment +
-    // context) in parallel too. This turns ~8 sequential calls into one parallel wave, cutting
-    // the momentum chart from ~20s to a few seconds. Order is preserved via the map index.
-    const perPeriod = await Promise.all(results.map(async (result, i) => {
+    // 2. Score each period PROGRAMMATICALLY (no OpenAI calls -> instant, free, no rate limits).
+    const perPeriod = results.map((result, i) => {
         const periodLabel = revisedTimePeriods[i].label;
         if (result.status !== 'fulfilled' || !result.value || result.value.length === 0) {
             console.warn(`Could not fetch data for period: ${periodLabel}`);
             return null;
         }
-        // Wrapped so a single failed/rate-limited AI call returns null for THIS period only,
-        // instead of rejecting Promise.all and hanging the whole Momentum chart on its loader.
-        try {
-            const uniquePosts = deduplicatePosts(result.value);
-            const [sentimentSettled, contextSettled] = await Promise.allSettled([
-                classifySentimentWithAI(uniquePosts),
-                generateSentimentContextWithAI(uniquePosts, brandName)
-            ]);
-            const sentimentResults = sentimentSettled.status === 'fulfilled' ? (sentimentSettled.value || []) : [];
-            const contextSummary = contextSettled.status === 'fulfilled' ? contextSettled.value : null;
-            const positiveMentions = sentimentResults.filter(s => s === 'Positive').length;
-            const negativeMentions = sentimentResults.filter(s => s === 'Negative').length;
-            const totalMentions = positiveMentions + negativeMentions;
-            if (totalMentions === 0 && !contextSummary) return null; // nothing usable this period
-            const positivePercentage = totalMentions > 0 ? Math.round((positiveMentions / totalMentions) * 100) : 50;
-            return { period: periodLabel, positivePercentage, context: contextSummary };
-        } catch (err) {
-            console.warn(`Momentum period "${periodLabel}" failed:`, err && err.message);
-            return null;
-        }
-    }));
-
-    // Ordered oldest -> newest (matches revisedTimePeriods order); drop periods with no data.
+        const uniquePosts = deduplicatePosts(result.value);
+        // 3. Local, token-free sentiment via the existing dictionary lookup.
+        const { positive, negative } = countSentimentWords(uniquePosts);
+        const total = positive + negative;
+        const positivePercentage = total > 0 ? Math.round((positive / total) * 100) : 50;
+        // 4. Build matching contextual tooltips programmatically.
+        const context = {
+            positive_theme: `Surfaced ${positive} positive sentiment signals.`,
+            negative_theme: `Surfaced ${negative} critical pain point signals.`,
+            verdict: `Analyzed ${uniquePosts.length} historical community discussions programmatically.`
+        };
+        return { period: periodLabel, positivePercentage, context };
+    });
+    // Return the processed array, dropping any empty periods.
     return perPeriod.filter(Boolean);
 }
 

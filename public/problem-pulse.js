@@ -887,31 +887,45 @@ function deduplicateByContent(items) {
 // batches + gems + sub-problems + summary all firing together) is what trips the proxy's
 // rate / 25s-latency limit and leaves features empty. This serialises the load gracefully.
 let _proxyActive = 0;
-const _proxyWaiters = [];
+const _proxyWaiters = []; // each: { resolve, priority }
 const PROXY_MAX_CONCURRENT = 3;
-function _acquireProxySlot() {
+// Priority lane: a run fires ~15+ AI calls at once, but only 3 can run together. Without
+// priorities the user-facing visual panels (constellation, podcasts, social, the core
+// summary) sit at the BACK of the queue behind every background text feature and only get a
+// slot minutes later — which reads as "slow" and, once the 25s proxy ceiling is hit, "empty".
+// Higher priority is served first whenever a slot frees up, so the panels appear promptly.
+function _acquireProxySlot(priority = 0) {
     if (_proxyActive < PROXY_MAX_CONCURRENT) { _proxyActive++; return Promise.resolve(); }
-    return new Promise(resolve => _proxyWaiters.push(resolve));
+    return new Promise(resolve => _proxyWaiters.push({ resolve, priority }));
 }
 function _releaseProxySlot() {
-    if (_proxyWaiters.length) { const next = _proxyWaiters.shift(); next(); }
-    else _proxyActive = Math.max(0, _proxyActive - 1);
+    if (_proxyWaiters.length) {
+        // Serve the highest-priority waiter (ties: FIFO, since we scan with strict >).
+        let best = 0;
+        for (let i = 1; i < _proxyWaiters.length; i++) {
+            if (_proxyWaiters[i].priority > _proxyWaiters[best].priority) best = i;
+        }
+        const next = _proxyWaiters.splice(best, 1)[0];
+        next.resolve();
+    } else {
+        _proxyActive = Math.max(0, _proxyActive - 1);
+    }
 }
 
-async function limitedFetch(url, opts) {
-    await _acquireProxySlot();
+async function limitedFetch(url, opts, priority = 0) {
+    await _acquireProxySlot(priority);
     try { return await fetch(url, opts); }
     finally { _releaseProxySlot(); }
 }
 
-async function callOpenAIProxyWithRetry(openaiPayload, { tries = 2, backoffMs = 600 } = {}) {
+async function callOpenAIProxyWithRetry(openaiPayload, { tries = 2, backoffMs = 600, priority = 0 } = {}) {
     for (let attempt = 0; attempt <= tries; attempt++) {
         try {
             const res = await limitedFetch(OPENAI_PROXY_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ openaiPayload })
-            });
+            }, priority);
             if (res.ok) {
                 const data = await res.json();
                 if (data && data.openaiResponse) return data;            // usable content -> done
@@ -3049,7 +3063,7 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
                 temperature: 0.2,
                 max_completion_tokens: 2500,
                 response_format: { "type": "json_object" }
-            }, { tries: 2 });
+            }, { tries: 2, priority: 2 });
 
             if (!data || !data.openaiResponse) throw new Error("Proxy returned no content after retries (timeout / rate limit / API key).");
 
@@ -4245,15 +4259,12 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
             response_format: { "type": "json_object" }
         };
 
-        const response = await limitedFetch(OPENAI_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: openAIParams })
-        });
-
-        const data = await response.json();
+        // Resilient call: the proxy's 25s latency limit (a slow OpenAI call) is variance, not a
+        // hard failure, so retry rather than throwing. This was the "Proxy timed out" console error.
+        const data = await callOpenAIProxyWithRetry(openAIParams, { tries: 2 });
         if (!data || !data.openaiResponse) {
-            throw new Error("Proxy timed out or returned invalid format.");
+            console.warn("[Hook Patterns] No content after retries (proxy 25s latency limit or API key). Skipping this section.");
+            return;
         }
         const parsed = JSON.parse(data.openaiResponse);
 
@@ -4825,7 +4836,7 @@ async function runProblemFinder(options = {}) {
         const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". CRITICAL RULES FOR QUOTES: The "quotes" array must contain exactly 3 strings, and each string MUST be 63 characters or less. Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Prioritise the most common, clearly recurring problems that appear across many of the posts, and avoid niche one-off complaints, so the analysis stays consistent if the tool is run again on the same audience. Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["A short quote under 63 chars.", "Another quote under 63 chars.", "A final quote under 63 chars."], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_completion_tokens: 1500, seed: 11, response_format: { "type": "json_object" } };
         // Resilient call: retries on a timed-out/empty response (each retry gets a fresh budget),
         // so one slow attempt no longer breaks the entire analysis.
-        const openAIData = await callOpenAIProxyWithRetry(openAIParams, { tries: 2 });
+        const openAIData = await callOpenAIProxyWithRetry(openAIParams, { tries: 2, priority: 3 });
         let summaries = [];
         if (openAIData && openAIData.openaiResponse) {
             summaries = parseAISummary(openAIData.openaiResponse);
@@ -5203,7 +5214,7 @@ Respond ONLY with JSON: {"media":[{"type":"youtube","name":"...","focus":"..."}]
             temperature: 0.1,
             max_completion_tokens: 800,
             response_format: { type: "json_object" }
-        }, { tries: 2 });
+        }, { tries: 2, priority: 2 });
         if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).media || [];
     } catch (e) {
         console.warn('[Media] extraction failed:', e && e.message);
@@ -5425,7 +5436,7 @@ Respond ONLY with JSON: {"waterholes":[{"platform":"Facebook","name":"...","cont
             temperature: 0.1,
             max_completion_tokens: 800,
             response_format: { type: "json_object" }
-        }, { tries: 2 });
+        }, { tries: 2, priority: 2 });
         if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).waterholes || [];
     } catch (e) {
         console.warn('[Waterholes] extraction failed:', e && e.message);

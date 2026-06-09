@@ -1526,7 +1526,7 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
 
 
 
-async function generateAndRenderToneMap(posts, audienceContext) {
+async function generateAndRenderToneMap(posts, audienceContext, preParsed = null) {
     const container = document.getElementById('tone-map-container');
     if (!container || !TONE_CARD_BLUEPRINT) return;
 
@@ -1554,14 +1554,18 @@ async function generateAndRenderToneMap(posts, audienceContext) {
             response_format: { "type": "json_object" }
         };
 
-        const response = await limitedFetch(OPENAI_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: openAIParams })
-        });
-
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
+        let parsed;
+        if (preParsed) {
+            parsed = preParsed; // supplied by the combined voice/tone/language call
+        } else {
+            const response = await limitedFetch(OPENAI_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ openaiPayload: openAIParams })
+            });
+            const data = await response.json();
+            parsed = JSON.parse(data.openaiResponse);
+        }
 
         container.innerHTML = ''; // Clear loading
 
@@ -1701,7 +1705,10 @@ Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}
     };
 
     try {
-        const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        // Brands & Products jumps the proxy queue (priority 2) so this well-performing panel
+        // fills early instead of waiting behind the profile/tone calls. Extraction logic and the
+        // data it returns are unchanged — this only changes WHEN the call is served.
+        const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }, 2);
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
@@ -3369,7 +3376,7 @@ function renderHighchartsBubbleChart(signals) {
 // === REVISED FUNCTION V2: AI MINDSET SUMMARY WITH DESCRIPTIVE POINTS ===
 // =================================================================================
 
-async function generateAndRenderMindsetSummary(posts, audienceContext) {
+async function generateAndRenderMindsetSummary(posts, audienceContext, preParsed = null) {
     const container = document.getElementById('mindset-summary-container');
     const archetypeHeadingEl = document.getElementById('archetype-heading');
     const archetypeDescEl = document.getElementById('archetype-d');
@@ -3493,11 +3500,15 @@ ${topPostsText}`;
             response_format: { "type": "json_object" }
         };
 
-        const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
-        if (!response.ok) throw new Error('Mindset analysis API call failed.');
-
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
+        let parsed;
+        if (preParsed) {
+            parsed = preParsed; // supplied by the combined mindset/pillars call
+        } else {
+            const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+            if (!response.ok) throw new Error('Mindset analysis API call failed.');
+            const data = await response.json();
+            parsed = JSON.parse(data.openaiResponse);
+        }
         const { archetype, summary, values, rejects } = parsed;
 
         archetypeHeadingEl.textContent = archetype || '';
@@ -3518,7 +3529,7 @@ ${topPostsText}`;
 // === NEW FUNCTION: AI STRATEGIC PILLARS (GOALS & FEARS) ===
 // ================================================================================
 
-async function generateAndRenderStrategicPillars(posts, audienceContext) {
+async function generateAndRenderStrategicPillars(posts, audienceContext, preParsed = null) {
     const goalsContainer = document.getElementById('goals-pillar');
     const fearsContainer = document.getElementById('fears-pillar');
     if (!goalsContainer || !fearsContainer) return;
@@ -3559,14 +3570,18 @@ ${topPostsText}`;
             response_format: { "type": "json_object" }
         };
 
-        const response = await limitedFetch(OPENAI_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: openAIParams })
-        });
-
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
+        let parsed;
+        if (preParsed) {
+            parsed = preParsed; // supplied by the combined mindset/pillars call
+        } else {
+            const response = await limitedFetch(OPENAI_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ openaiPayload: openAIParams })
+            });
+            const data = await response.json();
+            parsed = JSON.parse(data.openaiResponse);
+        }
         console.log('[Pillars] AI returned goals:', (parsed.goals || []).length, 'fears:', (parsed.fears || []).length);
 
         const populatePillars = (container, blueprint, items, swapClass) => {
@@ -4337,7 +4352,7 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
     }
 }
 
-async function generateAndRenderVoiceProfile(posts, audienceContext) {
+async function generateAndRenderVoiceProfile(posts, audienceContext, preParsed = null) {
     const container = document.getElementById('voice-profile-container');
     if (!container) return;
 
@@ -4375,14 +4390,18 @@ Posts: ${topPostsText}`;
             response_format: { "type": "json_object" }
         };
 
-        const response = await limitedFetch(OPENAI_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: openAIParams })
-        });
-
-        const data = await response.json();
-        const parsed = JSON.parse(data.openaiResponse);
+        let parsed;
+        if (preParsed) {
+            parsed = preParsed; // supplied by the combined voice/tone/language call
+        } else {
+            const response = await limitedFetch(OPENAI_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ openaiPayload: openAIParams })
+            });
+            const data = await response.json();
+            parsed = JSON.parse(data.openaiResponse);
+        }
 
         // Populate the 5 voice-p-context elements in order
         const wrap = container.querySelector('.voice-p-wrap');
@@ -4407,7 +4426,7 @@ Posts: ${topPostsText}`;
     }
 }
 
-async function generateAndRenderLanguageToAvoid(posts, audienceContext) {
+async function generateAndRenderLanguageToAvoid(posts, audienceContext, preParsed = null) {
     const moduleWrapper = document.getElementById('language-to-avoid-container');
     if (!moduleWrapper) return;
 
@@ -4454,17 +4473,20 @@ Posts: ${topPostsText}`;
             response_format: { "type": "json_object" }
         };
 
-        const response = await limitedFetch(OPENAI_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: openAIParams })
-        });
-
-        if (!response.ok) throw new Error('Language Avoid API call failed.');
-        const data = await response.json();
-        if (!data || !data.openaiResponse) throw new Error("Proxy returned empty response.");
-
-        const parsed = JSON.parse(data.openaiResponse);
+        let parsed;
+        if (preParsed) {
+            parsed = preParsed; // supplied by the combined voice/tone/language call
+        } else {
+            const response = await limitedFetch(OPENAI_PROXY_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ openaiPayload: openAIParams })
+            });
+            if (!response.ok) throw new Error('Language Avoid API call failed.');
+            const data = await response.json();
+            if (!data || !data.openaiResponse) throw new Error("Proxy returned empty response.");
+            parsed = JSON.parse(data.openaiResponse);
+        }
 
         if (parsed.pairs && Array.isArray(parsed.pairs)) {
             parsed.pairs.forEach(pair => {
@@ -4614,6 +4636,87 @@ function populateFindingPills() {
         pill.style.display = 'inline-block';
         wrap.appendChild(pill);
     });
+}
+
+// CONSOLIDATED CALL #1 — Voice Profile + Tone Map + Language-to-Avoid. All three read the same
+// top ~40 posts and describe how this audience talks. One proxy call instead of three removes
+// 2 OpenAI round-trips per run with no quality change (same material in the prompt). If the
+// combined call fails or a section is missing, that panel falls back to its own original call,
+// so the worst case is identical to the previous behaviour — never a regression.
+async function runVoiceClusterCombined(posts, audienceContext) {
+    let combined = null;
+    try {
+        const topPostsText = posts.slice(0, 40).map(p =>
+            `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
+        ).join('\n---\n');
+        const prompt = `You are a brand strategist and cultural observer studying how the "${audienceContext}" community talks. From the posts below produce THREE things in ONE JSON object. Be observational and slightly editorial; avoid cliches like "shared experience" or "celebrate the journey".
+
+"voice": { "tone_description": [exactly 5 one-sentence strings, in this order: (1) their emotional state, (2) how they communicate, (3) how they relate to each other, (4) what they are really seeking, (5) what messaging lands with them], "voice_adjectives": [exactly 6 evocative adjectives] }
+
+"tone": { "tone_analysis": [exactly 4 objects of { "topic": short title, "traits": [4 objects of { "name": adjective, "score": 10-100 }], "insights": [exactly 3 standalone sentences, each under 15 words, one idea each], "level": "LOW" | "MEDIUM" | "HIGH" }] }
+
+"language": { "pairs": [8-10 objects of { "avoid": term outsiders/marketers use, "avoid_reason": <=12 words why it sounds inauthentic, "use": authentic insider alternative, "use_reason": <=12 words why it lands better }] }
+
+Respond ONLY with valid JSON: {"voice":{...},"tone":{...},"language":{...}}
+
+Posts: ${topPostsText}`;
+        const data = await callOpenAIProxyWithRetry({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You are a brand strategist and linguist who outputs only valid JSON with keys voice, tone and language." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.3,
+            max_completion_tokens: 2200,
+            response_format: { "type": "json_object" }
+        }, { tries: 2, priority: 1 });
+        if (data && data.openaiResponse) combined = JSON.parse(data.openaiResponse);
+    } catch (e) {
+        console.warn('[Voice cluster] combined call failed; panels will self-fetch:', e && e.message);
+    }
+    generateAndRenderVoiceProfile(posts, audienceContext, (combined && combined.voice) ? combined.voice : null);
+    generateAndRenderToneMap(posts, audienceContext, (combined && combined.tone) ? combined.tone : null);
+    generateAndRenderLanguageToAvoid(posts, audienceContext, (combined && combined.language) ? combined.language : null);
+}
+
+// CONSOLIDATED CALL #2 — Mindset (archetype/values/rejects) + Strategic Pillars (goals/fears).
+// Both are psychological "field notes" on the same posts. One call instead of two, same
+// per-panel fallback safety.
+async function runProfileClusterCombined(posts, audienceContext) {
+    let combined = null;
+    try {
+        const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
+        const prompt = `You are a strategist who has spent months lurking inside the "${audienceContext}" community. From the real posts below write sharp, observational field notes (never a marketing deck). Produce ONE JSON object:
+
+"archetype": a 2-3 word evocative name for this audience.
+"summary": EXACTLY 2 short sentences (40 words max), a sharp character study built around one instinct or contradiction. Do NOT start with "this audience is driven by", "they value" or "they appreciate".
+"values": array of exactly 3 one-sentence observations (max 20 words) about an instinct, belief or contradiction. Do NOT begin with "They value" or "They appreciate".
+"rejects": array of exactly 3 one-sentence observations (max 20 words) about a pet peeve, red flag or thing they push back against. Do NOT begin with "They reject".
+"goals": array of exactly 3 things they quietly hope for, in their own emotional terms, ~12 words or fewer each. Avoid business-plan language.
+"fears": array of exactly 3 things that genuinely keep them up at night, ~12 words or fewer each.
+
+Ground every line in the posts. Respond ONLY with valid JSON.
+
+Posts:
+${topPostsText}`;
+        const data = await callOpenAIProxyWithRetry({
+            model: "gpt-4o",
+            messages: [
+                { role: "system", content: "You are a sharp cultural observer who writes psychologically specific field notes and outputs only valid JSON. You never sound like a marketing deck." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.6,
+            max_completion_tokens: 1500,
+            response_format: { "type": "json_object" }
+        }, { tries: 2, priority: 1 });
+        if (data && data.openaiResponse) combined = JSON.parse(data.openaiResponse);
+    } catch (e) {
+        console.warn('[Profile cluster] combined call failed; panels will self-fetch:', e && e.message);
+    }
+    // Mindset reads archetype/summary/values/rejects; Pillars reads goals/fears. Pass the shared
+    // object; if a half is missing, that panel gets null and does its own original call.
+    generateAndRenderMindsetSummary(posts, audienceContext, (combined && combined.values) ? combined : null);
+    generateAndRenderStrategicPillars(posts, audienceContext, (combined && combined.goals) ? combined : null);
 }
 
 async function runProblemFinder(options = {}) {
@@ -4815,12 +4918,12 @@ async function runProblemFinder(options = {}) {
         generateAndRenderHybridSentiment(filteredItems, originalGroupName);
         generateEmotionMapData(filteredItems).then(renderEmotionMap);
         renderIncludedSubreddits(selectedSubreddits);
-        generateAndRenderVoiceProfile(filteredItems, originalGroupName);
-        generateAndRenderLanguageToAvoid(filteredItems, originalGroupName);
+        // Voice + Tone + Language now share ONE proxy call; Mindset + Goals/Fears share ONE call.
+        // 5 OpenAI round-trips collapsed to 2 (each panel still falls back to its own call if the
+        // combined one fails). Hook Patterns stays separate (different posts/time window).
+        runVoiceClusterCombined(filteredItems, originalGroupName);
         generateAndRenderHookPatterns(filteredItems, originalGroupName);
-        generateAndRenderToneMap(filteredItems, originalGroupName);
-        generateAndRenderMindsetSummary(filteredItems, originalGroupName);
-        generateAndRenderStrategicPillars(filteredItems, originalGroupName);
+        runProfileClusterCombined(filteredItems, originalGroupName);
         // Deferred to the Growth Plan tab: AI prompt + SEO content plan/sunburst now run
         // only when #growth-tab-link is first opened (see setupGrowthKitInteraction).
         showBrandLoader();

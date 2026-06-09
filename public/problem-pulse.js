@@ -1145,34 +1145,63 @@ async function findSubredditsForGroup(groupName) {
         return [];
     }
 }
-async function fetchCommentsForPosts(postIds, batchSize = 5) {
-    let allComments = [];
-    console.log(`Fetching comments for ${postIds.length} posts...`);
-    for (let i = 0; i < postIds.length; i += batchSize) {
-        const batchIds = postIds.slice(i, i + batchSize);
-        const batchPromises = batchIds.map(postId => {
-            const payload = { type: 'comments', postId: postId };
-            return fetch(REDDIT_PROXY_URL, {
+// Global Reddit-proxy limiter: many features fetch comment threads at once, which trips
+// Reddit's 429 rate limit. Cap concurrency low and serialise the rest gracefully.
+let _redditActive = 0;
+const _redditWaiters = [];
+const REDDIT_MAX_CONCURRENT = 3;
+function _acquireReddit() {
+    if (_redditActive < REDDIT_MAX_CONCURRENT) { _redditActive++; return Promise.resolve(); }
+    return new Promise(resolve => _redditWaiters.push(resolve));
+}
+function _releaseReddit() {
+    if (_redditWaiters.length) { _redditWaiters.shift()(); }
+    else _redditActive = Math.max(0, _redditActive - 1);
+}
+
+// Per-post comment cache so the same thread is never fetched twice across features.
+const _commentCache = new Map();
+
+async function _fetchOneCommentThread(postId, tries = 2) {
+    for (let attempt = 0; attempt <= tries; attempt++) {
+        await _acquireReddit();
+        try {
+            const res = await fetch(REDDIT_PROXY_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            }).then(res => res.json()).then(data => {
+                body: JSON.stringify({ type: 'comments', postId })
+            });
+            if (res.ok) {
+                const data = await res.json();
                 if (Array.isArray(data) && data.length > 1 && data[1].data && data[1].data.children) {
-                    return data[1].data.children.filter(comment => comment.kind === 't1');
+                    return data[1].data.children.filter(c => c.kind === 't1');
                 }
                 return [];
-            }).catch(err => {
-                console.error(`Failed to fetch comments for post ${postId}:`, err);
-                return [];
-            });
-        });
-        const results = await Promise.all(batchPromises);
-        results.forEach(comments => allComments.push(...comments));
-        if (i + batchSize < postIds.length) {
-            await new Promise(resolve => setTimeout(resolve, 300));
+            }
+            // non-ok (likely 429) -> fall through to backoff + retry
+        } catch (e) {
+            // network error -> retry
+        } finally {
+            _releaseReddit();
         }
+        if (attempt < tries) await new Promise(r => setTimeout(r, 900 * (attempt + 1)));
     }
-    console.log(`Successfully fetched ${allComments.length} comments.`);
+    return [];
+}
+
+async function fetchCommentsForPosts(postIds, batchSize = 3) {
+    let allComments = [];
+    const toFetch = [];
+    (postIds || []).forEach(id => {
+        if (_commentCache.has(id)) allComments.push(...(_commentCache.get(id) || []));
+        else if (id) toFetch.push(id);
+    });
+    for (let i = 0; i < toFetch.length; i += batchSize) {
+        const batchIds = toFetch.slice(i, i + batchSize);
+        const results = await Promise.all(batchIds.map(id => _fetchOneCommentThread(id)));
+        results.forEach((comments, j) => { _commentCache.set(batchIds[j], comments); allComments.push(...comments); });
+        if (i + batchSize < toFetch.length) await new Promise(resolve => setTimeout(resolve, 450));
+    }
     return allComments;
 }
 function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1); return word; }

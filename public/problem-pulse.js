@@ -1501,8 +1501,16 @@ function showSlidingPanel(word, posts, category) { const positivePanel = documen
 
 
 async function extractAndValidateEntities(posts, nicheContext) {
-    // 1. Prepare text for counting
-    const allText = posts.map(p =>
+    // 1. Prepare text for counting - across the FULL corpus (main posts + this pass's items),
+    //    deduped by id, so mention counts reflect the whole dataset, not one small batch.
+    const _seenCount = new Set();
+    const countCorpus = [...(window._filteredPosts || []), ...posts].filter(p => {
+        const id = p && p.data && p.data.id;
+        if (!id) return true;
+        if (_seenCount.has(id)) return false;
+        _seenCount.add(id); return true;
+    });
+    const allText = countCorpus.map(p =>
         (p.data.title || '') + " " + (p.data.selftext || p.data.body || '')
     ).join(" [SEP] ").toLowerCase();
 
@@ -1526,9 +1534,9 @@ async function extractAndValidateEntities(posts, nicheContext) {
         capFreq[tok] = (capFreq[tok] || 0) + 1;
     });
     const candidateList = Object.entries(capFreq)
-        .filter(([k, c]) => c >= 3)
+        .filter(([k, c]) => c >= 2)
         .sort((a, b) => b[1] - a[1])
-        .slice(0, 50)
+        .slice(0, 60)
         .map(([k, c]) => `${k} (${c})`)
         .join(', ');
 
@@ -2880,7 +2888,7 @@ async function generateAndRenderConstellation(items) {
 
     const BATCH_SIZE = 20;          // bigger batches => fewer round-trips (80 items => 4 calls)
     const CONCURRENCY = 2;          // 2 at a time: fast, but gentle enough to avoid proxy rate limits
-    const MIN_SIGNALS = 12;
+    const MIN_SIGNALS = 20;
     const enrichedSignals = [];     // strong: clear commercial cue
     const backupSignals = [];       // weaker but valid - used to top up
     const seenThemes = new Set();
@@ -2904,7 +2912,7 @@ async function generateAndRenderConstellation(items) {
         const batch = prioritizedItems.slice(startIndex, startIndex + BATCH_SIZE);
         const prompt = `You are a shopper-behaviour analyst studying how the "${window.originalGroupName || 'this'}" audience spends money: what they buy, what they pay for, and how they decide between products and brands.
 
-From the numbered comments below, extract EVERY quote that reveals a shopping or buying behaviour: an actual purchase, a price or cost, money or budget, a named product or brand, paying or subscribing, choosing between things you can buy, recommending or abandoning a product, or how they decide what to buy. Aim to surface 4-8 genuine signals per batch when the material supports it - do not be stingy, but never invent signals that are not in the text.
+From the numbered comments below, extract EVERY quote that reveals how this audience SHOPS or makes product decisions. Cast a WIDE net - this includes any of: an actual purchase; a price, cost or budget mention; a named product or brand; paying or subscribing; choosing between options; recommending, praising or warning against a product; asking what to buy or for recommendations; comparing options; what they feed/use/buy for their needs; a product that worked or disappointed them; or what made them switch or stick with something. Most posts in an interest community contain at least one shopping or product signal - be generous. Aim to surface 6-12 genuine signals per batch when the material supports it, but never invent signals that are not in the text.
 
 The ONLY things you must reject are pure lifestyle, diet, habit and routine choices where nothing is bought and no product or brand is involved. Examples you MUST reject:
 - "I cut out pasta, bread, cookies and candy." (a diet choice, nothing is bought)
@@ -2917,13 +2925,13 @@ For each genuine shopping signal return an object with:
 - "category": EXACTLY one of [${validCategories.join(', ')}].
 - "theme": a concrete 3 to 5 word shopping-behaviour label describing an action or pattern, never a feeling. Good: "Pays premium for quality", "Hunts for the cheapest option", "Switches brand after bad batch", "Trusts reviews before buying".
 
-Category definitions:
-- WillingnessToPay: happy to spend, premium choices, "worth the money", "would pay more for".
-- PriceSensitivity: budget limits, "too expensive", deal hunting, choosing cheaper products.
-- BrandLoyalty: sticking with, recommending, or abandoning specific named brands or products.
-- ResearchHabits: how they decide what to buy, reading reviews, asking for recommendations, comparing options.
-- Substitutes: a different PRODUCT or service they buy or use instead of another product. Not a lifestyle method.
-- Dealbreakers: what stops a purchase, returns, refunds, regret over a purchase, distrust of a product.
+Category definitions (use these generously):
+- WillingnessToPay: happy to spend, premium choices, "worth the money", "would pay more for", investing in quality.
+- PriceSensitivity: budget limits, "too expensive", deal hunting, choosing cheaper options, sticker shock.
+- BrandLoyalty: sticking with, recommending, praising, warning against or abandoning a specific named brand or product; mentioning a product they use and trust.
+- ResearchHabits: how they decide what to buy, reading reviews, asking "what should I get", asking for recommendations, comparing options before buying.
+- Substitutes: a different product, service or option they buy or use INSTEAD of another. Not a lifestyle method.
+- Dealbreakers: what stops a purchase, returns, refunds, regret, distrust, or a product that disappointed or failed them.
 
 Comments:
 ${batch.map((item, index) => `${index}. ${((item.data.body || item.data.selftext || '')).substring(0, 1000)}`).join('\n---\n')}

@@ -714,7 +714,7 @@ async function classifySentimentWithAI(posts) {
         };
 
         try {
-            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+            const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
             if (response.ok) {
                 const data = await response.json();
                 const parsed = JSON.parse(data.openaiResponse);
@@ -808,7 +808,7 @@ async function generateSentimentContextWithAI(posts, brandName) {
     };
 
     try {
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (response.ok) {
             const data = await response.json();
             return JSON.parse(data.openaiResponse);
@@ -898,12 +898,16 @@ function _releaseProxySlot() {
     else _proxyActive = Math.max(0, _proxyActive - 1);
 }
 
-async function callOpenAIProxyWithRetry(openaiPayload, { tries = 2, backoffMs = 600 } = {}) {
+async function limitedFetch(url, opts) {
     await _acquireProxySlot();
-    try {
+    try { return await fetch(url, opts); }
+    finally { _releaseProxySlot(); }
+}
+
+async function callOpenAIProxyWithRetry(openaiPayload, { tries = 2, backoffMs = 600 } = {}) {
     for (let attempt = 0; attempt <= tries; attempt++) {
         try {
-            const res = await fetch(OPENAI_PROXY_URL, {
+            const res = await limitedFetch(OPENAI_PROXY_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ openaiPayload })
@@ -922,9 +926,6 @@ async function callOpenAIProxyWithRetry(openaiPayload, { tries = 2, backoffMs = 
         if (attempt < tries) await new Promise(r => setTimeout(r, backoffMs * (attempt + 1)));
     }
     return null;
-    } finally {
-        _releaseProxySlot();
-    }
 }
 
 // Renders #count-header by filling the user's Webflow-designed blueprint. The author builds
@@ -980,7 +981,7 @@ async function assignPostsToFindings(summaries, posts) {
     const prompt = `You are an expert data analyst. Your task is to categorize Reddit posts into the most relevant "Finding" from a provided list.\n\nHere are the ${summaries.length} findings:\n${summaries.map((s, i) => `Finding ${i + 1}: ${s.title}`).join('\n')}\n\nHere are the ${postsForAI.length} Reddit posts:\n${postsForAI.map((p, i) => `Post ${i + 1}: ${(p.data.title || p.data.link_title || '').substring(0, 150)}`).join('\n')}\n\nINSTRUCTIONS: For each post, assign it to the most relevant Finding (from 1 to ${summaries.length}). Respond ONLY with a JSON object with a single key "assignments", which is an array of objects like {"postNumber": 1, "finding": 2}.`;
     const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a precise data categorization engine that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0, max_completion_tokens: 1500, response_format: { "type": "json_object" } };
     try {
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error(`OpenAI API Error for assignments: ${response.statusText}`);
         const data = await response.json();
         return parseAIAssignments(data.openaiResponse);
@@ -1116,7 +1117,7 @@ async function getRelatedSearchTermsAI(audience) {
     const prompt = `Given the target audience "${audience}", generate up to 5 related but distinct search terms or concepts that would help find communities for them. Think about activities, problems, life stages, and related interests. Respond ONLY with a valid JSON object with a single key "terms", which is an array of strings.`;
     const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a creative brainstorming assistant that outputs only JSON." }, { role: "user", content: prompt }], temperature: 0.4, max_completion_tokens: 150, response_format: { "type": "json_object" } };
     try {
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('AI keyword generation failed.');
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
@@ -1133,7 +1134,7 @@ async function findSubredditsForGroup(groupName) {
     const prompt = `Based on the following audience and related keywords: [${allTerms.join(', ')}], suggest up to 20 relevant and active Reddit subreddits. Prioritize a variety of communities, including both large general ones and smaller niche ones. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").`;
     const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.2, max_completion_tokens: 300, response_format: { "type": "json_object" } };
     try {
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('OpenAI API request failed.');
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
@@ -1205,7 +1206,7 @@ async function fetchCommentsForPosts(postIds, batchSize = 3) {
     return allComments;
 }
 function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1); return word; }
-async function generateEmotionMapData(posts) { try { const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || p.data.link_title}\nBody: ${(p.data.selftext || p.data.body).substring(0, 1000)}`).join('\n---\n'); const prompt = `You are a world-class market research analyst for '${originalGroupName}'. Analyze the following text to identify the 15 most significant problems, pain points, or key topics.\n\nFor each one, provide:\n1. "problem": A short, descriptive name for the problem (e.g., "Finding Reliable Vendors", "Budgeting Anxiety").\n2. "intensity": A score from 1 (mild) to 10 (severe) of how big a problem this is.\n3. "frequency": A score from 1 (rarely mentioned) to 10 (frequently mentioned) based on its prevalence in the text.\n\nRespond ONLY with a valid JSON object with a single key "problems", which is an array of these objects.\nExample: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequency": 9 }] }`; const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_completion_tokens: 1500, response_format: { "type": "json_object" } }; const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) { throw new Error(`AI API failed with status: ${response.status}`); } const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const aiProblems = parsed.problems || []; if (aiProblems.length >= 3) { console.log("Successfully used AI analysis for Problem Map."); const chartData = aiProblems.map(item => { if (!item.problem || typeof item.intensity !== 'number' || typeof item.frequency !== 'number') return null; return { x: item.frequency, y: item.intensity, label: item.problem }; }).filter(Boolean); return chartData.sort((a, b) => b.x - a.x); } else { console.warn("AI analysis returned too few problems. Falling back to keyword analysis."); } } catch (error) { console.error("AI analysis for Problem Map failed:", error, "Falling back to reliable keyword-based analysis."); } const emotionFreq = {}; posts.forEach(post => { const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase(); const words = text.replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { const lemma = lemmatize(rawWord); if (emotionalIntensityScores[lemma]) { emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1; } }); }); const chartData = Object.entries(emotionFreq).map(([word, freq]) => ({ x: freq, y: emotionalIntensityScores[word], label: word })); return chartData.sort((a, b) => b.x - a.x).slice(0, 25); }
+async function generateEmotionMapData(posts) { try { const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || p.data.link_title}\nBody: ${(p.data.selftext || p.data.body).substring(0, 1000)}`).join('\n---\n'); const prompt = `You are a world-class market research analyst for '${originalGroupName}'. Analyze the following text to identify the 15 most significant problems, pain points, or key topics.\n\nFor each one, provide:\n1. "problem": A short, descriptive name for the problem (e.g., "Finding Reliable Vendors", "Budgeting Anxiety").\n2. "intensity": A score from 1 (mild) to 10 (severe) of how big a problem this is.\n3. "frequency": A score from 1 (rarely mentioned) to 10 (frequently mentioned) based on its prevalence in the text.\n\nRespond ONLY with a valid JSON object with a single key "problems", which is an array of these objects.\nExample: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequency": 9 }] }`; const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_completion_tokens: 1500, response_format: { "type": "json_object" } }; const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) { throw new Error(`AI API failed with status: ${response.status}`); } const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const aiProblems = parsed.problems || []; if (aiProblems.length >= 3) { console.log("Successfully used AI analysis for Problem Map."); const chartData = aiProblems.map(item => { if (!item.problem || typeof item.intensity !== 'number' || typeof item.frequency !== 'number') return null; return { x: item.frequency, y: item.intensity, label: item.problem }; }).filter(Boolean); return chartData.sort((a, b) => b.x - a.x); } else { console.warn("AI analysis returned too few problems. Falling back to keyword analysis."); } } catch (error) { console.error("AI analysis for Problem Map failed:", error, "Falling back to reliable keyword-based analysis."); } const emotionFreq = {}; posts.forEach(post => { const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase(); const words = text.replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { const lemma = lemmatize(rawWord); if (emotionalIntensityScores[lemma]) { emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1; } }); }); const chartData = Object.entries(emotionFreq).map(([word, freq]) => ({ x: freq, y: emotionalIntensityScores[word], label: word })); return chartData.sort((a, b) => b.x - a.x).slice(0, 25); }
 
 function renderEmotionMap(data) {
     const container = document.getElementById('emotion-map-container');
@@ -1455,7 +1456,7 @@ async function generateAndRenderHybridSentiment(posts, audienceContext) {
         try {
             const prompt = `You are a market research analyst. Below is a list of common phrases from the "${audienceContext}" community. Your task is to filter this list. Identify phrases that express clear **positive sentiment** and **negative sentiment**. Ignore neutral phrases. Respond ONLY with a valid JSON object with two keys: "positive_phrases" and "negative_phrases", holding an array of the relevant strings you selected. Candidate Phrases: ${JSON.stringify(candidatePhrases)}`;
             const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert sentiment filter that only outputs JSON." }, { role: "user", content: prompt }], temperature: 0.1, max_completion_tokens: 1000, response_format: { "type": "json_object" } };
-            const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+            const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
             if (response.ok) {
                 const data = await response.json();
                 const parsed = JSON.parse(data.openaiResponse);
@@ -1539,7 +1540,7 @@ async function generateAndRenderToneMap(posts, audienceContext) {
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, {
+        const response = await limitedFetch(OPENAI_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ openaiPayload: openAIParams })
@@ -1686,7 +1687,7 @@ Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}
     };
 
     try {
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
@@ -2160,7 +2161,7 @@ async function findRelatedSubredditsAI(analyzedSubsData, audienceContext) {
     const prompt = `You are a Reddit discovery expert. A user is analyzing communities for the audience "${audienceContext}", including: ${subNames}. Your task is to suggest up to 20 NEW, related subreddits that explore NICHE or ADJACENT topics. Think outside the box. For example, if the user is analyzing 'weddingplanning', suggest 'bridezillas', 'weddingdress', 'honeymoons', or 'UKweddings' instead of just another general wedding sub. CRITICAL: Do NOT include any of the original subreddits in your suggestions: ${subNames}. Provide your response ONLY as a JSON object with a single key "subreddits", containing an array of subreddit names (without "r/").`;
     const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are an expert Reddit community finder providing answers in strict JSON format." }, { role: "user", content: prompt }], temperature: 0.4, max_completion_tokens: 300, response_format: { "type": "json_object" } };
     try {
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('OpenAI related subreddits request failed.');
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
@@ -2352,7 +2353,7 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
@@ -2724,7 +2725,7 @@ ${corpusText}`;
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
         const raw = Array.isArray(parsed.sub_problems) ? parsed.sub_problems : [];
@@ -3459,7 +3460,7 @@ ${topPostsText}`;
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('Mindset analysis API call failed.');
 
         const data = await response.json();
@@ -3525,7 +3526,7 @@ ${topPostsText}`;
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, {
+        const response = await limitedFetch(OPENAI_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ openaiPayload: openAIParams })
@@ -3600,7 +3601,7 @@ async function generateAndRenderAIPrompt(posts, audienceContext) {
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
 
         if (!response.ok) throw new Error('AI prompt generation API call failed.');
 
@@ -3814,7 +3815,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
+        const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         if (!response.ok) throw new Error('AI content plan generation failed.');
 
         const aiResult = await response.json();
@@ -3984,7 +3985,7 @@ async function generateProblemOfferPairsAI(summaries) {
     };
 
     try {
-        const response = await fetch(OPENAI_PROXY_URL, {
+        const response = await limitedFetch(OPENAI_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ openaiPayload: openAIParams })
@@ -4228,7 +4229,7 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, {
+        const response = await limitedFetch(OPENAI_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ openaiPayload: openAIParams })
@@ -4344,7 +4345,7 @@ Posts: ${topPostsText}`;
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, {
+        const response = await limitedFetch(OPENAI_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ openaiPayload: openAIParams })
@@ -4423,7 +4424,7 @@ Posts: ${topPostsText}`;
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, {
+        const response = await limitedFetch(OPENAI_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ openaiPayload: openAIParams })
@@ -4495,7 +4496,7 @@ async function generateAndRenderOverview(posts, audienceContext) {
             response_format: { "type": "json_object" }
         };
 
-        const response = await fetch(OPENAI_PROXY_URL, {
+        const response = await limitedFetch(OPENAI_PROXY_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ openaiPayload: openAIParams })
@@ -5125,11 +5126,16 @@ async function generateAndRenderPodcasts(posts, audienceContext) {
 
     const corpus = posts || [];
     if (corpus.length < 5) return;
-    const sampleText = corpus.slice(0, 70).map((p, i) =>
-        `[${i}] ${`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.replace(/\s+/g, ' ').slice(0, 500)}`
+    // Focus the model on the items that actually MENTION podcasts - the rest never name any,
+    // so feeding the whole corpus just returns nothing.
+    const podcastMatch = /\b(podcast|podcasts|episode|episodes)\b/i;
+    const focused = corpus.filter(p => podcastMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
+    if (focused.length === 0) { renderPodcasts(container, blueprint, []); return; }
+    const sampleText = focused.slice(0, 70).map((p, i) =>
+        `[${i}] ${`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.replace(/\s+/g, ' ').slice(0, 600)}`
     ).join('\n');
 
-    const prompt = `From these "${audienceContext}" discussions, extract the PODCASTS and audio shows people mention listening to or recommending.
+    const prompt = `From these "${audienceContext}" discussions (already filtered to ones that mention podcasts), extract the PODCASTS and audio shows people mention listening to or recommending.
 For each, return:
 - "name": the podcast/show name exactly as mentioned (verbatim).
 - "focus": a SHORT phrase for what it is about, ONLY if clearly stated; otherwise "".

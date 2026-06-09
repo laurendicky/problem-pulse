@@ -5102,8 +5102,7 @@ function setupGrowthKitInteraction() {
 // =================================================================================
 
 
-
-async function generateAndRenderPodcasts(posts, audienceContext, subredditQueryString, timeFilter) {
+async function generateAndRenderPodcasts(posts, audienceContext) {
     const container = document.getElementById('podcasts');
     if (!container) return;
     if (!window._podcastBlueprint) {
@@ -5113,28 +5112,15 @@ async function generateAndRenderPodcasts(posts, audienceContext, subredditQueryS
     const blueprint = window._podcastBlueprint;
     if (!blueprint) { console.warn('[Media] no .podcasts-list-item template found in #podcasts.'); return; }
 
-    // Broad matching filters to look for media and written content mentions
+    // Mine the rich in-memory corpus compiled by the previous search phases
+    const corpus = posts || window._fullCorpus || window._filteredPosts || [];
+    if (corpus.length < 5) { renderPodcasts(container, blueprint, []); return; }
+
+    // Filter our local corpus for any posts/comments containing media terms
     const mediaMatch = /\b(podcast|podcasts|episode|episodes|youtube|yt|channel|channels|video|videos|watch|vlog|vlogs|show|shows|book|books|newsletter|newsletters|substack|blog|blogs|read|reading|article|articles)\b/i;
-    let pool = (posts || []).filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
+    const pool = corpus.filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
 
-    try {
-        if (subredditQueryString) {
-            // Simplified, high-volume single-word queries instead of restrictive multi-word terms
-            const searched = await fetchMultipleRedditDataBatched(
-                subredditQueryString, 
-                ['recommend', 'podcast', 'youtube', 'book', 'blog', 'channel', 'read'], 
-                30, 
-                timeFilter || 'all', 
-                false
-            );
-            const ids = searched.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 25).map(p => p.data.id);
-            const comments = await fetchCommentsForPosts(ids);
-            pool = deduplicatePosts([...pool, ...searched, ...comments]);
-        }
-    } catch (e) { console.warn('[Media] search failed:', e && e.message); }
-
-    pool = pool.filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
-    console.log(`[Media] ${pool.length} media/resource items to mine.`);
+    console.log(`[Media] Local mining pool: ${pool.length} items out of ${corpus.length} total posts/comments.`);
     if (pool.length === 0) { renderPodcasts(container, blueprint, []); return; }
 
     const sampleText = pool.slice(0, 70).map((p, i) =>
@@ -5160,7 +5146,7 @@ Respond ONLY with valid JSON: {"media":[{"type":"youtube","name":"...","focus":"
         const data = await callOpenAIProxyWithRetry({
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "You extract explicitly-named podcasts, books, newsletters, blogs, and video channels from text. You never invent names, and you output only valid JSON." },
+                { role: "system", content: "You extract only explicitly-named podcasts, books, newsletters, blogs, and video channels from text. You never invent names, and you output only valid JSON." },
                 { role: "user", content: prompt }
             ],
             temperature: 0.1,
@@ -5175,6 +5161,7 @@ Respond ONLY with valid JSON: {"media":[{"type":"youtube","name":"...","focus":"
     const allText = pool.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' [SEP] ').toLowerCase();
     const seen = new Set();
     const items = [];
+    
     (parsed || []).forEach(w => {
         if (!w || !w.name) return;
         const name = String(w.name).trim();
@@ -5188,10 +5175,10 @@ Respond ONLY with valid JSON: {"media":[{"type":"youtube","name":"...","focus":"
         const type = ['podcast', 'youtube', 'book', 'newsletter', 'blog'].includes(String(w.type || '').toLowerCase()) ? String(w.type).toLowerCase() : 'blog';
         items.push({ type, name, focus: (w.focus || '').trim(), count });
     });
-    items.sort((a, b) => b.count - a.count);
     
-    // No external API calls are made. We immediately map web search fallback links
+    items.sort((a, b) => b.count - a.count);
     const top = items.slice(0, 8);
+    
     top.forEach(it => {
         if (it.type === 'youtube') {
             it.link = `https://www.youtube.com/results?search_query=${encodeURIComponent(it.name)}`;
@@ -5235,7 +5222,6 @@ function renderPodcasts(container, blueprint, items) {
     items.forEach(it => {
         const node = blueprint.cloneNode(true);
         node.style.display = '';
-        
         node.setAttribute('data-media-type', it.type || 'podcast'); 
         
         const set = (sel, val) => { const e = node.querySelector(sel); if (e) e.innerText = val; };
@@ -5246,7 +5232,7 @@ function renderPodcasts(container, blueprint, items) {
         set('.podcast-focus', it.focus ? `Focus: ${it.focus}` : `Type: ${typeLabel}`);
         set('.podcast-meta', `Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}`);
         
-        // Bypassing the cover image element simplifies rendering and avoids alignment issues
+        // Completely hidden to simplify layout loading
         const img = node.querySelector('.podcast-image');
         if (img) {
             img.style.display = 'none'; 

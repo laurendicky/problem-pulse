@@ -37,7 +37,7 @@ const lemmaMap = { 'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': '
 const positiveWords = new Set(['love', 'amazing', 'awesome', 'beautiful', 'best', 'brilliant', 'celebrate', 'charming', 'dope', 'excellent', 'excited', 'exciting', 'epic', 'fantastic', 'flawless', 'gorgeous', 'happy', 'impressed', 'incredible', 'insane', 'joy', 'keen', 'lit', 'perfect', 'phenomenal', 'proud', 'rad', 'super', 'stoked', 'thrilled', 'vibrant', 'wow', 'wonderful', 'blessed', 'calm', 'chill', 'comfortable', 'cozy', 'grateful', 'loyal', 'peaceful', 'pleased', 'relaxed', 'relieved', 'satisfied', 'secure', 'thankful', 'want', 'wish', 'hope', 'desire', 'craving', 'benefit', 'bonus', 'deal', 'hack', 'improvement', 'quality', 'solution', 'strength', 'advice', 'tip', 'trick', 'recommend']);
 const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'broken', 'hate', 'challenge', 'confused', 'crazy', 'critical', 'danger', 'desperate', 'disappoint', 'disgusted', 'dreadful', 'fear', 'frustrate', 'furious', 'horrible', 'irritated', 'jealous', 'nightmare', 'outraged', 'pain', 'panic', 'problem', 'rant', 'scared', 'shocked', 'stressful', 'terrible', 'terrified', 'trash', 'alone', 'ashamed', 'bored', 'depressed', 'discouraged', 'dull', 'empty', 'exhausted', 'failure', 'guilty', 'heartbroken', 'hopeless', 'hurt', 'insecure', 'lonely', 'miserable', 'sad', 'sorry', 'tired', 'unhappy', 'upset', 'weak', 'need', 'disadvantage', 'issue', 'flaw']);
 const emotionalIntensityScores = { 'annoy': 3, 'irritated': 3, 'bored': 2, 'issue': 3, 'sad': 4, 'bad': 3, 'confused': 4, 'tired': 3, 'upset': 5, 'unhappy': 5, 'disappoint': 6, 'frustrate': 6, 'stressful': 6, 'awful': 7, 'hate': 8, 'angry': 7, 'broken': 5, 'exhausted': 5, 'pain': 7, 'miserable': 8, 'terrible': 8, 'worst': 9, 'horrible': 8, 'furious': 9, 'outraged': 9, 'dreadful': 8, 'terrified': 10, 'nightmare': 10, 'heartbroken': 9, 'desperate': 8, 'rage': 10, 'problem': 4, 'challenge': 5, 'critical': 6, 'danger': 7, 'fear': 7, 'panic': 8, 'scared': 6, 'shocked': 7, 'trash': 5, 'alone': 4, 'ashamed': 5, 'depressed': 8, 'discouraged': 5, 'dull': 2, 'empty': 6, 'failure': 7, 'guilty': 6, 'hopeless': 8, 'insecure': 5, 'lonely': 6, 'weak': 4, 'need': 5, 'disadvantage': 4, 'flaw': 4 };
-const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments"];
+const stopWords = ["a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at", "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could", "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for", "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's", "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm", "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't", "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours", "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't", "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there", "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too", "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't", "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's", "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself", "yourselves", "like", "just", "dont", "can", "people", "help", "hes", "shes", "thing", "stuff", "really", "actually", "even", "know", "still", "post", "posts", "subreddit", "redditor", "redditors", "comment", "comments", "high", "low", "will", "sorry", "please", "thanks", "thank", "feel", "feeling", "got", "get", "go", "going", "take", "make", "sure", "want", "wanted", "think", "thinking", "thought", "see", "saw", "come", "came", "day", "days", "week", "weeks", "month", "months", "year", "years", "time", "times", "way", "ways", "eat", "eating", "ate", "sleep", "sleeping", "slept", "bed", "beds", "old", "new"];
 
 const EMBEDDING_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/embeddings-proxy';
 const SIM_THRESHOLD = 0.30; // <-- the accuracy dial. Raise it if everything looks over-grounded.
@@ -345,19 +345,15 @@ async function generateAndRenderHiddenGems(posts, audienceContext, meta = {}) {
         //    with grounded quotes - instead of guessing what is surprising.
         const prompt = `You are a sharp consumer-insight analyst studying the "${audienceContext}" audience by reading real Reddit discussions.
 
-We ran a statistical association engine (Lift / Chi-Square) over these discussions and surfaced unusual, non-obvious term correlations. Inspect the posts and explain the underlying BEHAVIOURAL reason behind 3 to 5 of these relationships (or other genuinely surprising connections you find in the posts).
+We ran a statistical association engine (Lift/Chi-Square) on these discussions and surfaced several term correlations. Use these correlations ONLY as hints or springboards.
 
-STATISTICALLY SIGNIFICANT PAIRS (co-occur far more than chance):
-${statisticalContext || "(No strong correlations surfaced; analyse the posts for other unexpected connections.)"}
+SURFACED ASSOCIATIONS:
+${statisticalContext || "(No strong correlations found)"}
 
-THE TEST for every gem: would a smart founder think "huh, that's interesting" AND be able to act on it? If not, drop it.
-
-REJECT and never return:
-- Obvious or self-evident things (for ${audienceContext}, that they discuss their own core topic).
-- Tautologies or restatements (a thing linked to its own synonym or predictable feeling).
-- Vague or generic observations ("people want quality", "users get frustrated").
-- Measurement/unit artifacts ("per day", "years old").
-- Anything you cannot back with a real quote from the items below.
+CRITICAL RULES FOR SURPRISE AND ACTIONABILITY:
+1. REJECT TAUTOLOGIES AND IDIOMS: Do not output standard collocations, dictionary pairs, or basic idioms. Pairs like "sorry + loss" (standard condolence), "high + energy" (standard dog descriptor), "potty + accident" (standard training term), or "sleep + bed" (where else would they sleep) are NOT hidden gems. They are linguistically linked, not behaviorally surprising. If a pair we surfaced is boring, IGNORE it.
+2. LOOK FOR CONCEPTUAL LEAPS: A true hidden gem links two entirely distinct domains of the user's life (e.g., "balcony" + "potty" showing space constraints / apartment-dwelling workarounds; "working from home" + "separation anxiety" showing structural schedule impacts).
+3. SCREENSHOT TEST: Ask yourself: "Would an experienced startup founder screenshot this slide to show their team because it reveals an unexpected consumer workaround, hack, or unaddressed market opportunity?" If not, do not return it. Prefer 2 highly surprising, actionable gems over 5 boring ones.
 
 For each gem return:
 - "category": one of emotional_leap | behavioural_leap | commercial_leap | contradiction
@@ -3108,6 +3104,45 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
         console.log("--- 'How They Shop' Analysis Complete. ---");
     }
 }
+// =================================================================================
+// === CONSTELLATION SIDE PANEL (#bubble-content): Webflow-blueprint state manager =====
+// Build these inside #bubble-content in Webflow and the JS shows/hides + fills them:
+//   .bubble-loader  -> loading state (put your Lottie loader + message here)
+//   .bubble-empty   -> "no signals" state (your text/buttons)
+//   .bubble-prompt  -> default "click a bubble" state (your text)
+//   .bubble-detail  -> the detail card, containing:
+//        .bubble-detail-title, .bubble-detail-quote, .bubble-detail-meta,
+//        .bubble-detail-source (the "View on Reddit" link - JS sets its href)
+// If none of these exist yet, the function returns false and the caller falls back to
+// the old inline markup, so nothing breaks while you design it.
+// =================================================================================
+function setConstellationPanelState(state, data) {
+    const panel = document.getElementById('bubble-content');
+    if (!panel) return false;
+    const loader = panel.querySelector('.bubble-loader');
+    const empty  = panel.querySelector('.bubble-empty');
+    const prompt = panel.querySelector('.bubble-prompt');
+    const detail = panel.querySelector('.bubble-detail');
+    if (!loader && !empty && !prompt && !detail) return false; // not built yet -> use fallback
+
+    const show = (el, on) => { if (el) el.style.display = on ? '' : 'none'; };
+    show(loader, state === 'loading');
+    show(empty,  state === 'empty');
+    show(prompt, state === 'prompt');
+    show(detail, state === 'detail');
+
+    if (state === 'detail' && detail && data) {
+        const set = (sel, val) => { const e = detail.querySelector(sel); if (e) e.innerText = val; };
+        set('.bubble-detail-title', data.name || '');
+        set('.bubble-detail-quote', `“${data.quote || ''}”`);
+        const src = data.source || {};
+        set('.bubble-detail-meta', src.subreddit ? `r/${src.subreddit} | 👍 ${(src.ups || 0).toLocaleString()}` : '');
+        const link = detail.querySelector('.bubble-detail-source');
+        if (link) link.setAttribute('href', `https://www.reddit.com${src.permalink || ''}`);
+    }
+    return true;
+}
+
 function renderHighchartsBubbleChart(signals) {
     const container = document.getElementById('constellation-map-container');
     const panelContent = document.getElementById('bubble-content'); // Use the new ID
@@ -3119,7 +3154,7 @@ function renderHighchartsBubbleChart(signals) {
     }
 
     if (!signals || signals.length === 0) {
-        if (panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
+        if (!setConstellationPanelState('empty') && panelContent) panelContent.innerHTML = `<div class="panel-placeholder">No strong purchase signals found.<br/>Try different communities.</div>`;
         Highcharts.chart(container, { chart: { type: 'packedbubble', backgroundColor: 'transparent' }, title: { text: '' }, credits: { enabled: false }, series: [] });
         return;
     }
@@ -3232,22 +3267,19 @@ function renderHighchartsBubbleChart(signals) {
                         click: function () {
                             // isParentNode is true for the large category bubbles
                             if (!this.isParentNode) {
-                                const bubbleContent = document.getElementById('bubble-content');
-                                if (bubbleContent) {
-                                    const { name, quote, source } = this.options;
-                                    bubbleContent.innerHTML = `
-                                    <h4 class="bubble-detail-title">${name}</h4>
-                                    <p class="bubble-detail-quote">“${quote}”</p>
-                                    
-                                    <!-- This is the new element for the metadata -->
-                                    <p class="bubble-detail-meta">r/${source.subreddit} | 👍 ${source.ups.toLocaleString()}</p>
-                                    
-                                    <!-- This is the modified link with only the button text -->
-                                    <a href="https://www.reddit.com${source.permalink}" target="_blank" rel="noopener noreferrer" class="bubble-detail-source">
-                                        View on Reddit
-                                    </a>
-                                `;
-
+                                const { name, quote, source } = this.options;
+                                if (!setConstellationPanelState('detail', { name, quote, source })) {
+                                    const bubbleContent = document.getElementById('bubble-content');
+                                    if (bubbleContent) {
+                                        bubbleContent.innerHTML = `
+                                        <h4 class="bubble-detail-title">${name}</h4>
+                                        <p class="bubble-detail-quote">“${quote}”</p>
+                                        <p class="bubble-detail-meta">r/${source.subreddit} | 👍 ${source.ups.toLocaleString()}</p>
+                                        <a href="https://www.reddit.com${source.permalink}" target="_blank" rel="noopener noreferrer" class="bubble-detail-source">
+                                            View on Reddit
+                                        </a>
+                                    `;
+                                    }
                                 }
                             }
                         }
@@ -3258,7 +3290,7 @@ function renderHighchartsBubbleChart(signals) {
         series: chartSeries
     });
 
-    if (panelContent) {
+    if (!setConstellationPanelState('prompt') && panelContent) {
         panelContent.innerHTML = `<div class="panel-placeholder">Click a bubble to see details.</div>`;
     }
 }
@@ -4689,7 +4721,7 @@ async function runProblemFinder(options = {}) {
         if (!isUpdate) startProblemBubbles();
         console.log("--- STARTING PHASE 1: FAST ANALYSIS ---");
         const panelContent = document.getElementById('bubble-content');
-        if (panelContent) {
+        if (!setConstellationPanelState('loading') && panelContent) {
             panelContent.innerHTML = `<div class="panel-placeholder">Loading purchase signals... <span class="loader-dots"></span></div>`;
         }
         const searchDepth = document.querySelector('input[name="search-depth"]:checked')?.value || 'quick';
@@ -5410,6 +5442,18 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('DOMContentLoaded', waitForElementAndInit);
+
+// Hide all constellation side-panel states on load so they don't stack before the first
+// state fires. The script then reveals exactly one at a time. (Set each state's display to a
+// VISIBLE value in Webflow - Block/Flex - never "None", or the reveal can't un-hide it.)
+document.addEventListener('DOMContentLoaded', () => {
+    const panel = document.getElementById('bubble-content');
+    if (!panel) return;
+    ['.bubble-loader', '.bubble-empty', '.bubble-prompt', '.bubble-detail'].forEach(sel => {
+        const el = panel.querySelector(sel);
+        if (el) el.style.display = 'none';
+    });
+});
 // =================================================================================
 // === SUB-PROBLEM CHART: render the right chart when a finding's modal opens ===
 // =================================================================================

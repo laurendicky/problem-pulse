@@ -823,7 +823,7 @@ async function generateSentimentContextWithAI(posts, brandName) {
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
 function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
 async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all', searchInComments = false) { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const payload = { searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after }; if (searchInComments) { payload.includeComments = true; } const response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return []; } return allPosts.slice(0, totalLimit); }
-async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all', searchInComments = false) { const allResults = []; for (let i = 0; i < searchTerms.length; i += 8) { const batchTerms = searchTerms.slice(i, i + 8); const batchPromises = batchTerms.map(term => fetchRedditForTermWithPagination(niche, term, limitPerTerm, timeFilter, searchInComments)); const batchResults = await Promise.all(batchPromises); batchResults.forEach(posts => { if (Array.isArray(posts)) { allResults.push(...posts); } }); if (i + 8 < searchTerms.length) { await new Promise(resolve => setTimeout(resolve, 500)); } } return deduplicatePosts(allResults); }
+async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all', searchInComments = false) { const allResults = []; const TERM_BATCH = 5; for (let i = 0; i < searchTerms.length; i += TERM_BATCH) { const batchTerms = searchTerms.slice(i, i + TERM_BATCH); const batchPromises = batchTerms.map(term => fetchRedditForTermWithPagination(niche, term, limitPerTerm, timeFilter, searchInComments)); const batchResults = await Promise.all(batchPromises); batchResults.forEach(posts => { if (Array.isArray(posts)) { allResults.push(...posts); } }); if (i + TERM_BATCH < searchTerms.length) { await new Promise(resolve => setTimeout(resolve, 500)); } } return deduplicatePosts(allResults); }
 
 // =================================================================================
 // === ADD THIS NEW, AGGRESSIVE DE-DUPLICATION FUNCTION ===
@@ -1771,8 +1771,9 @@ Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}
 async function enhanceDiscoveryWithComments(initialPosts, nicheContext) {
     console.log("Enhancing with comments...");
     try {
-        // Higher post count for comments to find those hidden brand mentions
-        const postIds = initialPosts.slice(0, 80).map(p => p.data.id);
+        // 50 (was 80): most of the top filtered posts are already cached by the gems pass, so
+        // this is mostly cache hits now. Fewer fresh comment-thread fetches = less Reddit pressure.
+        const postIds = initialPosts.slice(0, 50).map(p => p.data.id);
         const comments = await fetchCommentsForPosts(postIds);
         if (!comments || comments.length < 5) return;
 
@@ -1845,7 +1846,7 @@ async function recoverBrandsWithShopping(subredditQueryString, timeFilter, niche
         const items = deduplicatePosts(shoppingPosts);
 
         // Comments from the top shopping threads are where brands are named most explicitly.
-        const postIds = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 80).map(p => p.data.id);
+        const postIds = items.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 30).map(p => p.data.id);
         const comments = await fetchCommentsForPosts(postIds);
         const recoveryCorpus = [...items, ...comments];
         if (recoveryCorpus.length) {
@@ -3147,7 +3148,9 @@ function renderPlatformPanels(corpus, subredditQueryString, timeFilter) {
 
     try {
         const shoppingPosts = await fetchMultipleRedditDataBatched(subredditQueryString, SHOPPING_SIGNAL_TERMS, 60, timeFilter, false);
-        const postIds = shoppingPosts.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 80).map(p => p.data.id);
+        // Was 80 comment threads — the heaviest single Reddit fetch per run. 35 is plenty; the
+        // corpus is topped up with the general filtered posts just below.
+        const postIds = shoppingPosts.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 35).map(p => p.data.id);
         const highIntentComments = await fetchCommentsForPosts(postIds);
         // Supplement with the main analysed corpus so the chart still has plenty to mine when the
         // narrow shopping-phrase search returns little (purchase mentions live in general posts too).
@@ -5005,7 +5008,7 @@ async function runProblemFinder(options = {}) {
                 searchedLabel: 'posts and comments'
             });
         }, 4000);
-        setTimeout(() => pregenerateAllSubProblems(originalGroupName), 14000);
+        setTimeout(() => pregenerateAllSubProblems(originalGroupName), 9000);
       
       
       
@@ -5174,19 +5177,11 @@ async function generateAndRenderPodcasts(posts, audienceContext, subredditQueryS
 
     // Broadened: podcasts AND YouTube channels / video shows the audience follows.
     const mediaMatch = /\b(podcast|podcasts|episode|episodes|youtube|yt|channel|channels|video|videos|watch|series|show|shows)\b/i;
-    let pool = (posts || []).filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
-
-    try {
-        if (subredditQueryString) {
-            const searched = await fetchMultipleRedditDataBatched(subredditQueryString, ['podcast', 'youtube channel', 'recommend youtube', 'best podcast', 'favourite channel'], 30, timeFilter || 'all', false);
-            const ids = searched.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 25).map(p => p.data.id);
-            const comments = await fetchCommentsForPosts(ids);
-            pool = deduplicatePosts([...pool, ...searched, ...comments]);
-        }
-    } catch (e) { console.warn('[Media] search failed:', e && e.message); }
-
-    pool = pool.filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
-    console.log(`[Media] ${pool.length} media-mentioning items to mine.`);
+    // Mine the corpus we were ALREADY handed (posts + comments + general, assembled by the
+    // constellation pass). No extra Reddit search/comment fetch here — that self-inflicted fetch
+    // storm made this the slowest panel and is why it often hung on the design placeholders.
+    const pool = (posts || []).filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
+    console.log(`[Media] ${pool.length} media-mentioning items to mine (shared corpus, no extra fetch).`);
     if (pool.length === 0) { renderPodcasts(container, blueprint, []); return; }
 
     const sampleText = pool.slice(0, 70).map((p, i) =>

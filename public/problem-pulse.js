@@ -3138,7 +3138,7 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
         const _corpus = window._fullCorpus || window._filteredPosts || [];
         try { renderSocialSplitChart(_corpus); } catch (e) { console.warn('[Social Split] failed', e); }
         try { generateAndRenderWaterholes(_corpus, window.originalGroupName || ''); } catch (e) { console.warn('[Waterholes] failed', e); }
-        try { generateAndRenderPodcasts(_corpus, window.originalGroupName || ''); } catch (e) { console.warn('[Podcasts] failed', e); }
+        try { generateAndRenderPodcasts(_corpus, window.originalGroupName || '', subredditQueryString, timeFilter); } catch (e) { console.warn('[Podcasts] failed', e); }
     }
 }
 // =================================================================================
@@ -5114,7 +5114,7 @@ function itunesPodcastLookup(name) {
     });
 }
 
-async function generateAndRenderPodcasts(posts, audienceContext) {
+async function generateAndRenderPodcasts(posts, audienceContext, subredditQueryString, timeFilter) {
     const container = document.getElementById('podcasts');
     if (!container) return;
     if (!window._podcastBlueprint) {
@@ -5122,51 +5122,57 @@ async function generateAndRenderPodcasts(posts, audienceContext) {
         if (bp) window._podcastBlueprint = bp.cloneNode(true);
     }
     const blueprint = window._podcastBlueprint;
-    if (!blueprint) { console.warn('[Podcasts] no .podcasts-list-item template found in #podcasts.'); return; }
+    if (!blueprint) { console.warn('[Media] no .podcasts-list-item template found in #podcasts.'); return; }
 
-    const corpus = posts || [];
-    if (corpus.length < 5) return;
+    // Broadened: podcasts AND YouTube channels / video shows the audience follows.
+    const mediaMatch = /\b(podcast|podcasts|episode|episodes|youtube|yt|channel|channels|video|videos|watch|series|show|shows)\b/i;
+    let pool = (posts || []).filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
 
-    // Broadened regex to capture video channels, creators, YouTube, and streams
-    const mediaMatch = /\b(podcast|podcasts|episode|episodes|youtube|channel|channels|watch|video|videos|creator|creators|vlog|vloggers?|stream|streamers?|show|shows)\b/i;
-    const focused = corpus.filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
-    
-    if (focused.length === 0) { renderPodcasts(container, blueprint, []); return; }
-    const sampleText = focused.slice(0, 75).map((p, i) =>
+    try {
+        if (subredditQueryString) {
+            const searched = await fetchMultipleRedditDataBatched(subredditQueryString, ['podcast', 'youtube channel', 'recommend youtube', 'best podcast', 'favourite channel'], 30, timeFilter || 'all', false);
+            const ids = searched.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 25).map(p => p.data.id);
+            const comments = await fetchCommentsForPosts(ids);
+            pool = deduplicatePosts([...pool, ...searched, ...comments]);
+        }
+    } catch (e) { console.warn('[Media] search failed:', e && e.message); }
+
+    pool = pool.filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
+    console.log(`[Media] ${pool.length} media-mentioning items to mine.`);
+    if (pool.length === 0) { renderPodcasts(container, blueprint, []); return; }
+
+    const sampleText = pool.slice(0, 70).map((p, i) =>
         `[${i}] ${`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.replace(/\s+/g, ' ').slice(0, 600)}`
     ).join('\n');
 
-    const prompt = `From these "${audienceContext}" discussions, extract the PODCASTS, YOUTUBE CHANNELS, and VIDEO CREATORS that people mention watching, listening to, or recommending.
-
-For each item, return:
-- "name": the show, channel, or creator name exactly as mentioned (verbatim).
-- "platform": "Podcast" or "YouTube" or "Video" depending on what it is.
-- "focus": a SHORT phrase for what it is about (genre/topic), e.g. "Dog Training", "Tech Reviews", "Comedy". Only if clearly stated or highly obvious; otherwise "".
-
-RULES: Only include real, specific shows/channels/creators actually NAMED in the text. NEVER invent names or descriptions.
+    const prompt = `From these "${audienceContext}" discussions, extract the SHOWS & CHANNELS this audience follows: PODCASTS, YOUTUBE channels, and audio/video shows they mention watching, listening to, or recommending.
+For each, return:
+- "type": "podcast", "youtube", or "show".
+- "name": the actual TITLE / channel name exactly as mentioned - a real proper name, NEVER a descriptive phrase or sentence fragment.
+- "focus": a SHORT phrase for what it is about, ONLY if clearly stated; otherwise "".
+RULES: Only return real, clearly-named shows or channels. NEVER invent names or numbers, and never return generic phrases or fragments. If none are clearly named, return an empty list.
 Discussions:
 ${sampleText}
-
-Respond ONLY with valid JSON: {"media":[{"name":"...","platform":"...","focus":"..."}]}`;
+Respond ONLY with JSON: {"media":[{"type":"youtube","name":"...","focus":"..."}]}`;
 
     let parsed = [];
     try {
         const data = await callOpenAIProxyWithRetry({
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "You extract explicitly-named podcasts, YouTube channels, and video creators from text. You never invent names or descriptions, and you output only valid JSON." },
+                { role: "system", content: "You extract only explicitly-named podcasts, YouTube channels and shows from text. You never invent names, numbers or descriptions, and you output only valid JSON." },
                 { role: "user", content: prompt }
             ],
             temperature: 0.1,
-            max_completion_tokens: 1000,
+            max_completion_tokens: 800,
             response_format: { type: "json_object" }
         }, { tries: 2 });
         if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).media || [];
     } catch (e) {
-        console.warn('[Podcasts] extraction failed:', e && e.message);
+        console.warn('[Media] extraction failed:', e && e.message);
     }
 
-    const allText = corpus.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' [SEP] ').toLowerCase();
+    const allText = pool.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' [SEP] ').toLowerCase();
     const seen = new Set();
     const items = [];
     (parsed || []).forEach(w => {
@@ -5179,92 +5185,39 @@ Respond ONLY with valid JSON: {"media":[{"name":"...","platform":"...","focus":"
         const count = m ? m.length : 0;
         if (count === 0) return;
         seen.add(key);
-        items.push({ 
-            name, 
-            platform: w.platform || 'Other',
-            focus: (w.focus || '').trim(), 
-            count 
-        });
+        const type = ['podcast', 'youtube', 'show'].includes(String(w.type || '').toLowerCase()) ? String(w.type).toLowerCase() : 'show';
+        items.push({ type, name, focus: (w.focus || '').trim(), count });
     });
     items.sort((a, b) => b.count - a.count);
-    const top = items.slice(0, 8);
+    const top = items.slice(0, 16);
 
-    // Only query iTunes artwork for Audio Podcasts
+    // Podcasts: verify against Apple + attach real cover art (drops fragments). YouTube/shows:
+    // keep grounded, no image, link to a YouTube search (no API key needed).
+    const out = [];
     await Promise.all(top.map(async it => {
-        if (it.platform === 'Podcast') {
+        if (it.type === 'podcast') {
             try {
                 const r = await itunesPodcastLookup(it.name);
                 if (r && r.collectionName) {
                     const a = it.name.toLowerCase(), b = r.collectionName.toLowerCase();
                     if (b.includes(a) || a.includes(b)) {
                         it.image = r.artworkUrl600 || r.artworkUrl100 || '';
-                        it.appleUrl = r.collectionViewUrl || '';
+                        it.link = r.collectionViewUrl || '';
                         it.name = r.collectionName;
-                        if (!it.focus && r.primaryGenreName) it.focus = r.primaryGenreName;
+                        it.focus = it.focus || r.primaryGenreName || '';
+                        out.push(it);
+                        return;
                     }
                 }
             } catch (e) { /* best-effort */ }
+            return; // unverified podcast -> drop
         }
+        it.link = `https://www.youtube.com/results?search_query=${encodeURIComponent(it.name)}`;
+        out.push(it);
     }));
-
-    renderPodcasts(container, blueprint, top);
-}
-
-function renderPodcasts(container, blueprint, items) {
-    container.querySelectorAll('.podcasts-list-item').forEach(el => el.remove());
-    if (!items || !items.length) {
-        const empty = blueprint.cloneNode(true);
-        empty.style.display = '';
-        const n = empty.querySelector('.podcast-name'); if (n) n.innerText = 'No podcasts or video channels were named in these discussions.';
-        ['.podcast-focus', '.podcast-meta'].forEach(sel => { const e = empty.querySelector(sel); if (e) e.innerText = ''; });
-        const img = empty.querySelector('.podcast-image'); if (img) img.style.display = 'none';
-        container.appendChild(empty);
-        return;
-    }
-    items.forEach(it => {
-        const node = blueprint.cloneNode(true);
-        node.style.display = '';
-        const set = (sel, val) => { const e = node.querySelector(sel); if (e) e.innerText = val; };
-        set('.podcast-name', it.name);
-        set('.podcast-focus', it.focus ? `Focus: ${it.focus}` : (it.platform ? `Platform: ${it.platform}` : ''));
-        set('.podcast-meta', `Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}`);
-        
-        const img = node.querySelector('.podcast-image');
-        if (img) {
-            if (it.image) {
-                if (img.tagName === 'IMG') img.src = it.image; else img.style.backgroundImage = `url("${it.image}")`;
-                img.style.display = '';
-            } else {
-                // Layout safe graphic fallback instead of setting display: none
-                const isYT = it.platform === 'YouTube';
-                const iconColor = isYT ? '%23ff0000' : '%2300a5ce'; 
-                const svgIcon = isYT 
-                    ? `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>`
-                    : `<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 24 24" fill="none" stroke="${iconColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>`;
-                
-                if (img.tagName === 'IMG') {
-                    img.src = `data:image/svg+xml;utf8,${encodeURIComponent(svgIcon)}`;
-                } else {
-                    img.style.background = isYT 
-                        ? 'linear-gradient(135deg, #ff4fa3, #fd80c7)' 
-                        : 'linear-gradient(135deg, #00a5ce, #7bd9ec)'; 
-                }
-                img.style.display = '';
-            }
-        }
-        
-        const link = node.querySelector('.podcast-link');
-        if (link) {
-            const targetUrl = it.appleUrl || (it.platform === 'YouTube' 
-                ? `https://www.youtube.com/results?search_query=${encodeURIComponent(it.name)}`
-                : `https://www.google.com/search?q=${encodeURIComponent(it.name)}`);
-            
-            link.setAttribute('href', targetUrl);
-            link.setAttribute('target', '_blank');
-            link.setAttribute('rel', 'noopener noreferrer');
-        }
-        container.appendChild(node);
-    });
+    out.sort((a, b) => b.count - a.count);
+    console.log(`[Media] ${out.length} kept (podcasts verified, channels grounded).`);
+    renderPodcasts(container, blueprint, out.slice(0, 8));
 }
 
 function renderPodcasts(container, blueprint, items) {
@@ -5281,6 +5234,7 @@ function renderPodcasts(container, blueprint, items) {
     items.forEach(it => {
         const node = blueprint.cloneNode(true);
         node.style.display = '';
+        node.setAttribute('data-media-type', it.type || 'podcast'); // "podcast" | "youtube" | "show" for icon styling
         const set = (sel, val) => { const e = node.querySelector(sel); if (e) e.innerText = val; };
         set('.podcast-name', it.name);
         set('.podcast-focus', it.focus ? `Focus: ${it.focus}` : '');
@@ -5293,7 +5247,7 @@ function renderPodcasts(container, blueprint, items) {
             } else { img.style.display = 'none'; }
         }
         const link = node.querySelector('.podcast-link');
-        if (link && it.appleUrl) link.setAttribute('href', it.appleUrl);
+        if (link && it.link) link.setAttribute('href', it.link);
         container.appendChild(node);
     });
 }

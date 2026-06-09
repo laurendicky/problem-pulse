@@ -5124,13 +5124,13 @@ async function generateAndRenderPodcasts(posts, audienceContext, subredditQueryS
     const blueprint = window._podcastBlueprint;
     if (!blueprint) { console.warn('[Media] no .podcasts-list-item template found in #podcasts.'); return; }
 
-    // Broad matching filters to look for media and written content mentions
+    // Expanded matching to catch podcasts, videos, channels, books, newsletters, blogs, and reads
     const mediaMatch = /\b(podcast|podcasts|episode|episodes|youtube|yt|channel|channels|video|videos|watch|vlog|vlogs|show|shows|book|books|newsletter|newsletters|substack|blog|blogs|read|reading|article|articles)\b/i;
     let pool = (posts || []).filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
 
     try {
         if (subredditQueryString) {
-            // FIX: Simplified, high-volume single-word queries instead of complex multi-word terms
+            // High-volume single-word queries instead of restrictive multi-word terms
             const searched = await fetchMultipleRedditDataBatched(
                 subredditQueryString, 
                 ['recommend', 'podcast', 'youtube', 'book', 'blog', 'channel', 'read'], 
@@ -5175,7 +5175,7 @@ Respond ONLY with valid JSON: {"media":[{"type":"youtube","name":"...","focus":"
         const data = await callOpenAIProxyWithRetry({
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "You extract only explicitly-named podcasts, books, newsletters, blogs, and video channels from text. You never invent names, and you output only valid JSON." },
+                { role: "system", content: "You extract explicitly-named podcasts, books, newsletters, blogs, and video channels from text. You never invent names, and you output only valid JSON." },
                 { role: "user", content: prompt }
             ],
             temperature: 0.1,
@@ -5252,7 +5252,7 @@ function renderPodcasts(container, blueprint, items) {
         const n = empty.querySelector('.podcast-name'); 
         if (n) n.innerText = 'No resources or media were named in these discussions.';
         
-        // FIX: Clean up and hide empty UI elements so they don't overlap awkwardly
+        // Clean up and hide empty UI elements so they don't overlap
         ['.podcast-focus', '.podcast-meta'].forEach(sel => { 
             const e = empty.querySelector(sel); 
             if (e) e.style.display = 'none'; 
@@ -5271,7 +5271,6 @@ function renderPodcasts(container, blueprint, items) {
         const node = blueprint.cloneNode(true);
         node.style.display = '';
         
-        // Dynamic media type attribute (allows Webflow to hook custom icons)
         node.setAttribute('data-media-type', it.type || 'podcast'); 
         
         const set = (sel, val) => { const e = node.querySelector(sel); if (e) e.innerText = val; };
@@ -5284,11 +5283,11 @@ function renderPodcasts(container, blueprint, items) {
         
         const img = node.querySelector('.podcast-image');
         if (img) {
-            img.style.display = ''; // Ensure display is reset
+            img.style.display = ''; // Reset display
             if (it.image) {
                 if (img.tagName === 'IMG') img.src = it.image; else img.style.backgroundImage = `url("${it.image}")`;
             } else {
-                // Branded CSS placeholder gradients (replaces empty spaces with visual blocks)
+                // Branded CSS placeholders (prevents Webflow visual collapse)
                 let gradient = 'linear-gradient(135deg, #00a5ce, #7bd9ec)'; // Teal (default / podcast)
                 if (it.type === 'youtube') {
                     gradient = 'linear-gradient(135deg, #ff4fa3, #fd80c7)'; // Pink (vlogs / youtube)
@@ -5306,10 +5305,9 @@ function renderPodcasts(container, blueprint, items) {
                 }
             }
         }
-        
         const link = node.querySelector('.podcast-link');
         if (link) {
-            link.style.display = ''; // Ensure display is reset
+            link.style.display = ''; // Reset display
             if (it.link) {
                 link.setAttribute('href', it.link);
                 link.setAttribute('target', '_blank');

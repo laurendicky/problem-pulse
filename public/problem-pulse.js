@@ -3076,6 +3076,7 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
 }
  async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
     console.log("--- Starting 'How They Shop' Signal Analysis (in background) ---");
+    window._fullCorpus = null; // reset so a failed run can't reuse a previous search's corpus
 
     // Shopping-intent search terms. These pull posts about spending, value, brand
     // choice and buying decisions, rather than generic frustration. demandSignalTerms
@@ -3095,6 +3096,7 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
         // narrow shopping-phrase search returns little (purchase mentions live in general posts too).
         const generalPosts = window._filteredPosts || [];
         const allItems = deduplicatePosts([...shoppingPosts, ...highIntentComments, ...generalPosts]);
+        window._fullCorpus = allItems; // richest corpus (posts + comments + general) for the platform panels
         console.log(`[Constellation] shopping=${shoppingPosts.length} comments=${highIntentComments.length} general=${generalPosts.length} -> corpus=${allItems.length}`);
         await generateAndRenderConstellation(allItems);
     } catch (error) {
@@ -3102,6 +3104,10 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
         renderHighchartsBubbleChart([]);
     } finally {
         console.log("--- 'How They Shop' Analysis Complete. ---");
+        // Run the social-split + waterholes on the richest corpus we have (posts + comments + general).
+        const _corpus = window._fullCorpus || window._filteredPosts || [];
+        try { renderSocialSplitChart(_corpus); } catch (e) { console.warn('[Social Split] failed', e); }
+        try { generateAndRenderWaterholes(_corpus, window.originalGroupName || ''); } catch (e) { console.warn('[Waterholes] failed', e); }
     }
 }
 // =================================================================================
@@ -4914,8 +4920,6 @@ async function runProblemFinder(options = {}) {
         }
         setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
         setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
-        setTimeout(() => generateAndRenderWaterholes(window._filteredPosts, originalGroupName), 9000);
-        setTimeout(() => renderSocialSplitChart(window._filteredPosts), 1500);
         setTimeout(() => {
             Promise.resolve(enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName))
                 .finally(() => recoverBrandsWithShopping(subredditQueryString, selectedTime, originalGroupName));
@@ -5066,26 +5070,34 @@ function renderSocialSplitChart(posts) {
     if (!texts.length) return;
 
     const PLATFORMS = [
-        { name: 'Instagram',   color: '#FF6FB5', keys: ['instagram'] },
+        { name: 'Instagram',   color: '#FF6FB5', keys: ['instagram', 'insta', 'reels'] },
         { name: 'TikTok',      color: '#36E0D0', keys: ['tiktok', 'tik tok'] },
         { name: 'YouTube',     color: '#FF8C66', keys: ['youtube'] },
-        { name: 'Facebook',    color: '#6C8CFF', keys: ['facebook'] },
-        { name: 'X / Twitter', color: '#7CC7FF', keys: ['twitter', 'x.com'] },
+        { name: 'Facebook',    color: '#6C8CFF', keys: ['facebook', 'fb group', 'fb groups'] },
+        { name: 'X / Twitter', color: '#7CC7FF', keys: ['twitter', 'tweet', 'x.com'] },
         { name: 'Discord',     color: '#8B7CFF', keys: ['discord'] },
         { name: 'Telegram',    color: '#5ED1D8', keys: ['telegram'] },
-        { name: 'WhatsApp',    color: '#57D9A3', keys: ['whatsapp'] },
+        { name: 'WhatsApp',    color: '#57D9A3', keys: ['whatsapp', 'whats app'] },
         { name: 'Snapchat',    color: '#FFD56B', keys: ['snapchat'] },
         { name: 'Pinterest',   color: '#FF8FA3', keys: ['pinterest'] },
         { name: 'LinkedIn',    color: '#5B9BD5', keys: ['linkedin'] }
     ];
 
-    let data = PLATFORMS.map(pl => {
-        const count = texts.reduce((n, t) => n + (pl.keys.some(k => t.includes(k)) ? 1 : 0), 0);
-        return { name: pl.name, color: pl.color, count };
-    }).filter(d => d.count > 0).sort((a, b) => b.count - a.count);
+    // Count TOTAL occurrences across the whole corpus (not just one-per-post) for granularity.
+    const fullText = texts.join(' \n ');
+    const countKeys = (keys) => {
+        const pat = keys.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')).join('|');
+        const m = fullText.match(new RegExp('\\b(' + pat + ')\\b', 'gi'));
+        return m ? m.length : 0;
+    };
+    let data = PLATFORMS.map(pl => ({ name: pl.name, color: pl.color, count: countKeys(pl.keys) }))
+        .filter(d => d.count > 0).sort((a, b) => b.count - a.count);
 
-    if (data.length === 0) {
-        el.innerHTML = '<p class="placeholder-text" style="text-align:center; color:#9ca3af;">No clear social-platform mentions in these discussions.</p>';
+    // Don't draw a confident split from a tiny sample - it's misleading (e.g. 1 vs 1 = 50/50).
+    const grandTotal = data.reduce((n, d) => n + d.count, 0);
+    const MIN_TOTAL = 12;
+    if (data.length === 0 || grandTotal < MIN_TOTAL) {
+        el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">This audience rarely names social platforms in their discussions (only ${grandTotal} mention${grandTotal === 1 ? '' : 's'}), so there isn't enough signal to chart a reliable split.</p>`;
         return;
     }
     if (data.length > 8) {

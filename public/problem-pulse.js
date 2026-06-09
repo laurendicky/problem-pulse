@@ -888,7 +888,7 @@ function deduplicateByContent(items) {
 // rate / 25s-latency limit and leaves features empty. This serialises the load gracefully.
 let _proxyActive = 0;
 const _proxyWaiters = []; // each: { resolve, priority }
-const PROXY_MAX_CONCURRENT = 3;
+const PROXY_MAX_CONCURRENT = 6; // OpenAI Tier 3 has ample RPM/TPM headroom; 3 was a leftover low-tier safety. Reddit stays at 3 (its 429s are the real limit).
 // Priority lane: a run fires ~15+ AI calls at once, but only 3 can run together. Without
 // priorities the user-facing visual panels (constellation, podcasts, social, the core
 // summary) sit at the BACK of the queue behind every background text feature and only get a

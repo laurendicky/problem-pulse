@@ -5299,12 +5299,23 @@ async function generateAndRenderPodcasts(posts, audienceContext, subredditQueryS
             const searched = await fetchMultipleRedditDataBatched(subredditQueryString, ['podcast', 'youtube channel', 'best podcast'], 25, timeFilter || 'all', false);
             const ids = searched.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 15).map(p => p.data.id);
             const comments = await fetchCommentsForPosts(ids);
-            pool = deduplicatePosts([...pool, ...searched, ...comments]);
+            // Dedicated-search threads + their comments FIRST — these are where shows actually get
+            // named, and they must land inside the sampled window, not after it.
+            pool = deduplicatePosts([...searched, ...comments, ...pool]);
         }
     } catch (e) { console.warn('[Media] search failed:', e && e.message); }
     pool = pool.filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
     console.log(`[Media] ${pool.length} media-mentioning items to mine.`);
     if (pool.length === 0) { renderPodcasts(container, blueprint, []); return; }
+
+    // The mediaMatch regex includes generic words (show/watch/video/series), so the pool is mostly
+    // noise. Sort threads that mention a REAL platform (podcast/youtube/channel/episode/substack...)
+    // to the top so the 40-item sample is full of posts that might actually name a show.
+    const STRONG_MEDIA = /\b(podcast|podcasts|episode|episodes|youtube|channel|channels|substack|newsletter|spotify)\b/i;
+    pool.sort((a, b) =>
+        (STRONG_MEDIA.test(`${b.data.title || ''} ${b.data.selftext || b.data.body || ''}`) ? 1 : 0) -
+        (STRONG_MEDIA.test(`${a.data.title || ''} ${a.data.selftext || a.data.body || ''}`) ? 1 : 0)
+    );
 
     // Smaller sample (was 70x600) so the extraction call is fast and stays under the proxy's 25s
     // ceiling — a silent timeout there returns nothing, which is the likeliest cause of "0 kept".

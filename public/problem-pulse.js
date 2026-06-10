@@ -5306,8 +5306,10 @@ async function generateAndRenderPodcasts(posts, audienceContext, subredditQueryS
     console.log(`[Media] ${pool.length} media-mentioning items to mine.`);
     if (pool.length === 0) { renderPodcasts(container, blueprint, []); return; }
 
-    const sampleText = pool.slice(0, 70).map((p, i) =>
-        `[${i}] ${`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.replace(/\s+/g, ' ').slice(0, 600)}`
+    // Smaller sample (was 70x600) so the extraction call is fast and stays under the proxy's 25s
+    // ceiling — a silent timeout there returns nothing, which is the likeliest cause of "0 kept".
+    const sampleText = pool.slice(0, 40).map((p, i) =>
+        `[${i}] ${`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.replace(/\s+/g, ' ').slice(0, 450)}`
     ).join('\n');
 
     const prompt = `From these "${audienceContext}" discussions, extract the SHOWS & CHANNELS this audience follows: PODCASTS, YOUTUBE channels, and audio/video shows they mention watching, listening to, or recommending.
@@ -5332,10 +5334,15 @@ Respond ONLY with JSON: {"media":[{"type":"youtube","name":"...","focus":"..."}]
             max_completion_tokens: 800,
             response_format: { type: "json_object" }
         }, { tries: 2, priority: 2 });
-        if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).media || [];
+        if (data && data.openaiResponse) {
+            parsed = JSON.parse(data.openaiResponse).media || [];
+        } else {
+            console.warn('[Media] extraction returned NO content (likely the 25s proxy timeout / rate limit) — panel will be empty even though the corpus was fine.');
+        }
     } catch (e) {
         console.warn('[Media] extraction failed:', e && e.message);
     }
+    console.log(`[Media] AI named ${parsed.length} candidate show(s) before grounding.`);
 
     const allText = pool.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' [SEP] ').toLowerCase();
     const seen = new Set();

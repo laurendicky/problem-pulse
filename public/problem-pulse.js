@@ -2340,20 +2340,77 @@ const briefCache = new Map();
 // =================================================================================
 
 
+// Typewriter helpers — reveal the brief progressively so it reads as if it is being written
+// live, which materially changes the perceived wait. Speed scales with text length so long
+// sections don't drag. Caret blinks while a field is "writing".
+function ensureTypewriterStyle() {
+    if (typeof document === 'undefined' || document.getElementById('tw-style')) return;
+    const st = document.createElement('style');
+    st.id = 'tw-style';
+    st.textContent = '.tw-caret{border-right:2px solid currentColor; padding-right:1px; animation:twblink 1s steps(1) infinite;} @keyframes twblink{50%{border-color:transparent;}}';
+    document.head.appendChild(st);
+}
+function typeInto(el, text, speed = 14) {
+    return new Promise(resolve => {
+        if (!el) { resolve(); return; }
+        const full = String(text == null ? '' : text);
+        el.textContent = '';
+        el.classList.add('tw-caret');
+        let i = 0;
+        const step = Math.max(1, Math.round(full.length / 90));
+        const tick = () => {
+            i += step;
+            el.textContent = full.slice(0, i);
+            if (i < full.length) { setTimeout(tick, speed); }
+            else { el.classList.remove('tw-caret'); resolve(); }
+        };
+        tick();
+    });
+}
+async function typeListItems(ul, items, speed = 14) {
+    if (!ul) return;
+    ul.innerHTML = '';
+    for (const it of (items || [])) {
+        const li = document.createElement('li');
+        ul.appendChild(li);
+        await typeInto(li, it, speed);
+    }
+}
+function escBriefText(s) { return String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+// Final (filled) HTML used for the cache, so re-opening a brief is instant and re-renders the
+// momentum chart from the embedded JSON without re-fetching.
+function buildBrandBriefHtml(itemName, parsed, trend) {
+    const e = escBriefText;
+    return `
+                <div class="brief-content">
+                    <h3 class="brief-header">${e(itemName)}</h3>
+                    <div class="brief-section"><h4 class="brief-section-title">What It Is</h4><p class="brief-text">${e(parsed.what_it_is)}</p></div>
+                    <div class="brief-section">
+                        <h4 class="brief-section-title">Momentum Trend</h4>
+                        <div id="brand-momentum-chart" style="height:200px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.03); border-radius:8px; font-size:12px; color:#888;"><span class="loader-dots">Crunching historical mentions...</span></div>
+                    </div>
+                    <div class="brief-section"><h4>Use Case</h4><p class="brief-text">${e(parsed.use_case)}</p></div>
+                    <div class="brief-section"><h4>Strengths</h4><ul class="brief-list">${(parsed.loves || []).map(i => `<li>${e(i)}</li>`).join('')}</ul></div>
+                    <div class="brief-section"><h4>Pain Points</h4><ul class="brief-list">${(parsed.hates || []).map(i => `<li>${e(i)}</li>`).join('')}</ul></div>
+                    <div class="brief-verdict" style="background:rgba(0,165,206,0.1); padding:15px; border-radius:8px;"><p><strong>Verdict:</strong> ${e(parsed.verdict)}</p></div>
+                    ${trend ? `<script id="brand-momentum-chart-data" type="application/json">${JSON.stringify(trend)}</script>` : ''}
+                </div>`;
+}
+
 async function generateAndRenderBrandBrief(itemName, itemType) {
     const isBrand = itemType === 'brands';
     const targetPanel = document.getElementById(isBrand ? 'brand-detail-panel' : 'product-detail-panel');
-
     if (!targetPanel) return;
+    ensureTypewriterStyle();
 
-    // 1. Loading state (No close button added here)
     targetPanel.innerHTML = '<div class="brief-content"><p class="loading-text">Building brief... <span class="loader-dots"></span></p></div>';
 
     if (briefCache.has(itemName)) {
         targetPanel.innerHTML = briefCache.get(itemName);
-        if (isBrand && targetPanel.querySelector('#brand-momentum-chart-data')) {
-            const cachedTrend = JSON.parse(targetPanel.querySelector('#brand-momentum-chart-data').textContent);
-            if (cachedTrend) renderBrandMomentumChart(cachedTrend);
+        if (isBrand) {
+            const dataEl = targetPanel.querySelector('#brand-momentum-chart-data');
+            if (dataEl) { try { const t = JSON.parse(dataEl.textContent); if (t) renderBrandMomentumChart(t); } catch (e) {} }
+            else { const c = document.getElementById('brand-momentum-chart'); if (c) c.innerHTML = '<span>Not enough historical data to chart.</span>'; }
         }
         return;
     }
@@ -2378,61 +2435,70 @@ async function generateAndRenderBrandBrief(itemName, itemType) {
         const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) });
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
+        const e = escBriefText;
 
-        // --- REMOVED THE CLOSE BUTTON FROM THE STRINGS BELOW ---
-        let htmlContent = '';
         if (isBrand) {
-            htmlContent = `
+            // Scaffold first (empty type-targets), then type the text in below.
+            targetPanel.innerHTML = `
                 <div class="brief-content">
-                    <h3 class="brief-header">${itemName}</h3>
-                    <div class="brief-section"><h4 class="brief-section-title">What It Is</h4><p class="brief-text">${parsed.what_it_is}</p></div>
-                    
+                    <h3 class="brief-header">${e(itemName)}</h3>
+                    <div class="brief-section"><h4 class="brief-section-title">What It Is</h4><p class="brief-text" id="tw-what"></p></div>
                     <div class="brief-section">
                         <h4 class="brief-section-title">Momentum Trend</h4>
-                        <div id="brand-momentum-chart" style="height:200px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.03); border-radius:8px; font-size:12px; color:#888;">
-                            <span class="loader-dots">Crunching historical mentions...</span>
-                        </div>
+                        <div id="brand-momentum-chart" style="height:200px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.03); border-radius:8px; font-size:12px; color:#888;"><span class="loader-dots">Crunching historical mentions...</span></div>
                     </div>
-
-                    <div class="brief-section"><h4>Use Case</h4><p class="brief-text">${parsed.use_case}</p></div>
-                    <div class="brief-section"><h4>Strengths</h4><ul class="brief-list">${parsed.loves.map(i => `<li>${i}</li>`).join('')}</ul></div>
-                    <div class="brief-section"><h4>Pain Points</h4><ul class="brief-list">${parsed.hates.map(i => `<li>${i}</li>`).join('')}</ul></div>
-                    <div class="brief-verdict" style="background:rgba(0,165,206,0.1); padding:15px; border-radius:8px;"><p><strong>Verdict:</strong> ${parsed.verdict}</p></div>
+                    <div class="brief-section"><h4>Use Case</h4><p class="brief-text" id="tw-use"></p></div>
+                    <div class="brief-section"><h4>Strengths</h4><ul class="brief-list" id="tw-loves"></ul></div>
+                    <div class="brief-section"><h4>Pain Points</h4><ul class="brief-list" id="tw-hates"></ul></div>
+                    <div class="brief-verdict" style="background:rgba(0,165,206,0.1); padding:15px; border-radius:8px;"><p><strong>Verdict:</strong> <span id="tw-verdict"></span></p></div>
                 </div>`;
-        } else {
-            htmlContent = `
-                <div class="brief-content">
-                    <h3 class="brief-header">${itemName}</h3>
-                    <div class="brief-section"><h4>Category Info</h4><p>${parsed.what_it_is}</p></div>
-                    <div class="brief-section"><h4>Job to be Done</h4><p>${parsed.job_to_be_done}</p></div>
-                    <div class="brief-section"><h4>Table Stakes</h4><ul>${parsed.table_stakes.map(i => `<li>${i}</li>`).join('')}</ul></div>
-                </div>`;
-        }
 
-        targetPanel.innerHTML = htmlContent;
-        briefCache.set(itemName, htmlContent);
-
-        if (isBrand) {
+            // Kick off the momentum chart IN PARALLEL with the typing, with a hard 12s timeout
+            // so it can never sit in a perpetual loading state again.
             const selectedSubreddits = Array.from(document.querySelectorAll('#subreddit-choices input:checked')).map(cb => cb.value);
             const subredditQueryString = selectedSubreddits.map(sub => `subreddit:${sub}`).join(' OR ');
-
-            fetchSentimentTrendData(itemName, subredditQueryString).then(trendResult => {
-                if (trendResult && trendResult.length > 0) {
-                    renderBrandMomentumChart(trendResult);
-                    const s = document.createElement('script');
-                    s.id = 'brand-momentum-chart-data';
-                    s.type = 'application/json';
-                    s.textContent = JSON.stringify(trendResult);
-                    targetPanel.querySelector('.brief-content').appendChild(s);
-                } else {
-                    const chartEl = document.getElementById('brand-momentum-chart');
-                    if (chartEl) chartEl.innerHTML = '<span>Not enough historical data to chart.</span>';
-                }
-            }).catch(err => {
-                console.error('Momentum trend failed:', err);
+            const momentum = (async () => {
+                let trend = null;
+                try {
+                    trend = await Promise.race([
+                        fetchSentimentTrendData(itemName, subredditQueryString),
+                        new Promise(res => setTimeout(() => res('__timeout__'), 12000))
+                    ]);
+                } catch (err) { console.error('Momentum trend failed:', err); trend = null; }
                 const chartEl = document.getElementById('brand-momentum-chart');
-                if (chartEl) chartEl.innerHTML = '<span>Could not load momentum data.</span>';
-            });
+                if (trend === '__timeout__') { if (chartEl) chartEl.innerHTML = '<span>Momentum data timed out — try again.</span>'; return null; }
+                if (trend && trend.length > 0) { renderBrandMomentumChart(trend); return trend; }
+                if (chartEl) chartEl.innerHTML = '<span>Not enough historical data to chart.</span>';
+                return null;
+            })();
+
+            // Typewriter reveal of each text section in order.
+            await typeInto(document.getElementById('tw-what'), parsed.what_it_is);
+            await typeInto(document.getElementById('tw-use'), parsed.use_case);
+            await typeListItems(document.getElementById('tw-loves'), parsed.loves);
+            await typeListItems(document.getElementById('tw-hates'), parsed.hates);
+            await typeInto(document.getElementById('tw-verdict'), parsed.verdict);
+
+            const trendForCache = await momentum;
+            briefCache.set(itemName, buildBrandBriefHtml(itemName, parsed, trendForCache));
+        } else {
+            targetPanel.innerHTML = `
+                <div class="brief-content">
+                    <h3 class="brief-header">${e(itemName)}</h3>
+                    <div class="brief-section"><h4>Category Info</h4><p class="brief-text" id="tw-what"></p></div>
+                    <div class="brief-section"><h4>Job to be Done</h4><p class="brief-text" id="tw-job"></p></div>
+                    <div class="brief-section"><h4>Table Stakes</h4><ul id="tw-stakes"></ul></div>
+                </div>`;
+            await typeInto(document.getElementById('tw-what'), parsed.what_it_is);
+            await typeInto(document.getElementById('tw-job'), parsed.job_to_be_done);
+            await typeListItems(document.getElementById('tw-stakes'), parsed.table_stakes);
+            briefCache.set(itemName, `
+                <div class="brief-content">
+                    <h3 class="brief-header">${e(itemName)}</h3>
+                    <div class="brief-section"><h4>Category Info</h4><p>${e(parsed.what_it_is)}</p></div>
+                    <div class="brief-section"><h4>Job to be Done</h4><p>${e(parsed.job_to_be_done)}</p></div>
+                    <div class="brief-section"><h4>Table Stakes</h4><ul>${(parsed.table_stakes || []).map(i => `<li>${e(i)}</li>`).join('')}</ul></div>
+                </div>`);
         }
     } catch (error) {
         targetPanel.innerHTML = `<div class="brief-content"><p>Error loading content.</p></div>`;
@@ -2948,38 +3014,44 @@ async function fetchSentimentTrendData(brandName, subredditQueryString) {
     if (brandName.toLowerCase() === 'openai') {
         searchTerms.push('"gpt-4o"', '"chatgpt"', '"gpt-5"');
     }
-    const revisedTimePeriods = [
-        { label: 'Past 6 Mos', value: '6month' },
-        { label: 'Past 3 Mos', value: '3month' },
-        { label: 'Last 30 Days', value: 'month' },
-        { label: 'Last 7 Days', value: 'week' },
+    // IMPORTANT: Reddit's `t` parameter only supports hour/day/week/month/year/all — there is
+    // NO "3month" or "6month". The old code requested those invalid values and then waited on
+    // ALL of them via Promise.allSettled, so a single stalled request left the momentum chart
+    // spinning forever. We now make ONE valid "year" fetch and bucket it locally by timestamp,
+    // which is faster (one request, not four) and can't hang on an unsupported time filter.
+    let rawPosts = [];
+    try {
+        rawPosts = await fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 100, 'year');
+    } catch (e) {
+        console.warn('[Momentum] fetch failed:', e && e.message);
+        return [];
+    }
+    const posts = deduplicatePosts(rawPosts || []);
+    if (!posts.length) return [];
+
+    const nowSec = Date.now() / 1000;
+    const DAY = 86400;
+    const periods = [
+        { label: 'Past 6 Mos', days: 182 },
+        { label: 'Past 3 Mos', days: 91 },
+        { label: 'Last 30 Days', days: 30 },
+        { label: 'Last 7 Days', days: 7 },
     ];
-    // 1. Fetch the raw Reddit posts for each time frame in parallel.
-    const fetchPromises = revisedTimePeriods.map(period =>
-        fetchMultipleRedditDataBatched(subredditQueryString, searchTerms, 50, period.value)
-    );
-    const results = await Promise.allSettled(fetchPromises);
-    // 2. Score each period PROGRAMMATICALLY (no OpenAI calls -> instant, free, no rate limits).
-    const perPeriod = results.map((result, i) => {
-        const periodLabel = revisedTimePeriods[i].label;
-        if (result.status !== 'fulfilled' || !result.value || result.value.length === 0) {
-            console.warn(`Could not fetch data for period: ${periodLabel}`);
-            return null;
-        }
-        const uniquePosts = deduplicatePosts(result.value);
-        // 3. Local, token-free sentiment via the existing dictionary lookup.
-        const { positive, negative } = countSentimentWords(uniquePosts);
+    const perPeriod = periods.map(per => {
+        const cutoff = nowSec - per.days * DAY;
+        const inWindow = posts.filter(p => (p.data.created_utc || 0) >= cutoff);
+        if (!inWindow.length) return null;
+        // Local, token-free sentiment via the existing dictionary lookup (no OpenAI calls).
+        const { positive, negative } = countSentimentWords(inWindow);
         const total = positive + negative;
         const positivePercentage = total > 0 ? Math.round((positive / total) * 100) : 50;
-        // 4. Build matching contextual tooltips programmatically.
         const context = {
             positive_theme: `Surfaced ${positive} positive sentiment signals.`,
             negative_theme: `Surfaced ${negative} critical pain point signals.`,
-            verdict: `Analyzed ${uniquePosts.length} historical community discussions programmatically.`
+            verdict: `Analyzed ${inWindow.length} historical community discussions programmatically.`
         };
-        return { period: periodLabel, positivePercentage, context };
+        return { period: per.label, positivePercentage, context };
     });
-    // Return the processed array, dropping any empty periods.
     return perPeriod.filter(Boolean);
 }
 

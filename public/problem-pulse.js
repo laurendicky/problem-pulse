@@ -5098,24 +5098,29 @@ async function runProblemFinder(options = {}) {
                 .finally(() => recoverBrandsWithShopping(subredditQueryString, selectedTime, originalGroupName));
         }, 5000);
         setTimeout(() => generateAndRenderHistoricalSentiment(subredditQueryString), 3500);
-        setTimeout(async () => {
-            let gemCorpus = window._filteredPosts || [];
-            try {
-                // Comments for the top posts. 40 keeps latency sane; raise if you want a deeper dig.
-                const topIds = gemCorpus.slice(0, 40).map(p => p.data.id);
-                const rawComments = await fetchCommentsForPosts(topIds);
-                const comments = deduplicateByContent(rawComments)
-                    .filter(c => (c.data.body || '').length >= 40); // drop "lol"-tier noise
-                gemCorpus = [...gemCorpus, ...comments];
-                console.log(`[Hidden Gems] Mining ${gemCorpus.length} items (${window._filteredPosts.length} posts + ${comments.length} comments).`);
-            } catch (e) {
-                console.warn('Hidden Gems: comment fetch failed, using posts only.', e);
-            }
-            generateAndRenderHiddenGems(gemCorpus, originalGroupName, {
-                searchedCount: gemCorpus.length,
-                searchedLabel: 'posts and comments'
-            });
-        }, 4000);
+        // HIDDEN GEMS — DISABLED for speed. It was one of the heaviest items in a run: a
+        // 40-thread comment fetch + a slow gpt-4o call + local stats math, for output that
+        // wasn't pulling its weight. Flip this flag back to true to restore it.
+        const ENABLE_HIDDEN_GEMS = false;
+        if (ENABLE_HIDDEN_GEMS) {
+            setTimeout(async () => {
+                let gemCorpus = window._filteredPosts || [];
+                try {
+                    const topIds = gemCorpus.slice(0, 40).map(p => p.data.id);
+                    const rawComments = await fetchCommentsForPosts(topIds);
+                    const comments = deduplicateByContent(rawComments)
+                        .filter(c => (c.data.body || '').length >= 40);
+                    gemCorpus = [...gemCorpus, ...comments];
+                    console.log(`[Hidden Gems] Mining ${gemCorpus.length} items (${window._filteredPosts.length} posts + ${comments.length} comments).`);
+                } catch (e) {
+                    console.warn('Hidden Gems: comment fetch failed, using posts only.', e);
+                }
+                generateAndRenderHiddenGems(gemCorpus, originalGroupName, {
+                    searchedCount: gemCorpus.length,
+                    searchedLabel: 'posts and comments'
+                });
+            }, 4000);
+        }
         setTimeout(() => pregenerateAllSubProblems(originalGroupName), 9000);
       
       

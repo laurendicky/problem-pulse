@@ -6126,11 +6126,13 @@ Respond ONLY with JSON: {"tools":[{"name":"...","use":"..."}]}`;
       </div>`;
 }
 
-// === EVENTS & PLACES: where the audience gathers in the real world ================
+// === EVENTS & PLACES: where the audience goes in the real world ===================
 // Add an empty <div id="events-places"></div> in Webflow. Same verified-extraction engine as
-// the experts/tools panels, for real-world EVENTS (conferences, expos, meetups, shows, classes,
-// competitions, festivals) and notable PLACES/VENUES the audience attends or visits. Grounded
-// against the corpus, with the same clearly-labelled "Suggested" fallback when findings are thin.
+// the experts/tools panels. Captures the everyday named PLACES the audience physically goes to
+// (stores, shops, parks, trails, clubs, training facilities, vet clinics, venues) AND named
+// EVENTS (shows, expos, meetups, competitions, classes, festivals). An earlier event-only prompt
+// missed the everyday places, which is why it returned only AI suggestions. Grounded against the
+// corpus, with the same clearly-labelled "Suggested" fallback when real findings are thin.
 // =================================================================================
 async function generateAndRenderEvents(posts, audienceContext) {
     const el = document.getElementById('events-places');
@@ -6139,7 +6141,7 @@ async function generateAndRenderEvents(posts, audienceContext) {
     if (corpus.length < 5) return;
 
     const textOf = p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`;
-    const EVENT_SIGNAL = /\b(attend|attended|attending|went to|going to|visit|visited|conference|convention|expo|meetup|meet up|show|shows|festival|workshop|class|classes|competition|trial|trials|seminar|event|events|fair|venue|park|trip|trips)\b/i;
+    const EVENT_SIGNAL = /\b(attend|attended|attending|went|going|visit|visited|store|stores|shop|shops|park|parks|trail|trails|club|clubs|facility|center|centre|clinic|vet|daycare|kennel|conference|convention|expo|meetup|meet up|show|shows|festival|workshop|class|classes|competition|trial|trials|seminar|event|events|fair|venue|near me|local|location)\b/i;
     let pool = corpus.filter(p => EVENT_SIGNAL.test(textOf(p)));
     if (pool.length < 15) pool = corpus.slice();
     const stableId = p => String(p.data.id || p.data.name || '');
@@ -6149,11 +6151,11 @@ async function generateAndRenderEvents(posts, audienceContext) {
         .map((p, i) => `[${i}] ${textOf(p).replace(/\s+/g, ' ').slice(0, 450)}`)
         .join('\n');
 
-    const prompt = `From these "${audienceContext}" discussions, extract the real-world EVENTS and PLACES this audience attends or visits — named conferences, conventions, expos, meetups, shows, competitions, workshops, classes, festivals, and notable venues or places.
+    const prompt = `From these "${audienceContext}" discussions, extract the real-world PLACES and EVENTS this audience physically goes to — named stores/shops, parks, trails, clubs, training facilities, vet clinics, daycares, venues, AND named shows, expos, meetups, competitions, classes, conferences or festivals.
 For each return:
-- "name": the real event or place name exactly as commonly written. A real proper name — never a generic category ("a conference", "the park"), an activity, or a description.
+- "name": the real place or event name exactly as commonly written (e.g. "PetSmart", "Crufts", "Westminster Dog Show", a named park or training club). A real proper name — never a generic category ("the park", "a store", "a class"), an activity, or a description.
 - "what": a SHORT phrase for what it is, ONLY if clear from context; otherwise "".
-RULES: Only real, clearly-named events or places actually referenced by this audience. NEVER invent names. Do NOT return generic categories, online-only platforms, personal names, or vague descriptions. If none are clearly named, return an empty list.
+RULES: Only real, clearly-named places or events actually referenced by this audience. NEVER invent names. Do NOT return generic categories, online-only websites/apps, personal names, or vague descriptions. If none are clearly named, return an empty list.
 Discussions:
 ${sample}
 Respond ONLY with JSON: {"events":[{"name":"...","what":"..."}]}`;
@@ -6163,7 +6165,7 @@ Respond ONLY with JSON: {"events":[{"name":"...","what":"..."}]}`;
         const data = await callOpenAIProxyWithRetry({
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "You extract only explicitly-named real-world events and places that an audience attends. You never invent names, never return generic categories or personal names, and you output only valid JSON." },
+                { role: "system", content: "You extract only explicitly-named real-world places and events an audience physically visits or attends — stores, shops, parks, clubs, venues, vet clinics, shows, expos, competitions. You never invent names, never return generic categories or online-only platforms, and you output only valid JSON." },
                 { role: "user", content: prompt }
             ],
             temperature: 0.1,
@@ -6175,7 +6177,7 @@ Respond ONLY with JSON: {"events":[{"name":"...","what":"..."}]}`;
     console.log(`[Events] AI named ${parsed.length} candidate event(s)/place(s) before grounding.`);
 
     const segments = corpus.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase());
-    const EVENT_CONTEXT = /\b(attend|attended|attending|went|going|visit|visited|conference|convention|expo|meetup|show|shows|festival|workshop|class|classes|competition|trial|trials|seminar|event|fair|venue|park|booth|ticket|tickets|hosted|held)\b/i;
+    const EVENT_CONTEXT = /\b(attend|attended|attending|went|going|visit|visited|go|take|took|drove|near|nearby|local|store|shop|shopping|bought|buy|park|parks|trail|club|facility|center|centre|clinic|vet|daycare|kennel|conference|convention|expo|meetup|show|shows|festival|workshop|class|classes|competition|trial|trials|venue|booth|ticket|tickets|hosted|held|located|at the)\b/i;
     const audienceTokens = new Set(String(audienceContext || '').toLowerCase().split(/\s+/).filter(Boolean));
     const seen = new Set();
     const items = [];

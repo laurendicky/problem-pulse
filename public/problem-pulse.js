@@ -5440,6 +5440,16 @@ Respond ONLY with JSON: {"media":[{"type":"youtube","name":"...","focus":"..."}]
     renderPodcasts(container, blueprint, merged.slice(0, 8));
 }
 
+// Translate a raw mention count into a qualitative tier. Bands are tuned to the real, heavily
+// skewed distribution (most shows are named once; a standout occasionally hits 30-40+), so the
+// label communicates relative prominence better than a bare "N times".
+function mentionTier(count) {
+    if (count >= 20) return 'Huge Mentions';
+    if (count >= 6)  return 'High Mentions';
+    if (count >= 2)  return 'Medium Mentions';
+    return 'Low Mentions';
+}
+
 function renderPodcasts(container, blueprint, items) {
     container.querySelectorAll('.podcasts-list-item').forEach(el => el.remove());
     if (!items || !items.length) {
@@ -5466,7 +5476,7 @@ function renderPodcasts(container, blueprint, items) {
         if (it.latest instanceof Date && !isNaN(it.latest)) {
             metaBits.push(`latest ${it.latest.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`);
         }
-        metaBits.push(`Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}`);
+        metaBits.push(mentionTier(it.count));
         set('.podcast-meta', metaBits.join(' · '));
         const img = node.querySelector('.podcast-image');
         if (img) {
@@ -5773,6 +5783,31 @@ function countNameInContext(key, segments, signalRe, windowSize) {
     return { total, contextHits };
 }
 
+// Thin-results fallback. When a panel grounds too few real mentions, we ask the AI to suggest
+// well-known, real names for THIS audience so the panel is still useful — but these are clearly
+// flagged "Suggested" in the UI and never counted as verified mentions. The honesty line: real
+// corpus mentions and AI suggestions are always visually distinct, never blended silently.
+async function aiSuggestEntities(audienceContext, spec, avoid, want) {
+    if (want <= 0) return [];
+    const prompt = `For a "${audienceContext}" audience, name up to ${want} of the most prominent, real, widely-recognised ${spec.what} that this kind of audience typically ${spec.verb}. ${spec.examples || ''}
+Return only REAL, well-known names — never invented ones — and avoid generic categories.${avoid && avoid.length ? ` Do NOT repeat any of these: ${avoid.join(', ')}.` : ''}
+Respond ONLY with JSON: {"items":[{"name":"...","note":"<= 6 word description, or empty"}]}`;
+    try {
+        const data = await callOpenAIProxyWithRetry({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You suggest only real, well-known names relevant to a given audience. You never invent names, and you output only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.3,
+            max_completion_tokens: 400,
+            response_format: { type: "json_object" }
+        }, { tries: 1, priority: 3 });
+        if (data && data.openaiResponse) return JSON.parse(data.openaiResponse).items || [];
+    } catch (e) { console.warn('[Suggest] failed:', e && e.message); }
+    return [];
+}
+
 // === KEY INFLUENCERS: the creators, channels & people the audience follows =========
 // Add an empty <div id="thought-leaders"></div> in Webflow. Same verified-extraction engine
 // as the podcasts panel, but BROADENED: most niches don't cite "First Last" experts — they
@@ -5855,13 +5890,33 @@ Respond ONLY with JSON: {"people":[{"name":"...","role":"..."}]}`;
     });
     // Rank by influence-context first (genuinely followed), then by raw mentions.
     items.sort((a, b) => (b.strong - a.strong) || (b.count - a.count));
-    const top = items.slice(0, 8);
+    let top = items.slice(0, 8).map(it => ({ ...it, suggested: false }));
+
+    // Thin-results fallback: if few real names were grounded, top up with clearly-labelled
+    // AI suggestions for this audience so the panel stays useful.
+    const MIN_GROUNDED = 4, TARGET = 6;
+    if (top.length < MIN_GROUNDED) {
+        const have = new Set(top.map(it => it.name.toLowerCase()));
+        const suggestions = await aiSuggestEntities(audienceContext, {
+            what: 'influencers, content creators and channels (YouTubers, TikTok / Instagram creators, well-known coaches or experts)',
+            verb: 'follows, watches or learns from',
+            examples: 'Give actual names or @handles people in this space would recognise.'
+        }, [...have], TARGET - top.length);
+        suggestions.forEach(s => {
+            if (!s || !s.name) return;
+            const nm = String(s.name).trim();
+            if (!nm || have.has(nm.toLowerCase())) return;
+            have.add(nm.toLowerCase());
+            top.push({ name: nm, role: (s.note || '').trim(), count: 0, strong: 0, suggested: true });
+        });
+    }
 
     const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     if (!top.length) {
         el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">No influencers, creators or channels were clearly named in these discussions.</p>`;
         return;
     }
+    const sBadge = `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:#7C5CFF; background:rgba(124,92,255,0.12); padding:2px 8px; border-radius:999px;">Suggested</span>`;
     el.innerHTML = `
       <div class="experts-list" style="display:flex; flex-direction:column; gap:10px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
         ${top.map(it => `
@@ -5871,8 +5926,9 @@ Respond ONLY with JSON: {"people":[{"name":"...","role":"..."}]}`;
               <div style="font-size:0.98rem; font-weight:700; color:#1f2937;">${esc(it.name)}</div>
               ${it.role ? `<div style="font-size:0.8rem; color:#6b7280;">${esc(it.role)}</div>` : ''}
             </div>
-            <span style="flex:0 0 auto; font-size:0.78rem; color:#9ca3af;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>
+            ${it.suggested ? sBadge : `<span style="flex:0 0 auto; font-size:0.78rem; color:#9ca3af;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>`}
           </div>`).join('')}
+        ${top.some(it => it.suggested) ? `<p style="margin:8px 0 0; font-size:0.72rem; color:#9ca3af;">“Suggested” names are well-known for this audience, added by AI because few were explicitly named in these discussions — not verified mentions.</p>` : ''}
       </div>`;
 }
 
@@ -5949,13 +6005,32 @@ Respond ONLY with JSON: {"tools":[{"name":"...","use":"..."}]}`;
         items.push({ name, use: (w.use || '').trim(), count: total, strong: contextHits });
     });
     items.sort((a, b) => (b.strong - a.strong) || (b.count - a.count));
-    const top = items.slice(0, 8);
+    let top = items.slice(0, 8).map(it => ({ ...it, suggested: false }));
+
+    // Thin-results fallback: top up with clearly-labelled AI suggestions for this audience.
+    const MIN_GROUNDED = 4, TARGET = 6;
+    if (top.length < MIN_GROUNDED) {
+        const have = new Set(top.map(it => it.name.toLowerCase()));
+        const suggestions = await aiSuggestEntities(audienceContext, {
+            what: 'apps, websites, online services and digital tools',
+            verb: 'uses',
+            examples: 'Real app / website / software names only (no physical products).'
+        }, [...have], TARGET - top.length);
+        suggestions.forEach(s => {
+            if (!s || !s.name) return;
+            const nm = String(s.name).trim();
+            if (!nm || have.has(nm.toLowerCase())) return;
+            have.add(nm.toLowerCase());
+            top.push({ name: nm, use: (s.note || '').trim(), count: 0, strong: 0, suggested: true });
+        });
+    }
 
     const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     if (!top.length) {
         el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">No specific apps, tools or websites were clearly named in these discussions.</p>`;
         return;
     }
+    const sBadge = `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:#1aa89a; background:rgba(54,224,208,0.15); padding:2px 8px; border-radius:999px;">Suggested</span>`;
     el.innerHTML = `
       <div class="tools-list" style="display:flex; flex-direction:column; gap:10px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
         ${top.map(it => `
@@ -5965,8 +6040,9 @@ Respond ONLY with JSON: {"tools":[{"name":"...","use":"..."}]}`;
               <div style="font-size:0.98rem; font-weight:700; color:#1f2937;">${esc(it.name)}</div>
               ${it.use ? `<div style="font-size:0.8rem; color:#6b7280;">${esc(it.use)}</div>` : ''}
             </div>
-            <span style="flex:0 0 auto; font-size:0.78rem; color:#9ca3af;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>
+            ${it.suggested ? sBadge : `<span style="flex:0 0 auto; font-size:0.78rem; color:#9ca3af;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>`}
           </div>`).join('')}
+        ${top.some(it => it.suggested) ? `<p style="margin:8px 0 0; font-size:0.72rem; color:#9ca3af;">“Suggested” tools are common for this audience, added by AI because few were explicitly named in these discussions — not verified mentions.</p>` : ''}
       </div>`;
 }
 

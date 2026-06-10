@@ -5773,11 +5773,12 @@ function countNameInContext(key, segments, signalRe, windowSize) {
     return { total, contextHits };
 }
 
-// === THOUGHT LEADERS: real, named people the audience follows & cites =============
-// Add an empty <div id="thought-leaders"></div> in Webflow. Same verified-extraction
-// engine as the podcasts panel: an AI names the people, then every name is GROUNDED against
-// the corpus (drops anything not actually present) and shown with its real mention count.
-// No images (people can't be sourced honestly), no invented names or roles.
+// === KEY INFLUENCERS: the creators, channels & people the audience follows =========
+// Add an empty <div id="thought-leaders"></div> in Webflow. Same verified-extraction engine
+// as the podcasts panel, but BROADENED: most niches don't cite "First Last" experts — they
+// follow CREATORS, CHANNELS and SOCIAL ACCOUNTS (e.g. Kikopup, McCann Dogs, @username).
+// Excluding channels/brands is what left this panel empty. The AI names them, then each is
+// GROUNDED against the corpus (drops anything not actually present) with its real mention count.
 // =================================================================================
 async function generateAndRenderExperts(posts, audienceContext) {
     const el = document.getElementById('thought-leaders');
@@ -5801,11 +5802,11 @@ async function generateAndRenderExperts(posts, audienceContext) {
         .map((p, i) => `[${i}] ${textOf(p).replace(/\s+/g, ' ').slice(0, 450)}`)
         .join('\n');
 
-    const prompt = `From these "${audienceContext}" discussions, extract the real NAMED PEOPLE this audience follows, cites, quotes, or recommends — creators, authors, founders, experts, coaches, influencers, researchers.
+    const prompt = `From these "${audienceContext}" discussions, extract the INFLUENCERS and PEOPLE this audience follows, watches, recommends, or cites — including content creators, YouTubers, TikTokers, Instagram accounts, podcast hosts, named channels, coaches, authors, experts and well-known figures in this space.
 For each return:
-- "name": the person's real name as commonly written (e.g. "Andrew Huberman", "Alex Hormozi"). A real proper name — never a description, a Reddit username, or a generic role.
-- "role": a SHORT phrase for who they are / what they are known for, ONLY if clear from context; otherwise "".
-RULES: Only real, clearly-named individuals actually referenced by this audience. NEVER invent names or roles. Do not return the audience's own usernames, fictional characters, brands, companies, or generic role words. If none are clearly named, return an empty list.
+- "name": the real name, channel name, or @handle exactly as commonly written (e.g. "Zak George", "Kikopup", "McCann Dogs", "@username"). Never a description or a generic role.
+- "role": a SHORT phrase for who they are / their platform, ONLY if clear from context; otherwise "".
+RULES: Only real, clearly-named people, creators or channels actually referenced by this audience. NEVER invent names or roles. Do not return the audience's own anonymous usernames, generic role words, or product/company brands that aren't a creator or personality. If none are clearly named, return an empty list.
 Discussions:
 ${sample}
 Respond ONLY with JSON: {"people":[{"name":"...","role":"..."}]}`;
@@ -5815,7 +5816,7 @@ Respond ONLY with JSON: {"people":[{"name":"...","role":"..."}]}`;
         const data = await callOpenAIProxyWithRetry({
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "You extract only explicitly-named real people (creators, authors, experts) that an audience references. You never invent names or roles, and you output only valid JSON." },
+                { role: "system", content: "You extract only explicitly-named people, content creators, channels and social accounts that an audience follows or references. You never invent names or roles, and you output only valid JSON." },
                 { role: "user", content: prompt }
             ],
             temperature: 0.1,
@@ -5827,10 +5828,11 @@ Respond ONLY with JSON: {"people":[{"name":"...","role":"..."}]}`;
     console.log(`[Experts] AI named ${parsed.length} candidate person/people before grounding.`);
 
     const segments = corpus.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase());
-    // AUTHORITY context only. Deliberately excludes ambiguous consumption verbs like
-    // "listen/watch/read" — those are as common for music/TV as for experts (e.g. "listened
-    // to Elton John"), which is exactly what produced the false positive.
-    const EXPERT_CONTEXT = /\b(recommend|recommends|recommended|follow|following|guru|coach|mentor|expert|trainer|trainers|vet|vets|veterinarian|behaviou?rist|breeder|advice|teaches|taught|course|method|approach|technique|channel|video|videos|account|page|cite|cites|author|wrote|writes|podcast|interview|influencer|creator)\b/i;
+    // FOLLOW / CREATOR context. Now that the panel is about influencers, "watch / channel /
+    // youtube / insta / subscribe" are exactly the right signals (they were excluded before to
+    // avoid music false-positives, but a creator is the point here). A name still needs either
+    // this context or repeated mentions, so a one-off passing celebrity won't slip in.
+    const EXPERT_CONTEXT = /\b(recommend|recommends|recommended|follow|following|watch|watching|subscribe|subscribed|guru|coach|mentor|expert|trainer|trainers|vet|vets|behaviou?rist|breeder|advice|teaches|taught|course|method|channel|video|videos|account|page|insta|instagram|tiktok|youtube|podcast|interview|influencer|creator|author|wrote)\b/i;
     const audienceTokens = new Set(String(audienceContext || '').toLowerCase().split(/\s+/).filter(Boolean));
     const seen = new Set();
     const items = [];
@@ -5857,7 +5859,7 @@ Respond ONLY with JSON: {"people":[{"name":"...","role":"..."}]}`;
 
     const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     if (!top.length) {
-        el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">No specific people were clearly named in these discussions.</p>`;
+        el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">No influencers, creators or channels were clearly named in these discussions.</p>`;
         return;
     }
     el.innerHTML = `

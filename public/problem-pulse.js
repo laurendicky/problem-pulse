@@ -3134,6 +3134,8 @@ function renderPlatformPanels(corpus, subredditQueryString, timeFilter) {
     window._platformPanelsRendered = true;
     const audience = window.originalGroupName || '';
     try { renderSocialSplitChart(corpus); } catch (e) { console.warn('[Social Split] failed', e); }
+    try { renderLocationChart(corpus); } catch (e) { console.warn('[Location] failed', e); }
+    try { renderLanguageChart(corpus); } catch (e) { console.warn('[Language] failed', e); }
     Promise.resolve().then(() => generateAndRenderWaterholes(corpus, audience)).catch(e => console.warn('[Waterholes] failed', e));
     Promise.resolve().then(() => generateAndRenderPodcasts(corpus, audience, subredditQueryString, timeFilter)).catch(e => console.warn('[Podcasts] failed', e));
 }
@@ -4910,6 +4912,8 @@ async function runProblemFinder(options = {}) {
         // longer waits ~minutes for the shopping-signal AI batching to finish. It is refined
         // later on the richer corpus (posts + comments + general).
         try { renderSocialSplitChart(filteredItems); } catch (e) { console.warn('[Social Split] early render failed', e); }
+        try { renderLocationChart(filteredItems); } catch (e) { console.warn('[Location] early render failed', e); }
+        try { renderLanguageChart(filteredItems); } catch (e) { console.warn('[Language] early render failed', e); }
         window._exportData = {}; // collected findings for the spreadsheet export
         window._growthTabLoaded = false; // Growth Plan tab regenerates its content on next open
         generateAndRenderOverview(filteredItems, originalGroupName);
@@ -5386,6 +5390,14 @@ Respond ONLY with JSON: {"media":[{"type":"youtube","name":"...","focus":"..."}]
                         it.link = r.collectionViewUrl || '';
                         it.name = r.collectionName;
                         it.focus = it.focus || r.primaryGenreName || '';
+                        // Real, sourced metadata from Apple — already fetched, just no longer
+                        // thrown away. Turns a thin "Mentioned 1 time" card into a substantial one.
+                        it.episodes = Number(r.trackCount) || 0;
+                        it.network = (r.artistName || '').trim();
+                        it.latest = r.releaseDate ? new Date(r.releaseDate) : null;
+                        // Canonical key for variant merging (#3): every spelling of a show that
+                        // resolves to the same Apple entry collapses to one card.
+                        it.canonical = b;
                         out.push(it);
                         return;
                     }
@@ -5395,15 +5407,35 @@ Respond ONLY with JSON: {"media":[{"type":"youtube","name":"...","focus":"..."}]
             // it (without cover art), linking to a search, instead of dropping a real mention.
             // Hard-dropping every unverified podcast was a major cause of an empty media panel.
             it.link = `https://www.google.com/search?q=${encodeURIComponent(it.name + ' podcast')}`;
+            it.canonical = it.name.toLowerCase();
             out.push(it);
             return;
         }
         it.link = `https://www.youtube.com/results?search_query=${encodeURIComponent(it.name)}`;
+        it.canonical = it.name.toLowerCase();
         out.push(it);
     }));
-    out.sort((a, b) => b.count - a.count);
-    console.log(`[Media] ${out.length} kept (podcasts verified, channels grounded).`);
-    renderPodcasts(container, blueprint, out.slice(0, 8));
+
+    // #3 Merge name variants that resolved to the same show (e.g. "Huberman",
+    // "Huberman Lab", "Andrew Huberman" -> one Apple entry). Sum the honest mention
+    // counts and keep the richest metadata, so genuinely popular shows rank by their
+    // true total instead of being split into three "Mentioned 1 time" cards.
+    const mergedMap = new Map();
+    out.forEach(it => {
+        const key = `${it.type}:${it.canonical}`;
+        const prev = mergedMap.get(key);
+        if (!prev) { mergedMap.set(key, it); return; }
+        prev.count += it.count;
+        if (!prev.image && it.image) prev.image = it.image;
+        if (!prev.focus && it.focus) prev.focus = it.focus;
+        if (!prev.episodes && it.episodes) prev.episodes = it.episodes;
+        if (!prev.network && it.network) prev.network = it.network;
+        if (it.latest && (!prev.latest || it.latest > prev.latest)) prev.latest = it.latest;
+    });
+    const merged = [...mergedMap.values()];
+    merged.sort((a, b) => b.count - a.count);
+    console.log(`[Media] ${merged.length} kept (podcasts verified + enriched, variants merged).`);
+    renderPodcasts(container, blueprint, merged.slice(0, 8));
 }
 
 function renderPodcasts(container, blueprint, items) {
@@ -5424,7 +5456,16 @@ function renderPodcasts(container, blueprint, items) {
         const set = (sel, val) => { const e = node.querySelector(sel); if (e) e.innerText = val; };
         set('.podcast-name', it.name);
         set('.podcast-focus', it.focus ? `Focus: ${it.focus}` : '');
-        set('.podcast-meta', `Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}`);
+        // Lead with real, sourced Apple metadata (network · episode count · latest episode),
+        // then the honest mention count — so the card reads substantial even at one mention.
+        const metaBits = [];
+        if (it.network) metaBits.push(it.network);
+        if (it.episodes) metaBits.push(`${it.episodes} episode${it.episodes === 1 ? '' : 's'}`);
+        if (it.latest instanceof Date && !isNaN(it.latest)) {
+            metaBits.push(`latest ${it.latest.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`);
+        }
+        metaBits.push(`Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}`);
+        set('.podcast-meta', metaBits.join(' · '));
         const img = node.querySelector('.podcast-image');
         if (img) {
             if (it.image) {
@@ -5517,6 +5558,197 @@ function renderSocialSplitChart(posts) {
               <b style="color:#374151;">${d.pct}%</b>
             </div>`).join('')}
         </div>
+      </div>`;
+}
+
+// === LOCATION: where the audience is, by country mentions in the corpus ===========
+// Add an empty <div id="location"></div> in Webflow. Pure JS/CSS ranked bar chart, no
+// AI and no external libs. Counts country / nationality mentions across the discussions
+// (same honest approach as the social-split donut). A map is deliberately avoided — it
+// would imply geographic precision this signal doesn't have. Low signal is disclosed,
+// never faked.
+// =================================================================================
+function renderLocationChart(posts) {
+    const el = document.getElementById('location');
+    if (!el) return;
+    const texts = (posts || []).map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase());
+    if (!texts.length) return;
+
+    // Curated country list. Each "keys" entry includes the country name plus low-ambiguity
+    // demonyms/aliases. Language-colliding demonyms (e.g. "spanish", "polish", "english") are
+    // deliberately omitted so a chart of LOCATIONS isn't polluted by talk of languages.
+    const COUNTRIES = [
+        { name: 'United States',  color: '#7C5CFF', keys: ['united states', 'usa', 'america', 'american', 'americans'] },
+        { name: 'United Kingdom', color: '#FF6FB5', keys: ['united kingdom', 'uk', 'britain', 'british', 'england', 'scotland', 'wales'] },
+        { name: 'Canada',         color: '#36E0D0', keys: ['canada', 'canadian', 'canadians'] },
+        { name: 'Australia',      color: '#FF8C66', keys: ['australia', 'australian', 'aussie', 'aussies'] },
+        { name: 'India',          color: '#6C8CFF', keys: ['india', 'indian', 'indians'] },
+        { name: 'Germany',        color: '#7CC7FF', keys: ['germany', 'german', 'germans'] },
+        { name: 'France',         color: '#8B7CFF', keys: ['france', 'french'] },
+        { name: 'Netherlands',    color: '#5ED1D8', keys: ['netherlands', 'dutch', 'holland'] },
+        { name: 'Ireland',        color: '#57D9A3', keys: ['ireland', 'irish'] },
+        { name: 'New Zealand',    color: '#FFD56B', keys: ['new zealand', 'kiwi', 'kiwis'] },
+        { name: 'Italy',          color: '#FF8FA3', keys: ['italy', 'italian', 'italians'] },
+        { name: 'Spain',          color: '#5B9BD5', keys: ['spain', 'spaniard'] },
+        { name: 'Brazil',         color: '#9CE37D', keys: ['brazil', 'brasil', 'brazilian', 'brazilians'] },
+        { name: 'Mexico',         color: '#F78C6B', keys: ['mexico', 'mexican', 'mexicans'] },
+        { name: 'Sweden',         color: '#8FD3F4', keys: ['sweden', 'swedish', 'swede'] },
+        { name: 'Norway',         color: '#B388FF', keys: ['norway', 'norwegian', 'norwegians'] },
+        { name: 'Denmark',        color: '#F48FB1', keys: ['denmark', 'danish'] },
+        { name: 'Finland',        color: '#80DEEA', keys: ['finland', 'finnish'] },
+        { name: 'Poland',         color: '#A5D6A7', keys: ['poland'] },
+        { name: 'Japan',          color: '#FF7597', keys: ['japan', 'japanese'] },
+        { name: 'Philippines',    color: '#4DD0E1', keys: ['philippines', 'filipino', 'filipina', 'pinoy'] },
+        { name: 'Singapore',      color: '#CE93D8', keys: ['singapore', 'singaporean'] },
+        { name: 'South Africa',   color: '#FFB74D', keys: ['south africa', 'south african'] },
+        { name: 'UAE / Dubai',    color: '#9FA8DA', keys: ['dubai', 'uae', 'emirates'] },
+        { name: 'Portugal',       color: '#80CBC4', keys: ['portugal', 'portuguese'] },
+        { name: 'Switzerland',    color: '#EF9A9A', keys: ['switzerland', 'swiss'] }
+    ];
+
+    const fullText = texts.join(' \n ');
+    const countKeys = (keys) => {
+        const pat = keys.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')).join('|');
+        const m = fullText.match(new RegExp('\\b(' + pat + ')\\b', 'gi'));
+        return m ? m.length : 0;
+    };
+    let data = COUNTRIES.map(c => ({ name: c.name, color: c.color, count: countKeys(c.keys) }))
+        .filter(d => d.count > 0).sort((a, b) => b.count - a.count);
+
+    // Don't draw a confident geography from a tiny sample — it's misleading.
+    const grandTotal = data.reduce((n, d) => n + d.count, 0);
+    const MIN_TOTAL = 12;
+    if (data.length === 0 || grandTotal < MIN_TOTAL) {
+        el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">This audience rarely names a country or region in their discussions (only ${grandTotal} mention${grandTotal === 1 ? '' : 's'}), so there isn't enough signal to chart where they're based.</p>`;
+        return;
+    }
+    if (data.length > 8) {
+        const otherCount = data.slice(8).reduce((n, d) => n + d.count, 0);
+        data = data.slice(0, 8);
+        if (otherCount > 0) data.push({ name: 'Other', color: '#C9C9D6', count: otherCount });
+    }
+    const total = data.reduce((n, d) => n + d.count, 0) || 1;
+    const max = data[0].count || 1;
+    data.forEach(d => { d.pct = Math.round((d.count / total) * 100); });
+
+    el.innerHTML = `
+      <div class="location-chart" style="display:flex; flex-direction:column; gap:11px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
+        ${data.map(d => `
+          <div class="location-row" style="display:flex; align-items:center; gap:12px; font-size:0.95rem; color:#1f2937;">
+            <span style="flex:0 0 120px; text-align:right; color:#374151;">${d.name}</span>
+            <div style="flex:1; height:14px; background:rgba(124,92,255,0.08); border-radius:7px; overflow:hidden;">
+              <div style="width:${Math.max(4, (d.count / max) * 100)}%; height:100%; background:${d.color}; border-radius:7px; box-shadow:0 1px 3px rgba(0,0,0,0.15);"></div>
+            </div>
+            <b style="flex:0 0 38px; text-align:right; color:#374151;">${d.pct}%</b>
+          </div>`).join('')}
+        <p style="margin:6px 0 0; font-size:0.72rem; color:#9ca3af;">Share of ${grandTotal} country/region mention${grandTotal === 1 ? '' : 's'} found in the discussions.</p>
+      </div>`;
+}
+
+// === LANGUAGE: what language the audience actually writes in ======================
+// Add an empty <div id="language"></div> in Webflow. Pure JS/CSS, no AI and no external
+// libs. Detects the WRITTEN language of each post two ways: (1) non-Latin scripts (CJK,
+// Cyrillic, Arabic, Devanagari, ...) by Unicode range — extremely reliable; (2) Latin-
+// script languages by distinctive-stopword scoring with a confidence margin. Posts that
+// are too short or ambiguous are left UNDETERMINED rather than guessed, and the footnote
+// discloses how much of the corpus could be classified. Honest by construction.
+// =================================================================================
+function detectPostLanguage(text) {
+    const t = (text || '').toLowerCase();
+    if (!t.trim()) return null;
+
+    // (1) Non-Latin scripts — a confident, near-zero-false-positive signal.
+    const SCRIPTS = [
+        { name: 'Japanese',           re: /[぀-ヿ]/g,  min: 5 },
+        { name: 'Korean',             re: /[가-힯]/g,  min: 5 },
+        { name: 'Chinese',            re: /[一-鿿]/g,  min: 5 },
+        { name: 'Russian (Cyrillic)', re: /[Ѐ-ӿ]/g,  min: 8 },
+        { name: 'Arabic',             re: /[؀-ۿ]/g,  min: 8 },
+        { name: 'Hindi (Devanagari)', re: /[ऀ-ॿ]/g,  min: 8 },
+        { name: 'Greek',              re: /[Ͱ-Ͽ]/g,  min: 8 },
+        { name: 'Hebrew',             re: /[֐-׿]/g,  min: 8 },
+        { name: 'Thai',               re: /[฀-๿]/g,  min: 8 }
+    ];
+    for (const s of SCRIPTS) {
+        const m = t.match(s.re);
+        if (m && m.length >= s.min) return s.name;
+    }
+
+    // (2) Latin script — distinctive function words. Need enough text to be reliable.
+    const tokens = t.split(/[^a-zÀ-ɏ]+/).filter(Boolean);
+    if (tokens.length < 25) return null; // too short to classify honestly
+    const freq = Object.create(null);
+    tokens.forEach(w => { freq[w] = (freq[w] || 0) + 1; });
+
+    const LANGS = {
+        'English':    ['the', 'and', 'to', 'of', 'in', 'is', 'it', 'that', 'for', 'you', 'with', 'was', 'this', 'but', 'not', 'are', 'have'],
+        'Spanish':    ['que', 'de', 'la', 'el', 'en', 'los', 'las', 'una', 'por', 'con', 'para', 'no', 'es', 'se', 'su', 'como', 'pero'],
+        'French':     ['le', 'la', 'les', 'des', 'une', 'est', 'que', 'pour', 'dans', 'avec', 'pas', 'vous', 'nous', 'sur', 'plus', 'je', 'ne', 'qui', 'au', 'du', 'ce'],
+        'German':     ['der', 'die', 'das', 'und', 'ich', 'nicht', 'ein', 'eine', 'mit', 'ist', 'für', 'auch', 'sich', 'dem', 'den', 'von'],
+        'Portuguese': ['que', 'não', 'uma', 'com', 'para', 'mais', 'isso', 'você', 'está', 'muito', 'dos', 'das', 'eu', 'mas', 'por'],
+        'Italian':    ['che', 'di', 'il', 'la', 'non', 'per', 'una', 'sono', 'con', 'gli', 'anche', 'come', 'più', 'ma', 'questo'],
+        'Dutch':      ['het', 'een', 'de', 'en', 'ik', 'niet', 'dat', 'je', 'van', 'met', 'voor', 'op', 'te', 'maar', 'ook'],
+        'Polish':     ['nie', 'się', 'jest', 'że', 'na', 'do', 'to', 'ale', 'jak', 'czy', 'dla', 'tylko', 'bardzo'],
+        'Swedish':    ['och', 'att', 'det', 'som', 'en', 'är', 'jag', 'för', 'inte', 'med', 'på', 'av', 'har']
+    };
+    let best = null, bestScore = 0, second = 0;
+    for (const lang in LANGS) {
+        let s = 0;
+        LANGS[lang].forEach(w => { s += freq[w] || 0; });
+        if (s > bestScore) { second = bestScore; bestScore = s; best = lang; }
+        else if (s > second) { second = s; }
+    }
+    // Require a real signal AND a clear margin over the runner-up; else undetermined.
+    if (bestScore >= 4 && bestScore >= second * 1.4) return best;
+    return null;
+}
+
+function renderLanguageChart(posts) {
+    const el = document.getElementById('language');
+    if (!el) return;
+    const corpus = posts || [];
+    if (!corpus.length) return;
+
+    const PALETTE = ['#7C5CFF', '#FF6FB5', '#36E0D0', '#FF8C66', '#6C8CFF', '#7CC7FF', '#8B7CFF', '#57D9A3', '#FFD56B'];
+    const counts = Object.create(null);
+    let classified = 0;
+    corpus.forEach(p => {
+        const lang = detectPostLanguage(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`);
+        if (!lang) return;
+        counts[lang] = (counts[lang] || 0) + 1;
+        classified++;
+    });
+
+    let data = Object.keys(counts).map((name, i) => ({ name, count: counts[name] }))
+        .sort((a, b) => b.count - a.count);
+
+    // Don't chart a confident language split from a handful of posts.
+    const MIN_CLASSIFIED = 8;
+    if (classified < MIN_CLASSIFIED) {
+        el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">Only ${classified} post${classified === 1 ? '' : 's'} had enough text to identify a language reliably, so there isn't enough signal to chart what this audience writes in.</p>`;
+        return;
+    }
+    if (data.length > 8) {
+        const otherCount = data.slice(8).reduce((n, d) => n + d.count, 0);
+        data = data.slice(0, 8);
+        if (otherCount > 0) data.push({ name: 'Other', count: otherCount });
+    }
+    data.forEach((d, i) => { d.color = d.name === 'Other' ? '#C9C9D6' : PALETTE[i % PALETTE.length]; });
+    const total = data.reduce((n, d) => n + d.count, 0) || 1;
+    const max = data[0].count || 1;
+    data.forEach(d => { d.pct = Math.round((d.count / total) * 100); });
+
+    el.innerHTML = `
+      <div class="language-chart" style="display:flex; flex-direction:column; gap:11px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
+        ${data.map(d => `
+          <div class="language-row" style="display:flex; align-items:center; gap:12px; font-size:0.95rem; color:#1f2937;">
+            <span style="flex:0 0 130px; text-align:right; color:#374151;">${d.name}</span>
+            <div style="flex:1; height:14px; background:rgba(124,92,255,0.08); border-radius:7px; overflow:hidden;">
+              <div style="width:${Math.max(4, (d.count / max) * 100)}%; height:100%; background:${d.color}; border-radius:7px; box-shadow:0 1px 3px rgba(0,0,0,0.15);"></div>
+            </div>
+            <b style="flex:0 0 38px; text-align:right; color:#374151;">${d.pct}%</b>
+          </div>`).join('')}
+        <p style="margin:6px 0 0; font-size:0.72rem; color:#9ca3af;">Based on the ${classified} of ${corpus.length} posts with enough text to identify a language. Short or ambiguous posts are left out rather than guessed.</p>
       </div>`;
 }
 

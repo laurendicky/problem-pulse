@@ -5494,6 +5494,10 @@ Respond ONLY with JSON: {"media":[{"type":"youtube","name":"...","focus":"..."}]
             return;
         }
         it.link = `https://www.youtube.com/results?search_query=${encodeURIComponent(it.name)}`;
+        // YouTube channels have no Apple artwork, but unavatar.io resolves a channel avatar by
+        // name with no API key (and serves a generated fallback if it can't find one), so the
+        // card gets a real image. If it fails to load, the render hides the image gracefully.
+        if (it.type === 'youtube') it.image = `https://unavatar.io/youtube/${encodeURIComponent(it.name)}`;
         it.canonical = it.name.toLowerCase();
         out.push(it);
     }));
@@ -5527,7 +5531,7 @@ function mentionTier(count) {
     if (count >= 20) return 'Huge Mentions';
     if (count >= 6)  return 'High Mentions';
     if (count >= 2)  return 'Medium Mentions';
-    return 'Low Mentions';
+    return 'A Few Mentions';
 }
 
 function renderPodcasts(container, blueprint, items) {
@@ -5548,20 +5552,30 @@ function renderPodcasts(container, blueprint, items) {
         const set = (sel, val) => { const e = node.querySelector(sel); if (e) e.innerText = val; };
         set('.podcast-name', it.name);
         set('.podcast-focus', it.focus ? `Focus: ${it.focus}` : '');
-        // Lead with real, sourced Apple metadata (network · episode count · latest episode),
-        // then the honest mention count — so the card reads substantial even at one mention.
+        // Medium label for the new .media-type element: Podcast | YouTube | Show.
+        set('.media-type', it.type === 'youtube' ? 'YouTube' : (it.type === 'show' ? 'Show' : 'Podcast'));
+        // .podcast-meta now holds just the sourced Apple metadata (network · episodes · latest) —
+        // the prevalence tier moved out to its own tag so this line isn't overcrowded.
         const metaBits = [];
         if (it.network) metaBits.push(it.network);
         if (it.episodes) metaBits.push(`${it.episodes} episode${it.episodes === 1 ? '' : 's'}`);
         if (it.latest instanceof Date && !isNaN(it.latest)) {
             metaBits.push(`latest ${it.latest.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`);
         }
-        metaBits.push(mentionTier(it.count));
         set('.podcast-meta', metaBits.join(' · '));
+        // Prevalence tier in its own tag (support both spellings of the class the user added).
+        const tier = mentionTier(it.count);
+        set('.prevalence-tag', tier);
+        set('.prevelance-tag', tier);
         const img = node.querySelector('.podcast-image');
         if (img) {
             if (it.image) {
-                if (img.tagName === 'IMG') img.src = it.image; else img.style.backgroundImage = `url("${it.image}")`;
+                if (img.tagName === 'IMG') {
+                    img.onerror = () => { img.onerror = null; img.style.display = 'none'; };
+                    img.src = it.image;
+                } else {
+                    img.style.backgroundImage = `url("${it.image}")`;
+                }
                 img.style.display = '';
             } else { img.style.display = 'none'; }
         }

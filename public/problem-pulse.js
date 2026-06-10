@@ -1,4 +1,4 @@
-// =================================================================================
+=// =================================================================================
 // FINAL SCRIPT WITH HIGHCHARTS SPLIT PACKED BUBBLE CHART (WITH CLICK EVENT)
 // =================================================================================
 
@@ -5290,11 +5290,20 @@ async function generateAndRenderPodcasts(posts, audienceContext, subredditQueryS
 
     // Broadened: podcasts AND YouTube channels / video shows the audience follows.
     const mediaMatch = /\b(podcast|podcasts|episode|episodes|youtube|yt|channel|channels|video|videos|watch|series|show|shows)\b/i;
-    // Mine the corpus we were ALREADY handed (posts + comments + general, assembled by the
-    // constellation pass). No extra Reddit search/comment fetch here — that self-inflicted fetch
-    // storm made this the slowest panel and is why it often hung on the design placeholders.
-    const pool = (posts || []).filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
-    console.log(`[Media] ${pool.length} media-mentioning items to mine (shared corpus, no extra fetch).`);
+    let pool = (posts || []).filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
+    // Targeted media search: problem-discussion posts rarely name specific shows, so we pull the
+    // threads where this audience actually recommends podcasts/channels. Kept LEAN (3 terms, 15
+    // comment threads) so it restores coverage without the old heavy fetch storm.
+    try {
+        if (subredditQueryString) {
+            const searched = await fetchMultipleRedditDataBatched(subredditQueryString, ['podcast', 'youtube channel', 'best podcast'], 25, timeFilter || 'all', false);
+            const ids = searched.sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0)).slice(0, 15).map(p => p.data.id);
+            const comments = await fetchCommentsForPosts(ids);
+            pool = deduplicatePosts([...pool, ...searched, ...comments]);
+        }
+    } catch (e) { console.warn('[Media] search failed:', e && e.message); }
+    pool = pool.filter(p => mediaMatch.test(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`));
+    console.log(`[Media] ${pool.length} media-mentioning items to mine.`);
     if (pool.length === 0) { renderPodcasts(container, blueprint, []); return; }
 
     const sampleText = pool.slice(0, 70).map((p, i) =>

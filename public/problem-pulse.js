@@ -5715,10 +5715,10 @@ function renderActiveHours(posts) {
           ${bins.map((c, h) => {
               const inPeak = peakHours.has(h);
               const col = inPeak ? '#7C5CFF' : 'rgba(124,92,255,0.22)';
-              const ht = Math.max(3, (c / max) * 100);
-              return `<div title="${fmt(h)} — ${c} post${c === 1 ? '' : 's'}" style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; align-items:center;">
-                <div style="width:100%; height:${ht}%; background:${col}; border-radius:4px 4px 0 0; box-shadow:${inPeak ? '0 1px 4px rgba(124,92,255,0.35)' : 'none'};"></div>
-              </div>`;
+              // Explicit pixel height — percentage heights collapse inside an auto-height
+              // flex column, which is why the bars previously didn't render at all.
+              const ht = Math.max(3, Math.round((c / max) * 132));
+              return `<div title="${fmt(h)} — ${c} post${c === 1 ? '' : 's'}" style="flex:1 1 0; height:${ht}px; background:${col}; border-radius:4px 4px 0 0; box-shadow:${inPeak ? '0 1px 4px rgba(124,92,255,0.35)' : 'none'};"></div>`;
           }).join('')}
         </div>
         <div style="display:flex; gap:3px; margin-top:6px;">
@@ -5741,11 +5741,17 @@ async function generateAndRenderExperts(posts, audienceContext) {
     const corpus = posts || [];
     if (corpus.length < 5) return;
 
-    // Sample the most-upvoted posts so the extraction call is fast and signal-rich.
-    const sample = corpus.slice()
+    // Prioritise posts that actually carry "I follow / I recommend / read / listen to"
+    // signal — with a 7k+ corpus, a flat top-by-upvotes sample rarely contains named people,
+    // which is why yield was thin. Fall back to the whole corpus if the signal pool is small.
+    const textOf = p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`;
+    const PEOPLE_SIGNAL = /\b(recommend|recommends|recommended|follow|following|read|reading|author|wrote|writes|expert|guru|coach|mentor|listen|listening|interview|influencer|creator|podcast|channel|youtube|book|books|account|subscribe)\b/i;
+    let epool = corpus.filter(p => PEOPLE_SIGNAL.test(textOf(p)));
+    if (epool.length < 15) epool = corpus.slice();
+    const sample = epool
         .sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0))
-        .slice(0, 45)
-        .map((p, i) => `[${i}] ${`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.replace(/\s+/g, ' ').slice(0, 450)}`)
+        .slice(0, 55)
+        .map((p, i) => `[${i}] ${textOf(p).replace(/\s+/g, ' ').slice(0, 450)}`)
         .join('\n');
 
     const prompt = `From these "${audienceContext}" discussions, extract the real NAMED PEOPLE this audience follows, cites, quotes, or recommends — creators, authors, founders, experts, coaches, influencers, researchers.
@@ -5827,10 +5833,16 @@ async function generateAndRenderTools(posts, audienceContext) {
     const corpus = posts || [];
     if (corpus.length < 5) return;
 
-    const sample = corpus.slice()
+    // Prioritise posts that mention using software/apps so the sample is signal-rich,
+    // rather than a flat top-by-upvotes slice of a 7k+ corpus. Fall back to all if sparse.
+    const textOf = p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`;
+    const TOOL_SIGNAL = /\b(app|apps|tool|tools|software|saas|platform|use|used|using|subscription|dashboard|plugin|extension|integrat|spreadsheet|tracker|automate|automation)\b|\.(com|io|app)\b/i;
+    let tpool = corpus.filter(p => TOOL_SIGNAL.test(textOf(p)));
+    if (tpool.length < 15) tpool = corpus.slice();
+    const sample = tpool
         .sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0))
-        .slice(0, 45)
-        .map((p, i) => `[${i}] ${`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.replace(/\s+/g, ' ').slice(0, 450)}`)
+        .slice(0, 55)
+        .map((p, i) => `[${i}] ${textOf(p).replace(/\s+/g, ' ').slice(0, 450)}`)
         .join('\n');
 
     const prompt = `From these "${audienceContext}" discussions, extract the real SOFTWARE, APPS and digital TOOLS this audience actually uses to get things done — e.g. apps, web tools, SaaS products, platforms (think Notion, Excel, QuickBooks, Canva, Figma, Slack).

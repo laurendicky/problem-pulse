@@ -3212,6 +3212,7 @@ function renderPlatformPanels(corpus, subredditQueryString, timeFilter) {
     Promise.resolve().then(() => generateAndRenderPodcasts(corpus, audience, subredditQueryString, timeFilter)).catch(e => console.warn('[Podcasts] failed', e));
     Promise.resolve().then(() => generateAndRenderExperts(corpus, audience)).catch(e => console.warn('[Experts] failed', e));
     Promise.resolve().then(() => generateAndRenderTools(corpus, audience)).catch(e => console.warn('[Tools] failed', e));
+    Promise.resolve().then(() => generateAndRenderEvents(corpus, audience)).catch(e => console.warn('[Events] failed', e));
 }
 
  async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
@@ -3337,7 +3338,14 @@ function renderHighchartsBubbleChart(signals) {
         });
     });
 
-    const chartSeries = Array.from(groupedByCategory, ([name, data]) => ({ name, data }));
+    const chartSeries = Array.from(groupedByCategory, ([name, data]) => {
+        const series = { name, data };
+        // Dealbreakers defaulted to an indistinct grey from Highcharts' palette. Pin it to the
+        // dashboard blue: inner bubbles render solid blue and the outer parent bubble auto-
+        // lightens to a pastel blue, matching the rest of the dashboard.
+        if (/dealbreaker/i.test(name)) series.color = '#00a5ce';
+        return series;
+    });
 
     Highcharts.chart(container, {
         chart: {
@@ -6115,6 +6123,114 @@ Respond ONLY with JSON: {"tools":[{"name":"...","use":"..."}]}`;
             ${it.suggested ? sBadge : `<span style="flex:0 0 auto; font-size:0.78rem; color:#9ca3af;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>`}
           </div>`).join('')}
         ${top.some(it => it.suggested) ? `<p style="margin:8px 0 0; font-size:0.72rem; color:#9ca3af;">“Suggested” tools are common for this audience, added by AI because few were explicitly named in these discussions — not verified mentions.</p>` : ''}
+      </div>`;
+}
+
+// === EVENTS & PLACES: where the audience gathers in the real world ================
+// Add an empty <div id="events-places"></div> in Webflow. Same verified-extraction engine as
+// the experts/tools panels, for real-world EVENTS (conferences, expos, meetups, shows, classes,
+// competitions, festivals) and notable PLACES/VENUES the audience attends or visits. Grounded
+// against the corpus, with the same clearly-labelled "Suggested" fallback when findings are thin.
+// =================================================================================
+async function generateAndRenderEvents(posts, audienceContext) {
+    const el = document.getElementById('events-places');
+    if (!el) return;
+    const corpus = posts || [];
+    if (corpus.length < 5) return;
+
+    const textOf = p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`;
+    const EVENT_SIGNAL = /\b(attend|attended|attending|went to|going to|visit|visited|conference|convention|expo|meetup|meet up|show|shows|festival|workshop|class|classes|competition|trial|trials|seminar|event|events|fair|venue|park|trip|trips)\b/i;
+    let pool = corpus.filter(p => EVENT_SIGNAL.test(textOf(p)));
+    if (pool.length < 15) pool = corpus.slice();
+    const stableId = p => String(p.data.id || p.data.name || '');
+    const sample = pool
+        .sort((a, b) => ((b.data.ups || 0) - (a.data.ups || 0)) || (stableId(a) < stableId(b) ? -1 : 1))
+        .slice(0, 70)
+        .map((p, i) => `[${i}] ${textOf(p).replace(/\s+/g, ' ').slice(0, 450)}`)
+        .join('\n');
+
+    const prompt = `From these "${audienceContext}" discussions, extract the real-world EVENTS and PLACES this audience attends or visits — named conferences, conventions, expos, meetups, shows, competitions, workshops, classes, festivals, and notable venues or places.
+For each return:
+- "name": the real event or place name exactly as commonly written. A real proper name — never a generic category ("a conference", "the park"), an activity, or a description.
+- "what": a SHORT phrase for what it is, ONLY if clear from context; otherwise "".
+RULES: Only real, clearly-named events or places actually referenced by this audience. NEVER invent names. Do NOT return generic categories, online-only platforms, personal names, or vague descriptions. If none are clearly named, return an empty list.
+Discussions:
+${sample}
+Respond ONLY with JSON: {"events":[{"name":"...","what":"..."}]}`;
+
+    let parsed = [];
+    try {
+        const data = await callOpenAIProxyWithRetry({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You extract only explicitly-named real-world events and places that an audience attends. You never invent names, never return generic categories or personal names, and you output only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.1,
+            max_completion_tokens: 700,
+            response_format: { type: "json_object" }
+        }, { tries: 2, priority: 2 });
+        if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).events || [];
+    } catch (e) { console.warn('[Events] extraction failed:', e && e.message); }
+    console.log(`[Events] AI named ${parsed.length} candidate event(s)/place(s) before grounding.`);
+
+    const segments = corpus.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase());
+    const EVENT_CONTEXT = /\b(attend|attended|attending|went|going|visit|visited|conference|convention|expo|meetup|show|shows|festival|workshop|class|classes|competition|trial|trials|seminar|event|fair|venue|park|booth|ticket|tickets|hosted|held)\b/i;
+    const audienceTokens = new Set(String(audienceContext || '').toLowerCase().split(/\s+/).filter(Boolean));
+    const seen = new Set();
+    const items = [];
+    (parsed || []).forEach(w => {
+        if (!w || !w.name) return;
+        const name = String(w.name).trim();
+        const key = name.toLowerCase();
+        if (seen.has(key) || key.length < 3) return;
+        const tokens = key.split(/\s+/).filter(Boolean);
+        if (tokens.every(t => audienceTokens.has(t))) return;
+        const { total, contextHits } = countNameInContext(key, segments, EVENT_CONTEXT);
+        if (total === 0) return;
+        if (contextHits === 0 && total < 2) return;
+        seen.add(key);
+        items.push({ name, use: (w.what || '').trim(), count: total, strong: contextHits });
+    });
+    items.sort((a, b) => (b.strong - a.strong) || (b.count - a.count));
+    let top = items.slice(0, 8).map(it => ({ ...it, suggested: false }));
+
+    // Thin-results fallback: top up with clearly-labelled AI suggestions for this audience.
+    const MIN_GROUNDED = 4, TARGET = 6;
+    if (top.length < MIN_GROUNDED) {
+        const have = new Set(top.map(it => it.name.toLowerCase()));
+        const suggestions = await aiSuggestEntities(audienceContext, {
+            what: 'real-world events, conferences, expos, meetups, shows, competitions or notable places/venues',
+            verb: 'attends or visits in person',
+            examples: 'Real, named events or places only — no online-only platforms.'
+        }, [...have], TARGET - top.length);
+        suggestions.forEach(s => {
+            if (!s || !s.name) return;
+            const nm = String(s.name).trim();
+            if (!nm || have.has(nm.toLowerCase())) return;
+            have.add(nm.toLowerCase());
+            top.push({ name: nm, use: (s.note || '').trim(), count: 0, strong: 0, suggested: true });
+        });
+    }
+
+    const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    if (!top.length) {
+        el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">No specific events or places were clearly named in these discussions.</p>`;
+        return;
+    }
+    const sBadge = `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:#00a5ce; background:rgba(0,165,206,0.14); padding:2px 8px; border-radius:999px;">Suggested</span>`;
+    el.innerHTML = `
+      <div class="events-list" style="display:flex; flex-direction:column; gap:10px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
+        ${top.map(it => `
+          <div class="event-item" style="display:flex; align-items:center; gap:12px;">
+            <span style="flex:0 0 34px; height:34px; border-radius:9px; background:rgba(0,165,206,0.14); color:#00a5ce; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:0.82rem;">${(it.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2) || '?').toUpperCase()}</span>
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:0.98rem; font-weight:700; color:#1f2937;">${esc(it.name)}</div>
+              ${it.use ? `<div style="font-size:0.8rem; color:#6b7280;">${esc(it.use)}</div>` : ''}
+            </div>
+            ${it.suggested ? sBadge : `<span style="flex:0 0 auto; font-size:0.78rem; color:#9ca3af;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>`}
+          </div>`).join('')}
+        ${top.some(it => it.suggested) ? `<p style="margin:8px 0 0; font-size:0.72rem; color:#9ca3af;">“Suggested” entries are common for this audience, added by AI because few were explicitly named in these discussions — not verified mentions.</p>` : ''}
       </div>`;
 }
 

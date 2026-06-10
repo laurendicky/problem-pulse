@@ -3135,9 +3135,11 @@ function renderPlatformPanels(corpus, subredditQueryString, timeFilter) {
     const audience = window.originalGroupName || '';
     try { renderSocialSplitChart(corpus); } catch (e) { console.warn('[Social Split] failed', e); }
     try { renderLocationChart(corpus); } catch (e) { console.warn('[Location] failed', e); }
-    try { renderLanguageChart(corpus); } catch (e) { console.warn('[Language] failed', e); }
+    try { renderActiveHours(corpus); } catch (e) { console.warn('[Active Hours] failed', e); }
     Promise.resolve().then(() => generateAndRenderWaterholes(corpus, audience)).catch(e => console.warn('[Waterholes] failed', e));
     Promise.resolve().then(() => generateAndRenderPodcasts(corpus, audience, subredditQueryString, timeFilter)).catch(e => console.warn('[Podcasts] failed', e));
+    Promise.resolve().then(() => generateAndRenderExperts(corpus, audience)).catch(e => console.warn('[Experts] failed', e));
+    Promise.resolve().then(() => generateAndRenderTools(corpus, audience)).catch(e => console.warn('[Tools] failed', e));
 }
 
  async function runConstellationAnalysis(subredditQueryString, demandSignalTerms, timeFilter) {
@@ -4913,7 +4915,7 @@ async function runProblemFinder(options = {}) {
         // later on the richer corpus (posts + comments + general).
         try { renderSocialSplitChart(filteredItems); } catch (e) { console.warn('[Social Split] early render failed', e); }
         try { renderLocationChart(filteredItems); } catch (e) { console.warn('[Location] early render failed', e); }
-        try { renderLanguageChart(filteredItems); } catch (e) { console.warn('[Language] early render failed', e); }
+        try { renderActiveHours(filteredItems); } catch (e) { console.warn('[Active Hours] early render failed', e); }
         window._exportData = {}; // collected findings for the spreadsheet export
         window._growthTabLoaded = false; // Growth Plan tab regenerates its content on next open
         generateAndRenderOverview(filteredItems, originalGroupName);
@@ -5607,29 +5609,52 @@ function renderLocationChart(posts) {
     ];
 
     const fullText = texts.join(' \n ');
+    const esc = (k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
     const countKeys = (keys) => {
-        const pat = keys.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')).join('|');
+        const pat = keys.map(esc).join('|');
         const m = fullText.match(new RegExp('\\b(' + pat + ')\\b', 'gi'));
         return m ? m.length : 0;
     };
-    let data = COUNTRIES.map(c => ({ name: c.name, color: c.color, count: countKeys(c.keys) }))
-        .filter(d => d.count > 0).sort((a, b) => b.count - a.count);
+    // Self-location phrases ("I'm in France", "based in the UK", "here in Canada", "from
+    // Australia") are a far stronger signal that the WRITER actually lives there than a passing
+    // country mention, so they're weighted heavily. This shifts the chart from "countries talked
+    // about" toward "where the audience is" — using only real text, nothing inferred.
+    const LOC_INTENT = "(?:i'?m|i am|we'?re|we are)\\s+(?:from|in|living\\s+in|based\\s+in|located\\s+in)|live\\s+in|living\\s+in|based\\s+in|located\\s+in|here\\s+in|from";
+    const countStrong = (keys) => {
+        const pat = keys.map(esc).join('|');
+        const re = new RegExp('\\b(?:' + LOC_INTENT + ')\\s+(?:the\\s+)?(' + pat + ')\\b', 'gi');
+        const m = fullText.match(re);
+        return m ? m.length : 0;
+    };
+    const STRONG_WEIGHT = 4;
+    let data = COUNTRIES.map(c => {
+        const mentions = countKeys(c.keys);
+        const strong = countStrong(c.keys);
+        // A residency phrase counts as 4; the remaining bare mentions count as 1 each.
+        const score = strong * STRONG_WEIGHT + Math.max(0, mentions - strong);
+        return { name: c.name, color: c.color, mentions, strong, score };
+    }).filter(d => d.mentions > 0).sort((a, b) => b.score - a.score);
 
-    // Don't draw a confident geography from a tiny sample — it's misleading.
-    const grandTotal = data.reduce((n, d) => n + d.count, 0);
+    // Guard on raw mention volume — a confident geography from a tiny sample is misleading.
+    const grandTotal = data.reduce((n, d) => n + d.mentions, 0);
+    const strongTotal = data.reduce((n, d) => n + d.strong, 0);
     const MIN_TOTAL = 12;
     if (data.length === 0 || grandTotal < MIN_TOTAL) {
         el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">This audience rarely names a country or region in their discussions (only ${grandTotal} mention${grandTotal === 1 ? '' : 's'}), so there isn't enough signal to chart where they're based.</p>`;
         return;
     }
     if (data.length > 8) {
-        const otherCount = data.slice(8).reduce((n, d) => n + d.count, 0);
+        const otherScore = data.slice(8).reduce((n, d) => n + d.score, 0);
         data = data.slice(0, 8);
-        if (otherCount > 0) data.push({ name: 'Other', color: '#C9C9D6', count: otherCount });
+        if (otherScore > 0) data.push({ name: 'Other', color: '#C9C9D6', score: otherScore, strong: 0, mentions: 0 });
     }
-    const total = data.reduce((n, d) => n + d.count, 0) || 1;
-    const max = data[0].count || 1;
-    data.forEach(d => { d.pct = Math.round((d.count / total) * 100); });
+    const total = data.reduce((n, d) => n + d.score, 0) || 1;
+    const max = data[0].score || 1;
+    data.forEach(d => { d.pct = Math.round((d.score / total) * 100); });
+
+    const footnote = strongTotal > 0
+        ? `Weighted toward stated location — ${strongTotal} explicit "I'm based in…" phrase${strongTotal === 1 ? '' : 's'} found among ${grandTotal} country mentions, and counted more heavily.`
+        : `Based on ${grandTotal} country/region mentions. No explicit "I'm based in…" phrases were found, so this reflects countries discussed rather than confirmed residence.`;
 
     el.innerHTML = `
       <div class="location-chart" style="display:flex; flex-direction:column; gap:11px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
@@ -5637,118 +5662,237 @@ function renderLocationChart(posts) {
           <div class="location-row" style="display:flex; align-items:center; gap:12px; font-size:0.95rem; color:#1f2937;">
             <span style="flex:0 0 120px; text-align:right; color:#374151;">${d.name}</span>
             <div style="flex:1; height:14px; background:rgba(124,92,255,0.08); border-radius:7px; overflow:hidden;">
-              <div style="width:${Math.max(4, (d.count / max) * 100)}%; height:100%; background:${d.color}; border-radius:7px; box-shadow:0 1px 3px rgba(0,0,0,0.15);"></div>
+              <div style="width:${Math.max(4, (d.score / max) * 100)}%; height:100%; background:${d.color}; border-radius:7px; box-shadow:0 1px 3px rgba(0,0,0,0.15);"></div>
             </div>
             <b style="flex:0 0 38px; text-align:right; color:#374151;">${d.pct}%</b>
           </div>`).join('')}
-        <p style="margin:6px 0 0; font-size:0.72rem; color:#9ca3af;">Share of ${grandTotal} country/region mention${grandTotal === 1 ? '' : 's'} found in the discussions.</p>
+        <p style="margin:6px 0 0; font-size:0.72rem; color:#9ca3af;">${footnote}</p>
       </div>`;
 }
 
-// === LANGUAGE: what language the audience actually writes in ======================
-// Add an empty <div id="language"></div> in Webflow. Pure JS/CSS, no AI and no external
-// libs. Detects the WRITTEN language of each post two ways: (1) non-Latin scripts (CJK,
-// Cyrillic, Arabic, Devanagari, ...) by Unicode range — extremely reliable; (2) Latin-
-// script languages by distinctive-stopword scoring with a confidence margin. Posts that
-// are too short or ambiguous are left UNDETERMINED rather than guessed, and the footnote
-// discloses how much of the corpus could be classified. Honest by construction.
+// === ACTIVE HOURS: when the audience actually posts, from real timestamps ==========
+// Add an empty <div id="active-hours"></div> in Webflow. Pure JS/CSS, no AI, no libs.
+// Buckets every post's real created_utc into a 24-hour histogram and highlights the busiest
+// 4-hour window. This is a FACT (timestamps), not an inference. Times are UTC — disclosed in
+// the footnote — which still reveals the daily rhythm and rough hemisphere of the audience.
 // =================================================================================
-function detectPostLanguage(text) {
-    const t = (text || '').toLowerCase();
-    if (!t.trim()) return null;
-
-    // (1) Non-Latin scripts — a confident, near-zero-false-positive signal.
-    const SCRIPTS = [
-        { name: 'Japanese',           re: /[぀-ヿ]/g,  min: 5 },
-        { name: 'Korean',             re: /[가-힯]/g,  min: 5 },
-        { name: 'Chinese',            re: /[一-鿿]/g,  min: 5 },
-        { name: 'Russian (Cyrillic)', re: /[Ѐ-ӿ]/g,  min: 8 },
-        { name: 'Arabic',             re: /[؀-ۿ]/g,  min: 8 },
-        { name: 'Hindi (Devanagari)', re: /[ऀ-ॿ]/g,  min: 8 },
-        { name: 'Greek',              re: /[Ͱ-Ͽ]/g,  min: 8 },
-        { name: 'Hebrew',             re: /[֐-׿]/g,  min: 8 },
-        { name: 'Thai',               re: /[฀-๿]/g,  min: 8 }
-    ];
-    for (const s of SCRIPTS) {
-        const m = t.match(s.re);
-        if (m && m.length >= s.min) return s.name;
-    }
-
-    // (2) Latin script — distinctive function words. Need enough text to be reliable.
-    const tokens = t.split(/[^a-zÀ-ɏ]+/).filter(Boolean);
-    if (tokens.length < 25) return null; // too short to classify honestly
-    const freq = Object.create(null);
-    tokens.forEach(w => { freq[w] = (freq[w] || 0) + 1; });
-
-    const LANGS = {
-        'English':    ['the', 'and', 'to', 'of', 'in', 'is', 'it', 'that', 'for', 'you', 'with', 'was', 'this', 'but', 'not', 'are', 'have'],
-        'Spanish':    ['que', 'de', 'la', 'el', 'en', 'los', 'las', 'una', 'por', 'con', 'para', 'no', 'es', 'se', 'su', 'como', 'pero'],
-        'French':     ['le', 'la', 'les', 'des', 'une', 'est', 'que', 'pour', 'dans', 'avec', 'pas', 'vous', 'nous', 'sur', 'plus', 'je', 'ne', 'qui', 'au', 'du', 'ce'],
-        'German':     ['der', 'die', 'das', 'und', 'ich', 'nicht', 'ein', 'eine', 'mit', 'ist', 'für', 'auch', 'sich', 'dem', 'den', 'von'],
-        'Portuguese': ['que', 'não', 'uma', 'com', 'para', 'mais', 'isso', 'você', 'está', 'muito', 'dos', 'das', 'eu', 'mas', 'por'],
-        'Italian':    ['che', 'di', 'il', 'la', 'non', 'per', 'una', 'sono', 'con', 'gli', 'anche', 'come', 'più', 'ma', 'questo'],
-        'Dutch':      ['het', 'een', 'de', 'en', 'ik', 'niet', 'dat', 'je', 'van', 'met', 'voor', 'op', 'te', 'maar', 'ook'],
-        'Polish':     ['nie', 'się', 'jest', 'że', 'na', 'do', 'to', 'ale', 'jak', 'czy', 'dla', 'tylko', 'bardzo'],
-        'Swedish':    ['och', 'att', 'det', 'som', 'en', 'är', 'jag', 'för', 'inte', 'med', 'på', 'av', 'har']
-    };
-    let best = null, bestScore = 0, second = 0;
-    for (const lang in LANGS) {
-        let s = 0;
-        LANGS[lang].forEach(w => { s += freq[w] || 0; });
-        if (s > bestScore) { second = bestScore; bestScore = s; best = lang; }
-        else if (s > second) { second = s; }
-    }
-    // Require a real signal AND a clear margin over the runner-up; else undetermined.
-    if (bestScore >= 4 && bestScore >= second * 1.4) return best;
-    return null;
-}
-
-function renderLanguageChart(posts) {
-    const el = document.getElementById('language');
+function renderActiveHours(posts) {
+    const el = document.getElementById('active-hours');
     if (!el) return;
     const corpus = posts || [];
-    if (!corpus.length) return;
 
-    const PALETTE = ['#7C5CFF', '#FF6FB5', '#36E0D0', '#FF8C66', '#6C8CFF', '#7CC7FF', '#8B7CFF', '#57D9A3', '#FFD56B'];
-    const counts = Object.create(null);
-    let classified = 0;
+    const bins = new Array(24).fill(0);
+    let n = 0;
     corpus.forEach(p => {
-        const lang = detectPostLanguage(`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`);
-        if (!lang) return;
-        counts[lang] = (counts[lang] || 0) + 1;
-        classified++;
+        const ts = p && p.data && p.data.created_utc;
+        if (!ts) return;
+        const h = new Date(ts * 1000).getUTCHours();
+        if (h >= 0 && h < 24) { bins[h]++; n++; }
     });
 
-    let data = Object.keys(counts).map((name, i) => ({ name, count: counts[name] }))
-        .sort((a, b) => b.count - a.count);
-
-    // Don't chart a confident language split from a handful of posts.
-    const MIN_CLASSIFIED = 8;
-    if (classified < MIN_CLASSIFIED) {
-        el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">Only ${classified} post${classified === 1 ? '' : 's'} had enough text to identify a language reliably, so there isn't enough signal to chart what this audience writes in.</p>`;
+    const MIN_TS = 20;
+    if (n < MIN_TS) {
+        el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">Only ${n} post${n === 1 ? '' : 's'} carried a timestamp, so there isn't enough signal to chart a reliable posting rhythm.</p>`;
         return;
     }
-    if (data.length > 8) {
-        const otherCount = data.slice(8).reduce((n, d) => n + d.count, 0);
-        data = data.slice(0, 8);
-        if (otherCount > 0) data.push({ name: 'Other', count: otherCount });
+
+    const max = Math.max.apply(null, bins) || 1;
+    // Busiest 4-hour window via a rolling sum (wraps around midnight).
+    let peakStart = 0, peakSum = -1;
+    for (let i = 0; i < 24; i++) {
+        let s = 0;
+        for (let k = 0; k < 4; k++) s += bins[(i + k) % 24];
+        if (s > peakSum) { peakSum = s; peakStart = i; }
     }
-    data.forEach((d, i) => { d.color = d.name === 'Other' ? '#C9C9D6' : PALETTE[i % PALETTE.length]; });
-    const total = data.reduce((n, d) => n + d.count, 0) || 1;
-    const max = data[0].count || 1;
-    data.forEach(d => { d.pct = Math.round((d.count / total) * 100); });
+    const peakHours = new Set([0, 1, 2, 3].map(k => (peakStart + k) % 24));
+    const fmt = (h) => String(h).padStart(2, '0') + ':00';
+    const peakLabel = `${fmt(peakStart)}–${fmt((peakStart + 4) % 24)} UTC`;
+    const peakShare = Math.round((peakSum / n) * 100);
 
     el.innerHTML = `
-      <div class="language-chart" style="display:flex; flex-direction:column; gap:11px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
-        ${data.map(d => `
-          <div class="language-row" style="display:flex; align-items:center; gap:12px; font-size:0.95rem; color:#1f2937;">
-            <span style="flex:0 0 130px; text-align:right; color:#374151;">${d.name}</span>
-            <div style="flex:1; height:14px; background:rgba(124,92,255,0.08); border-radius:7px; overflow:hidden;">
-              <div style="width:${Math.max(4, (d.count / max) * 100)}%; height:100%; background:${d.color}; border-radius:7px; box-shadow:0 1px 3px rgba(0,0,0,0.15);"></div>
+      <div class="active-hours" style="font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
+        <div style="display:flex; align-items:flex-end; gap:3px; height:140px;">
+          ${bins.map((c, h) => {
+              const inPeak = peakHours.has(h);
+              const col = inPeak ? '#7C5CFF' : 'rgba(124,92,255,0.22)';
+              const ht = Math.max(3, (c / max) * 100);
+              return `<div title="${fmt(h)} — ${c} post${c === 1 ? '' : 's'}" style="flex:1; display:flex; flex-direction:column; justify-content:flex-end; align-items:center;">
+                <div style="width:100%; height:${ht}%; background:${col}; border-radius:4px 4px 0 0; box-shadow:${inPeak ? '0 1px 4px rgba(124,92,255,0.35)' : 'none'};"></div>
+              </div>`;
+          }).join('')}
+        </div>
+        <div style="display:flex; gap:3px; margin-top:6px;">
+          ${bins.map((c, h) => `<div style="flex:1; text-align:center; font-size:0.6rem; color:#9ca3af;">${h % 6 === 0 ? fmt(h) : ''}</div>`).join('')}
+        </div>
+        <p style="margin:11px 0 0; font-size:0.9rem; color:#1f2937;">Most active around <b>${peakLabel}</b> — ${peakShare}% of posts land in that 4-hour window.</p>
+        <p style="margin:4px 0 0; font-size:0.72rem; color:#9ca3af;">Based on ${n} timestamped posts. Times are UTC — shift to your audience's timezone to plan posting and launches.</p>
+      </div>`;
+}
+
+// === THOUGHT LEADERS: real, named people the audience follows & cites =============
+// Add an empty <div id="thought-leaders"></div> in Webflow. Same verified-extraction
+// engine as the podcasts panel: an AI names the people, then every name is GROUNDED against
+// the corpus (drops anything not actually present) and shown with its real mention count.
+// No images (people can't be sourced honestly), no invented names or roles.
+// =================================================================================
+async function generateAndRenderExperts(posts, audienceContext) {
+    const el = document.getElementById('thought-leaders');
+    if (!el) return;
+    const corpus = posts || [];
+    if (corpus.length < 5) return;
+
+    // Sample the most-upvoted posts so the extraction call is fast and signal-rich.
+    const sample = corpus.slice()
+        .sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0))
+        .slice(0, 45)
+        .map((p, i) => `[${i}] ${`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.replace(/\s+/g, ' ').slice(0, 450)}`)
+        .join('\n');
+
+    const prompt = `From these "${audienceContext}" discussions, extract the real NAMED PEOPLE this audience follows, cites, quotes, or recommends — creators, authors, founders, experts, coaches, influencers, researchers.
+For each return:
+- "name": the person's real name as commonly written (e.g. "Andrew Huberman", "Alex Hormozi"). A real proper name — never a description, a Reddit username, or a generic role.
+- "role": a SHORT phrase for who they are / what they are known for, ONLY if clear from context; otherwise "".
+RULES: Only real, clearly-named individuals actually referenced by this audience. NEVER invent names or roles. Do not return the audience's own usernames, fictional characters, brands, companies, or generic role words. If none are clearly named, return an empty list.
+Discussions:
+${sample}
+Respond ONLY with JSON: {"people":[{"name":"...","role":"..."}]}`;
+
+    let parsed = [];
+    try {
+        const data = await callOpenAIProxyWithRetry({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You extract only explicitly-named real people (creators, authors, experts) that an audience references. You never invent names or roles, and you output only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.1,
+            max_completion_tokens: 700,
+            response_format: { type: "json_object" }
+        }, { tries: 2, priority: 2 });
+        if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).people || [];
+    } catch (e) { console.warn('[Experts] extraction failed:', e && e.message); }
+    console.log(`[Experts] AI named ${parsed.length} candidate person/people before grounding.`);
+
+    const allText = corpus.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' [SEP] ').toLowerCase();
+    const audienceTokens = new Set(String(audienceContext || '').toLowerCase().split(/\s+/).filter(Boolean));
+    const seen = new Set();
+    const items = [];
+    (parsed || []).forEach(w => {
+        if (!w || !w.name) return;
+        const name = String(w.name).trim();
+        const key = name.toLowerCase();
+        if (seen.has(key)) return;
+        const tokens = key.split(/\s+/).filter(Boolean);
+        // Reject fragments, bare short first-names, and audience-context words — all common
+        // sources of false matches when grounding a person's name against free text.
+        if (key.length < 4) return;
+        if (tokens.length === 1 && key.length < 5) return;
+        if (tokens.every(t => audienceTokens.has(t))) return;
+        const count = groundNameCount(key, allText);
+        if (count === 0) return; // not actually in the corpus -> drop, never show unverified
+        seen.add(key);
+        items.push({ name, role: (w.role || '').trim(), count });
+    });
+    items.sort((a, b) => b.count - a.count);
+    const top = items.slice(0, 8);
+
+    const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    if (!top.length) {
+        el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">No specific people were clearly named in these discussions.</p>`;
+        return;
+    }
+    el.innerHTML = `
+      <div class="experts-list" style="display:flex; flex-direction:column; gap:10px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
+        ${top.map(it => `
+          <div class="expert-item" style="display:flex; align-items:center; gap:12px;">
+            <span style="flex:0 0 34px; height:34px; border-radius:50%; background:rgba(124,92,255,0.12); color:#7C5CFF; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:0.82rem;">${(it.name.replace(/[^a-zA-Z]/g, '').slice(0, 2) || '?').toUpperCase()}</span>
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:0.98rem; font-weight:700; color:#1f2937;">${esc(it.name)}</div>
+              ${it.role ? `<div style="font-size:0.8rem; color:#6b7280;">${esc(it.role)}</div>` : ''}
             </div>
-            <b style="flex:0 0 38px; text-align:right; color:#374151;">${d.pct}%</b>
+            <span style="flex:0 0 auto; font-size:0.78rem; color:#9ca3af;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>
           </div>`).join('')}
-        <p style="margin:6px 0 0; font-size:0.72rem; color:#9ca3af;">Based on the ${classified} of ${corpus.length} posts with enough text to identify a language. Short or ambiguous posts are left out rather than guessed.</p>
+      </div>`;
+}
+
+// === TOOLS & APPS: the software the audience actually uses day-to-day =============
+// Add an empty <div id="tools-apps"></div> in Webflow. Same verified-extraction engine as
+// the experts/podcasts panels: an AI names the tools, then every name is GROUNDED against
+// the corpus and shown with its real mention count. Focused on software/apps people USE to
+// get things done — deliberately distinct from the physical BRANDS they shop for.
+// =================================================================================
+async function generateAndRenderTools(posts, audienceContext) {
+    const el = document.getElementById('tools-apps');
+    if (!el) return;
+    const corpus = posts || [];
+    if (corpus.length < 5) return;
+
+    const sample = corpus.slice()
+        .sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0))
+        .slice(0, 45)
+        .map((p, i) => `[${i}] ${`${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.replace(/\s+/g, ' ').slice(0, 450)}`)
+        .join('\n');
+
+    const prompt = `From these "${audienceContext}" discussions, extract the real SOFTWARE, APPS and digital TOOLS this audience actually uses to get things done — e.g. apps, web tools, SaaS products, platforms (think Notion, Excel, QuickBooks, Canva, Figma, Slack).
+For each return:
+- "name": the tool's real product name exactly as commonly written. A real proper product name — never a generic category ("a spreadsheet"), an activity, or a description.
+- "use": a SHORT phrase for what they use it for, ONLY if clear from context; otherwise "".
+RULES: Only real, clearly-named software/apps/tools actually referenced by this audience. NEVER invent names. Do NOT return physical products, food, supplements, clothing brands, generic categories, companies that aren't tools, or personal names. If none are clearly named, return an empty list.
+Discussions:
+${sample}
+Respond ONLY with JSON: {"tools":[{"name":"...","use":"..."}]}`;
+
+    let parsed = [];
+    try {
+        const data = await callOpenAIProxyWithRetry({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You extract only explicitly-named software, apps and digital tools that an audience uses. You never invent names, never return generic categories or physical products, and you output only valid JSON." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.1,
+            max_completion_tokens: 700,
+            response_format: { type: "json_object" }
+        }, { tries: 2, priority: 2 });
+        if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).tools || [];
+    } catch (e) { console.warn('[Tools] extraction failed:', e && e.message); }
+    console.log(`[Tools] AI named ${parsed.length} candidate tool(s) before grounding.`);
+
+    const allText = corpus.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' [SEP] ').toLowerCase();
+    const audienceTokens = new Set(String(audienceContext || '').toLowerCase().split(/\s+/).filter(Boolean));
+    const seen = new Set();
+    const items = [];
+    (parsed || []).forEach(w => {
+        if (!w || !w.name) return;
+        const name = String(w.name).trim();
+        const key = name.toLowerCase();
+        if (seen.has(key) || key.length < 3) return;
+        const tokens = key.split(/\s+/).filter(Boolean);
+        if (tokens.every(t => audienceTokens.has(t))) return;
+        const count = groundNameCount(key, allText);
+        if (count === 0) return; // not actually in the corpus -> drop, never show unverified
+        seen.add(key);
+        items.push({ name, use: (w.use || '').trim(), count });
+    });
+    items.sort((a, b) => b.count - a.count);
+    const top = items.slice(0, 8);
+
+    const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    if (!top.length) {
+        el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">No specific tools or apps were clearly named in these discussions.</p>`;
+        return;
+    }
+    el.innerHTML = `
+      <div class="tools-list" style="display:flex; flex-direction:column; gap:10px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
+        ${top.map(it => `
+          <div class="tool-item" style="display:flex; align-items:center; gap:12px;">
+            <span style="flex:0 0 34px; height:34px; border-radius:9px; background:rgba(54,224,208,0.15); color:#1aa89a; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:0.82rem;">${(it.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2) || '?').toUpperCase()}</span>
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:0.98rem; font-weight:700; color:#1f2937;">${esc(it.name)}</div>
+              ${it.use ? `<div style="font-size:0.8rem; color:#6b7280;">${esc(it.use)}</div>` : ''}
+            </div>
+            <span style="flex:0 0 auto; font-size:0.78rem; color:#9ca3af;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>
+          </div>`).join('')}
       </div>`;
 }
 

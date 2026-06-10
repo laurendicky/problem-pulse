@@ -5697,17 +5697,32 @@ function renderActiveHours(posts) {
     }
 
     const max = Math.max.apply(null, bins) || 1;
-    // Busiest 4-hour window via a rolling sum (wraps around midnight).
-    let peakStart = 0, peakSum = -1;
-    for (let i = 0; i < 24; i++) {
-        let s = 0;
-        for (let k = 0; k < 4; k++) s += bins[(i + k) % 24];
-        if (s > peakSum) { peakSum = s; peakStart = i; }
-    }
-    const peakHours = new Set([0, 1, 2, 3].map(k => (peakStart + k) % 24));
+    // Rolling 4-hour window sums (wrap around midnight).
+    const winSum = [];
+    for (let i = 0; i < 24; i++) { let s = 0; for (let k = 0; k < 4; k++) s += bins[(i + k) % 24]; winSum.push(s); }
+    let peakStart = 0;
+    for (let i = 1; i < 24; i++) if (winSum[i] > winSum[peakStart]) peakStart = i;
+    // Many audiences are BIMODAL (e.g. a US-evening peak AND a Europe-daytime peak). Reporting
+    // only the single busiest window makes the headline flip between two near-equal peaks from
+    // one run to the next — the exact inconsistency seen across runs. So we also find the best
+    // NON-overlapping second window and, when it's genuinely close, report both, stably.
+    const apart = (a, b) => { const d = Math.abs(a - b); return Math.min(d, 24 - d) >= 4; };
+    let secStart = -1;
+    for (let i = 0; i < 24; i++) if (apart(i, peakStart) && (secStart === -1 || winSum[i] > winSum[secStart])) secStart = i;
+    const bimodal = secStart !== -1 && winSum[secStart] >= winSum[peakStart] * 0.8;
     const fmt = (h) => String(h).padStart(2, '0') + ':00';
-    const peakLabel = `${fmt(peakStart)}–${fmt((peakStart + 4) % 24)} UTC`;
-    const peakShare = Math.round((peakSum / n) * 100);
+    const win = (s) => `${fmt(s)}–${fmt((s + 4) % 24)}`;
+    const peakHours = new Set();
+    [peakStart].concat(bimodal ? [secStart] : []).forEach(st => [0, 1, 2, 3].forEach(k => peakHours.add((st + k) % 24)));
+    const peakShare = Math.round((winSum[peakStart] / n) * 100);
+    let callout;
+    if (bimodal) {
+        const a = Math.min(peakStart, secStart), b = Math.max(peakStart, secStart);
+        const combined = Math.round(((winSum[peakStart] + winSum[secStart]) / n) * 100);
+        callout = `Two active windows: <b>${win(a)} and ${win(b)} UTC</b> — together ${combined}% of posts.`;
+    } else {
+        callout = `Most active around <b>${win(peakStart)} UTC</b> — ${peakShare}% of posts land in that 4-hour window.`;
+    }
 
     el.innerHTML = `
       <div class="active-hours" style="font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
@@ -5724,7 +5739,7 @@ function renderActiveHours(posts) {
         <div style="display:flex; gap:3px; margin-top:6px;">
           ${bins.map((c, h) => `<div style="flex:1; text-align:center; font-size:0.6rem; color:#9ca3af;">${h % 6 === 0 ? fmt(h) : ''}</div>`).join('')}
         </div>
-        <p style="margin:11px 0 0; font-size:0.9rem; color:#1f2937;">Most active around <b>${peakLabel}</b> — ${peakShare}% of posts land in that 4-hour window.</p>
+        <p style="margin:11px 0 0; font-size:0.9rem; color:#1f2937;">${callout}</p>
         <p style="margin:4px 0 0; font-size:0.72rem; color:#9ca3af;">Based on ${n} timestamped posts. Times are UTC — shift to your audience's timezone to plan posting and launches.</p>
       </div>`;
 }
@@ -5774,12 +5789,15 @@ async function generateAndRenderExperts(posts, audienceContext) {
     // signal — with a 7k+ corpus, a flat top-by-upvotes sample rarely contains named people,
     // which is why yield was thin. Fall back to the whole corpus if the signal pool is small.
     const textOf = p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`;
-    const PEOPLE_SIGNAL = /\b(recommend|recommends|recommended|follow|following|read|reading|author|wrote|writes|expert|guru|coach|mentor|listen|listening|interview|influencer|creator|podcast|channel|youtube|book|books|account|subscribe)\b/i;
+    const PEOPLE_SIGNAL = /\b(recommend|recommends|recommended|follow|following|read|reading|author|wrote|writes|expert|guru|coach|mentor|trainer|trainers|vet|vets|behaviou?rist|breeder|listen|listening|interview|influencer|creator|podcast|channel|youtube|video|videos|account|method|book|books)\b/i;
     let epool = corpus.filter(p => PEOPLE_SIGNAL.test(textOf(p)));
     if (epool.length < 15) epool = corpus.slice();
+    // STABLE id tiebreak: the same corpus must always produce the same sample, otherwise the
+    // panel drifts run-to-run even when the data hasn't really changed.
+    const stableId = p => String(p.data.id || p.data.name || '');
     const sample = epool
-        .sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0))
-        .slice(0, 55)
+        .sort((a, b) => ((b.data.ups || 0) - (a.data.ups || 0)) || (stableId(a) < stableId(b) ? -1 : 1))
+        .slice(0, 70)
         .map((p, i) => `[${i}] ${textOf(p).replace(/\s+/g, ' ').slice(0, 450)}`)
         .join('\n');
 
@@ -5812,7 +5830,7 @@ Respond ONLY with JSON: {"people":[{"name":"...","role":"..."}]}`;
     // AUTHORITY context only. Deliberately excludes ambiguous consumption verbs like
     // "listen/watch/read" — those are as common for music/TV as for experts (e.g. "listened
     // to Elton John"), which is exactly what produced the false positive.
-    const EXPERT_CONTEXT = /\b(recommend|recommends|recommended|follow|following|guru|coach|mentor|expert|advice|teaches|taught|course|cite|cites|author|wrote|writes|podcast|channel|interview|influencer|creator)\b/i;
+    const EXPERT_CONTEXT = /\b(recommend|recommends|recommended|follow|following|guru|coach|mentor|expert|trainer|trainers|vet|vets|veterinarian|behaviou?rist|breeder|advice|teaches|taught|course|method|approach|technique|channel|video|videos|account|page|cite|cites|author|wrote|writes|podcast|interview|influencer|creator)\b/i;
     const audienceTokens = new Set(String(audienceContext || '').toLowerCase().split(/\s+/).filter(Boolean));
     const seen = new Set();
     const items = [];
@@ -5829,7 +5847,7 @@ Respond ONLY with JSON: {"people":[{"name":"...","role":"..."}]}`;
         if (tokens.every(t => audienceTokens.has(t))) return;
         const { total, contextHits } = countNameInContext(key, segments, EXPERT_CONTEXT);
         if (total === 0) return;                    // not in the corpus at all -> drop
-        if (contextHits === 0 && total < 3) return; // only passing mentions -> not an influence
+        if (contextHits === 0 && total < 2) return; // named once with no authority context -> drop
         seen.add(key);
         items.push({ name, role: (w.role || '').trim(), count: total, strong: contextHits });
     });
@@ -5856,11 +5874,12 @@ Respond ONLY with JSON: {"people":[{"name":"...","role":"..."}]}`;
       </div>`;
 }
 
-// === TOOLS & APPS: the software the audience actually uses day-to-day =============
+// === APPS & TOOLS: the apps, websites & digital tools the audience uses ============
 // Add an empty <div id="tools-apps"></div> in Webflow. Same verified-extraction engine as
-// the experts/podcasts panels: an AI names the tools, then every name is GROUNDED against
-// the corpus and shown with its real mention count. Focused on software/apps people USE to
-// get things done — deliberately distinct from the physical BRANDS they shop for.
+// the experts/podcasts panels. Extracts APPS, WEBSITES, online SERVICES and digital TOOLS
+// the audience uses (e.g. Rover, Notion, YouTube, Chewy) — NOT physical products, gear, food
+// or clothing, which belong in the separate Products & Brands section. Rover is an app, so it
+// belongs here; a Thunder Shirt or a Kong does not.
 // =================================================================================
 async function generateAndRenderTools(posts, audienceContext) {
     const el = document.getElementById('tools-apps');
@@ -5868,23 +5887,25 @@ async function generateAndRenderTools(posts, audienceContext) {
     const corpus = posts || [];
     if (corpus.length < 5) return;
 
-    // Prioritise posts that mention using software/apps so the sample is signal-rich,
-    // rather than a flat top-by-upvotes slice of a 7k+ corpus. Fall back to all if sparse.
+    // Prioritise posts where the audience talks about USING or BUYING something, then sort by
+    // upvotes with a STABLE id tiebreak so the same corpus always yields the same sample
+    // (removing a big source of run-to-run drift). Fall back to all if the signal pool is thin.
     const textOf = p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`;
-    const TOOL_SIGNAL = /\b(app|apps|tool|tools|software|saas|platform|use|used|using|subscription|dashboard|plugin|extension|integrat|spreadsheet|tracker|automate|automation)\b|\.(com|io|app)\b/i;
-    let tpool = corpus.filter(p => TOOL_SIGNAL.test(textOf(p)));
+    const USE_SIGNAL = /\b(app|apps|website|websites|site|online|tool|tools|software|platform|use|using|used|tried|subscription|subscribe|account|sign up|signed up|download|downloaded|login|log in|switched)\b|\.(com|io|app|net|org)\b/i;
+    let tpool = corpus.filter(p => USE_SIGNAL.test(textOf(p)));
     if (tpool.length < 15) tpool = corpus.slice();
+    const stableId = p => String(p.data.id || p.data.name || '');
     const sample = tpool
-        .sort((a, b) => (b.data.ups || 0) - (a.data.ups || 0))
-        .slice(0, 55)
+        .sort((a, b) => ((b.data.ups || 0) - (a.data.ups || 0)) || (stableId(a) < stableId(b) ? -1 : 1))
+        .slice(0, 70)
         .map((p, i) => `[${i}] ${textOf(p).replace(/\s+/g, ' ').slice(0, 450)}`)
         .join('\n');
 
-    const prompt = `From these "${audienceContext}" discussions, extract the real SOFTWARE, APPS and digital TOOLS this audience actually uses to get things done — e.g. apps, web tools, SaaS products, platforms (think Notion, Excel, QuickBooks, Canva, Figma, Slack).
+    const prompt = `From these "${audienceContext}" discussions, extract the real APPS, WEBSITES, online SERVICES, SOFTWARE and digital TOOLS this audience actually uses (e.g. an app like Rover, software like Notion, a website like Chewy, a platform like YouTube).
 For each return:
-- "name": the tool's real product name exactly as commonly written. A real proper product name — never a generic category ("a spreadsheet"), an activity, or a description.
-- "use": a SHORT phrase for what they use it for, ONLY if clear from context; otherwise "".
-RULES: Only real, clearly-named software/apps/tools actually referenced by this audience. NEVER invent names. Do NOT return physical products, food, supplements, clothing brands, generic categories, companies that aren't tools, or personal names. If none are clearly named, return an empty list.
+- "name": the real app / website / tool name exactly as commonly written. A real proper name — never a generic category ("an app", "a website"), an activity, or a description.
+- "use": a SHORT phrase for what it is / what they use it for, ONLY if clear from context; otherwise "".
+RULES: Only real, clearly-named apps, websites, online services or software actually referenced by this audience. NEVER invent names. Do NOT return PHYSICAL products, gear, food, supplements or clothing (e.g. a Thunder Shirt or a Kong toy belong elsewhere, not here), nor generic categories or personal names. If none are clearly named, return an empty list.
 Discussions:
 ${sample}
 Respond ONLY with JSON: {"tools":[{"name":"...","use":"..."}]}`;
@@ -5894,7 +5915,7 @@ Respond ONLY with JSON: {"tools":[{"name":"...","use":"..."}]}`;
         const data = await callOpenAIProxyWithRetry({
             model: "gpt-4o-mini",
             messages: [
-                { role: "system", content: "You extract only explicitly-named software, apps and digital tools that an audience uses. You never invent names, never return generic categories or physical products, and you output only valid JSON." },
+                { role: "system", content: "You extract only explicitly-named apps, websites, online services, software and digital tools that an audience uses. You never invent names, never return physical products/gear/food/clothing or generic categories, and you output only valid JSON." },
                 { role: "user", content: prompt }
             ],
             temperature: 0.1,
@@ -5906,9 +5927,9 @@ Respond ONLY with JSON: {"tools":[{"name":"...","use":"..."}]}`;
     console.log(`[Tools] AI named ${parsed.length} candidate tool(s) before grounding.`);
 
     const segments = corpus.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase());
-    // USAGE context only. Excludes ambiguous words like "love/free/plan" that fire on
-    // non-tool mentions; keeps verbs that specifically signal using a piece of software.
-    const TOOL_CONTEXT = /\b(use|using|used|app|tool|software|switch|switched|tried|recommend|subscription|subscribe|workflow|stack|setup|set up|plugin|integration|dashboard|paid for|paying for)\b/i;
+    // DIGITAL-USE context only — words signalling that a name is an app/site/tool being used,
+    // so physical-product mentions don't slip through and passing mentions are dropped.
+    const TOOL_CONTEXT = /\b(use|using|used|app|website|site|online|tool|software|platform|switch|switched|tried|recommend|subscription|subscribe|download|downloaded|account|sign up|signed up|login|log in|workflow|setup|set up|plugin|integration|dashboard)\b/i;
     const audienceTokens = new Set(String(audienceContext || '').toLowerCase().split(/\s+/).filter(Boolean));
     const seen = new Set();
     const items = [];
@@ -5921,7 +5942,7 @@ Respond ONLY with JSON: {"tools":[{"name":"...","use":"..."}]}`;
         if (tokens.every(t => audienceTokens.has(t))) return;
         const { total, contextHits } = countNameInContext(key, segments, TOOL_CONTEXT);
         if (total === 0) return;                    // not in the corpus at all -> drop
-        if (contextHits === 0 && total < 3) return; // only passing mentions -> not a tool they use
+        if (contextHits === 0 && total < 2) return; // named once with no use-context -> drop
         seen.add(key);
         items.push({ name, use: (w.use || '').trim(), count: total, strong: contextHits });
     });
@@ -5930,7 +5951,7 @@ Respond ONLY with JSON: {"tools":[{"name":"...","use":"..."}]}`;
 
     const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     if (!top.length) {
-        el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">No specific tools or apps were clearly named in these discussions.</p>`;
+        el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">No specific apps, tools or websites were clearly named in these discussions.</p>`;
         return;
     }
     el.innerHTML = `

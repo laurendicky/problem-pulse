@@ -5729,6 +5729,35 @@ function renderActiveHours(posts) {
       </div>`;
 }
 
+// Count how often a name/tool appears in the corpus AND how often it appears in an
+// "influence" context — within a small window of words like follow / recommend / read /
+// use / tried. A name that only ever shows up in passing (e.g. "listened to Elton John
+// once") is NOT a thought leader, so the experts/tools panels keep a candidate only when it
+// has real influence-context, or is clearly repeated. This is what stops single passing
+// mentions from being presented as something the audience follows.
+// `segments` is an array of per-post lowercased texts. Scanning per-post (not one joined
+// string) is essential: a single window must never bleed across a post boundary, or an
+// authority word in the NEXT post would falsely validate a passing mention in this one.
+function countNameInContext(key, segments, signalRe, windowSize) {
+    const esc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('\\b' + esc + '\\b', 'gi');
+    const w = windowSize || 70;
+    let total = 0, contextHits = 0;
+    for (const seg of segments) {
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(seg)) !== null) {
+            total++;
+            const s = Math.max(0, m.index - w);
+            const e = Math.min(seg.length, m.index + key.length + w);
+            if (signalRe.test(seg.slice(s, e))) contextHits++;
+            if (total > 800) break;
+        }
+        if (total > 800) break;
+    }
+    return { total, contextHits };
+}
+
 // === THOUGHT LEADERS: real, named people the audience follows & cites =============
 // Add an empty <div id="thought-leaders"></div> in Webflow. Same verified-extraction
 // engine as the podcasts panel: an AI names the people, then every name is GROUNDED against
@@ -5779,7 +5808,11 @@ Respond ONLY with JSON: {"people":[{"name":"...","role":"..."}]}`;
     } catch (e) { console.warn('[Experts] extraction failed:', e && e.message); }
     console.log(`[Experts] AI named ${parsed.length} candidate person/people before grounding.`);
 
-    const allText = corpus.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' [SEP] ').toLowerCase();
+    const segments = corpus.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase());
+    // AUTHORITY context only. Deliberately excludes ambiguous consumption verbs like
+    // "listen/watch/read" — those are as common for music/TV as for experts (e.g. "listened
+    // to Elton John"), which is exactly what produced the false positive.
+    const EXPERT_CONTEXT = /\b(recommend|recommends|recommended|follow|following|guru|coach|mentor|expert|advice|teaches|taught|course|cite|cites|author|wrote|writes|podcast|channel|interview|influencer|creator)\b/i;
     const audienceTokens = new Set(String(audienceContext || '').toLowerCase().split(/\s+/).filter(Boolean));
     const seen = new Set();
     const items = [];
@@ -5794,12 +5827,14 @@ Respond ONLY with JSON: {"people":[{"name":"...","role":"..."}]}`;
         if (key.length < 4) return;
         if (tokens.length === 1 && key.length < 5) return;
         if (tokens.every(t => audienceTokens.has(t))) return;
-        const count = groundNameCount(key, allText);
-        if (count === 0) return; // not actually in the corpus -> drop, never show unverified
+        const { total, contextHits } = countNameInContext(key, segments, EXPERT_CONTEXT);
+        if (total === 0) return;                    // not in the corpus at all -> drop
+        if (contextHits === 0 && total < 3) return; // only passing mentions -> not an influence
         seen.add(key);
-        items.push({ name, role: (w.role || '').trim(), count });
+        items.push({ name, role: (w.role || '').trim(), count: total, strong: contextHits });
     });
-    items.sort((a, b) => b.count - a.count);
+    // Rank by influence-context first (genuinely followed), then by raw mentions.
+    items.sort((a, b) => (b.strong - a.strong) || (b.count - a.count));
     const top = items.slice(0, 8);
 
     const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -5870,7 +5905,10 @@ Respond ONLY with JSON: {"tools":[{"name":"...","use":"..."}]}`;
     } catch (e) { console.warn('[Tools] extraction failed:', e && e.message); }
     console.log(`[Tools] AI named ${parsed.length} candidate tool(s) before grounding.`);
 
-    const allText = corpus.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`).join(' [SEP] ').toLowerCase();
+    const segments = corpus.map(p => `${p.data.title || ''} ${p.data.selftext || p.data.body || ''}`.toLowerCase());
+    // USAGE context only. Excludes ambiguous words like "love/free/plan" that fire on
+    // non-tool mentions; keeps verbs that specifically signal using a piece of software.
+    const TOOL_CONTEXT = /\b(use|using|used|app|tool|software|switch|switched|tried|recommend|subscription|subscribe|workflow|stack|setup|set up|plugin|integration|dashboard|paid for|paying for)\b/i;
     const audienceTokens = new Set(String(audienceContext || '').toLowerCase().split(/\s+/).filter(Boolean));
     const seen = new Set();
     const items = [];
@@ -5881,12 +5919,13 @@ Respond ONLY with JSON: {"tools":[{"name":"...","use":"..."}]}`;
         if (seen.has(key) || key.length < 3) return;
         const tokens = key.split(/\s+/).filter(Boolean);
         if (tokens.every(t => audienceTokens.has(t))) return;
-        const count = groundNameCount(key, allText);
-        if (count === 0) return; // not actually in the corpus -> drop, never show unverified
+        const { total, contextHits } = countNameInContext(key, segments, TOOL_CONTEXT);
+        if (total === 0) return;                    // not in the corpus at all -> drop
+        if (contextHits === 0 && total < 3) return; // only passing mentions -> not a tool they use
         seen.add(key);
-        items.push({ name, use: (w.use || '').trim(), count });
+        items.push({ name, use: (w.use || '').trim(), count: total, strong: contextHits });
     });
-    items.sort((a, b) => b.count - a.count);
+    items.sort((a, b) => (b.strong - a.strong) || (b.count - a.count));
     const top = items.slice(0, 8);
 
     const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));

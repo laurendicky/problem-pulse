@@ -832,8 +832,8 @@ function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); retu
 // is what was turning a slow Reddit proxy into a multi-minute load.
 let _redditFailStreak = 0;
 let _redditCircuitOpenUntil = 0;
-const _REDDIT_FAIL_THRESHOLD = 4;
-const _REDDIT_COOLDOWN_MS = 15000;
+const _REDDIT_FAIL_THRESHOLD = 6;   // only trip after sustained UNREACHABLE failures
+const _REDDIT_COOLDOWN_MS = 8000;
 async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all', searchInComments = false) {
     if (Date.now() < _redditCircuitOpenUntil) return []; // proxy just failed repeatedly — skip fast
     let allPosts = [];
@@ -843,7 +843,7 @@ async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, t
             const payload = { searchTerm: term, niche: niche, limit: 100, timeFilter: timeFilter, after: after }; // 100 is Reddit's max page size — same data in ~4x fewer requests (efficient, within limits)
             if (searchInComments) payload.includeComments = true;
             const ctrl = new AbortController();
-            const timer = setTimeout(() => ctrl.abort(), 8000); // shorter: stalled calls give up fast
+            const timer = setTimeout(() => ctrl.abort(), 15000); // generous: a busy proxy/cold start shouldn't be treated as failure
             let response;
             try { response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctrl.signal }); }
             finally { clearTimeout(timer); }
@@ -857,10 +857,12 @@ async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, t
         _redditFailStreak = 0; // got through without a network failure
     } catch (err) {
         console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message);
-        if (++_redditFailStreak >= _REDDIT_FAIL_THRESHOLD) {
+        // Only a true unreachable error counts toward the breaker; a single slow/aborted call
+        // shouldn't start skipping every later fetch.
+        if (err && err.name !== 'AbortError' && ++_redditFailStreak >= _REDDIT_FAIL_THRESHOLD) {
             _redditCircuitOpenUntil = Date.now() + _REDDIT_COOLDOWN_MS;
             _redditFailStreak = 0;
-            console.warn(`[Reddit] proxy looks down — skipping Reddit fetches for ${_REDDIT_COOLDOWN_MS / 1000}s instead of waiting out every timeout.`);
+            console.warn(`[Reddit] proxy unreachable — skipping Reddit fetches for ${_REDDIT_COOLDOWN_MS / 1000}s.`);
         }
         return allPosts.slice(0, totalLimit); // return whatever we got rather than nothing
     }
@@ -1007,30 +1009,35 @@ function _releaseProxySlot() {
 // count — HTTP 4xx/5xx come back as a resolved response and are handled by the caller's retry.
 let _proxyFailStreak = 0;
 let _proxyCircuitOpenUntil = 0;
-const _PROXY_FAIL_THRESHOLD = 4;   // consecutive network failures before we trip
-const _PROXY_COOLDOWN_MS = 15000;  // how long to fail fast before probing again
+const _PROXY_FAIL_THRESHOLD = 8;   // consecutive UNREACHABLE failures before we trip (high, so a
+                                   // few slow calls never nuke the run)
+const _PROXY_COOLDOWN_MS = 8000;   // short cooldown so it recovers quickly
 
 async function limitedFetch(url, opts, priority = 0) {
     if (Date.now() < _proxyCircuitOpenUntil) {
-        // Backend looked down moments ago — fail fast instead of waiting out another timeout.
         throw new Error('Proxy circuit open (backend unreachable; failing fast)');
     }
     await _acquireProxySlot(priority);
     try {
-        // Hard timeout so a stalled proxy request can't hold a slot forever. With only 6 shared
-        // slots, a few permanently-pending requests would otherwise starve EVERY later AI call.
+        // Backstop timeout set ABOVE the proxy's own 25s race — so we never abort a call the
+        // proxy would have answered. It only fires if the proxy itself hangs entirely.
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 15000);
+        const timer = setTimeout(() => ctrl.abort(), 30000);
         try {
             const res = await fetch(url, { ...opts, signal: ctrl.signal });
             _proxyFailStreak = 0; // a real response (even a 4xx/5xx) means the backend is reachable
             return res;
         } finally { clearTimeout(timer); }
     } catch (e) {
-        if (++_proxyFailStreak >= _PROXY_FAIL_THRESHOLD) {
-            _proxyCircuitOpenUntil = Date.now() + _PROXY_COOLDOWN_MS;
-            _proxyFailStreak = 0;
-            console.warn(`[Proxy] backend looks down — pausing AI calls for ${_PROXY_COOLDOWN_MS / 1000}s so the page settles into fallbacks instead of grinding.`);
+        // ONLY a true "can't reach the server" error (TypeError: Failed to fetch) counts toward
+        // the breaker. A slow call that we aborted (AbortError) must NOT trip it — that was the
+        // bug that turned a few slow calls into a whole-dashboard wipeout.
+        if (e && e.name !== 'AbortError' && !String(e.message).includes('circuit open')) {
+            if (++_proxyFailStreak >= _PROXY_FAIL_THRESHOLD) {
+                _proxyCircuitOpenUntil = Date.now() + _PROXY_COOLDOWN_MS;
+                _proxyFailStreak = 0;
+                console.warn(`[Proxy] backend unreachable — pausing AI calls for ${_PROXY_COOLDOWN_MS / 1000}s.`);
+            }
         }
         throw e;
     } finally { _releaseProxySlot(); }

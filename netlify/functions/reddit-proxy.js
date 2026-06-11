@@ -96,6 +96,24 @@ exports.handler = async (event) => {
         return { statusCode: 204, headers: corsHeaders, body: '' };
     }
 
+    // Safeguard 1: Reject GET requests or other non-POST methods gracefully
+    if (event.httpMethod !== 'POST') {
+        return { 
+            statusCode: 405, 
+            headers: corsHeaders, 
+            body: JSON.stringify({ error: 'Method Not Allowed. This endpoint requires a POST request.' }) 
+        };
+    }
+
+    // Safeguard 2: Check if event.body exists and is not empty
+    if (!event.body) {
+        return { 
+            statusCode: 400, 
+            headers: corsHeaders, 
+            body: JSON.stringify({ error: 'Bad Request. Missing request body.' }) 
+        };
+    }
+
     try {
         if (!APPS.length) throw new Error('No Reddit app credentials configured.');
 

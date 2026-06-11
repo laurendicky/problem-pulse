@@ -33,6 +33,10 @@ const suggestions = [  "Dog Owners",
 "Freelancers"];
 const positiveColors = ['#00a5ce', '#0090b5', '#00c0e6', '#7bd9ec', '#b3e8f3', '#006d85'];
 const negativeColors = ['#fd80c7', '#d6539d', '#ff4fa3', '#ff99d6', '#fbb6ce', '#f472b6'];
+// Media-panel icon assets (Webflow-hosted) + a generic placeholder for any missing image.
+const MEDIA_ICON_YOUTUBE = 'https://cdn.prod.website-files.com/685a77786ed6701cb1f51c9f/6a29904e3a7a8a6d15eab767_youtube.svg';
+const MEDIA_ICON_PODCAST = 'https://cdn.prod.website-files.com/685a77786ed6701cb1f51c9f/6a29910c7ee904f1b1846c2a_microphone%20(1).svg';
+const IMAGE_PLACEHOLDER = 'https://cdn.prod.website-files.com/685a77786ed6701cb1f51c9f/6a2acb68c17d0210e9c27927_user%20(1).svg';
 const lemmaMap = { 'needs': 'need', 'wants': 'want', 'loves': 'love', 'loved': 'love', 'loving': 'love', 'hates': 'hate', 'wishes': 'wish', 'wishing': 'wish', 'solutions': 'solution', 'challenges': 'challenge', 'recommended': 'recommend', 'disappointed': 'disappoint', 'frustrated': 'frustrate', 'annoyed': 'annoy' };
 const positiveWords = new Set(['love', 'amazing', 'awesome', 'beautiful', 'best', 'brilliant', 'celebrate', 'charming', 'dope', 'excellent', 'excited', 'exciting', 'epic', 'fantastic', 'flawless', 'gorgeous', 'happy', 'impressed', 'incredible', 'insane', 'joy', 'keen', 'lit', 'perfect', 'phenomenal', 'proud', 'rad', 'super', 'stoked', 'thrilled', 'vibrant', 'wow', 'wonderful', 'blessed', 'calm', 'chill', 'comfortable', 'cozy', 'grateful', 'loyal', 'peaceful', 'pleased', 'relaxed', 'relieved', 'satisfied', 'secure', 'thankful', 'want', 'wish', 'hope', 'desire', 'craving', 'benefit', 'bonus', 'deal', 'hack', 'improvement', 'quality', 'solution', 'strength', 'advice', 'tip', 'trick', 'recommend']);
 const negativeWords = new Set(['angry', 'annoy', 'anxious', 'awful', 'bad', 'broken', 'hate', 'challenge', 'confused', 'crazy', 'critical', 'danger', 'desperate', 'disappoint', 'disgusted', 'dreadful', 'fear', 'frustrate', 'furious', 'horrible', 'irritated', 'jealous', 'nightmare', 'outraged', 'pain', 'panic', 'problem', 'rant', 'scared', 'shocked', 'stressful', 'terrible', 'terrified', 'trash', 'alone', 'ashamed', 'bored', 'depressed', 'discouraged', 'dull', 'empty', 'exhausted', 'failure', 'guilty', 'heartbroken', 'hopeless', 'hurt', 'insecure', 'lonely', 'miserable', 'sad', 'sorry', 'tired', 'unhappy', 'upset', 'weak', 'need', 'disadvantage', 'issue', 'flaw']);
@@ -1800,6 +1804,7 @@ async function enhanceDiscoveryWithComments(initialPosts, nicheContext) {
 
         renderDiscoveryList('top-brands-container', finalBrands, 'Top Brands', 'brands');
         renderDiscoveryList('top-products-container', finalProducts, 'Top Products', 'products');
+        renderThinBrandsSummary(nicheContext).catch(() => {});
 
     } catch (error) {
         console.error("Discovery enhancement failed:", error);
@@ -1830,6 +1835,45 @@ function setBrandsEmptyState(show, message) {
 // filling in, hidden once the final (shopping-recovery) pass has completed.
 function showBrandLoader() { const el = document.getElementById('brand-load-msg'); if (el) el.style.display = 'flex'; }
 function hideBrandLoader() { const el = document.getElementById('brand-load-msg'); if (el) el.style.display = 'none'; }
+
+// Thin-brands explainer. When few brands/products are named (6 or fewer of EITHER), fill the
+// optional #brand-summary div with a short AI explanation of WHY — so a sparse panel reads as
+// an insight rather than a gap. Hidden entirely when the panel is healthy. It explains the
+// sparsity; it never invents brands. Add a <div id="brand-summary"> with optional text elements
+// .brand-summary-title and .brand-summary-text (otherwise the container itself is filled).
+async function renderThinBrandsSummary(nicheContext) {
+    const el = document.getElementById('brand-summary');
+    if (!el) return;
+    const brands = (window._entityData && window._entityData.brands) ? Object.keys(window._entityData.brands).length : 0;
+    const products = (window._entityData && window._entityData.products) ? Object.keys(window._entityData.products).length : 0;
+    // Only show when thin: 6 or fewer brands OR products.
+    if (brands > 6 && products > 6) { el.style.display = 'none'; return; }
+    el.style.display = '';
+
+    let summary = '';
+    try {
+        const prompt = `A market-research tool scanned discussions from the "${nicheContext}" audience and found only ${brands} brand(s) and ${products} product(s) explicitly named. In 1-2 short, plain sentences, explain WHY this particular audience names few specific brands or products (e.g. they discuss problems, emotions or techniques more than purchases; the niche has few branded solutions; they rely on generic, DIY or service-based options; decisions are advice-led). Be specific to this audience. No preamble, no lists.`;
+        const data = await callOpenAIProxyWithRetry({
+            model: "gpt-4o-mini",
+            messages: [
+                { role: "system", content: "You are a concise market analyst. Reply with 1-2 plain sentences, no lists or preamble." },
+                { role: "user", content: prompt }
+            ],
+            temperature: 0.4,
+            max_completion_tokens: 160
+        }, { tries: 1, priority: 3 });
+        if (data && data.openaiResponse) summary = String(data.openaiResponse).trim();
+    } catch (e) { console.warn('[Brand Summary] failed:', e && e.message); }
+    if (!summary) {
+        summary = `Only ${brands} brand${brands === 1 ? '' : 's'} and ${products} product${products === 1 ? '' : 's'} were clearly named — this audience tends to discuss problems and experiences more than specific products to buy.`;
+    }
+
+    const titleEl = el.querySelector('.brand-summary-title');
+    const textEl = el.querySelector('.brand-summary-text');
+    if (titleEl) titleEl.innerText = 'Why so few brands?';
+    if (textEl) { textEl.innerText = summary; }
+    else { el.innerHTML = `<p style="margin:0; font-size:0.9rem; color:#374151; line-height:1.55;">${summary.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))}</p>`; }
+}
 
 // Brand-recovery pass. The main discovery lists are mined from the PROBLEM search, where
 // some audiences (e.g. first-time parents) rarely name brands. When brands come back thin,
@@ -1870,6 +1914,7 @@ async function recoverBrandsWithShopping(subredditQueryString, timeFilter, niche
         } else {
             setBrandsEmptyState(false);
         }
+        renderThinBrandsSummary(nicheContext).catch(() => {});
     } catch (error) {
         console.error("Brand recovery pass failed:", error);
     } finally {
@@ -3338,12 +3383,22 @@ function renderHighchartsBubbleChart(signals) {
         });
     });
 
+    // Explicit, distinct colour per category. Assigning by NAME (not Highcharts' index-based
+    // palette) removes the duplicate cyan, keeps colours consistent across every run, and lets
+    // us make each cluster visible against the light background. Inner bubbles take the colour;
+    // the outer parent bubble auto-lightens to a matching pastel.
+    const CATEGORY_COLORS = {
+        'willingness to pay': '#4FB0F5', // bright sky blue (was a duplicate cyan)
+        'substitutes':        '#2BD4E8', // cyan, now distinct from the sky blue above
+        'price sensitivity':  '#FB923C', // orange
+        'brand loyalty':      '#F15FA6', // pink
+        'research habits':    '#34D17A', // green
+        'dealbreakers':       '#00a5ce'  // dashboard blue
+    };
     const chartSeries = Array.from(groupedByCategory, ([name, data]) => {
         const series = { name, data };
-        // Dealbreakers defaulted to an indistinct grey from Highcharts' palette. Pin it to the
-        // dashboard blue: inner bubbles render solid blue and the outer parent bubble auto-
-        // lightens to a pastel blue, matching the rest of the dashboard.
-        if (/dealbreaker/i.test(name)) series.color = '#00a5ce';
+        const c = CATEGORY_COLORS[String(name).toLowerCase().trim()];
+        if (c) series.color = c;
         return series;
     });
 
@@ -5554,6 +5609,14 @@ function renderPodcasts(container, blueprint, items) {
         set('.podcast-focus', it.focus ? `Focus: ${it.focus}` : '');
         // Medium label for the new .media-type element: Podcast | YouTube | Show.
         set('.media-type', it.type === 'youtube' ? 'YouTube' : (it.type === 'show' ? 'Show' : 'Podcast'));
+        // Medium ICON: YouTube glyph for YouTube items, microphone for podcasts/shows.
+        const setImg = (sel, url) => {
+            const el = node.querySelector(sel);
+            if (!el) return;
+            if (el.tagName === 'IMG') el.src = url; else el.style.backgroundImage = `url("${url}")`;
+            el.style.display = '';
+        };
+        setImg('.media-icon', it.type === 'youtube' ? MEDIA_ICON_YOUTUBE : MEDIA_ICON_PODCAST);
         // .podcast-meta now holds just the sourced Apple metadata (network · episodes · latest) —
         // the prevalence tier moved out to its own tag so this line isn't overcrowded.
         const metaBits = [];
@@ -5569,15 +5632,15 @@ function renderPodcasts(container, blueprint, items) {
         set('.prevelance-tag', tier);
         const img = node.querySelector('.podcast-image');
         if (img) {
-            if (it.image) {
-                if (img.tagName === 'IMG') {
-                    img.onerror = () => { img.onerror = null; img.style.display = 'none'; };
-                    img.src = it.image;
-                } else {
-                    img.style.backgroundImage = `url("${it.image}")`;
-                }
-                img.style.display = '';
-            } else { img.style.display = 'none'; }
+            const url = it.image || IMAGE_PLACEHOLDER;
+            if (img.tagName === 'IMG') {
+                // If the (best-effort) artwork/avatar fails to load, fall back to the placeholder.
+                img.onerror = () => { img.onerror = null; img.src = IMAGE_PLACEHOLDER; };
+                img.src = url;
+            } else {
+                img.style.backgroundImage = `url("${url}")`;
+            }
+            img.style.display = '';
         }
         const link = node.querySelector('.podcast-link');
         if (link && it.link) link.setAttribute('href', it.link);
@@ -6020,7 +6083,7 @@ Respond ONLY with JSON: {"people":[{"name":"...","role":"..."}]}`;
               <div style="font-size:0.98rem; font-weight:700; color:#1f2937;">${esc(it.name)}</div>
               ${it.role ? `<div style="font-size:0.8rem; color:#6b7280;">${esc(it.role)}</div>` : ''}
             </div>
-            ${it.suggested ? sBadge : `<span style="flex:0 0 auto; font-size:0.78rem; color:#9ca3af;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>`}
+            ${it.suggested ? sBadge : `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:#6b7280; background:rgba(0,0,0,0.06); padding:2px 8px; border-radius:999px;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>`}
           </div>`).join('')}
         ${top.some(it => it.suggested) ? `<p style="margin:8px 0 0; font-size:0.72rem; color:#9ca3af;">“Suggested” names are well-known for this audience, added by AI because few were explicitly named in these discussions — not verified mentions.</p>` : ''}
       </div>`;
@@ -6124,17 +6187,17 @@ Respond ONLY with JSON: {"tools":[{"name":"...","use":"..."}]}`;
         el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">No specific apps, tools or websites were clearly named in these discussions.</p>`;
         return;
     }
-    const sBadge = `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:#1aa89a; background:rgba(54,224,208,0.15); padding:2px 8px; border-radius:999px;">Suggested</span>`;
+    const sBadge = `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:#00a5ce; background:rgba(0,165,206,0.14); padding:2px 8px; border-radius:999px;">Suggested</span>`;
     el.innerHTML = `
       <div class="tools-list" style="display:flex; flex-direction:column; gap:10px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
         ${top.map(it => `
           <div class="tool-item" style="display:flex; align-items:center; gap:12px;">
-            <span style="flex:0 0 34px; height:34px; border-radius:9px; background:rgba(54,224,208,0.15); color:#1aa89a; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:0.82rem;">${(it.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2) || '?').toUpperCase()}</span>
+            <span style="flex:0 0 34px; height:34px; border-radius:9px; background:rgba(0,165,206,0.14); color:#00a5ce; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:0.82rem;">${(it.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2) || '?').toUpperCase()}</span>
             <div style="flex:1; min-width:0;">
               <div style="font-size:0.98rem; font-weight:700; color:#1f2937;">${esc(it.name)}</div>
               ${it.use ? `<div style="font-size:0.8rem; color:#6b7280;">${esc(it.use)}</div>` : ''}
             </div>
-            ${it.suggested ? sBadge : `<span style="flex:0 0 auto; font-size:0.78rem; color:#9ca3af;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>`}
+            ${it.suggested ? sBadge : `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:#6b7280; background:rgba(0,0,0,0.06); padding:2px 8px; border-radius:999px;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>`}
           </div>`).join('')}
         ${top.some(it => it.suggested) ? `<p style="margin:8px 0 0; font-size:0.72rem; color:#9ca3af;">“Suggested” tools are common for this audience, added by AI because few were explicitly named in these discussions — not verified mentions.</p>` : ''}
       </div>`;
@@ -6244,7 +6307,7 @@ Respond ONLY with JSON: {"events":[{"name":"...","what":"..."}]}`;
               <div style="font-size:0.98rem; font-weight:700; color:#1f2937;">${esc(it.name)}</div>
               ${it.use ? `<div style="font-size:0.8rem; color:#6b7280;">${esc(it.use)}</div>` : ''}
             </div>
-            ${it.suggested ? sBadge : `<span style="flex:0 0 auto; font-size:0.78rem; color:#9ca3af;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>`}
+            ${it.suggested ? sBadge : `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:#6b7280; background:rgba(0,0,0,0.06); padding:2px 8px; border-radius:999px;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>`}
           </div>`).join('')}
         ${top.some(it => it.suggested) ? `<p style="margin:8px 0 0; font-size:0.72rem; color:#9ca3af;">“Suggested” entries are common for this audience, added by AI because few were explicitly named in these discussions — not verified mentions.</p>` : ''}
       </div>`;

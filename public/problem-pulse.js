@@ -378,7 +378,7 @@ Respond ONLY with valid JSON: {"gems":[{"category":"...","topic_a":"...","reveal
         let parsed = [];
         try {
             const data = await callOpenAIProxyWithRetry({
-                model: "gpt-4o",
+                model: "gpt-4o-mini",
                 messages: [
                     { role: "system", content: "You read real online discussions and explain statistically significant correlations with qualitative insights. You only assert what the quotes support, never invent statistics or compare to the general population, and you output only valid JSON." },
                     { role: "user", content: prompt }
@@ -826,7 +826,46 @@ async function generateSentimentContextWithAI(posts, brandName) {
 
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
 function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
-async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all', searchInComments = false) { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const payload = { searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after }; if (searchInComments) { payload.includeComments = true; } const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 12000); /* per-request timeout: a stalled Reddit proxy call must not hang the whole analysis on the loading screen */ let response; try { response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctrl.signal }); } finally { clearTimeout(timer); } if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return allPosts.slice(0, totalLimit); /* return whatever we got rather than nothing */ } return allPosts.slice(0, totalLimit); }
+// Reddit-proxy circuit breaker (separate from the OpenAI one, since the logs show Reddit can be
+// failing while OpenAI still works). Once a few Reddit fetches fail in a row, EVERY later Reddit
+// query returns instantly for a cooldown instead of each waiting out its own 8s timeout — which
+// is what was turning a slow Reddit proxy into a multi-minute load.
+let _redditFailStreak = 0;
+let _redditCircuitOpenUntil = 0;
+const _REDDIT_FAIL_THRESHOLD = 4;
+const _REDDIT_COOLDOWN_MS = 15000;
+async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all', searchInComments = false) {
+    if (Date.now() < _redditCircuitOpenUntil) return []; // proxy just failed repeatedly — skip fast
+    let allPosts = [];
+    let after = null;
+    try {
+        while (allPosts.length < totalLimit) {
+            const payload = { searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after };
+            if (searchInComments) payload.includeComments = true;
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 8000); // shorter: stalled calls give up fast
+            let response;
+            try { response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctrl.signal }); }
+            finally { clearTimeout(timer); }
+            if (!response.ok) throw new Error(`Proxy Error: Server returned status ${response.status}`);
+            const data = await response.json();
+            if (!data.data || !data.data.children || !data.data.children.length) break;
+            allPosts = allPosts.concat(data.data.children);
+            after = data.data.after;
+            if (!after) break;
+        }
+        _redditFailStreak = 0; // got through without a network failure
+    } catch (err) {
+        console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message);
+        if (++_redditFailStreak >= _REDDIT_FAIL_THRESHOLD) {
+            _redditCircuitOpenUntil = Date.now() + _REDDIT_COOLDOWN_MS;
+            _redditFailStreak = 0;
+            console.warn(`[Reddit] proxy looks down — skipping Reddit fetches for ${_REDDIT_COOLDOWN_MS / 1000}s instead of waiting out every timeout.`);
+        }
+        return allPosts.slice(0, totalLimit); // return whatever we got rather than nothing
+    }
+    return allPosts.slice(0, totalLimit);
+}
 async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all', searchInComments = false) {
     const allResults = [];
     const terms = (searchTerms || []).filter(Boolean);
@@ -923,7 +962,9 @@ function deduplicateByContent(items) {
 // rate / 25s-latency limit and leaves features empty. This serialises the load gracefully.
 let _proxyActive = 0;
 const _proxyWaiters = []; // each: { resolve, priority }
-const PROXY_MAX_CONCURRENT = 6; // OpenAI Tier 3 has ample RPM/TPM headroom; 3 was a leftover low-tier safety. Reddit stays at 3 (its 429s are the real limit).
+const PROXY_MAX_CONCURRENT = 4; // Netlify functions have limited concurrent execution slots, and
+// each held-open OpenAI call occupies one. Capping the client at 4 in-flight keeps the burst from
+// saturating Netlify (which is what was queueing/dropping requests into "Failed to fetch").
 // Load-order priorities by dashboard TAB (higher = served first when the 6 slots are contended).
 // BACKBONE is the core findings analysis everything else is built from, so it always wins. The
 // rest follow the tab layout: Who -> Where they are -> What hurts -> Language -> How they shop.
@@ -966,7 +1007,7 @@ function _releaseProxySlot() {
 // count — HTTP 4xx/5xx come back as a resolved response and are handled by the caller's retry.
 let _proxyFailStreak = 0;
 let _proxyCircuitOpenUntil = 0;
-const _PROXY_FAIL_THRESHOLD = 6;   // consecutive network failures before we trip
+const _PROXY_FAIL_THRESHOLD = 4;   // consecutive network failures before we trip
 const _PROXY_COOLDOWN_MS = 15000;  // how long to fail fast before probing again
 
 async function limitedFetch(url, opts, priority = 0) {
@@ -979,7 +1020,7 @@ async function limitedFetch(url, opts, priority = 0) {
         // Hard timeout so a stalled proxy request can't hold a slot forever. With only 6 shared
         // slots, a few permanently-pending requests would otherwise starve EVERY later AI call.
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 30000);
+        const timer = setTimeout(() => ctrl.abort(), 15000);
         try {
             const res = await fetch(url, { ...opts, signal: ctrl.signal });
             _proxyFailStreak = 0; // a real response (even a 4xx/5xx) means the backend is reachable
@@ -3704,7 +3745,7 @@ Posts:
 ${topPostsText}`;
 
         const openAIParams = {
-            model: "gpt-4o",
+            model: "gpt-4o-mini",
             messages: [
                 { role: "system", content: "You are a sharp cultural observer who writes psychologically specific field notes about online communities. You output only valid JSON and never sound like a marketing deck." },
                 { role: "user", content: prompt }
@@ -3778,7 +3819,7 @@ Posts:
 ${topPostsText}`;
 
         const openAIParams = {
-            model: "gpt-4o",
+            model: "gpt-4o-mini",
             messages: [{ role: "system", content: "You are a perceptive observer of human motivation who writes honest, specific, non-corporate insight. Output only valid JSON." }, { role: "user", content: prompt }],
             temperature: 0.6,
             response_format: { "type": "json_object" }
@@ -4071,7 +4112,7 @@ async function generateAndRenderSeoSunburst(posts, audienceContext) {
         ${topPostsText}`;
 
         const openAIParams = {
-            model: "gpt-4o",
+            model: "gpt-4o-mini",
             messages: [{ role: "system", content: "You are a content strategist who grounds every idea in the supplied discussions and never fabricates metrics." }, { role: "user", content: prompt }],
             temperature: 0.2,
             response_format: { "type": "json_object" }
@@ -4239,7 +4280,7 @@ async function generateProblemOfferPairsAI(summaries) {
     `;
 
     const openAIParams = {
-        model: "gpt-4o",
+        model: "gpt-4o-mini",
         messages: [{ role: "system", content: "You are a startup advisor creating problem-solution pairs in strict JSON format." }, { role: "user", content: prompt }],
         temperature: 0.6,
         max_completion_tokens: 2000,
@@ -4914,7 +4955,7 @@ Ground every line in the posts. Respond ONLY with valid JSON.
 Posts:
 ${topPostsText}`;
         const data = await callOpenAIProxyWithRetry({
-            model: "gpt-4o",
+            model: "gpt-4o-mini",
             messages: [
                 { role: "system", content: "You are a sharp cultural observer who writes psychologically specific field notes and outputs only valid JSON. You never sound like a marketing deck." },
                 { role: "user", content: prompt }

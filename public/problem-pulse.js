@@ -826,8 +826,36 @@ async function generateSentimentContextWithAI(posts, brandName) {
 
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
 function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
-async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all', searchInComments = false) { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const payload = { searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after }; if (searchInComments) { payload.includeComments = true; } const response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) }); if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return []; } return allPosts.slice(0, totalLimit); }
-async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all', searchInComments = false) { const allResults = []; const TERM_BATCH = 5; for (let i = 0; i < searchTerms.length; i += TERM_BATCH) { const batchTerms = searchTerms.slice(i, i + TERM_BATCH); const batchPromises = batchTerms.map(term => fetchRedditForTermWithPagination(niche, term, limitPerTerm, timeFilter, searchInComments)); const batchResults = await Promise.all(batchPromises); batchResults.forEach(posts => { if (Array.isArray(posts)) { allResults.push(...posts); } }); if (i + TERM_BATCH < searchTerms.length) { await new Promise(resolve => setTimeout(resolve, 500)); } } return deduplicatePosts(allResults); }
+async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all', searchInComments = false) { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const payload = { searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after }; if (searchInComments) { payload.includeComments = true; } const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 20000); /* per-request timeout: a stalled Reddit proxy call must not hang the whole analysis on the loading screen */ let response; try { response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctrl.signal }); } finally { clearTimeout(timer); } if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return allPosts.slice(0, totalLimit); /* return whatever we got rather than nothing */ } return allPosts.slice(0, totalLimit); }
+async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all', searchInComments = false) {
+    const allResults = [];
+    const terms = (searchTerms || []).filter(Boolean);
+    // CONSOLIDATION: combine SINGLE-WORD terms into one boolean-OR query (up to 5 per query)
+    // instead of a separate fetch per term. An OR query returns each matching post once, so we
+    // avoid the cross-term duplicates that separate queries fetch and then dedup away — cutting
+    // Reddit requests (and the 429s behind the "Failed to fetch" stalls) without shrinking the
+    // corpus. Multi-word phrases stay as their own queries to avoid OR/phrase parsing ambiguity.
+    // (Relies on the proxy passing the query straight to Reddit's `q`, which supports boolean OR.)
+    const TERMS_PER_QUERY = 5;
+    const singleWord = terms.filter(t => !/\s/.test(t));
+    const multiWord = terms.filter(t => /\s/.test(t));
+    const queries = [];
+    for (let i = 0; i < singleWord.length; i += TERMS_PER_QUERY) {
+        const group = singleWord.slice(i, i + TERMS_PER_QUERY);
+        queries.push(group.length > 1 ? '(' + group.join(' OR ') + ')' : group[0]);
+    }
+    multiWord.forEach(t => queries.push(t));
+    // Lift the per-query limit so the UNION of ~5 terms is well covered (keeps corpus size).
+    const perQueryLimit = Math.min(250, limitPerTerm * 2);
+    const QUERY_CONCURRENCY = 3;
+    for (let i = 0; i < queries.length; i += QUERY_CONCURRENCY) {
+        const batch = queries.slice(i, i + QUERY_CONCURRENCY);
+        const batchResults = await Promise.all(batch.map(q => fetchRedditForTermWithPagination(niche, q, perQueryLimit, timeFilter, searchInComments)));
+        batchResults.forEach(posts => { if (Array.isArray(posts)) allResults.push(...posts); });
+        if (i + QUERY_CONCURRENCY < queries.length) await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    return deduplicatePosts(allResults);
+}
 
 // =================================================================================
 // === ADD THIS NEW, AGGRESSIVE DE-DUPLICATION FUNCTION ===
@@ -893,6 +921,17 @@ function deduplicateByContent(items) {
 let _proxyActive = 0;
 const _proxyWaiters = []; // each: { resolve, priority }
 const PROXY_MAX_CONCURRENT = 6; // OpenAI Tier 3 has ample RPM/TPM headroom; 3 was a leftover low-tier safety. Reddit stays at 3 (its 429s are the real limit).
+// Load-order priorities by dashboard TAB (higher = served first when the 6 slots are contended).
+// BACKBONE is the core findings analysis everything else is built from, so it always wins. The
+// rest follow the tab layout: Who -> Where they are -> What hurts -> Language -> How they shop.
+const AI_PRIORITY = {
+    BACKBONE: 100,  // core problem-findings summary (data backbone — must finish first)
+    WHO: 90,        // demographics, goals, fears, characteristics & rejects
+    WHERE: 80,      // social/location/active-hours (instant), media, influencers, apps, places
+    HURTS: 70,      // problem cards, polarity map, sub-problems
+    LANGUAGE: 60,   // voice, tone, language-to-avoid, hooks, sentiment
+    SHOP: 50        // demand signals, brands & products
+};
 // Priority lane: a run fires ~15+ AI calls at once, but only 3 can run together. Without
 // priorities the user-facing visual panels (constellation, podcasts, social, the core
 // summary) sit at the BACK of the queue behind every background text feature and only get a
@@ -918,7 +957,16 @@ function _releaseProxySlot() {
 
 async function limitedFetch(url, opts, priority = 0) {
     await _acquireProxySlot(priority);
-    try { return await fetch(url, opts); }
+    try {
+        // Hard timeout so a stalled proxy request can't hold a slot forever. With only 6 shared
+        // slots, a few permanently-pending requests would otherwise starve EVERY later AI call
+        // (including the core summary that gates the whole load) — i.e. the page loads forever.
+        // On abort, fetch rejects, the outer finally releases the slot, and the caller retries.
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 30000);
+        try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
+        finally { clearTimeout(timer); }
+    }
     finally { _releaseProxySlot(); }
 }
 
@@ -1224,7 +1272,7 @@ async function fetchCommentsForPosts(postIds, batchSize = 3) {
     return allComments;
 }
 function lemmatize(word) { if (lemmaMap[word]) return lemmaMap[word]; if (word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1); return word; }
-async function generateEmotionMapData(posts) { try { const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || p.data.link_title}\nBody: ${(p.data.selftext || p.data.body).substring(0, 1000)}`).join('\n---\n'); const prompt = `You are a world-class market research analyst for '${originalGroupName}'. Analyze the following text to identify the 15 most significant problems, pain points, or key topics.\n\nFor each one, provide:\n1. "problem": A short, descriptive name for the problem (e.g., "Finding Reliable Vendors", "Budgeting Anxiety").\n2. "intensity": A score from 1 (mild) to 10 (severe) of how big a problem this is.\n3. "frequency": A score from 1 (rarely mentioned) to 10 (frequently mentioned) based on its prevalence in the text.\n\nRespond ONLY with a valid JSON object with a single key "problems", which is an array of these objects.\nExample: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequency": 9 }] }`; const openAIParams = { model: "gpt-4o", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_completion_tokens: 1500, response_format: { "type": "json_object" } }; const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }); if (!response.ok) { throw new Error(`AI API failed with status: ${response.status}`); } const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const aiProblems = parsed.problems || []; if (aiProblems.length >= 3) { console.log("Successfully used AI analysis for Problem Map."); const chartData = aiProblems.map(item => { if (!item.problem || typeof item.intensity !== 'number' || typeof item.frequency !== 'number') return null; return { x: item.frequency, y: item.intensity, label: item.problem }; }).filter(Boolean); return chartData.sort((a, b) => b.x - a.x); } else { console.warn("AI analysis returned too few problems. Falling back to keyword analysis."); } } catch (error) { console.error("AI analysis for Problem Map failed:", error, "Falling back to reliable keyword-based analysis."); } const emotionFreq = {}; posts.forEach(post => { const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase(); const words = text.replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { const lemma = lemmatize(rawWord); if (emotionalIntensityScores[lemma]) { emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1; } }); }); const chartData = Object.entries(emotionFreq).map(([word, freq]) => ({ x: freq, y: emotionalIntensityScores[word], label: word })); return chartData.sort((a, b) => b.x - a.x).slice(0, 25); }
+async function generateEmotionMapData(posts) { try { const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || p.data.link_title}\nBody: ${(p.data.selftext || p.data.body).substring(0, 1000)}`).join('\n---\n'); const prompt = `You are a world-class market research analyst for '${originalGroupName}'. Analyze the following text to identify the 15 most significant problems, pain points, or key topics.\n\nFor each one, provide:\n1. "problem": A short, descriptive name for the problem (e.g., "Finding Reliable Vendors", "Budgeting Anxiety").\n2. "intensity": A score from 1 (mild) to 10 (severe) of how big a problem this is.\n3. "frequency": A score from 1 (rarely mentioned) to 10 (frequently mentioned) based on its prevalence in the text.\n\nRespond ONLY with a valid JSON object with a single key "problems", which is an array of these objects.\nExample: { "problems": [{ "problem": "Catering Costs", "intensity": 8, "frequency": 9 }] }`; const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a market research analyst that outputs only valid JSON." }, { role: "user", content: prompt }], temperature: 0.2, max_completion_tokens: 1500, response_format: { "type": "json_object" } }; const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }, AI_PRIORITY.HURTS); if (!response.ok) { throw new Error(`AI API failed with status: ${response.status}`); } const data = await response.json(); const parsed = JSON.parse(data.openaiResponse); const aiProblems = parsed.problems || []; if (aiProblems.length >= 3) { console.log("Successfully used AI analysis for Problem Map."); const chartData = aiProblems.map(item => { if (!item.problem || typeof item.intensity !== 'number' || typeof item.frequency !== 'number') return null; return { x: item.frequency, y: item.intensity, label: item.problem }; }).filter(Boolean); return chartData.sort((a, b) => b.x - a.x); } else { console.warn("AI analysis returned too few problems. Falling back to keyword analysis."); } } catch (error) { console.error("AI analysis for Problem Map failed:", error, "Falling back to reliable keyword-based analysis."); } const emotionFreq = {}; posts.forEach(post => { const text = `${post.data.title || post.data.link_title || ''} ${post.data.selftext || post.data.body || ''}`.toLowerCase(); const words = text.replace(/[^a-z\s']/g, '').split(/\s+/); words.forEach(rawWord => { const lemma = lemmatize(rawWord); if (emotionalIntensityScores[lemma]) { emotionFreq[lemma] = (emotionFreq[lemma] || 0) + 1; } }); }); const chartData = Object.entries(emotionFreq).map(([word, freq]) => ({ x: freq, y: emotionalIntensityScores[word], label: word })); return chartData.sort((a, b) => b.x - a.x).slice(0, 25); }
 
 function renderEmotionMap(data) {
     const container = document.getElementById('emotion-map-container');
@@ -1712,7 +1760,7 @@ Return ONLY JSON: {"brands": ["name1", "name2"], "products": ["name1", "name2"]}
         // Brands & Products jumps the proxy queue (priority 2) so this well-performing panel
         // fills early instead of waiting behind the profile/tone calls. Extraction logic and the
         // data it returns are unchanged — this only changes WHEN the call is served.
-        const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }, 2);
+        const response = await limitedFetch(OPENAI_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ openaiPayload: openAIParams }) }, AI_PRIORITY.SHOP);
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
 
@@ -1846,9 +1894,12 @@ async function renderThinBrandsSummary(nicheContext) {
     if (!el) return;
     const brands = (window._entityData && window._entityData.brands) ? Object.keys(window._entityData.brands).length : 0;
     const products = (window._entityData && window._entityData.products) ? Object.keys(window._entityData.products).length : 0;
-    // Only show when thin: 6 or fewer brands OR products.
+    // Only show when thin: 6 or fewer brands OR products. Reveal with an explicit value so a
+    // `display:none` default set in Webflow (which stops the placeholder flashing during load)
+    // is overridden when there's genuinely a summary to show.
     if (brands > 6 && products > 6) { el.style.display = 'none'; return; }
-    el.style.display = '';
+    el.style.display = 'flex';
+    el.style.flexDirection = 'column';
 
     let summary = '';
     try {
@@ -1861,7 +1912,7 @@ async function renderThinBrandsSummary(nicheContext) {
             ],
             temperature: 0.4,
             max_completion_tokens: 160
-        }, { tries: 1, priority: 3 });
+        }, { tries: 1, priority: AI_PRIORITY.SHOP });
         if (data && data.openaiResponse) summary = String(data.openaiResponse).trim();
     } catch (e) { console.warn('[Brand Summary] failed:', e && e.message); }
     if (!summary) {
@@ -3127,7 +3178,8 @@ async function generateAndRenderConstellation(items) {
     const isLifestyleNoise = (q) => LIFESTYLE_NOISE.test(q || '');
 
     const BATCH_SIZE = 20;          // bigger batches => fewer round-trips (80 items => 4 calls)
-    const CONCURRENCY = 1;          // sequential: gentlest on the proxy so signals reliably land
+    const CONCURRENCY = 2;          // run 2 batches in parallel; the priority tier (SHOP, lowest)
+                                    // + global 6-slot cap keep this from starving higher tabs.
     const MIN_SIGNALS = 20;
     const enrichedSignals = [];     // strong: clear commercial cue
     const backupSignals = [];       // weaker but valid - used to top up
@@ -3188,7 +3240,7 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
                 temperature: 0.2,
                 max_completion_tokens: 2500,
                 response_format: { "type": "json_object" }
-            }, { tries: 2, priority: 2 });
+            }, { tries: 2, priority: AI_PRIORITY.SHOP });
 
             if (!data || !data.openaiResponse) throw new Error("Proxy returned no content after retries (timeout / rate limit / API key).");
 
@@ -4417,7 +4469,7 @@ async function generateAndRenderHookPatterns(posts, audienceContext) {
 
         // Resilient call: the proxy's 25s latency limit (a slow OpenAI call) is variance, not a
         // hard failure, so retry rather than throwing. This was the "Proxy timed out" console error.
-        const data = await callOpenAIProxyWithRetry(openAIParams, { tries: 2 });
+        const data = await callOpenAIProxyWithRetry(openAIParams, { tries: 2, priority: AI_PRIORITY.LANGUAGE });
         if (!data || !data.openaiResponse) {
             console.warn("[Hook Patterns] No content after retries (proxy 25s latency limit or API key). Skipping this section.");
             return;
@@ -4690,7 +4742,7 @@ async function generateAndRenderOverview(posts, audienceContext) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ openaiPayload: openAIParams })
-        });
+        }, AI_PRIORITY.WHO);
 
         const data = await response.json();
         const parsed = JSON.parse(data.openaiResponse);
@@ -4807,7 +4859,7 @@ Posts: ${topPostsText}`;
             temperature: 0.3,
             max_completion_tokens: 2200,
             response_format: { "type": "json_object" }
-        }, { tries: 2, priority: 1 });
+        }, { tries: 2, priority: AI_PRIORITY.LANGUAGE });
         if (data && data.openaiResponse) combined = JSON.parse(data.openaiResponse);
     } catch (e) {
         console.warn('[Voice cluster] combined call failed; panels will self-fetch:', e && e.message);
@@ -4846,7 +4898,7 @@ ${topPostsText}`;
             temperature: 0.6,
             max_completion_tokens: 1500,
             response_format: { "type": "json_object" }
-        }, { tries: 2, priority: 1 });
+        }, { tries: 2, priority: AI_PRIORITY.WHO });
         if (data && data.openaiResponse) combined = JSON.parse(data.openaiResponse);
     } catch (e) {
         console.warn('[Profile cluster] combined call failed; panels will self-fetch:', e && e.message);
@@ -5082,7 +5134,7 @@ async function runProblemFinder(options = {}) {
         const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". CRITICAL RULES FOR QUOTES: The "quotes" array must contain exactly 3 strings, and each string MUST be 63 characters or less. Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Prioritise the most common, clearly recurring problems that appear across many of the posts, and avoid niche one-off complaints, so the analysis stays consistent if the tool is run again on the same audience. Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["A short quote under 63 chars.", "Another quote under 63 chars.", "A final quote under 63 chars."], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_completion_tokens: 1500, seed: 11, response_format: { "type": "json_object" } };
         // Resilient call: retries on a timed-out/empty response (each retry gets a fresh budget),
         // so one slow attempt no longer breaks the entire analysis.
-        const openAIData = await callOpenAIProxyWithRetry(openAIParams, { tries: 2, priority: 3 });
+        const openAIData = await callOpenAIProxyWithRetry(openAIParams, { tries: 2, priority: AI_PRIORITY.BACKBONE });
         let summaries = [];
         if (openAIData && openAIData.openaiResponse) {
             summaries = parseAISummary(openAIData.openaiResponse);
@@ -5485,7 +5537,7 @@ Respond ONLY with JSON: {"media":[{"type":"youtube","name":"...","focus":"..."}]
             temperature: 0.1,
             max_completion_tokens: 800,
             response_format: { type: "json_object" }
-        }, { tries: 2, priority: 2 });
+        }, { tries: 2, priority: AI_PRIORITY.WHERE });
         if (data && data.openaiResponse) {
             parsed = JSON.parse(data.openaiResponse).media || [];
         } else {
@@ -5959,7 +6011,7 @@ Respond ONLY with JSON: {"items":[{"name":"...","note":"<= 6 word description, o
             temperature: 0.3,
             max_completion_tokens: 400,
             response_format: { type: "json_object" }
-        }, { tries: 1, priority: 3 });
+        }, { tries: 1, priority: AI_PRIORITY.WHERE });
         if (data && data.openaiResponse) return JSON.parse(data.openaiResponse).items || [];
     } catch (e) { console.warn('[Suggest] failed:', e && e.message); }
     return [];
@@ -6014,7 +6066,7 @@ Respond ONLY with JSON: {"people":[{"name":"...","role":"..."}]}`;
             temperature: 0.1,
             max_completion_tokens: 700,
             response_format: { type: "json_object" }
-        }, { tries: 2, priority: 2 });
+        }, { tries: 2, priority: AI_PRIORITY.WHERE });
         if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).people || [];
     } catch (e) { console.warn('[Experts] extraction failed:', e && e.message); }
     console.log(`[Experts] AI named ${parsed.length} candidate person/people before grounding.`);
@@ -6136,7 +6188,7 @@ Respond ONLY with JSON: {"tools":[{"name":"...","use":"..."}]}`;
             temperature: 0.1,
             max_completion_tokens: 700,
             response_format: { type: "json_object" }
-        }, { tries: 2, priority: 2 });
+        }, { tries: 2, priority: AI_PRIORITY.WHERE });
         if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).tools || [];
     } catch (e) { console.warn('[Tools] extraction failed:', e && e.message); }
     console.log(`[Tools] AI named ${parsed.length} candidate tool(s) before grounding.`);
@@ -6248,7 +6300,7 @@ Respond ONLY with JSON: {"events":[{"name":"...","what":"..."}]}`;
             temperature: 0.1,
             max_completion_tokens: 700,
             response_format: { type: "json_object" }
-        }, { tries: 2, priority: 2 });
+        }, { tries: 2, priority: AI_PRIORITY.WHERE });
         if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).events || [];
     } catch (e) { console.warn('[Events] extraction failed:', e && e.message); }
     console.log(`[Events] AI named ${parsed.length} candidate event(s)/place(s) before grounding.`);
@@ -6364,7 +6416,7 @@ Respond ONLY with JSON: {"waterholes":[{"platform":"Facebook","name":"...","cont
             temperature: 0.1,
             max_completion_tokens: 800,
             response_format: { type: "json_object" }
-        }, { tries: 2, priority: 2 });
+        }, { tries: 2, priority: AI_PRIORITY.WHERE });
         if (data && data.openaiResponse) parsed = JSON.parse(data.openaiResponse).waterholes || [];
     } catch (e) {
         console.warn('[Waterholes] extraction failed:', e && e.message);

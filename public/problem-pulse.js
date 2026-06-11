@@ -826,7 +826,7 @@ async function generateSentimentContextWithAI(posts, brandName) {
 
 function deduplicatePosts(posts) { const seen = new Set(); return posts.filter(post => { if (!post.data || !post.data.id) return false; if (seen.has(post.data.id)) return false; seen.add(post.data.id); return true; }); }
 function formatDate(utcSeconds) { const date = new Date(utcSeconds * 1000); return date.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }); }
-async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all', searchInComments = false) { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const payload = { searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after }; if (searchInComments) { payload.includeComments = true; } const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 20000); /* per-request timeout: a stalled Reddit proxy call must not hang the whole analysis on the loading screen */ let response; try { response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctrl.signal }); } finally { clearTimeout(timer); } if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return allPosts.slice(0, totalLimit); /* return whatever we got rather than nothing */ } return allPosts.slice(0, totalLimit); }
+async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all', searchInComments = false) { let allPosts = []; let after = null; try { while (allPosts.length < totalLimit) { const payload = { searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after }; if (searchInComments) { payload.includeComments = true; } const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 12000); /* per-request timeout: a stalled Reddit proxy call must not hang the whole analysis on the loading screen */ let response; try { response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctrl.signal }); } finally { clearTimeout(timer); } if (!response.ok) { throw new Error(`Proxy Error: Server returned status ${response.status}`); } const data = await response.json(); if (!data.data || !data.data.children || !data.data.children.length) break; allPosts = allPosts.concat(data.data.children); after = data.data.after; if (!after) break; } } catch (err) { console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message); return allPosts.slice(0, totalLimit); /* return whatever we got rather than nothing */ } return allPosts.slice(0, totalLimit); }
 async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm = 100, timeFilter = 'all', searchInComments = false) {
     const allResults = [];
     const terms = (searchTerms || []).filter(Boolean);
@@ -845,8 +845,11 @@ async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm =
         queries.push(group.length > 1 ? '(' + group.join(' OR ') + ')' : group[0]);
     }
     multiWord.forEach(t => queries.push(t));
-    // Lift the per-query limit so the UNION of ~5 terms is well covered (keeps corpus size).
-    const perQueryLimit = Math.min(250, limitPerTerm * 2);
+    // Keep the per-query limit at the ORIGINAL per-term size. Inflating it forced each OR query
+    // to paginate through many more pages, which on a slow/flaky proxy stacked up into a multi-
+    // minute load. The OR query already returns a richer (deduped) union within this limit, and
+    // we still cut total requests by issuing far fewer distinct queries.
+    const perQueryLimit = limitPerTerm;
     const QUERY_CONCURRENCY = 3;
     for (let i = 0; i < queries.length; i += QUERY_CONCURRENCY) {
         const batch = queries.slice(i, i + QUERY_CONCURRENCY);
@@ -955,19 +958,41 @@ function _releaseProxySlot() {
     }
 }
 
+// Circuit breaker for the proxy. When the backend goes down, EVERY one of the ~15 AI calls
+// otherwise waits out its own 30s timeout before giving up — turning an outage into a multi-
+// minute loading grind. Once we see a run of consecutive network failures, we "open" the
+// circuit: further calls fail INSTANTLY for a short cooldown, so panels drop to their fallbacks
+// in seconds. A success closes it again. Only true network failures (Failed to fetch / abort)
+// count — HTTP 4xx/5xx come back as a resolved response and are handled by the caller's retry.
+let _proxyFailStreak = 0;
+let _proxyCircuitOpenUntil = 0;
+const _PROXY_FAIL_THRESHOLD = 6;   // consecutive network failures before we trip
+const _PROXY_COOLDOWN_MS = 15000;  // how long to fail fast before probing again
+
 async function limitedFetch(url, opts, priority = 0) {
+    if (Date.now() < _proxyCircuitOpenUntil) {
+        // Backend looked down moments ago — fail fast instead of waiting out another timeout.
+        throw new Error('Proxy circuit open (backend unreachable; failing fast)');
+    }
     await _acquireProxySlot(priority);
     try {
         // Hard timeout so a stalled proxy request can't hold a slot forever. With only 6 shared
-        // slots, a few permanently-pending requests would otherwise starve EVERY later AI call
-        // (including the core summary that gates the whole load) — i.e. the page loads forever.
-        // On abort, fetch rejects, the outer finally releases the slot, and the caller retries.
+        // slots, a few permanently-pending requests would otherwise starve EVERY later AI call.
         const ctrl = new AbortController();
         const timer = setTimeout(() => ctrl.abort(), 30000);
-        try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
-        finally { clearTimeout(timer); }
-    }
-    finally { _releaseProxySlot(); }
+        try {
+            const res = await fetch(url, { ...opts, signal: ctrl.signal });
+            _proxyFailStreak = 0; // a real response (even a 4xx/5xx) means the backend is reachable
+            return res;
+        } finally { clearTimeout(timer); }
+    } catch (e) {
+        if (++_proxyFailStreak >= _PROXY_FAIL_THRESHOLD) {
+            _proxyCircuitOpenUntil = Date.now() + _PROXY_COOLDOWN_MS;
+            _proxyFailStreak = 0;
+            console.warn(`[Proxy] backend looks down — pausing AI calls for ${_PROXY_COOLDOWN_MS / 1000}s so the page settles into fallbacks instead of grinding.`);
+        }
+        throw e;
+    } finally { _releaseProxySlot(); }
 }
 
 async function callOpenAIProxyWithRetry(openaiPayload, { tries = 2, backoffMs = 600, priority = 0 } = {}) {
@@ -2725,30 +2750,29 @@ async function generateAndRenderHistoricalSentiment(subredditQueryString) {
     container.innerHTML = '<p class="loading-text">Charting sentiment over time... <span class="loader-dots"></span></p>';
 
     const sampleTerms = ["love", "hate", "best", "worst", "frustrating", "amazing"];
-    const timePeriods = [
-        { label: 'Past 6 Mo', value: '6month' },
-        { label: 'Past 3 Mo', value: '3month' },
-        { label: 'Past Month', value: 'month' },
-        { label: 'Past Week', value: 'week' },
+    const periods = [
+        { label: 'Past 6 Mo', days: 182 },
+        { label: 'Past 3 Mo', days: 91 },
+        { label: 'Past Month', days: 30 },
+        { label: 'Past Week', days: 7 },
     ];
 
     try {
-        const fetchPromises = timePeriods.map(p =>
-            fetchMultipleRedditDataBatched(subredditQueryString, sampleTerms, 40, p.value)
-        );
-        const results = await Promise.allSettled(fetchPromises);
+        // ONE valid 'year' fetch, bucketed locally by timestamp. Reddit has no 3month/6month
+        // filter (the old code requested them), and a single request is far gentler on the proxy
+        // than four — which matters when the backend is under strain.
+        const raw = await fetchMultipleRedditDataBatched(subredditQueryString, sampleTerms, 100, 'year');
+        const posts = deduplicatePosts(raw || []);
+        const nowSec = Date.now() / 1000, DAY = 86400;
 
         const trendData = [];
-        results.forEach((result, i) => {
-            if (result.status !== 'fulfilled' || result.value.length === 0) return;
-            const posts = deduplicatePosts(result.value);
-            const { positive, negative } = countSentimentWords(posts);
+        periods.forEach(per => {
+            const inWindow = posts.filter(p => (p.data.created_utc || 0) >= nowSec - per.days * DAY);
+            if (!inWindow.length) return;
+            const { positive, negative } = countSentimentWords(inWindow);
             const total = positive + negative;
             if (total === 0) return;
-            trendData.push({
-                period: timePeriods[i].label,
-                positive: Math.round((positive / total) * 100)
-            });
+            trendData.push({ period: per.label, positive: Math.round((positive / total) * 100) });
         });
 
         renderHistoricalSentimentChart(trendData);
@@ -3178,8 +3202,8 @@ async function generateAndRenderConstellation(items) {
     const isLifestyleNoise = (q) => LIFESTYLE_NOISE.test(q || '');
 
     const BATCH_SIZE = 20;          // bigger batches => fewer round-trips (80 items => 4 calls)
-    const CONCURRENCY = 2;          // run 2 batches in parallel; the priority tier (SHOP, lowest)
-                                    // + global 6-slot cap keep this from starving higher tabs.
+    const CONCURRENCY = 1;          // sequential: gentlest on the proxy so signals reliably land
+                                    // (a strained backend fails under parallel load).
     const MIN_SIGNALS = 20;
     const enrichedSignals = [];     // strong: clear commercial cue
     const backupSignals = [];       // weaker but valid - used to top up

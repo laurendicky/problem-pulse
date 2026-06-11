@@ -840,7 +840,7 @@ async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, t
     let after = null;
     try {
         while (allPosts.length < totalLimit) {
-            const payload = { searchTerm: term, niche: niche, limit: 25, timeFilter: timeFilter, after: after };
+            const payload = { searchTerm: term, niche: niche, limit: 100, timeFilter: timeFilter, after: after }; // 100 is Reddit's max page size — same data in ~4x fewer requests (efficient, within limits)
             if (searchInComments) payload.includeComments = true;
             const ctrl = new AbortController();
             const timer = setTimeout(() => ctrl.abort(), 8000); // shorter: stalled calls give up fast

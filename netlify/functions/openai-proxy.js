@@ -1,4 +1,4 @@
- // =============================================================================
+// =============================================================================
 // openai-proxy.js  (Netlify function) — fail-fast on rate limits
 //
 // DEPLOY THIS to your Netlify project (netlify/functions/openai-proxy.js).
@@ -38,13 +38,14 @@ exports.handler = async (event) => {
     const apiKey = process.env.OPENAI_API_KEY;
     // maxRetries: 0  -> never sit in a silent backoff loop on a 429; fail fast and let the
     //                   frontend's own retry/fallback handle it.
-    // timeout: 20000 -> the SDK aborts a single slow call at 20s (under the proxy's race).
-    const openai = new OpenAI({ apiKey, maxRetries: 0, timeout: 20000 });
+    // timeout: 45000 -> Netlify allows synchronous functions up to 60s, so give a slow OpenAI
+    //                   call room to finish (the old 20-25s cutoff was killing valid calls).
+    const openai = new OpenAI({ apiKey, maxRetries: 0, timeout: 45000 });
     const { openaiPayload } = JSON.parse(event.body);
 
-    // Backstop race (rarely needed now that the SDK fails fast).
+    // Backstop race, comfortably under Netlify's 60s function ceiling.
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('OpenAI_Latency_Limit')), 22000)
+      setTimeout(() => reject(new Error('OpenAI_Latency_Limit')), 45000)
     );
     const chatCompletion = await Promise.race([
       openai.chat.completions.create(openaiPayload),

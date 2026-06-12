@@ -91,7 +91,10 @@ exports.handler = async (event) => {
     const corsHeaders = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Content-Type',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS'
+        'Access-Control-Allow-Methods': 'POST, OPTIONS',
+        // Cache the CORS preflight for 24h so the browser stops sending an OPTIONS before EVERY
+        // POST. Uncached preflights doubled the request count and were timing out under burst.
+        'Access-Control-Max-Age': '86400'
     };
 
     if (event.httpMethod === 'OPTIONS') {

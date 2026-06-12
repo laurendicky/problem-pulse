@@ -220,4 +220,25 @@ function initEntryFlow() {
     console.log('[Entry] wired ✓');
 }
 
-document.addEventListener('DOMContentLoaded', initEntryFlow);
+// --- bootstrap --------------------------------------------------------------
+// Webflow renders the DOM asynchronously, so #find-communities-btn often doesn't exist yet at
+// DOMContentLoaded — and this script may even load AFTER the page is ready. So we poll for the
+// button (up to ~5s) and init the moment it appears. (Same proven pattern as the old file.)
+function bootstrapEntryFlow() {
+    let retries = 0;
+    const intervalId = setInterval(() => {
+        if (document.getElementById('find-communities-btn')) {
+            clearInterval(intervalId);
+            initEntryFlow();
+        } else if (++retries > 50) {
+            clearInterval(intervalId);
+            console.error('[Entry] #find-communities-btn never appeared — init aborted.');
+        }
+    }, 100);
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bootstrapEntryFlow);
+} else {
+    bootstrapEntryFlow(); // DOM already parsed (script loaded late) — start polling now
+}

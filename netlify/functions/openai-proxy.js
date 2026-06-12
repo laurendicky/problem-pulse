@@ -3,12 +3,11 @@
 //
 // DEPLOY THIS to your Netlify project (netlify/functions/openai-proxy.js).
 //
-// The key change: `maxRetries: 0` + a 20s SDK timeout on the OpenAI client.
-// Previously the OpenAI SDK silently retried on 429 (rate-limit) errors with
-// backoff, which burned 20-30s and blew past the proxy's 25s race — surfacing
-// as "OpenAI_Latency_Limit" and silent client stalls. Now a throttled call
-// returns an error in a couple of seconds, the frontend retries gracefully,
-// and the dashboard settles into fallbacks fast instead of hanging.
+// The key change: `maxRetries: 0` + a 45s SDK timeout on the OpenAI client, plus a 45s backstop
+// race (both comfortably under Netlify Pro's 60s function ceiling) and a cached CORS preflight.
+// Previously the OpenAI SDK silently retried on 429 (rate-limit) errors with backoff, which burned
+// 20-30s and surfaced as "OpenAI_Latency_Limit" and silent client stalls. Now a throttled call
+// returns an error in a couple of seconds, and the frontend retries/falls back gracefully.
 // =============================================================================
 const OpenAI = require('openai');
 

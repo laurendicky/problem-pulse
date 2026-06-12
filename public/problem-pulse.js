@@ -844,7 +844,7 @@ async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, t
     let after = null;
     try {
         while (allPosts.length < totalLimit) {
-            const payload = { searchTerm: term, niche: niche, limit: 100, timeFilter: timeFilter, after: after };
+            const payload = { searchTerm: term, niche: niche, limit: Math.min(100, totalLimit), timeFilter: timeFilter, after: after }; // only request as many as we'll use (was a flat 100, over-fetching ~60% per query)
             if (searchInComments) payload.includeComments = true;
             const ctrl = new AbortController();
             // STRICT 15s timeout covering BOTH the connection AND the JSON body parse. The timer is

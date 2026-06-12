@@ -19,6 +19,8 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
+console.log('[problem-pulse-v2] script loaded');
+
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
 // --- proxy helpers ----------------------------------------------------------
@@ -173,18 +175,15 @@ function renderSubredditChoices(subs) {
 
 // --- wire the buttons -------------------------------------------------------
 function initEntryFlow() {
-    const groupInput = document.getElementById('group-input');
     const findBtn = document.getElementById('find-communities-btn');
+    if (!findBtn) { console.warn('[Entry] #find-communities-btn not found — cannot wire.'); return; }
+    if (findBtn.dataset.ppWired) { return; } // never wire twice
+    findBtn.dataset.ppWired = '1';
+
+    // "Inspire me" reveals suggestion pills; clicking a pill fills the input and searches. Best-
+    // effort: if these elements don't exist, we just skip them — the main button still works.
     const inspireBtn = document.getElementById('inspire-me-button');
     const pills = document.getElementById('pf-suggestion-pills');
-    const choices = document.getElementById('subreddit-choices');
-
-    if (!findBtn || !choices) {
-        console.warn('[Entry] missing #find-communities-btn or #subreddit-choices — buttons not wired.');
-        return;
-    }
-
-    // "Inspire me" reveals suggestion pills; clicking a pill fills the input and searches.
     if (inspireBtn && pills) {
         if (!pills.dataset.populated) {
             pills.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
@@ -193,21 +192,32 @@ function initEntryFlow() {
         inspireBtn.addEventListener('click', () => pills.classList.toggle('visible'));
         pills.addEventListener('click', (e) => {
             const pill = e.target.closest('.pf-suggestion-pill');
-            if (pill && groupInput) { groupInput.value = pill.getAttribute('data-value'); findBtn.click(); }
+            if (!pill) return;
+            const gi = document.getElementById('group-input');
+            if (gi) gi.value = pill.getAttribute('data-value');
+            findBtn.click();
         });
     }
 
+    // Look up #group-input / #subreddit-choices at CLICK time (not now) so it doesn't matter
+    // whether they exist yet when the button is first wired.
     findBtn.addEventListener('click', async (e) => {
         e.preventDefault();
+        console.log('[Entry] find-communities-btn clicked');
+        const groupInput = document.getElementById('group-input');
+        const choices = document.getElementById('subreddit-choices');
         const groupName = (groupInput && groupInput.value.trim()) || '';
         if (!groupName) { alert('Please enter a group of people or pick a suggestion.'); return; }
-        window.originalGroupName = groupName;
+        if (!choices) { console.error('[Entry] #subreddit-choices not found — nowhere to show results.'); return; }
 
+        window.originalGroupName = groupName;
         findBtn.disabled = true;
         choices.innerHTML = '<p class="loading-text">Finding communities…</p>';
         try {
             const names = await findSubredditsForGroup(groupName);
+            console.log('[Entry] candidate subreddits:', names);
             const ranked = await fetchAndRankSubreddits(names);
+            console.log('[Entry] ranked subreddits:', ranked.length);
             renderSubredditChoices(ranked);
         } catch (error) {
             console.error('[Entry] find communities failed:', error);
@@ -217,7 +227,7 @@ function initEntryFlow() {
         }
     });
 
-    console.log('[Entry] wired ✓');
+    console.log('[Entry] wired ✓ — #find-communities-btn is live');
 }
 
 // --- bootstrap --------------------------------------------------------------

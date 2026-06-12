@@ -42,7 +42,23 @@ async function callOpenAI(payload, { timeoutMs = 45000 } = {}) {
     }
 }
 
+// Shared Reddit concurrency gate. EVERY Reddit call (subreddit lookups, the corpus search, and
+// later comment fetches) passes through here, so no feature can ever burst the proxy — the exact
+// failure that killed the old app, prevented at the source.
+const REDDIT_MAX_CONCURRENT = 4;
+let _redditInFlight = 0;
+const _redditQueue = [];
+function _acquireRedditSlot() {
+    if (_redditInFlight < REDDIT_MAX_CONCURRENT) { _redditInFlight++; return Promise.resolve(); }
+    return new Promise(resolve => _redditQueue.push(resolve));
+}
+function _releaseRedditSlot() {
+    if (_redditQueue.length) _redditQueue.shift()();
+    else _redditInFlight = Math.max(0, _redditInFlight - 1);
+}
+
 async function callReddit(payload, { timeoutMs = 12000 } = {}) {
+    await _acquireRedditSlot();
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
@@ -56,6 +72,7 @@ async function callReddit(payload, { timeoutMs = 12000 } = {}) {
         return await res.json();
     } finally {
         clearTimeout(timer);
+        _releaseRedditSlot();
     }
 }
 
@@ -129,17 +146,11 @@ function getActivityLabel(active, members) {
     return 'Insight Rich';
 }
 
-// Look up each candidate, drop the ones that don't resolve, rank by size. Lookups run 4 at a
-// time — the one place a real burst exists (up to 20 at once would hammer the proxy).
+// Look up each candidate, drop the ones that don't resolve, rank by size. We fire them all at
+// once and let the shared Reddit gate throttle to 4 concurrent — no manual batching needed.
 async function fetchAndRankSubreddits(names) {
     const list = (names || []).filter(Boolean);
-    const details = [];
-    const BATCH = 4;
-    for (let i = 0; i < list.length; i += BATCH) {
-        const batch = list.slice(i, i + BATCH);
-        const results = await Promise.all(batch.map(n => fetchSubredditDetails(n)));
-        details.push(...results);
-    }
+    const details = await Promise.all(list.map(n => fetchSubredditDetails(n)));
     return details
         .filter(Boolean)
         .map(d => ({
@@ -171,6 +182,137 @@ function renderSubredditChoices(subs) {
                 <span class="pill activity-pill" data-activity="${sub.activityLabel}">${sub.activityLabel}</span>
             </label>
         </div>`).join('');
+}
+
+// =============================================================================
+// PART 2 — Run analysis: build the corpus (the single source of truth)
+//
+// On #search-selected-btn click we fetch ONE post corpus from the chosen subreddits, dedupe and
+// store it on window._corpus. Every later analysis reads from that — nothing re-fetches Reddit.
+// =============================================================================
+
+// Problem-signal terms. Single words get OR-combined into a couple of queries; multi-word phrases
+// are quoted for exact match. ~6 queries total, each one page — enough signal, minimal requests.
+const PROBLEM_TERMS_SINGLE = ['problem', 'struggle', 'frustrating', 'annoying', 'hate', 'advice', 'help'];
+const PROBLEM_TERMS_PHRASE = ['how do i', 'wish i could', 'any tips', 'looking for'];
+
+// Corpus sizing — deliberately modest. AI analyses sample ~40 posts, so a few hundred is plenty.
+const CORPUS_PER_QUERY = 60;      // posts requested per query (Reddit max page is 100)
+const CORPUS_TIME_FILTER = 'year'; // recent + enough volume; 'all' would be broader but staler
+const CORPUS_MIN_SCORE = 1;        // drop 0-score noise
+
+function buildSubredditQuery(subreddits) {
+    return subreddits.map(s => `subreddit:${s}`).join(' OR ');
+}
+
+// Combine the problem terms into as few Reddit queries as possible. Single words go in OR groups
+// of 4; phrases are quoted individually. Fewer queries = fewer requests = faster + gentler.
+function buildProblemQueries() {
+    const queries = [];
+    for (let i = 0; i < PROBLEM_TERMS_SINGLE.length; i += 4) {
+        const group = PROBLEM_TERMS_SINGLE.slice(i, i + 4);
+        queries.push(group.length > 1 ? '(' + group.join(' OR ') + ')' : group[0]);
+    }
+    PROBLEM_TERMS_PHRASE.forEach(p => queries.push(`"${p}"`));
+    return queries;
+}
+
+// One Reddit search → array of post children. Fails soft to [].
+async function fetchPostsForQuery(subredditQuery, searchTerm) {
+    try {
+        const data = await callReddit({
+            searchTerm,
+            niche: subredditQuery,
+            limit: CORPUS_PER_QUERY,
+            timeFilter: CORPUS_TIME_FILTER,
+            after: null
+        });
+        return (data && data.data && Array.isArray(data.data.children)) ? data.data.children : [];
+    } catch (error) {
+        console.warn(`[Corpus] query failed (${searchTerm}):`, error && error.message);
+        return [];
+    }
+}
+
+function dedupePosts(children) {
+    const seen = new Set();
+    return children.filter(c => {
+        const id = c && c.data && c.data.id;
+        if (!id || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+    });
+}
+
+// Keep posts with a real title and at least a little traction; flatten to a lean shape so the rest
+// of the app never touches Reddit's raw envelope.
+function normalizeCorpus(children) {
+    return children
+        .map(c => c.data)
+        .filter(d => d && d.title && (d.ups || 0) >= CORPUS_MIN_SCORE)
+        .map(d => ({
+            id: d.id,
+            subreddit: d.subreddit,
+            title: d.title,
+            body: d.selftext || '',
+            score: d.ups || 0,
+            comments: d.num_comments || 0,
+            created: d.created_utc || 0,
+            permalink: d.permalink ? `https://reddit.com${d.permalink}` : ''
+        }));
+}
+
+// Build the corpus: consolidated queries (gate-throttled) → dedupe → normalize. One fetch, reused.
+async function buildCorpus(subreddits) {
+    const subredditQuery = buildSubredditQuery(subreddits);
+    const queries = buildProblemQueries();
+    const batches = await Promise.all(queries.map(q => fetchPostsForQuery(subredditQuery, q)));
+    const corpus = normalizeCorpus(dedupePosts(batches.flat()));
+    corpus.sort((a, b) => b.score - a.score); // most-upvoted first
+    return corpus;
+}
+
+// --- selection + loader -----------------------------------------------------
+function getSelectedSubreddits() {
+    const boxes = document.querySelectorAll('#subreddit-choices input[type="checkbox"]:checked');
+    return Array.from(boxes).map(b => b.value).filter(Boolean);
+}
+
+// The user is building their own loader UI in #full-loader-msg; we just show/hide it.
+function showLoader(message) {
+    const el = document.getElementById('full-loader-msg');
+    if (!el) return;
+    el.style.display = '';
+    if (message) el.setAttribute('data-status', message);
+}
+function hideLoader() {
+    const el = document.getElementById('full-loader-msg');
+    if (el) el.style.display = 'none';
+}
+
+// #search-selected-btn handler. Builds the corpus, stores it, then hands off to analysis (Part 3).
+async function runProblemFinder() {
+    const subreddits = getSelectedSubreddits();
+    if (!subreddits.length) { alert('Select at least one community to analyse.'); return; }
+    console.log('[Analysis] selected subreddits:', subreddits);
+
+    showLoader('Gathering discussions…');
+    try {
+        const corpus = await buildCorpus(subreddits);
+        window._corpus = corpus;
+        window._analysisSubreddits = subreddits;
+        console.log(`[Analysis] corpus ready: ${corpus.length} posts from ${subreddits.length} subreddits`);
+        if (!corpus.length) {
+            alert('No discussions found for those communities. Try different ones.');
+            return;
+        }
+        // TODO Part 3: run the analyses, all reading from window._corpus.
+    } catch (error) {
+        console.error('[Analysis] failed to build corpus:', error);
+        alert('Something went wrong gathering discussions. Please try again.');
+    } finally {
+        hideLoader();
+    }
 }
 
 // Reveal the subreddit-selection step (the original's transitionToStep2). Without this, the
@@ -242,8 +384,26 @@ function initEntryFlow() {
         }
     });
 
+    // #search-selected-btn → run the analysis on the checked communities. Wired here if present;
+    // also covered by the delegated handler below in case it's added to the DOM later.
+    const searchBtn = document.getElementById('search-selected-btn');
+    if (searchBtn && !searchBtn.dataset.ppWired) {
+        searchBtn.dataset.ppWired = '1';
+        searchBtn.addEventListener('click', (e) => { e.preventDefault(); runProblemFinder(); });
+    }
+
     console.log('[Entry] wired ✓ — #find-communities-btn is live');
 }
+
+// Safety net: a delegated click handler so #search-selected-btn works even if it's rendered into
+// the page after init (Webflow tabs/interactions). Guarded so it never double-fires.
+document.addEventListener('click', (e) => {
+    const btn = e.target.closest('#search-selected-btn');
+    if (!btn) return;
+    if (btn.dataset.ppWired) return; // already handled by the direct listener
+    e.preventDefault();
+    runProblemFinder();
+});
 
 // --- bootstrap --------------------------------------------------------------
 // Webflow renders the DOM asynchronously, so #find-communities-btn often doesn't exist yet at

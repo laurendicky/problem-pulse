@@ -24,7 +24,10 @@ exports.handler = async (event) => {
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': allowedOrigins.includes(origin) ? origin : '*'
+    'Access-Control-Allow-Origin': allowedOrigins.includes(origin) ? origin : '*',
+    // Cache the CORS preflight for 24h so the browser stops sending an OPTIONS before EVERY POST.
+    // Uncached preflights doubled the request count and were timing out under burst.
+    'Access-Control-Max-Age': '86400'
   };
   if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers, body: '' };
   if (event.httpMethod !== 'POST') {

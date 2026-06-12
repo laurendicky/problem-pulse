@@ -1,17 +1,11 @@
 // =============================================================================
-// reddit-proxy.js  (Netlify function)  — upgraded
+// reddit-proxy.js  (Netlify function)  — upgraded with internal timeouts
 //
-// Two changes vs. the old version:
-//   1. TOKEN CACHING. The old proxy minted a brand-new OAuth token on EVERY request
-//      (two round-trips per call). Tokens are valid for hours, so we now cache each
-//      app's token in module scope (survives warm invocations) and only refresh when
-//      it's near expiry. This roughly halves Reddit latency on its own.
-//   2. OPTIONAL MULTI-APP POOL. Add a second Reddit app's creds as REDDIT_CLIENT_ID_2
-//      / REDDIT_CLIENT_SECRET_2 in Netlify and the proxy round-robins across both,
-//      doubling your effective ~100 req/min ceiling for multiple simultaneous users.
-//      If you don't set the _2 vars, it runs on the single app exactly as before.
-//
-// No client-side changes needed — same request/response shape.
+// DEPLOY THIS to your Netlify project (netlify/functions/reddit-proxy.js),
+// not just this folder. The key addition is fetchWithTimeout(): every outgoing
+// call to Reddit (token + search/about/comments) is aborted after 8s, so if
+// Reddit rate-limits or stalls Netlify's IP, the function returns a descriptive
+// error in ~8s instead of hanging open until Netlify's execution ceiling.
 // =============================================================================
 
 const UA = process.env.REDDIT_USER_AGENT;
@@ -26,14 +20,24 @@ const APPS = [
 const tokenCache = new Map();
 let rr = 0; // round-robin cursor
 
+// Helper: enforce a strict timeout on outgoing fetch calls to Reddit.
+async function fetchWithTimeout(url, options, timeoutMs = 8000) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+        return await fetch(url, { ...options, signal: ctrl.signal });
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
 async function getToken(app, forceRefresh = false) {
     const cached = tokenCache.get(app.id);
-    // Reuse a cached token until 60s before it expires.
     if (!forceRefresh && cached && cached.expiresAt > Date.now() + 60000) {
         return cached.token;
     }
     const auth = Buffer.from(`${app.id}:${app.secret}`).toString('base64');
-    const response = await fetch('https://www.reddit.com/api/v1/access_token', {
+    const response = await fetchWithTimeout('https://www.reddit.com/api/v1/access_token', {
         method: 'POST',
         headers: {
             'Authorization': `Basic ${auth}`,
@@ -41,7 +45,8 @@ async function getToken(app, forceRefresh = false) {
             'User-Agent': UA
         },
         body: 'grant_type=client_credentials'
-    });
+    }, 8000);
+
     if (!response.ok) {
         const errorBody = await response.text();
         console.error('Reddit Token Error:', errorBody);
@@ -53,7 +58,6 @@ async function getToken(app, forceRefresh = false) {
     return data.access_token;
 }
 
-// Build the Reddit URL for a given request body (unchanged routing logic).
 function buildUrl(body) {
     if (body.type === 'about') {
         if (!body.subreddit) throw new Error("A 'subreddit' name is required for 'about' details.");
@@ -73,14 +77,12 @@ function buildUrl(body) {
     throw new Error('Invalid request payload.');
 }
 
-// One Reddit call with a cached token. On a 401 (token rejected), refresh once and retry —
-// so a stale cached token never causes a hard failure.
 async function redditFetch(app, url) {
     let token = await getToken(app);
-    let res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': UA } });
+    let res = await fetchWithTimeout(url, { headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': UA } }, 8000);
     if (res.status === 401) {
         token = await getToken(app, true);
-        res = await fetch(url, { headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': UA } });
+        res = await fetchWithTimeout(url, { headers: { 'Authorization': `Bearer ${token}`, 'User-Agent': UA } }, 8000);
     }
     return res;
 }
@@ -96,22 +98,14 @@ exports.handler = async (event) => {
         return { statusCode: 204, headers: corsHeaders, body: '' };
     }
 
-    // Safeguard 1: Reject GET requests or other non-POST methods gracefully
+    // Reject non-POST methods gracefully (e.g. a browser GET).
     if (event.httpMethod !== 'POST') {
-        return { 
-            statusCode: 405, 
-            headers: corsHeaders, 
-            body: JSON.stringify({ error: 'Method Not Allowed. This endpoint requires a POST request.' }) 
-        };
+        return { statusCode: 405, headers: corsHeaders, body: JSON.stringify({ error: 'Method Not Allowed. This endpoint requires a POST request.' }) };
     }
 
-    // Safeguard 2: Check if event.body exists and is not empty
+    // Guard against an empty body (the cause of the "Unexpected end of JSON input" log).
     if (!event.body) {
-        return { 
-            statusCode: 400, 
-            headers: corsHeaders, 
-            body: JSON.stringify({ error: 'Bad Request. Missing request body.' }) 
-        };
+        return { statusCode: 400, headers: corsHeaders, body: JSON.stringify({ error: 'Bad Request. Missing request body.' }) };
     }
 
     try {
@@ -119,14 +113,10 @@ exports.handler = async (event) => {
 
         const body = JSON.parse(event.body);
         const url = buildUrl(body);
-
-        // Pick an app round-robin across the pool (1 app => always the same one).
         const app = APPS[rr++ % APPS.length];
-
         const redditResponse = await redditFetch(app, url);
 
         if (!redditResponse.ok) {
-            // 'about' failures (404/403/etc.) just mean the subreddit isn't accessible — not an error.
             if (body.type === 'about') {
                 return { statusCode: 200, headers: corsHeaders, body: JSON.stringify(null) };
             }

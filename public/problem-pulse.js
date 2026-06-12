@@ -5346,7 +5346,12 @@ async function runProblemFinder(options = {}) {
         // here — they load when their tab is opened (loadTabHurts / loadTabWhere / loadTabTalk /
         // loadTabShop). Only the related-communities suggestion (part of the subreddit picker)
         // stays on a short delay.
-        setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 8000); // run AFTER the core dashboard settles so its burst doesn't compete with the Who tab + search
+        // DISABLED: this optional "related communities" panel fires a burst of ~17 subreddit
+        // lookups that saturated the shared browser→Netlify connection pool, starving the core
+        // calls (assignment, AI) and causing the cascade of ERR_TIMED_OUTs. The console proved it
+        // was the ONLY thing failing on load. Re-enable once it's rebuilt to fetch sequentially /
+        // on demand. To restore: uncomment the line below.
+        // setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 8000);
         // HIDDEN GEMS — DISABLED for speed. It was one of the heaviest items in a run: a
         // 40-thread comment fetch + a slow gpt-4o call + local stats math, for output that
         // wasn't pulling its weight. Flip this flag back to true to restore it.

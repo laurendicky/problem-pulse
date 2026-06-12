@@ -1364,11 +1364,17 @@ async function fetchCommentsForPosts(postIds, batchSize = 3) {
         if (_commentCache.has(id)) allComments.push(...(_commentCache.get(id) || []));
         else if (id) toFetch.push(id);
     });
-    for (let i = 0; i < toFetch.length; i += batchSize) {
-        const batchIds = toFetch.slice(i, i + batchSize);
+    // HARD CAP on NEW comment fetches per call. This function is called from ~7 places per run,
+    // each pulling a batch of threads — that was firing hundreds of requests at one Netlify site,
+    // saturating it (the 502s that show up as CORS errors, plus timeouts). The per-post cache
+    // still serves repeats across the run, so capping new fetches barely dents the corpus.
+    const MAX_NEW_THREADS = 8;
+    const capped = toFetch.slice(0, MAX_NEW_THREADS);
+    for (let i = 0; i < capped.length; i += batchSize) {
+        const batchIds = capped.slice(i, i + batchSize);
         const results = await Promise.all(batchIds.map(id => _fetchOneCommentThread(id)));
         results.forEach((comments, j) => { _commentCache.set(batchIds[j], comments); allComments.push(...comments); });
-        if (i + batchSize < toFetch.length) await new Promise(resolve => setTimeout(resolve, 450));
+        if (i + batchSize < capped.length) await new Promise(resolve => setTimeout(resolve, 450));
     }
     return allComments;
 }

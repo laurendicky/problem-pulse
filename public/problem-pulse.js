@@ -152,7 +152,7 @@ async function fetchAndRankSubreddits(names) {
     const list = (names || []).filter(Boolean);
     const details = await Promise.all(list.map(n => fetchSubredditDetails(n)));
     return details
-        .filter(Boolean)
+        .filter(d => d && d.display_name) // require a real name — drops the "undefined" entries
         .map(d => ({
             name: d.display_name,
             members: d.subscribers || 0,
@@ -275,14 +275,15 @@ async function buildCorpus(subreddits) {
 // --- selection + loader -----------------------------------------------------
 function getSelectedSubreddits() {
     const boxes = document.querySelectorAll('#subreddit-choices input[type="checkbox"]:checked');
-    return Array.from(boxes).map(b => b.value).filter(Boolean);
+    return Array.from(boxes).map(b => b.value).filter(v => v && v !== 'undefined');
 }
 
-// The user is building their own loader UI in #full-loader-msg; we just show/hide it.
+// The loader div (#full-loader-msg) is display:none in Webflow, so we must set an explicit visible
+// value to override that — setting '' would just fall back to the none. The user owns its look.
 function showLoader(message) {
     const el = document.getElementById('full-loader-msg');
     if (!el) return;
-    el.style.display = '';
+    el.style.display = 'flex';
     if (message) el.setAttribute('data-status', message);
 }
 function hideLoader() {
@@ -327,6 +328,16 @@ function transitionToStep2(audienceName) {
     if (step1) step1.classList.add('hidden');
     if (step2) step2.classList.add('visible');
     if (title) title.innerHTML = `Select Subreddits For: <span class="pf-audience-name">${audienceName}</span>`;
+}
+
+// Reverse of transitionToStep2 — back to the search-term entry step.
+function transitionToStep1() {
+    const welcome = document.getElementById('welcome-div');
+    const step1 = document.getElementById('step-1-container');
+    const step2 = document.getElementById('subreddit-selection-container');
+    if (step2) step2.classList.remove('visible');
+    if (step1) step1.classList.remove('hidden');
+    if (welcome) welcome.style.display = ''; // restore Webflow's default (visible)
 }
 
 // --- wire the buttons -------------------------------------------------------
@@ -392,17 +403,23 @@ function initEntryFlow() {
         searchBtn.addEventListener('click', (e) => { e.preventDefault(); runProblemFinder(); });
     }
 
+    // #back-to-step1-btn → return to the search-term entry step.
+    const backBtn = document.getElementById('back-to-step1-btn');
+    if (backBtn && !backBtn.dataset.ppWired) {
+        backBtn.dataset.ppWired = '1';
+        backBtn.addEventListener('click', (e) => { e.preventDefault(); transitionToStep1(); });
+    }
+
     console.log('[Entry] wired ✓ — #find-communities-btn is live');
 }
 
-// Safety net: a delegated click handler so #search-selected-btn works even if it's rendered into
-// the page after init (Webflow tabs/interactions). Guarded so it never double-fires.
+// Safety net: delegated click handlers so these buttons work even if Webflow renders them after
+// init. Each is guarded by dataset.ppWired so it never double-fires with the direct listeners.
 document.addEventListener('click', (e) => {
-    const btn = e.target.closest('#search-selected-btn');
-    if (!btn) return;
-    if (btn.dataset.ppWired) return; // already handled by the direct listener
-    e.preventDefault();
-    runProblemFinder();
+    const searchBtn = e.target.closest('#search-selected-btn');
+    if (searchBtn && !searchBtn.dataset.ppWired) { e.preventDefault(); runProblemFinder(); return; }
+    const backBtn = e.target.closest('#back-to-step1-btn');
+    if (backBtn && !backBtn.dataset.ppWired) { e.preventDefault(); transitionToStep1(); return; }
 });
 
 // --- bootstrap --------------------------------------------------------------

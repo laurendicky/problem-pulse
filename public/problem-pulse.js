@@ -980,9 +980,10 @@ function deduplicateByContent(items) {
 // rate / 25s-latency limit and leaves features empty. This serialises the load gracefully.
 let _proxyActive = 0;
 const _proxyWaiters = []; // each: { resolve, priority }
-const PROXY_MAX_CONCURRENT = 4; // Netlify functions have limited concurrent execution slots, and
-// each held-open OpenAI call occupies one. Capping the client at 4 in-flight keeps the burst from
-// saturating Netlify (which is what was queueing/dropping requests into "Failed to fetch").
+const PROXY_MAX_CONCURRENT = 3; // Netlify functions have limited concurrent execution slots, and
+// each held-open OpenAI call occupies one. Capping the client low keeps the burst from saturating
+// Netlify (which is what was queueing/dropping requests into "Failed to fetch"). With Reddit also
+// capped at 2, total simultaneous requests to the one Netlify site stay around 5.
 // Load-order priorities by dashboard TAB (higher = served first when the 6 slots are contended).
 // BACKBONE is the core findings analysis everything else is built from, so it always wins. The
 // rest follow the tab layout: Who -> Where they are -> What hurts -> Language -> How they shop.
@@ -1306,7 +1307,7 @@ async function findSubredditsForGroup(groupName) {
 // Reddit's 429 rate limit. Cap concurrency low and serialise the rest gracefully.
 let _redditActive = 0;
 const _redditWaiters = [];
-const REDDIT_MAX_CONCURRENT = 3;
+const REDDIT_MAX_CONCURRENT = 2; // shared by search, comments AND subreddit-detail fetches — keep low so a burst of any of them can't saturate the one Netlify site
 function _acquireReddit() {
     if (_redditActive < REDDIT_MAX_CONCURRENT) { _redditActive++; return Promise.resolve(); }
     return new Promise(resolve => _redditWaiters.push(resolve));
@@ -2141,14 +2142,19 @@ async function handleRemoveSubClick(event) {
 }
 
 async function fetchSubredditDetails(subredditName) {
-    const MAX_RETRIES = 2;
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    const MAX_RETRIES = 1;
+    for (let attempt = 1; attempt <= MAX_RETRIES + 1; attempt++) {
+        if (Date.now() < _redditCircuitOpenUntil) return null; // proxy struggling — skip
+        await _acquireReddit(); // share the Reddit concurrency limiter so ~20 of these don't burst
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 12000);
         try {
             const payload = { type: 'about', subreddit: subredditName };
             const response = await fetch(REDDIT_PROXY_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
+                body: JSON.stringify(payload),
+                signal: ctrl.signal
             });
             if (response.status >= 500) { throw new Error(`Server error: ${response.status}`); }
             if (!response.ok) {
@@ -2156,11 +2162,19 @@ async function fetchSubredditDetails(subredditName) {
                 return null;
             }
             const data = await response.json();
+            _redditFailStreak = 0;
             return data && data.data ? data.data : null;
         } catch (error) {
             console.error(`Attempt ${attempt} failed for r/${subredditName}:`, error.message);
-            if (attempt === MAX_RETRIES) { return null; }
+            if (error && error.name !== 'AbortError' && ++_redditFailStreak >= _REDDIT_FAIL_THRESHOLD) {
+                _redditCircuitOpenUntil = Date.now() + _REDDIT_COOLDOWN_MS;
+                _redditFailStreak = 0;
+            }
+            if (attempt > MAX_RETRIES) { return null; }
             await new Promise(r => setTimeout(r, 200 * attempt));
+        } finally {
+            clearTimeout(timer);
+            _releaseReddit();
         }
     }
     return null;

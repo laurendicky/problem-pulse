@@ -220,13 +220,16 @@ function buildProblemQueries() {
 // One Reddit search → array of post children. Fails soft to [].
 async function fetchPostsForQuery(subredditQuery, searchTerm) {
     try {
+        // Search calls are heavier than about-lookups (big OR query across many subreddits), so
+        // give them more headroom than callReddit's 12s default — the proxy can take ~8s on Reddit
+        // alone, and these were the calls aborting at 12s.
         const data = await callReddit({
             searchTerm,
             niche: subredditQuery,
             limit: CORPUS_PER_QUERY,
             timeFilter: CORPUS_TIME_FILTER,
             after: null
-        });
+        }, { timeoutMs: 20000 });
         return (data && data.data && Array.isArray(data.data.children)) ? data.data.children : [];
     } catch (error) {
         console.warn(`[Corpus] query failed (${searchTerm}):`, error && error.message);
@@ -307,13 +310,101 @@ async function runProblemFinder() {
             alert('No discussions found for those communities. Try different ones.');
             return;
         }
-        // TODO Part 3: run the analyses, all reading from window._corpus.
+        // Part 3 — first analysis: audience demographics. Reads from the corpus; nothing refetched.
+        showLoader('Analysing audience…');
+        await generateAndRenderWho(corpus, window.originalGroupName || '');
+        revealResults();
     } catch (error) {
         console.error('[Analysis] failed to build corpus:', error);
         alert('Something went wrong gathering discussions. Please try again.');
     } finally {
         hideLoader();
     }
+}
+
+// =============================================================================
+// PART 3 — "Who they are": audience demographics, read straight from the corpus
+// =============================================================================
+
+// Self-contained, inline-styled block (matches the original dashboard look so it renders the same
+// regardless of Webflow CSS). All values are guarded so a missing field can't break the layout.
+function renderDemographicsHTML(d) {
+    const n = (v) => (typeof v === 'number' && isFinite(v)) ? Math.max(0, Math.round(v)) : 0;
+    const male = n(d.male_pct), female = n(d.female_pct);
+    const a1 = n(d.age_18_24), a2 = n(d.age_25_45), a3 = n(d.age_45_plus);
+    const lifeStage = (d.top_life_stage || '—').toString();
+    return `
+        <div style="background: transparent; padding: 24px; border-radius: 12px; border: 1px solid #333; color: white; font-family: sans-serif;">
+            <h3 style="margin: 0 0 20px 0; font-size: 18px; color: #00a5ce;">Audience Demographics</h3>
+            <div style="margin-bottom: 25px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
+                    <span>Male: <strong>${male}%</strong></span>
+                    <span>Female: <strong>${female}%</strong></span>
+                </div>
+                <div style="width: 100%; height: 8px; background: #333; border-radius: 4px; display: flex; overflow: hidden;">
+                    <div style="width: ${male}%; background: #00a5ce; height: 100%;"></div>
+                    <div style="width: ${female}%; background: #fd80c7; height: 100%;"></div>
+                </div>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px; text-align: center;">
+                <div style="padding: 10px; border-radius: 8px;">
+                    <div style="font-size: 11px; color: #888; text-transform: uppercase;">18-24</div>
+                    <div style="font-size: 18px; font-weight: bold;">${a1}%</div>
+                </div>
+                <div style="padding: 10px; border-radius: 8px; border: 1px solid #00a5ce;">
+                    <div style="font-size: 11px; color: #888; text-transform: uppercase;">25-45</div>
+                    <div style="font-size: 18px; font-weight: bold;">${a2}%</div>
+                </div>
+                <div style="padding: 10px; border-radius: 8px;">
+                    <div style="font-size: 11px; color: #888; text-transform: uppercase;">45+</div>
+                    <div style="font-size: 18px; font-weight: bold;">${a3}%</div>
+                </div>
+            </div>
+            <div style="border-top: 1px solid #333; padding-top: 15px; font-size: 14px;">
+                <span style="color: #888;">Primary Life Stage:</span>
+                <span style="margin-left: 5px; color: #00a5ce; font-weight: 500;">${lifeStage}</span>
+            </div>
+        </div>`;
+}
+
+async function generateAndRenderWho(corpus, audience) {
+    const container = document.getElementById('overview-div');
+    if (!container) { console.warn('[Who] #overview-div not found — cannot render.'); return; }
+    container.innerHTML = '<p class="loading-text">Calculating demographic proportions…</p>';
+
+    // Top ~50 posts, capped at 600 chars each — enough signal, small upload.
+    const sample = corpus.slice(0, 50)
+        .map(p => `Title: ${p.title}\nContent: ${p.body}`.substring(0, 600))
+        .join('\n---\n');
+
+    const payload = {
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: 'You are a precise demographic estimator.' },
+            { role: 'user', content: `Based on the language, slang, and life experiences in these Reddit posts for "${audience}", give a specific demographic estimate. You MUST provide numerical percentages — specific, even if estimated. Respond ONLY with a valid JSON object with these keys: "male_pct" (integer), "female_pct" (integer), "age_18_24" (integer), "age_25_45" (integer), "age_45_plus" (integer), "top_life_stage" (a 3-4 word string, e.g. "Young Professionals"). Text: ${sample}` }
+        ],
+        temperature: 0.1,
+        response_format: { type: 'json_object' }
+    };
+
+    try {
+        const parsed = await callOpenAI(payload);
+        container.innerHTML = renderDemographicsHTML(parsed);
+        console.log('[Who] demographics rendered:', parsed);
+    } catch (error) {
+        console.error('[Who] demographics failed:', error);
+        container.innerHTML = '<p class="error-message">Could not analyse demographics. Please try again.</p>';
+    }
+}
+
+// Reveal the main results container (hidden until the first analysis is ready). display:flex is set
+// with !important to beat any Webflow inline/none, then we fade in and scroll to it.
+function revealResults() {
+    const wrapper = document.getElementById('results-wrapper-b');
+    if (!wrapper) { console.warn('[Analysis] #results-wrapper-b not found — results may already be visible.'); return; }
+    wrapper.style.setProperty('display', 'flex', 'important');
+    wrapper.style.opacity = '1';
+    setTimeout(() => wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
 }
 
 // Reveal the subreddit-selection step (the original's transitionToStep2). Without this, the

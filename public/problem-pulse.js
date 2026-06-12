@@ -1307,7 +1307,7 @@ async function findSubredditsForGroup(groupName) {
 // Reddit's 429 rate limit. Cap concurrency low and serialise the rest gracefully.
 let _redditActive = 0;
 const _redditWaiters = [];
-const REDDIT_MAX_CONCURRENT = 2; // shared by search, comments AND subreddit-detail fetches — keep low so a burst of any of them can't saturate the one Netlify site
+const REDDIT_MAX_CONCURRENT = 3; // shared by search, comments AND subreddit-detail fetches. With comment threads now tiny (limit=100&depth=1) each request is fast, so 3 flows without the slow-thread pile-up that was blocking critical calls.
 function _acquireReddit() {
     if (_redditActive < REDDIT_MAX_CONCURRENT) { _redditActive++; return Promise.resolve(); }
     return new Promise(resolve => _redditWaiters.push(resolve));

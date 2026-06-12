@@ -45,7 +45,7 @@ async function callOpenAI(payload, { timeoutMs = 45000 } = {}) {
 // Shared Reddit concurrency gate. EVERY Reddit call (subreddit lookups, the corpus search, and
 // later comment fetches) passes through here, so no feature can ever burst the proxy — the exact
 // failure that killed the old app, prevented at the source.
-const REDDIT_MAX_CONCURRENT = 4;
+const REDDIT_MAX_CONCURRENT = 3; // browsers allow ~6 connections/origin; leave room for other scripts
 let _redditInFlight = 0;
 const _redditQueue = [];
 function _acquireRedditSlot() {
@@ -294,10 +294,22 @@ function hideLoader() {
     if (el) el.style.display = 'none';
 }
 
+// Re-entrancy guard. Another script on the page (audience-chat.js) also hooks the search and
+// triggers the analysis, and the button can be double-clicked — so without this, several corpus
+// fetches fire at once, saturate the browser→Netlify connection pool, and everything times out.
+// Only ONE analysis runs at a time; duplicate triggers are ignored until it finishes.
+let _analysisRunning = false;
+
 // #search-selected-btn handler. Builds the corpus, stores it, then hands off to analysis (Part 3).
 async function runProblemFinder() {
+    if (_analysisRunning) {
+        console.warn('[Analysis] already running — ignoring duplicate trigger.');
+        return;
+    }
     const subreddits = getSelectedSubreddits();
     if (!subreddits.length) { alert('Select at least one community to analyse.'); return; }
+
+    _analysisRunning = true; // set synchronously, before any await, so concurrent calls bail here
     console.log('[Analysis] selected subreddits:', subreddits);
 
     showLoader('Gathering discussions…');
@@ -319,6 +331,7 @@ async function runProblemFinder() {
         alert('Something went wrong gathering discussions. Please try again.');
     } finally {
         hideLoader();
+        _analysisRunning = false;
     }
 }
 

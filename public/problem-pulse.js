@@ -1318,17 +1318,25 @@ function _releaseReddit() {
 // Per-post comment cache so the same thread is never fetched twice across features.
 const _commentCache = new Map();
 
-async function _fetchOneCommentThread(postId, tries = 2) {
+async function _fetchOneCommentThread(postId, tries = 1) {
     for (let attempt = 0; attempt <= tries; attempt++) {
+        if (Date.now() < _redditCircuitOpenUntil) return []; // proxy down — skip instead of hanging
         await _acquireReddit();
+        // STRICT timeout (this fetch previously had NONE — a slow thread held a Reddit slot
+        // forever, surfacing as ERR_TIMED_OUT and freezing the shared pool). Cleared in finally
+        // AFTER json() so the body-parse step is covered too.
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 12000);
         try {
             const res = await fetch(REDDIT_PROXY_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ type: 'comments', postId })
+                body: JSON.stringify({ type: 'comments', postId }),
+                signal: ctrl.signal
             });
             if (res.ok) {
                 const data = await res.json();
+                _redditFailStreak = 0;
                 if (Array.isArray(data) && data.length > 1 && data[1].data && data[1].data.children) {
                     return data[1].data.children.filter(c => c.kind === 't1');
                 }
@@ -1336,11 +1344,15 @@ async function _fetchOneCommentThread(postId, tries = 2) {
             }
             // non-ok (likely 429) -> fall through to backoff + retry
         } catch (e) {
-            // network error -> retry
+            if (e && e.name !== 'AbortError' && ++_redditFailStreak >= _REDDIT_FAIL_THRESHOLD) {
+                _redditCircuitOpenUntil = Date.now() + _REDDIT_COOLDOWN_MS;
+                _redditFailStreak = 0;
+            }
         } finally {
+            clearTimeout(timer);
             _releaseReddit();
         }
-        if (attempt < tries) await new Promise(r => setTimeout(r, 900 * (attempt + 1)));
+        if (attempt < tries) await new Promise(r => setTimeout(r, 800 * (attempt + 1)));
     }
     return [];
 }

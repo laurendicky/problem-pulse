@@ -2491,7 +2491,7 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
     container.addEventListener('click', handleAddRelatedSubClick);
 
     try {
-        const detailPromises = analyzedSubs.map(sub => fetchSubredditDetails(sub));
+        const detailPromises = analyzedSubs.slice(0, 5).map(sub => fetchSubredditDetails(sub)); // sample 5, not all — enough to characterise the audience, and far fewer requests
         const detailsArray = await Promise.all(detailPromises);
         const validDetails = detailsArray.filter(Boolean).map(d => ({ name: d.display_name, description: d.public_description || '' }));
         if (validDetails.length === 0) throw new Error("Could not get details for source subreddits.");
@@ -2504,7 +2504,7 @@ async function renderAndHandleRelatedSubreddits(analyzedSubs) {
             return;
         }
 
-        const rankedRelatedSubs = await fetchAndRankSubreddits(newSubNames);
+        const rankedRelatedSubs = await fetchAndRankSubreddits(newSubNames.slice(0, 12)); // cap candidates so this doesn't fire 20+ subreddit-detail fetches at once
         if (rankedRelatedSubs.length === 0) {
             container.querySelector('.subreddit-tag-list').innerHTML = `<p class="placeholder-text">No suitable communities found after validation.</p>`;
             return;
@@ -5346,7 +5346,7 @@ async function runProblemFinder(options = {}) {
         // here — they load when their tab is opened (loadTabHurts / loadTabWhere / loadTabTalk /
         // loadTabShop). Only the related-communities suggestion (part of the subreddit picker)
         // stays on a short delay.
-        setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
+        setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 8000); // run AFTER the core dashboard settles so its burst doesn't compete with the Who tab + search
         // HIDDEN GEMS — DISABLED for speed. It was one of the heaviest items in a run: a
         // 40-thread comment fetch + a slow gpt-4o call + local stats math, for output that
         // wasn't pulling its weight. Flip this flag back to true to restore it.

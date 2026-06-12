@@ -65,7 +65,10 @@ function buildUrl(body) {
     }
     if (body.type === 'comments') {
         if (!body.postId) throw new Error("A 'postId' is required for fetching comments.");
-        return `https://oauth.reddit.com/comments/${body.postId}?limit=500&depth=10`;
+        // limit=100&depth=1 (was 500&depth=10): the app only needs top-level comments for word
+        // counting / signal extraction. This makes each comment thread ~10x smaller and faster,
+        // which is what unclogs the shared Reddit lane (the big slow threads were blocking everything).
+        return `https://oauth.reddit.com/comments/${body.postId}?limit=100&depth=1`;
     }
     if (body.searchTerm) {
         const { searchTerm, niche, limit, timeFilter, after } = body;

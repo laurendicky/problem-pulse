@@ -834,29 +834,41 @@ let _redditFailStreak = 0;
 let _redditCircuitOpenUntil = 0;
 const _REDDIT_FAIL_THRESHOLD = 6;   // only trip after sustained UNREACHABLE failures
 const _REDDIT_COOLDOWN_MS = 8000;
+// These search fetches now also go through the existing _acquireReddit/_releaseReddit limiter
+// (defined below, shared with comment fetching) — previously only comment fetches were capped,
+// so a burst of search calls from several features could blow past Reddit's rate limit at once.
 async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, timeFilter = 'all', searchInComments = false) {
-    if (Date.now() < _redditCircuitOpenUntil) return []; // proxy just failed repeatedly — skip fast
+    if (Date.now() < _redditCircuitOpenUntil) { console.warn(`[Reddit] circuit open — skipping "${term}"`); return []; }
+    await _acquireReddit(); // cap concurrent Reddit calls (shared limiter) so bursts don't get throttled
     let allPosts = [];
     let after = null;
     try {
         while (allPosts.length < totalLimit) {
-            const payload = { searchTerm: term, niche: niche, limit: 100, timeFilter: timeFilter, after: after }; // 100 is Reddit's max page size — same data in ~4x fewer requests (efficient, within limits)
+            const payload = { searchTerm: term, niche: niche, limit: 100, timeFilter: timeFilter, after: after };
             if (searchInComments) payload.includeComments = true;
             const ctrl = new AbortController();
-            const timer = setTimeout(() => ctrl.abort(), 15000); // generous: a busy proxy/cold start shouldn't be treated as failure
-            let response;
-            try { response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctrl.signal }); }
-            finally { clearTimeout(timer); }
-            if (!response.ok) throw new Error(`Proxy Error: Server returned status ${response.status}`);
-            const data = await response.json();
-            if (!data.data || !data.data.children || !data.data.children.length) break;
-            allPosts = allPosts.concat(data.data.children);
-            after = data.data.after;
-            if (!after) break;
+            // STRICT 15s timeout covering BOTH the connection AND the JSON body parse. The timer is
+            // cleared ONLY after response.json() resolves — so a server that returns headers then
+            // hangs the body stream still gets aborted. (Clearing it right after fetch() was the bug
+            // that left response.json() waiting forever and froze the whole analysis.)
+            const timer = setTimeout(() => { console.warn(`[Reddit] "${term}" exceeded 15s — aborting`); ctrl.abort(); }, 15000);
+            try {
+                const response = await fetch(REDDIT_PROXY_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload), signal: ctrl.signal });
+                if (!response.ok) throw new Error(`Proxy error status: ${response.status}`);
+                const data = await response.json();
+                clearTimeout(timer); // safe to clear only now that the body has fully parsed
+                if (!data || !data.data || !data.data.children || !data.data.children.length) break;
+                allPosts = allPosts.concat(data.data.children);
+                after = data.data.after;
+                if (!after) break;
+            } catch (err) {
+                clearTimeout(timer);
+                throw err;
+            }
         }
         _redditFailStreak = 0; // got through without a network failure
     } catch (err) {
-        console.error(`Failed to fetch posts for term "${term}" via proxy:`, err.message);
+        console.warn(`[Reddit] "${term}" failed or timed out:`, err.message);
         // Only a true unreachable error counts toward the breaker; a single slow/aborted call
         // shouldn't start skipping every later fetch.
         if (err && err.name !== 'AbortError' && ++_redditFailStreak >= _REDDIT_FAIL_THRESHOLD) {
@@ -865,6 +877,8 @@ async function fetchRedditForTermWithPagination(niche, term, totalLimit = 100, t
             console.warn(`[Reddit] proxy unreachable — skipping Reddit fetches for ${_REDDIT_COOLDOWN_MS / 1000}s.`);
         }
         return allPosts.slice(0, totalLimit); // return whatever we got rather than nothing
+    } finally {
+        _releaseReddit();
     }
     return allPosts.slice(0, totalLimit);
 }
@@ -890,6 +904,7 @@ async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm =
     // to paginate through many more pages, which on a slow/flaky proxy stacked up into a multi-
     // minute load. The OR query already returns a richer (deduped) union within this limit, and
     // we still cut total requests by issuing far fewer distinct queries.
+    console.log('[Reddit Batch] consolidated queries:', queries);
     const perQueryLimit = limitPerTerm;
     const QUERY_CONCURRENCY = 3;
     for (let i = 0; i < queries.length; i += QUERY_CONCURRENCY) {
@@ -898,6 +913,7 @@ async function fetchMultipleRedditDataBatched(niche, searchTerms, limitPerTerm =
         batchResults.forEach(posts => { if (Array.isArray(posts)) allResults.push(...posts); });
         if (i + QUERY_CONCURRENCY < queries.length) await new Promise(resolve => setTimeout(resolve, 500));
     }
+    console.log(`[Reddit Batch] collection complete — deduplicating ${allResults.length} raw items`);
     return deduplicatePosts(allResults);
 }
 

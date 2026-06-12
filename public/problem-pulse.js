@@ -713,7 +713,7 @@ async function classifySentimentWithAI(posts) {
             model: "gpt-4o-mini",
             messages: [{ role: "system", content: "You are a precise JSON-only sentiment classifier." }, { role: "user", content: prompt }],
             temperature: 0,
-            max_completion_tokens: 1500,
+            max_completion_tokens: 800,
             response_format: { "type": "json_object" }
         };
 
@@ -3358,7 +3358,7 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
                     { role: "user", content: prompt }
                 ],
                 temperature: 0.2,
-                max_completion_tokens: 1500, // was 2500 — ~12 signals/batch needs far less, and a smaller output generates well under the proxy's 25s ceiling
+                max_completion_tokens: 800, // was 2500 — ~12 signals/batch needs far less, and a smaller output generates well under the proxy's 25s ceiling
                 response_format: { "type": "json_object" }
             }, { tries: 2, priority: AI_PRIORITY.SHOP });
 
@@ -5185,7 +5185,7 @@ async function runProblemFinder(options = {}) {
             String(a.data.id).localeCompare(String(b.data.id))
         );
         const topKeywords = getTopKeywords(stableSorted, 10);
-        const topPosts = stableSorted.slice(0, 40);
+        const topPosts = stableSorted.slice(0, 20);
         const combinedTexts = topPosts.map(post => `${post.data.title || post.data.link_title || ''}. ${getFirstTwoSentences(post.data.selftext || post.data.body || '')}`).join("\n\n");  
         const openAIParams = { model: "gpt-4o-mini", messages: [{ role: "system", content: "You are a helpful assistant that summarizes user-provided text into between 1 and 5 core common struggles and provides authentic quotes." }, { role: "user", content: `Your task is to analyze the provided text about the niche "${originalGroupName}" and identify 1 to 5 common problems. You MUST provide your response in a strict JSON format. The JSON object must have a single top-level key named "summaries". The "summaries" key must contain an array of objects. Each object in the array represents one common problem and must have the following keys: "title", "body", "count", "quotes", "keywords". CRITICAL RULES FOR QUOTES: The "quotes" array must contain exactly 3 strings, and each string MUST be 63 characters or less. Here are the top keywords to guide your analysis: [${topKeywords.join(', ')}]. Make sure the niche "${originalGroupName}" is naturally mentioned in each "body". Prioritise the most common, clearly recurring problems that appear across many of the posts, and avoid niche one-off complaints, so the analysis stays consistent if the tool is run again on the same audience. Example of the required output format: { "summaries": [ { "title": "Example Title 1", "body": "Example body text about the problem.", "count": 50, "quotes": ["A short quote under 63 chars.", "Another quote under 63 chars.", "A final quote under 63 chars."], "keywords": ["keyword1", "keyword2"] } ] }. Here is the text to analyze: \`\`\`${combinedTexts}\`\`\`` }], temperature: 0.0, max_completion_tokens: 1500, seed: 11, response_format: { "type": "json_object" } };
         // Resilient call: retries on a timed-out/empty response (each retry gets a fresh budget),

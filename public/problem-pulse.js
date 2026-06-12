@@ -173,6 +173,20 @@ function renderSubredditChoices(subs) {
         </div>`).join('');
 }
 
+// Reveal the subreddit-selection step (the original's transitionToStep2). Without this, the
+// results render into a container that's still hidden — which is why "nothing happened" even
+// though the data loaded fine.
+function transitionToStep2(audienceName) {
+    const welcome = document.getElementById('welcome-div');
+    const step1 = document.getElementById('step-1-container');
+    const step2 = document.getElementById('subreddit-selection-container');
+    const title = document.getElementById('pf-audience-title');
+    if (welcome) welcome.style.display = 'none';
+    if (step1) step1.classList.add('hidden');
+    if (step2) step2.classList.add('visible');
+    if (title) title.innerHTML = `Select Subreddits For: <span class="pf-audience-name">${audienceName}</span>`;
+}
+
 // --- wire the buttons -------------------------------------------------------
 function initEntryFlow() {
     const findBtn = document.getElementById('find-communities-btn');
@@ -211,6 +225,7 @@ function initEntryFlow() {
         if (!choices) { console.error('[Entry] #subreddit-choices not found — nowhere to show results.'); return; }
 
         window.originalGroupName = groupName;
+        transitionToStep2(groupName); // reveal the step-2 panel so the results are actually visible
         findBtn.disabled = true;
         choices.innerHTML = '<p class="loading-text">Finding communities…</p>';
         try {

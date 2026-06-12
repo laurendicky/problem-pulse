@@ -3326,7 +3326,7 @@ Respond ONLY with valid JSON: {"signals":[{"quote":"...","source_index":0,"categ
                     { role: "user", content: prompt }
                 ],
                 temperature: 0.2,
-                max_completion_tokens: 2500,
+                max_completion_tokens: 1500, // was 2500 — ~12 signals/batch needs far less, and a smaller output generates well under the proxy's 25s ceiling
                 response_format: { "type": "json_object" }
             }, { tries: 2, priority: AI_PRIORITY.SHOP });
 
@@ -4922,79 +4922,25 @@ function populateFindingPills() {
 // combined call fails or a section is missing, that panel falls back to its own original call,
 // so the worst case is identical to the previous behaviour — never a regression.
 async function runVoiceClusterCombined(posts, audienceContext) {
-    let combined = null;
-    try {
-        const topPostsText = posts.slice(0, 40).map(p =>
-            `Title: ${p.data.title || ''}\nBody: ${(p.data.selftext || p.data.body || '').substring(0, 400)}`
-        ).join('\n---\n');
-        const prompt = `You are a brand strategist and cultural observer studying how the "${audienceContext}" community talks. From the posts below produce THREE things in ONE JSON object. Be observational and slightly editorial; avoid cliches like "shared experience" or "celebrate the journey".
-
-"voice": { "tone_description": [exactly 5 one-sentence strings, in this order: (1) their emotional state, (2) how they communicate, (3) how they relate to each other, (4) what they are really seeking, (5) what messaging lands with them], "voice_adjectives": [exactly 6 evocative adjectives] }
-
-"tone": { "tone_analysis": [exactly 4 objects of { "topic": short title, "traits": [4 objects of { "name": adjective, "score": 10-100 }], "insights": [exactly 3 standalone sentences, each under 15 words, one idea each], "level": "LOW" | "MEDIUM" | "HIGH" }] }
-
-"language": { "pairs": [8-10 objects of { "avoid": term outsiders/marketers use, "avoid_reason": <=12 words why it sounds inauthentic, "use": authentic insider alternative, "use_reason": <=12 words why it lands better }] }
-
-Respond ONLY with valid JSON: {"voice":{...},"tone":{...},"language":{...}}
-
-Posts: ${topPostsText}`;
-        const data = await callOpenAIProxyWithRetry({
-            model: "gpt-4o-mini",
-            messages: [
-                { role: "system", content: "You are a brand strategist and linguist who outputs only valid JSON with keys voice, tone and language." },
-                { role: "user", content: prompt }
-            ],
-            temperature: 0.3,
-            max_completion_tokens: 2200,
-            response_format: { "type": "json_object" }
-        }, { tries: 2, priority: AI_PRIORITY.LANGUAGE });
-        if (data && data.openaiResponse) combined = JSON.parse(data.openaiResponse);
-    } catch (e) {
-        console.warn('[Voice cluster] combined call failed; panels will self-fetch:', e && e.message);
-    }
-    generateAndRenderVoiceProfile(posts, audienceContext, (combined && combined.voice) ? combined.voice : null);
-    generateAndRenderToneMap(posts, audienceContext, (combined && combined.tone) ? combined.tone : null);
-    generateAndRenderLanguageToAvoid(posts, audienceContext, (combined && combined.language) ? combined.language : null);
+    // NOTE: this used to make ONE big call returning voice+tone+language as ~2200 tokens of JSON.
+    // At gpt-4o-mini's generation speed that output regularly took >25s and tripped the proxy's
+    // latency ceiling ("OpenAI_Latency_Limit"). Rate limits are NOT the constraint here (Tier 3:
+    // 4M TPM / 5k RPM), so we run the three SMALLER, faster calls directly — each finishes well
+    // under 25s. More requests, but each is quick and reliable.
+    generateAndRenderVoiceProfile(posts, audienceContext, null);
+    generateAndRenderToneMap(posts, audienceContext, null);
+    generateAndRenderLanguageToAvoid(posts, audienceContext, null);
 }
 
 // CONSOLIDATED CALL #2 — Mindset (archetype/values/rejects) + Strategic Pillars (goals/fears).
 // Both are psychological "field notes" on the same posts. One call instead of two, same
 // per-panel fallback safety.
 async function runProfileClusterCombined(posts, audienceContext) {
-    let combined = null;
-    try {
-        const topPostsText = posts.slice(0, 40).map(p => `Title: ${p.data.title || ''}\nContent: ${p.data.selftext || p.data.body || ''}`.substring(0, 800)).join('\n---\n');
-        const prompt = `You are a strategist who has spent months lurking inside the "${audienceContext}" community. From the real posts below write sharp, observational field notes (never a marketing deck). Produce ONE JSON object:
-
-"archetype": a 2-3 word evocative name for this audience.
-"summary": EXACTLY 2 short sentences (40 words max), a sharp character study built around one instinct or contradiction. Do NOT start with "this audience is driven by", "they value" or "they appreciate".
-"values": array of exactly 3 one-sentence observations (max 20 words) about an instinct, belief or contradiction. Do NOT begin with "They value" or "They appreciate".
-"rejects": array of exactly 3 one-sentence observations (max 20 words) about a pet peeve, red flag or thing they push back against. Do NOT begin with "They reject".
-"goals": array of exactly 3 things they quietly hope for, in their own emotional terms, ~12 words or fewer each. Avoid business-plan language.
-"fears": array of exactly 3 things that genuinely keep them up at night, ~12 words or fewer each.
-
-Ground every line in the posts. Respond ONLY with valid JSON.
-
-Posts:
-${topPostsText}`;
-        const data = await callOpenAIProxyWithRetry({
-            model: "gpt-4o-mini",
-            messages: [
-                { role: "system", content: "You are a sharp cultural observer who writes psychologically specific field notes and outputs only valid JSON. You never sound like a marketing deck." },
-                { role: "user", content: prompt }
-            ],
-            temperature: 0.6,
-            max_completion_tokens: 1500,
-            response_format: { "type": "json_object" }
-        }, { tries: 2, priority: AI_PRIORITY.WHO });
-        if (data && data.openaiResponse) combined = JSON.parse(data.openaiResponse);
-    } catch (e) {
-        console.warn('[Profile cluster] combined call failed; panels will self-fetch:', e && e.message);
-    }
-    // Mindset reads archetype/summary/values/rejects; Pillars reads goals/fears. Pass the shared
-    // object; if a half is missing, that panel gets null and does its own original call.
-    generateAndRenderMindsetSummary(posts, audienceContext, (combined && combined.values) ? combined : null);
-    generateAndRenderStrategicPillars(posts, audienceContext, (combined && combined.goals) ? combined : null);
+    // Was one combined ~1500-token call (mindset + goals/fears). Split into the two smaller,
+    // faster individual calls for the same latency reason as the voice cluster above — each
+    // generates a small JSON object well under the proxy's 25s ceiling.
+    generateAndRenderMindsetSummary(posts, audienceContext, null);
+    generateAndRenderStrategicPillars(posts, audienceContext, null);
 }
 
 async function runProblemFinder(options = {}) {

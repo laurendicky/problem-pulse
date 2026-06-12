@@ -980,10 +980,9 @@ function deduplicateByContent(items) {
 // rate / 25s-latency limit and leaves features empty. This serialises the load gracefully.
 let _proxyActive = 0;
 const _proxyWaiters = []; // each: { resolve, priority }
-const PROXY_MAX_CONCURRENT = 3; // Netlify functions have limited concurrent execution slots, and
-// each held-open OpenAI call occupies one. Capping the client low keeps the burst from saturating
-// Netlify (which is what was queueing/dropping requests into "Failed to fetch"). With Reddit also
-// capped at 2, total simultaneous requests to the one Netlify site stay around 5.
+const PROXY_MAX_CONCURRENT = 5; // Now that the big related-communities burst is removed, the
+// remaining load is moderate, so we can run more in parallel for speed without re-saturating the
+// shared connection pool. (Was 3 while we were firefighting the burst.)
 // Load-order priorities by dashboard TAB (higher = served first when the 6 slots are contended).
 // BACKBONE is the core findings analysis everything else is built from, so it always wins. The
 // rest follow the tab layout: Who -> Where they are -> What hurts -> Language -> How they shop.
@@ -1307,7 +1306,7 @@ async function findSubredditsForGroup(groupName) {
 // Reddit's 429 rate limit. Cap concurrency low and serialise the rest gracefully.
 let _redditActive = 0;
 const _redditWaiters = [];
-const REDDIT_MAX_CONCURRENT = 3; // shared by search, comments AND subreddit-detail fetches. With comment threads now tiny (limit=100&depth=1) each request is fast, so 3 flows without the slow-thread pile-up that was blocking critical calls.
+const REDDIT_MAX_CONCURRENT = 4; // shared by search + comments. Comment threads are tiny now (limit=100&depth=1) so each request is fast; 4 in parallel speeds the load without the pile-up that blocked critical calls.
 function _acquireReddit() {
     if (_redditActive < REDDIT_MAX_CONCURRENT) { _redditActive++; return Promise.resolve(); }
     return new Promise(resolve => _redditWaiters.push(resolve));

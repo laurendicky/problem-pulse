@@ -1035,10 +1035,11 @@ async function limitedFetch(url, opts, priority = 0) {
     }
     await _acquireProxySlot(priority);
     try {
-        // Backstop timeout set ABOVE the proxy's own 25s race — so we never abort a call the
-        // proxy would have answered. It only fires if the proxy itself hangs entirely.
+        // Backstop timeout set ABOVE the proxy's race. Netlify allows synchronous functions up to
+        // 60s, so the proxy can afford a ~45s race; the client waits a bit longer (52s) so it never
+        // aborts a call the proxy would still answer. Only fires if the function hangs entirely.
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 30000);
+        const timer = setTimeout(() => ctrl.abort(), 52000);
         try {
             const res = await fetch(url, { ...opts, signal: ctrl.signal });
             _proxyFailStreak = 0; // a real response (even a 4xx/5xx) means the backend is reachable
@@ -5149,29 +5150,19 @@ async function runProblemFinder(options = {}) {
         const filteredItems = filterPosts(allItems, selectedMinUpvotes);
         if (filteredItems.length < 10) throw new Error("Not enough high-quality content found after filtering. Try a 'Deep' search or a longer time frame.");
         window._filteredPosts = filteredItems;
-        // Social split is pure, instant counting (no network, no AI). Render it NOW so it no
-        // longer waits ~minutes for the shopping-signal AI batching to finish. It is refined
-        // later on the richer corpus (posts + comments + general).
-        try { renderSocialSplitChart(filteredItems); } catch (e) { console.warn('[Social Split] early render failed', e); }
-        try { renderLocationChart(filteredItems); } catch (e) { console.warn('[Location] early render failed', e); }
-        try { renderActiveHours(filteredItems); } catch (e) { console.warn('[Active Hours] early render failed', e); }
         window._exportData = {}; // collected findings for the spreadsheet export
         window._growthTabLoaded = false; // Growth Plan tab regenerates its content on next open
-        generateAndRenderOverview(filteredItems, originalGroupName);
+        // LAZY LOADING: only the "Who" tab + the core findings load now. Every other tab's heavy
+        // work is deferred until that tab is first opened (see setupLazyTabs / loadTab* below), so
+        // the app no longer fires ~15 AI calls + a comment-fetch flood at once and overwhelms the
+        // single Netlify proxy. State the loaders need is stashed on window._lazy.
+        window._tabLoaded = {};
+        window._lazy = { subredditQueryString, demandSignalTerms, selectedTime, allItems };
         renderPosts(filteredItems);
-        generateAndRenderHybridSentiment(filteredItems, originalGroupName);
-        generateEmotionMapData(filteredItems).then(renderEmotionMap);
         renderIncludedSubreddits(selectedSubreddits);
-        // Voice + Tone + Language now share ONE proxy call; Mindset + Goals/Fears share ONE call.
-        // 5 OpenAI round-trips collapsed to 2 (each panel still falls back to its own call if the
-        // combined one fails). Hook Patterns stays separate (different posts/time window).
-        runVoiceClusterCombined(filteredItems, originalGroupName);
-        generateAndRenderHookPatterns(filteredItems, originalGroupName);
+        // Tab 1 (Who): demographics + mindset/goals/fears. This tab is shown first, so load eagerly.
+        generateAndRenderOverview(filteredItems, originalGroupName);
         runProfileClusterCombined(filteredItems, originalGroupName);
-        // Deferred to the Growth Plan tab: AI prompt + SEO content plan/sunburst now run
-        // only when #growth-tab-link is first opened (see setupGrowthKitInteraction).
-        showBrandLoader();
-        extractAndValidateEntities(filteredItems, originalGroupName).then(entities => { renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands'); renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products'); });
         renderCountHeader(filteredItems.length, allItems.length, originalGroupName);
        // Deterministic ordering so the same posts always produce the same "top" sample.
         // A bigger sample also means a few new posts can't swing the themes.
@@ -5336,13 +5327,12 @@ async function runProblemFinder(options = {}) {
                 }, 50);
             }
         }
-        setTimeout(() => runConstellationAnalysis(subredditQueryString, demandSignalTerms, selectedTime), 1500);
+        // LAZY: runConstellationAnalysis (demand signals + where-they-are panels), brand recovery,
+        // historical sentiment, sub-problems and the emotion/voice/hook panels are NO LONGER fired
+        // here — they load when their tab is opened (loadTabHurts / loadTabWhere / loadTabTalk /
+        // loadTabShop). Only the related-communities suggestion (part of the subreddit picker)
+        // stays on a short delay.
         setTimeout(() => renderAndHandleRelatedSubreddits(selectedSubreddits), 2500);
-        setTimeout(() => {
-            Promise.resolve(enhanceDiscoveryWithComments(window._filteredPosts, originalGroupName))
-                .finally(() => recoverBrandsWithShopping(subredditQueryString, selectedTime, originalGroupName));
-        }, 5000);
-        setTimeout(() => generateAndRenderHistoricalSentiment(subredditQueryString), 3500);
         // HIDDEN GEMS — DISABLED for speed. It was one of the heaviest items in a run: a
         // 40-thread comment fetch + a slow gpt-4o call + local stats math, for output that
         // wasn't pulling its weight. Flip this flag back to true to restore it.
@@ -5366,7 +5356,7 @@ async function runProblemFinder(options = {}) {
                 });
             }, 4000);
         }
-        setTimeout(() => pregenerateAllSubProblems(originalGroupName), 9000);
+        // (sub-problems now load with the "What hurts them" tab — see loadTabHurts)
       
       
       
@@ -5393,6 +5383,76 @@ async function runProblemFinder(options = {}) {
 
 
 
+
+// =================================================================================
+// === PER-TAB LAZY LOADING ========================================================
+// Only the "Who" tab + core findings load on search. Each other tab's heavy work runs the
+// first time that tab is opened, so the app never fires its whole workload at once (which was
+// overwhelming the single Netlify proxy). Mirrors the existing #growth-tab-link pattern.
+//
+// WEBFLOW SETUP: give each tab LINK element a custom ID so the JS can hook its first open:
+//   Tab 2 "What hurts them"  -> id="tab-hurts"
+//   Tab 3 "Where they are"   -> id="tab-where"
+//   Tab 4 "How they talk"    -> id="tab-talk"
+//   Tab 5 "How they shop"    -> id="tab-shop"
+// (Tab 1 "Who" needs no ID — it loads on search.) The Growth Plan tab keeps #growth-tab-link.
+// =================================================================================
+function _runTabOnce(key, fn) {
+    if (!window._tabLoaded) window._tabLoaded = {};
+    if (window._tabLoaded[key]) return;
+    const posts = window._filteredPosts;
+    if (!posts || !posts.length) return; // analysis not finished yet — a later click will load it
+    window._tabLoaded[key] = true;
+    const audience = window.originalGroupName || '';
+    const lz = window._lazy || {};
+    try { fn(posts, audience, lz); } catch (e) { console.warn(`[Lazy ${key}] failed`, e); }
+}
+
+function loadTabHurts() {            // Tab 2: polarity map + sub-problems (findings already shown)
+    _runTabOnce('hurts', (posts, audience) => {
+        generateEmotionMapData(posts).then(renderEmotionMap).catch(e => console.warn('[Emotion Map] failed', e));
+        pregenerateAllSubProblems(audience);
+    });
+}
+function loadTabWhere() {            // Tab 3: social, location, active hours, media, influencers, apps, places
+    _runTabOnce('where', (posts, audience, lz) => {
+        renderPlatformPanels(posts, lz.subredditQueryString, lz.selectedTime);
+    });
+}
+function loadTabTalk() {             // Tab 4: hooks, sentiment, pos/neg words & phrases, voice/tone/language
+    _runTabOnce('talk', (posts, audience, lz) => {
+        generateAndRenderHybridSentiment(posts, audience);
+        runVoiceClusterCombined(posts, audience);
+        generateAndRenderHookPatterns(posts, audience);
+        generateAndRenderHistoricalSentiment(lz.subredditQueryString);
+    });
+}
+function loadTabShop() {             // Tab 5: demand signals + brands & products
+    _runTabOnce('shop', (posts, audience, lz) => {
+        showBrandLoader();
+        extractAndValidateEntities(posts, audience)
+            .then(entities => {
+                renderDiscoveryList('top-brands-container', entities.topBrands, 'Top Brands & Specific Products', 'brands');
+                renderDiscoveryList('top-products-container', entities.topProducts, 'Top Generic Products', 'products');
+            })
+            .catch(e => console.warn('[Brands] failed', e))
+            // Brand recovery + comment enrichment only AFTER entities exist (fixes the old
+            // "Cannot read properties of undefined (reading 'brands')" crash).
+            .finally(() => {
+                Promise.resolve(enhanceDiscoveryWithComments(posts, audience))
+                    .finally(() => recoverBrandsWithShopping(lz.subredditQueryString, lz.selectedTime, audience));
+            });
+        runConstellationAnalysis(lz.subredditQueryString, lz.demandSignalTerms, lz.selectedTime);
+    });
+}
+
+function setupLazyTabs() {
+    const map = { 'tab-hurts': loadTabHurts, 'tab-where': loadTabWhere, 'tab-talk': loadTabTalk, 'tab-shop': loadTabShop };
+    Object.keys(map).forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('click', map[id]);
+    });
+}
 
 function setupGrowthKitInteraction() {
     // Find the key elements of the dropdown header
@@ -6760,6 +6820,7 @@ function initializeProblemFinderTool() {
     // Initialize logic
     initializeDashboardInteractivity();
     setupGrowthKitInteraction();
+    setupLazyTabs(); // wire each tab to load its panels on first open
 
     console.log("Problem Finder tool successfully initialized.");
 }

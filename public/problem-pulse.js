@@ -1,26 +1,27 @@
 // =============================================================================
 // problem-pulse-v2.js — clean rebuild, piece by piece.
 //
-// PART 1 — Entry / search flow (first 3 functions):
-//   1. callOpenAI            — single reliable helper for the OpenAI proxy
-//   2. getRelatedSearchTermsAI — brainstorm related search terms for an audience
-//   3. findSubredditsForGroup  — turn those terms into candidate subreddits
+// PART 1 — Entry / search flow (runs end-to-end on its own):
+//   callOpenAI / callReddit      — two small, reliable proxy helpers
+//   getRelatedSearchTermsAI       — brainstorm related search terms
+//   findSubredditsForGroup        — turn terms into candidate subreddit names
+//   fetchSubredditDetails         — look up one subreddit's stats
+//   fetchAndRankSubreddits        — validate + rank the candidates (gentle, 4 at a time)
+//   renderSubredditChoices        — show selectable communities
+//   initEntryFlow                 — wire the buttons (#find-communities-btn / #inspire-me-button)
 //
-// Design rules for the rebuild:
-//   - Keep it simple. No throttling/circuit-breakers until a piece actually needs them.
-//   - One fetch per call, with a timeout that covers BOTH the request AND the JSON parse.
-//   - Every async function fails soft (returns a sensible empty value), never throws to the UI.
+// Design rules:
+//   - Keep it simple. Throttle ONLY where a real burst exists (the subreddit lookups).
+//   - Timeouts are cleared in `finally` (after JSON parse) so a stall can't hang silently.
+//   - Async functions fail soft (return [] / null), never throw into the UI.
 // =============================================================================
 
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
-const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy'; // used by later parts
+const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-// --- 1. callOpenAI ----------------------------------------------------------
-// Sends an OpenAI chat payload to the proxy and returns the PARSED JSON object
-// the model produced. The proxy responds with either { openaiResponse: "<json string>" }
-// or { error: true, message }. The abort timer is cleared in `finally` — i.e. AFTER
-// response.json() resolves — so a server that stalls mid-body still gets aborted
-// (that was the silent-hang bug in the old code).
+const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
+
+// --- proxy helpers ----------------------------------------------------------
 async function callOpenAI(payload, { timeoutMs = 45000 } = {}) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -32,17 +33,31 @@ async function callOpenAI(payload, { timeoutMs = 45000 } = {}) {
             signal: ctrl.signal
         });
         const data = await res.json();
-        if (!data || data.error) {
-            throw new Error((data && data.message) || 'OpenAI proxy returned an error');
-        }
+        if (!data || data.error) throw new Error((data && data.message) || 'OpenAI proxy error');
         return JSON.parse(data.openaiResponse);
     } finally {
         clearTimeout(timer);
     }
 }
 
-// --- 2. getRelatedSearchTermsAI --------------------------------------------
-// Given an audience name, returns up to ~5 related search terms (or [] on failure).
+async function callReddit(payload, { timeoutMs = 12000 } = {}) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+        const res = await fetch(REDDIT_PROXY_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: ctrl.signal
+        });
+        if (!res.ok) throw new Error('Reddit proxy status ' + res.status);
+        return await res.json();
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// --- find communities -------------------------------------------------------
 async function getRelatedSearchTermsAI(audience) {
     const payload = {
         model: 'gpt-4o-mini',
@@ -63,14 +78,10 @@ async function getRelatedSearchTermsAI(audience) {
     }
 }
 
-// --- 3. findSubredditsForGroup ---------------------------------------------
-// Brainstorms related terms, then asks the model for up to 20 candidate subreddits
-// (names without the "r/" prefix). Returns [] on failure so the caller can handle it.
 async function findSubredditsForGroup(groupName) {
     const relatedTerms = await getRelatedSearchTermsAI(groupName);
-    window._audienceTopics = relatedTerms; // stash for later parts that want the topics
+    window._audienceTopics = relatedTerms;
     const allTerms = [groupName, ...relatedTerms];
-
     const payload = {
         model: 'gpt-4o-mini',
         messages: [
@@ -89,3 +100,124 @@ async function findSubredditsForGroup(groupName) {
         return [];
     }
 }
+
+// --- validate + rank candidates --------------------------------------------
+async function fetchSubredditDetails(name) {
+    try {
+        const result = await callReddit({ type: 'about', subreddit: name });
+        return result && result.data ? result.data : null; // {display_name, subscribers, active_user_count, public_description}
+    } catch (error) {
+        console.warn(`[Subreddit] r/${name} lookup failed:`, error && error.message);
+        return null;
+    }
+}
+
+function formatMemberCount(num) {
+    if (num == null) return 'N/A';
+    if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'm';
+    if (num >= 1000) return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+    return String(num);
+}
+
+function getActivityLabel(active, members) {
+    members = members || 0; active = active || 0;
+    const ratio = members > 0 ? active / members : 0;
+    if (members >= 1000000 || active >= 2000 || ratio >= 0.004) return 'High Activity';
+    if (members >= 200000 || active >= 300 || ratio >= 0.0015) return 'Highly Engaged';
+    return 'Insight Rich';
+}
+
+// Look up each candidate, drop the ones that don't resolve, rank by size. Lookups run 4 at a
+// time — the one place a real burst exists (up to 20 at once would hammer the proxy).
+async function fetchAndRankSubreddits(names) {
+    const list = (names || []).filter(Boolean);
+    const details = [];
+    const BATCH = 4;
+    for (let i = 0; i < list.length; i += BATCH) {
+        const batch = list.slice(i, i + BATCH);
+        const results = await Promise.all(batch.map(n => fetchSubredditDetails(n)));
+        details.push(...results);
+    }
+    return details
+        .filter(Boolean)
+        .map(d => ({
+            name: d.display_name,
+            members: d.subscribers || 0,
+            description: d.public_description || '',
+            activityLabel: getActivityLabel(d.active_user_count, d.subscribers)
+        }))
+        .sort((a, b) => b.members - a.members);
+}
+
+// --- render -----------------------------------------------------------------
+function renderSubredditChoices(subs) {
+    const container = document.getElementById('subreddit-choices');
+    if (!container) return;
+    if (!subs.length) {
+        container.innerHTML = '<p class="placeholder-text">No communities found. Try another audience.</p>';
+        return;
+    }
+    container.innerHTML = subs.map(sub => `
+        <div class="subreddit-choice">
+            <input type="checkbox" id="sub-${sub.name}" value="${sub.name}" checked>
+            <label for="sub-${sub.name}">
+                <span class="sub-checkbox"></span>
+                <span class="sub-info">
+                    <span class="sub-name">r/${sub.name}</span>
+                    <span class="sub-members">${formatMemberCount(sub.members)} members</span>
+                </span>
+                <span class="pill activity-pill" data-activity="${sub.activityLabel}">${sub.activityLabel}</span>
+            </label>
+        </div>`).join('');
+}
+
+// --- wire the buttons -------------------------------------------------------
+function initEntryFlow() {
+    const groupInput = document.getElementById('group-input');
+    const findBtn = document.getElementById('find-communities-btn');
+    const inspireBtn = document.getElementById('inspire-me-button');
+    const pills = document.getElementById('pf-suggestion-pills');
+    const choices = document.getElementById('subreddit-choices');
+
+    if (!findBtn || !choices) {
+        console.warn('[Entry] missing #find-communities-btn or #subreddit-choices — buttons not wired.');
+        return;
+    }
+
+    // "Inspire me" reveals suggestion pills; clicking a pill fills the input and searches.
+    if (inspireBtn && pills) {
+        if (!pills.dataset.populated) {
+            pills.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
+            pills.dataset.populated = '1';
+        }
+        inspireBtn.addEventListener('click', () => pills.classList.toggle('visible'));
+        pills.addEventListener('click', (e) => {
+            const pill = e.target.closest('.pf-suggestion-pill');
+            if (pill && groupInput) { groupInput.value = pill.getAttribute('data-value'); findBtn.click(); }
+        });
+    }
+
+    findBtn.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const groupName = (groupInput && groupInput.value.trim()) || '';
+        if (!groupName) { alert('Please enter a group of people or pick a suggestion.'); return; }
+        window.originalGroupName = groupName;
+
+        findBtn.disabled = true;
+        choices.innerHTML = '<p class="loading-text">Finding communities…</p>';
+        try {
+            const names = await findSubredditsForGroup(groupName);
+            const ranked = await fetchAndRankSubreddits(names);
+            renderSubredditChoices(ranked);
+        } catch (error) {
+            console.error('[Entry] find communities failed:', error);
+            choices.innerHTML = '<p class="error-message">Could not load communities. Please try again.</p>';
+        } finally {
+            findBtn.disabled = false;
+        }
+    });
+
+    console.log('[Entry] wired ✓');
+}
+
+document.addEventListener('DOMContentLoaded', initEntryFlow);

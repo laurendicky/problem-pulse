@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 29 — cache TTL 14 days', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 30 — posts cache 14 days, communities cache indefinite (seedable)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -336,7 +336,10 @@ async function buildCorpus(subreddits, audience) {
 // FIREBASE CORPUS CACHE — repeat searches for the same audience skip Reddit entirely.
 // All fail-soft: if Firebase isn't on the page or errors, we just fetch live as before.
 // =============================================================================
-const CORPUS_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // re-fetch if the cached data is >14 days old
+const CORPUS_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;   // posts: re-fetch if >14 days old (content goes stale)
+const SUBREDDIT_CACHE_TTL_MS = Infinity;                // communities: never expire — the mapping is stable,
+                                                        // and this lets pre-launch seeding persist. Delete a
+                                                        // doc in Firebase to force a refresh for one audience.
 
 function _firestore() {
     try { return (typeof firebase !== 'undefined' && firebase.firestore) ? firebase.firestore() : null; }
@@ -385,7 +388,7 @@ async function getCachedSubreddits(audience) {
         if (!doc.exists) return null;
         const data = doc.data() || {};
         if (!Array.isArray(data.ranked) || !data.ranked.length) return null;
-        if (Date.now() - (data.updatedAt || 0) > CORPUS_CACHE_TTL_MS) return null; // stale
+        if (Date.now() - (data.updatedAt || 0) > SUBREDDIT_CACHE_TTL_MS) return null; // indefinite by default
         return data.ranked;
     } catch (e) { console.warn('[Cache] subreddits read failed (continuing live):', e && e.message); return null; }
 }

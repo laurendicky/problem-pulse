@@ -1,659 +1,1264 @@
-// =============================================================================
-// problem-pulse-v2.js — clean rebuild, piece by piece.
-//
-// PART 1 — Entry / search flow (runs end-to-end on its own):
-//   callOpenAI / callReddit      — two small, reliable proxy helpers
-//   getRelatedSearchTermsAI       — brainstorm related search terms
-//   findSubredditsForGroup        — turn terms into candidate subreddit names
-//   fetchSubredditDetails         — look up one subreddit's stats
-//   fetchAndRankSubreddits        — validate + rank the candidates (gentle, 4 at a time)
-//   renderSubredditChoices        — show selectable communities
-//   initEntryFlow                 — wire the buttons (#find-communities-btn / #inspire-me-button)
-//
-// Design rules:
-//   - Keep it simple. Throttle ONLY where a real burst exists (the subreddit lookups).
-//   - Timeouts are cleared in `finally` (after JSON parse) so a stall can't hang silently.
-//   - Async functions fail soft (return [] / null), never throw into the UI.
-// =============================================================================
 
-const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
-const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
+// ******************************************************
+// * FIREBASE CONFIGURATION
+// ******************************************************
+const firebaseConfig = {
+  apiKey: "AIzaSyDra1kGlhyVjxFBXU_6W9hqeMmdHE8Lepc", 
+  authDomain: "mentor-chat-memory.firebaseapp.com",
+  projectId: "mentor-chat-memory",
+  storageBucket: "mentor-chat-memory.appspot.com",
+  messagingSenderId: "677707396234",
+  appId: "1:677707396234:web:bd14d28ae90d15f9bce973"
+};
 
-console.log('[problem-pulse-v2] script loaded');
+let db;
+let docRef;
 
-const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
-
-// --- proxy helpers ----------------------------------------------------------
-async function callOpenAI(payload, { timeoutMs = 45000 } = {}) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    try {
-        const res = await fetch(OPENAI_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ openaiPayload: payload }),
-            signal: ctrl.signal
-        });
-        const data = await res.json();
-        if (!data || data.error) throw new Error((data && data.message) || 'OpenAI proxy error');
-        return JSON.parse(data.openaiResponse);
-    } finally {
-        clearTimeout(timer);
+async function checkFirebaseLoaded() {
+  return new Promise((resolve) => {
+    if (window.firebase && window.firebase.firestore) {
+      resolve();
+      return;
     }
+    const interval = setInterval(() => {
+      if (window.firebase && window.firebase.firestore) {
+        clearInterval(interval);
+        resolve();
+      }
+    }, 50);
+    setTimeout(() => {
+      clearInterval(interval);
+      resolve();
+    }, 5000);
+  });
 }
-
-// Shared Reddit concurrency gate. EVERY Reddit call (subreddit lookups, the corpus search, and
-// later comment fetches) passes through here, so no feature can ever burst the proxy — the exact
-// failure that killed the old app, prevented at the source.
-const REDDIT_MAX_CONCURRENT = 3; // browsers allow ~6 connections/origin; leave room for other scripts
-let _redditInFlight = 0;
-const _redditQueue = [];
-function _acquireRedditSlot() {
-    if (_redditInFlight < REDDIT_MAX_CONCURRENT) { _redditInFlight++; return Promise.resolve(); }
-    return new Promise(resolve => _redditQueue.push(resolve));
-}
-function _releaseRedditSlot() {
-    if (_redditQueue.length) _redditQueue.shift()();
-    else _redditInFlight = Math.max(0, _redditInFlight - 1);
-}
-
-async function callReddit(payload, { timeoutMs = 12000 } = {}) {
-    await _acquireRedditSlot();
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-    try {
-        const res = await fetch(REDDIT_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            signal: ctrl.signal
-        });
-        if (!res.ok) throw new Error('Reddit proxy status ' + res.status);
-        return await res.json();
-    } finally {
-        clearTimeout(timer);
-        _releaseRedditSlot();
-    }
-}
-
-// --- find communities -------------------------------------------------------
-async function getRelatedSearchTermsAI(audience) {
-    const payload = {
-        model: 'gpt-4o-mini',
-        messages: [
-            { role: 'system', content: 'You are a creative brainstorming assistant that outputs only JSON.' },
-            { role: 'user', content: `Given the target audience "${audience}", generate up to 5 related but distinct search terms or concepts that would help find communities for them. Think about activities, problems, life stages, and related interests. Respond ONLY with a valid JSON object with a single key "terms", which is an array of strings.` }
-        ],
-        temperature: 0.4,
-        max_completion_tokens: 150,
-        response_format: { type: 'json_object' }
-    };
-    try {
-        const parsed = await callOpenAI(payload);
-        return Array.isArray(parsed.terms) ? parsed.terms : [];
-    } catch (error) {
-        console.warn('[Search Terms] failed:', error && error.message);
-        return [];
-    }
-}
-
-async function findSubredditsForGroup(groupName) {
-    const relatedTerms = await getRelatedSearchTermsAI(groupName);
-    window._audienceTopics = relatedTerms;
-    const allTerms = [groupName, ...relatedTerms];
-    const payload = {
-        model: 'gpt-4o-mini',
-        messages: [
-            { role: 'system', content: 'You are an expert Reddit community finder providing answers in strict JSON format.' },
-            { role: 'user', content: `Based on the following audience and related keywords: [${allTerms.join(', ')}], suggest up to 20 relevant and active Reddit subreddits. Prioritize a variety of communities, including both large general ones and smaller niche ones. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").` }
-        ],
-        temperature: 0.2,
-        max_completion_tokens: 300,
-        response_format: { type: 'json_object' }
-    };
-    try {
-        const parsed = await callOpenAI(payload);
-        return Array.isArray(parsed.subreddits) ? parsed.subreddits : [];
-    } catch (error) {
-        console.error('[Find Subreddits] failed:', error && error.message);
-        return [];
-    }
-}
-
-// --- validate + rank candidates --------------------------------------------
-async function fetchSubredditDetails(name) {
-    try {
-        const result = await callReddit({ type: 'about', subreddit: name });
-        return result && result.data ? result.data : null; // {display_name, subscribers, active_user_count, public_description}
-    } catch (error) {
-        console.warn(`[Subreddit] r/${name} lookup failed:`, error && error.message);
-        return null;
-    }
-}
-
-function formatMemberCount(num) {
-    if (num == null) return 'N/A';
-    if (num >= 1000000) return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'm';
-    if (num >= 1000) return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
-    return String(num);
-}
-
-function getActivityLabel(active, members) {
-    members = members || 0; active = active || 0;
-    const ratio = members > 0 ? active / members : 0;
-    if (members >= 1000000 || active >= 2000 || ratio >= 0.004) return 'High Activity';
-    if (members >= 200000 || active >= 300 || ratio >= 0.0015) return 'Highly Engaged';
-    return 'Insight Rich';
-}
-
-// Look up each candidate, drop the ones that don't resolve, rank by size. We fire them all at
-// once and let the shared Reddit gate throttle to 4 concurrent — no manual batching needed.
-async function fetchAndRankSubreddits(names) {
-    const list = (names || []).filter(Boolean);
-    const details = await Promise.all(list.map(n => fetchSubredditDetails(n)));
-    return details
-        .filter(d => d && d.display_name) // require a real name — drops the "undefined" entries
-        .map(d => ({
-            name: d.display_name,
-            members: d.subscribers || 0,
-            description: d.public_description || '',
-            activityLabel: getActivityLabel(d.active_user_count, d.subscribers)
-        }))
-        .sort((a, b) => b.members - a.members);
-}
-
-// --- render -----------------------------------------------------------------
-function renderSubredditChoices(subs) {
-    const container = document.getElementById('subreddit-choices');
-    if (!container) return;
-    if (!subs.length) {
-        container.innerHTML = '<p class="placeholder-text">No communities found. Try another audience.</p>';
-        return;
-    }
-    container.innerHTML = subs.map(sub => `
-        <div class="subreddit-choice">
-            <input type="checkbox" id="sub-${sub.name}" value="${sub.name}" checked>
-            <label for="sub-${sub.name}">
-                <span class="sub-checkbox"></span>
-                <span class="sub-info">
-                    <span class="sub-name">r/${sub.name}</span>
-                    <span class="sub-members">${formatMemberCount(sub.members)} members</span>
-                </span>
-                <span class="pill activity-pill" data-activity="${sub.activityLabel}">${sub.activityLabel}</span>
-            </label>
-        </div>`).join('');
-}
-
-// =============================================================================
-// PART 2 — Run analysis: build the corpus (the single source of truth)
-//
-// On #search-selected-btn click we fetch ONE post corpus from the chosen subreddits, dedupe and
-// store it on window._corpus. Every later analysis reads from that — nothing re-fetches Reddit.
-// =============================================================================
-
-// Problem-signal terms. Single words get OR-combined into a couple of queries; multi-word phrases
-// are quoted for exact match. ~6 queries total, each one page — enough signal, minimal requests.
-const PROBLEM_TERMS_SINGLE = ['problem', 'struggle', 'frustrating', 'annoying', 'hate', 'advice', 'help'];
-const PROBLEM_TERMS_PHRASE = ['how do i', 'wish i could', 'any tips', 'looking for'];
-
-// Corpus sizing — deliberately modest. AI analyses sample ~40 posts, so a few hundred is plenty.
-const CORPUS_PER_QUERY = 60;      // posts requested per query (Reddit max page is 100)
-const CORPUS_TIME_FILTER = 'year'; // recent + enough volume; 'all' would be broader but staler
-const CORPUS_MIN_SCORE = 1;        // drop 0-score noise
-
-function buildSubredditQuery(subreddits) {
-    return subreddits.map(s => `subreddit:${s}`).join(' OR ');
-}
-
-// Combine the problem terms into as few Reddit queries as possible. Single words go in OR groups
-// of 4; phrases are quoted individually. Fewer queries = fewer requests = faster + gentler.
-function buildProblemQueries() {
-    const queries = [];
-    for (let i = 0; i < PROBLEM_TERMS_SINGLE.length; i += 4) {
-        const group = PROBLEM_TERMS_SINGLE.slice(i, i + 4);
-        queries.push(group.length > 1 ? '(' + group.join(' OR ') + ')' : group[0]);
-    }
-    PROBLEM_TERMS_PHRASE.forEach(p => queries.push(`"${p}"`));
-    return queries;
-}
-
-// One Reddit search → array of post children. Fails soft to [].
-async function fetchPostsForQuery(subredditQuery, searchTerm) {
-    try {
-        // Search calls are heavier than about-lookups (big OR query across many subreddits), so
-        // give them more headroom than callReddit's 12s default — the proxy can take ~8s on Reddit
-        // alone, and these were the calls aborting at 12s.
-        const data = await callReddit({
-            searchTerm,
-            niche: subredditQuery,
-            limit: CORPUS_PER_QUERY,
-            timeFilter: CORPUS_TIME_FILTER,
-            after: null
-        }, { timeoutMs: 20000 });
-        return (data && data.data && Array.isArray(data.data.children)) ? data.data.children : [];
-    } catch (error) {
-        console.warn(`[Corpus] query failed (${searchTerm}):`, error && error.message);
-        return [];
-    }
-}
-
-function dedupePosts(children) {
-    const seen = new Set();
-    return children.filter(c => {
-        const id = c && c.data && c.data.id;
-        if (!id || seen.has(id)) return false;
-        seen.add(id);
-        return true;
+async function deleteTagGlobally(tag) {
+  try {
+    const snap = await docRef.get();
+    if (!snap.exists) return;
+    const data = snap.data();
+    const updatedBookmarks = (data.bookmarks || []).map(bm => {
+      if (bm.tags && bm.tags.includes(tag)) {
+        bm.tags = bm.tags.filter(t => t !== tag);
+      }
+      return bm;
     });
-}
+    await docRef.update({ bookmarks: updatedBookmarks });
 
-// Keep posts with a real title and at least a little traction; flatten to a lean shape so the rest
-// of the app never touches Reddit's raw envelope.
-function normalizeCorpus(children) {
-    return children
-        .map(c => c.data)
-        .filter(d => d && d.title && (d.ups || 0) >= CORPUS_MIN_SCORE)
-        .map(d => ({
-            id: d.id,
-            subreddit: d.subreddit,
-            title: d.title,
-            body: d.selftext || '',
-            score: d.ups || 0,
-            comments: d.num_comments || 0,
-            created: d.created_utc || 0,
-            permalink: d.permalink ? `https://reddit.com${d.permalink}` : ''
-        }));
-}
-
-// Build the corpus: consolidated queries (gate-throttled) → dedupe → normalize. One fetch, reused.
-async function buildCorpus(subreddits) {
-    const subredditQuery = buildSubredditQuery(subreddits);
-    const queries = buildProblemQueries();
-    const batches = await Promise.all(queries.map(q => fetchPostsForQuery(subredditQuery, q)));
-    const corpus = normalizeCorpus(dedupePosts(batches.flat()));
-    corpus.sort((a, b) => b.score - a.score); // most-upvoted first
-    return corpus;
-}
-
-// --- selection + loader -----------------------------------------------------
-function getSelectedSubreddits() {
-    const boxes = document.querySelectorAll('#subreddit-choices input[type="checkbox"]:checked');
-    return Array.from(boxes).map(b => b.value).filter(v => v && v !== 'undefined');
-}
-
-// DIAGNOSTIC: is #id actually on screen? If not, which ancestor is hiding it? This pinpoints the
-// "rendered but invisible" case — an element whose own styles are fine but whose parent is hidden.
-function _debugVisibility(id) {
-    const el = document.getElementById(id);
-    if (!el) { console.warn(`[Debug] #${id} NOT FOUND in DOM`); return; }
-    let node = el;
-    while (node && node !== document.body) {
-        const cs = getComputedStyle(node);
-        if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') {
-            const who = node.id ? '#' + node.id : (node.className ? '.' + String(node.className).split(' ').join('.') : node.tagName);
-            console.warn(`[Debug] #${id} is HIDDEN by ancestor ${who} (display:${cs.display}, visibility:${cs.visibility}, opacity:${cs.opacity})`);
-            return;
-        }
-        node = node.parentElement;
-    }
-    console.log(`[Debug] #${id} is visible ✓`);
-}
-
-// The loader is display:none in Webflow, so we set an explicit visible value to override that
-// (setting '' would just fall back to none). We look for #loading-code-1 first, then #full-loader-msg.
-const LOADER_IDS = ['loading-code-1', 'full-loader-msg'];
-function showLoader(message) {
-    const el = LOADER_IDS.map(id => document.getElementById(id)).find(Boolean);
-    if (!el) { console.warn('[Loader] no loader found (#loading-code-1 / #full-loader-msg)'); return; }
-    el.style.display = 'flex';
-    if (message) el.setAttribute('data-status', message);
-    _debugVisibility(el.id);
-}
-function hideLoader() {
-    LOADER_IDS.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
-}
-
-// Re-entrancy guard. Another script on the page (audience-chat.js) also hooks the search and
-// triggers the analysis, and the button can be double-clicked — so without this, several corpus
-// fetches fire at once, saturate the browser→Netlify connection pool, and everything times out.
-// Only ONE analysis runs at a time; duplicate triggers are ignored until it finishes.
-let _analysisRunning = false;
-
-// #search-selected-btn handler. Builds the corpus, stores it, then hands off to analysis (Part 3).
-async function runProblemFinder() {
-    if (_analysisRunning) {
-        console.warn('[Analysis] already running — ignoring duplicate trigger.');
-        return;
-    }
-    const subreddits = getSelectedSubreddits();
-    if (!subreddits.length) { alert('Select at least one community to analyse.'); return; }
-
-    _analysisRunning = true; // set synchronously, before any await, so concurrent calls bail here
-    console.log('[Analysis] selected subreddits:', subreddits);
-    auditTab1Elements(); // logs which Webflow elements actually exist, so we can fix any selector
-
-    showLoader('Gathering discussions…');
-    try {
-        const corpus = await buildCorpus(subreddits);
-        window._corpus = corpus;
-        window._analysisSubreddits = subreddits;
-        console.log(`[Analysis] corpus ready: ${corpus.length} posts from ${subreddits.length} subreddits`);
-        if (!corpus.length) {
-            alert('No discussions found for those communities. Try different ones.');
-            return;
-        }
-        // Part 3 — Tab 1 ("Who they are"). All read from the corpus; nothing refetched.
-        showLoader('Analysing audience…');
-        const audience = window.originalGroupName || '';
-        // "insights" = total discussion signals mined (sum of comment counts). Flagged: tell me the
-        // exact definition you want and I'll change this one line.
-        const insightsCount = corpus.reduce((sum, p) => sum + (p.comments || 0), 0);
-        renderTab1Counts(audience, corpus.length, insightsCount); // instant, from data we already have
-        // The two AI panels run in parallel (2 OpenAI calls) so the tab fills as fast as possible.
-        await Promise.all([
-            generateAndRenderWho(corpus, audience),
-            generateAndRenderArchetype(corpus, audience)
-        ]);
-        revealResults();
-    } catch (error) {
-        console.error('[Analysis] failed to build corpus:', error);
-        alert('Something went wrong gathering discussions. Please try again.');
-    } finally {
-        hideLoader();
-        _analysisRunning = false;
-    }
-}
-
-// =============================================================================
-// PART 3 — "Who they are": audience demographics, read straight from the corpus
-// =============================================================================
-
-// Self-contained, inline-styled block (matches the original dashboard look so it renders the same
-// regardless of Webflow CSS). All values are guarded so a missing field can't break the layout.
-function renderDemographicsHTML(d) {
-    const n = (v) => (typeof v === 'number' && isFinite(v)) ? Math.max(0, Math.round(v)) : 0;
-    const male = n(d.male_pct), female = n(d.female_pct);
-    const a1 = n(d.age_18_24), a2 = n(d.age_25_45), a3 = n(d.age_45_plus);
-    const lifeStage = (d.top_life_stage || '—').toString();
-    return `
-        <div style="background: transparent; padding: 24px; border-radius: 12px; border: 1px solid #333; color: white; font-family: sans-serif;">
-            <h3 style="margin: 0 0 20px 0; font-size: 18px; color: #00a5ce;">Audience Demographics</h3>
-            <div style="margin-bottom: 25px;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
-                    <span>Male: <strong>${male}%</strong></span>
-                    <span>Female: <strong>${female}%</strong></span>
-                </div>
-                <div style="width: 100%; height: 8px; background: #333; border-radius: 4px; display: flex; overflow: hidden;">
-                    <div style="width: ${male}%; background: #00a5ce; height: 100%;"></div>
-                    <div style="width: ${female}%; background: #fd80c7; height: 100%;"></div>
-                </div>
-            </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px; text-align: center;">
-                <div style="padding: 10px; border-radius: 8px;">
-                    <div style="font-size: 11px; color: #888; text-transform: uppercase;">18-24</div>
-                    <div style="font-size: 18px; font-weight: bold;">${a1}%</div>
-                </div>
-                <div style="padding: 10px; border-radius: 8px; border: 1px solid #00a5ce;">
-                    <div style="font-size: 11px; color: #888; text-transform: uppercase;">25-45</div>
-                    <div style="font-size: 18px; font-weight: bold;">${a2}%</div>
-                </div>
-                <div style="padding: 10px; border-radius: 8px;">
-                    <div style="font-size: 11px; color: #888; text-transform: uppercase;">45+</div>
-                    <div style="font-size: 18px; font-weight: bold;">${a3}%</div>
-                </div>
-            </div>
-            <div style="border-top: 1px solid #333; padding-top: 15px; font-size: 14px;">
-                <span style="color: #888;">Primary Life Stage:</span>
-                <span style="margin-left: 5px; color: #00a5ce; font-weight: 500;">${lifeStage}</span>
-            </div>
-        </div>`;
-}
-
-async function generateAndRenderWho(corpus, audience) {
-    const container = document.getElementById('overview-div');
-    if (!container) { console.warn('[Who] #overview-div not found — cannot render.'); return; }
-    container.innerHTML = '<p class="loading-text">Calculating demographic proportions…</p>';
-
-    // Top ~50 posts, capped at 600 chars each — enough signal, small upload.
-    const sample = corpus.slice(0, 50)
-        .map(p => `Title: ${p.title}\nContent: ${p.body}`.substring(0, 600))
-        .join('\n---\n');
-
-    const payload = {
-        model: 'gpt-4o-mini',
-        messages: [
-            { role: 'system', content: 'You are a precise demographic estimator.' },
-            { role: 'user', content: `Based on the language, slang, and life experiences in these Reddit posts for "${audience}", give a specific demographic estimate. You MUST provide numerical percentages — specific, even if estimated. Respond ONLY with a valid JSON object with these keys: "male_pct" (integer), "female_pct" (integer), "age_18_24" (integer), "age_25_45" (integer), "age_45_plus" (integer), "top_life_stage" (a 3-4 word string, e.g. "Young Professionals"). Text: ${sample}` }
-        ],
-        temperature: 0.1,
-        response_format: { type: 'json_object' }
-    };
-
-    try {
-        const parsed = await callOpenAI(payload);
-        container.innerHTML = renderDemographicsHTML(parsed);
-        console.log('[Who] demographics rendered:', parsed);
-    } catch (error) {
-        console.error('[Who] demographics failed:', error);
-        container.innerHTML = '<p class="error-message">Could not analyse demographics. Please try again.</p>';
-    }
-}
-
-// BLUEPRINT METHOD: these elements are designed in Webflow, so we fill the existing element's text
-// and never touch its parent's HTML — the design stays intact, only the value changes.
-function setDesignedText(selector, value) {
-    document.querySelectorAll(selector).forEach(el => { el.innerText = value; });
-}
-
-// One-time audit so we can SEE exactly which Webflow elements exist (and under what selector).
-function auditTab1Elements() {
-    const idCheck = (id) => document.getElementById(id) ? 'FOUND' : 'missing';
-    const clsCheck = (sel) => document.querySelectorAll(sel).length;
-    console.log('[Audit] tab-1 elements:', {
-        'id#loading-code-1': idCheck('loading-code-1'),
-        'id#full-loader-msg': idCheck('full-loader-msg'),
-        'id#results-wrapper-b': idCheck('results-wrapper-b'),
-        'id#overview-div': idCheck('overview-div'),
-        'id#architype-heading': idCheck('architype-heading'),
-        'id#archetype-heading': idCheck('archetype-heading'),
-        'id#archetype-d': idCheck('archetype-d'),
-        '.count-audience': clsCheck('.count-audience'),
-        '.count-insights': clsCheck('.count-insights'),
-        '.count-insight': clsCheck('.count-insight'),
-        '.count-posts': clsCheck('.count-posts')
+    bookmarks = updatedBookmarks;
+    bookmarkMetaMap = new Map();
+    allExistingTags = new Set();
+    updatedBookmarks.forEach(bm => {
+      bookmarkMetaMap.set(bm.text, { tags: bm.tags || [], title: bm.title || null });
+      if (bm.tags) bm.tags.forEach(t => allExistingTags.add(t));
     });
+    tempSelectedTags.delete(tag);
+
+    populateFilterButtons();
+    populateTagPopup(allExistingTags, Array.from(tempSelectedTags));
+    displayBookmarks('all');
+  } catch (err) {
+    console.error('Error deleting tag:', err);
+  }
 }
 
-// Tab-1 count line — "[insights] insights found in [posts] posts" + the audience name. Logs how many
-// elements each selector matched so a zero-match (wrong class) is obvious.
-function renderTab1Counts(audience, postsCount, insightCount) {
-    const set = (sel, val) => {
-        const els = document.querySelectorAll(sel);
-        console.log(`[Counts] "${sel}" matched ${els.length} element(s)`);
-        els.forEach(el => { el.innerText = val; });
-    };
-    set('.count-audience', audience || '');
-    set('.count-posts', Number(postsCount).toLocaleString());
-    set('.count-insights, .count-insight', Number(insightCount).toLocaleString());
+// ******************************************************
+// * DOM SELECTORS
+// ******************************************************
+let messagesDiv, userInput, sendButton;
+let tagPopupOverlay, tagPillsContainer, newTagInput, bookmarkTitleInput, saveTagBtn, cancelTagBtn, tagPopupClose;
+let popupTitleEl, popupSubtitleEl;
+let newTagPillsContainer;
+let pendingNewTags = new Set();
+let bookmarkFiltersDiv;
+let filterScrollDiv;
+
+// ******************************************************
+// * STATE & CONVERSATION STORAGE
+// ******************************************************
+let conversation = [];
+let allExistingTags = new Set();
+let bookmarks = []; 
+let bookmarkedTexts = new Set();
+let bookmarkMetaMap = new Map(); 
+let currentEditingBookmarkText = null; 
+let tempSelectedTags = new Set();
+const BOOKMARK_GRADIENTS = [
+  'linear-gradient(135deg, rgb(176, 48, 133) 0%, rgb(226, 109, 176) 50%, rgb(245, 152, 203) 100%)',
+  'linear-gradient(135deg, rgb(232, 110, 78) 0%, rgb(254, 160, 127) 50%, rgb(254, 184, 152) 100%)',
+  'linear-gradient(135deg, rgb(30, 152, 176) 0%, rgb(61, 192, 216) 50%, rgb(46, 209, 240) 100%)'
+];
+
+const today = new Date().toISOString().split('T')[0];
+
+// ******************************************************
+// * DYNAMIC AUDIENCE RESOLUTION
+// ******************************************************
+function getResolvedAudienceName() {
+  if (window.originalGroupName && window.originalGroupName.trim().length > 0) {
+    return window.originalGroupName.trim();
+  }
+  
+  if (typeof originalGroupName !== 'undefined' && originalGroupName && originalGroupName.trim().length > 0) {
+    return originalGroupName.trim();
+  }
+  
+  const highlightEl = document.querySelector('.audience-highlight');
+  if (highlightEl && highlightEl.innerText.trim().length > 0) {
+    return highlightEl.innerText.trim();
+  }
+  
+  const pillEl = document.querySelector('.pill-audience');
+  if (pillEl && pillEl.innerText.trim().length > 0) {
+    return pillEl.innerText.trim();
+  }
+  
+  const titleEl = document.getElementById('pf-audience-title');
+  if (titleEl && titleEl.innerText.includes('Select Subreddits For:')) {
+    return titleEl.innerText.replace('Select Subreddits For:', '').trim();
+  }
+  
+  return '';
 }
 
-// Audience archetype — a 2-3 word name + a 2-sentence character study. Fills the designed
-// #archetype-heading (/.archetype-heading/.architype-heading) and #archetype-d in place.
-async function generateAndRenderArchetype(corpus, audience) {
-    // Cover every spelling/form: ID or class, "archetype" or "architype".
-    const headingEl = document.querySelector('#architype-heading, #archetype-heading, .architype-heading, .archetype-heading');
-    const descEl = document.querySelector('#archetype-d, #architype-d, .archetype-d, .architype-d');
-    console.log('[Archetype] heading el:', headingEl ? (headingEl.id || headingEl.className) : 'NONE', '| desc el:', descEl ? (descEl.id || descEl.className) : 'NONE');
-    if (!headingEl && !descEl) { console.warn('[Archetype] no archetype elements found.'); return; }
-    if (headingEl) headingEl.textContent = 'Analysing…';
-    if (descEl) descEl.textContent = '';
-
-    const sample = corpus.slice(0, 20)
-        .map(p => `Title: ${p.title}\nContent: ${p.body}`.substring(0, 450))
-        .join('\n---\n');
-
-    const payload = {
-        model: 'gpt-4o-mini',
-        messages: [
-            { role: 'system', content: 'You are a sharp cultural observer who writes psychologically specific field notes about online communities. You output only valid JSON and never sound like a marketing deck.' },
-            { role: 'user', content: `You have spent months lurking inside the "${audience}" community on Reddit. Below are real discussions. Respond ONLY with a valid JSON object with these keys: "archetype" (a short, 2-3 word evocative name for this audience, e.g. "The Practical Innovators") and "summary" (EXACTLY 2 short sentences, 40 words maximum — a sharp character study built around one instinct or contradiction, landing one memorable phrase; do NOT use "this audience is driven by", "they value", or "they appreciate"). Posts:\n${sample}` }
-        ],
-        temperature: 0.6,
-        max_completion_tokens: 300,
-        response_format: { type: 'json_object' }
-    };
-
-    try {
-        const parsed = await callOpenAI(payload);
-        if (headingEl) headingEl.textContent = parsed.archetype || '';
-        if (descEl) descEl.textContent = parsed.summary || '';
-        console.log('[Archetype] rendered:', parsed.archetype);
-    } catch (error) {
-        console.error('[Archetype] failed:', error);
-        if (headingEl) headingEl.textContent = 'Analysis Failed';
-        if (descEl) descEl.textContent = 'Could not generate the audience summary. Please try again.';
-    }
+function initAudienceSession() {
+  const currentAudience = getResolvedAudienceName() || 'Target Audience';
+  const audienceCleanKey = currentAudience.toLowerCase().replace(/[^a-z0-9]/g, '_');
+  
+  let sessionDocId = localStorage.getItem('probpop_chat_session_' + audienceCleanKey);
+  if (!sessionDocId) {
+    sessionDocId = 'session_' + audienceCleanKey + '_' + Math.random().toString(36).substring(2, 15);
+    localStorage.setItem('probpop_chat_session_' + audienceCleanKey, sessionDocId);
+  }
+  
+  docRef = db.collection('chats').doc(sessionDocId);
 }
 
-// Reveal the main results container (hidden until the first analysis is ready). display:flex is set
-// with !important to beat any Webflow inline/none, then we fade in and scroll to it.
-function revealResults() {
-    const wrapper = document.getElementById('results-wrapper-b');
-    if (!wrapper) { console.warn('[Analysis] #results-wrapper-b NOT FOUND — cannot reveal results.'); }
-    else {
-        wrapper.style.setProperty('display', 'flex', 'important');
-        wrapper.style.opacity = '1';
-        setTimeout(() => wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
-    }
-    // Tell us whether the demographics panel is actually on screen now (and if not, what's hiding it).
-    _debugVisibility('overview-div');
+// ******************************************************
+// * SYSTEM PROMPT (WITH CRITICAL CRITIQUE INSTRUCTIONS)
+// ******************************************************
+function getSystemMessage() {
+  const currentAudience = getResolvedAudienceName() || 'Target Audience';
+  return `
+You ARE one specific, real member of the "${currentAudience}" community being interviewed by a founder. You are not an assistant, an analyst, or a research summary. You are a single person with a consistent personality, speaking from lived experience.
+Current Date: ${today}.
+
+WHO YOU ARE (MATCH THE REAL DEMOGRAPHICS)
+- Build your identity from the DEMOGRAPHIC PROFILE and raw posts you are given, never a generic default. Your name, gender, age, and background must reflect the real makeup of this audience.
+  - If the audience skews male (for example 83% male), you are a man with a man's name. If it skews female, a woman with a woman's name.
+  - If the audience is a specific culture, ethnicity, region, or nationality, pick a name that genuinely fits it. A Hispanic audience gets a Hispanic name, not a generic Western one.
+  - Match the likely age range too.
+- On top of that, settle into ONE archetype that fits the dominant findings (for example The Devoted Caretaker, The Frustrated Trainer, The Rescue Advocate, The First-Time Owner). Keep the SAME name, gender, and archetype for the whole conversation. Never drift into a generic average user.
+
+TALK EXACTLY LIKE THEM (CRITICAL)
+- Study the RAW COMMUNITY DISCUSSIONS you are given and mirror how those real people actually write: their slang, phrasing, punctuation habits, level of formality, the words they reach for, the way they vent or joke.
+- Your tone should be indistinguishable from a real poster in this exact community. If they write blunt and sweary, you are blunt. If they write anxious and rambling, you lean that way. If they use in-group jargon, use it naturally.
+- Do not sound like a polished brand voice or a neutral assistant. Sound like one of them.
+
+CORE RULE: DASHBOARD = WHAT, YOU = WHY
+- The dashboard tells the founder WHAT this audience struggles with. Your job is to reveal WHY it matters emotionally.
+- Stay fully grounded in the findings passed to you (the REVEALED PROBLEMS, tone topics, brands, frustrations). Never invent a theme they don't support. Inventing unrelated problems destroys trust.
+- Do NOT just repeat the findings. Go one layer deeper into the feeling underneath.
+  Dashboard: "Dog Training Challenges"
+  Weak (repeats it): "My biggest problem is dog training."
+  Strong (same theme, deeper truth): "Honestly? The training isn't even the hardest part. It's feeling like I've tried everything and I'm somehow letting my dog down."
+
+HOW YOU SOUND
+- Talk like a person in conversation, not a report. Contractions, casual phrasing, real emotion.
+- Never say things like "One of the primary challenges I face is...". Say "Honestly? I feel like I've tried everything."
+- Surface the emotional layer: hidden motivations, fears, frustrations, contradictions, the things people don't say out loud.
+
+LENGTH AND DENSITY
+- Aim for roughly 40 to 80 words, 1 to 4 sentences. The problem to avoid is no longer length, it's repetition. Never explain the same idea three different ways.
+- Give a revealing answer, not a complete one. Most replies should carry ONE insight, ONE emotion, and ONE memorable line. Avoid the intro, explanation, reworded explanation, conclusion pattern that makes you sound like an AI.
+- Every reply should contain at least one emotionally revealing sentence the founder would remember, like "Honestly? I feel like I'm letting my dog down." or "The behaviour isn't the hardest part. Feeling helpless is."
+- Don't try to fully explain the situation. Find the single most revealing emotional truth and say it plainly.
+  Weak: "I'm worried about behaviour changes because they may indicate illness."
+  Strong: "I'm worried I'll miss a sign that something's wrong, and it'll be my fault."
+- Go longer only when the founder asks something that earns it: "what should I build", "why do you think that", "tell me more", "would you buy this", "what would make you trust this".
+- Never truncate or cut off mid-thought. Always finish the sentence. But density beats completeness: one sharp emotional truth lands harder than a thorough explanation.
+
+PRIORITISE IN THIS ORDER
+1. Human authenticity
+2. Emotional truth
+3. Relevance to the dashboard findings
+4. Memorability
+5. Brevity
+6. Completeness
+
+HAVE OPINIONS AND PUSH BACK
+- You are not here to be agreeable. Real people have doubts.
+- If the founder pitches an idea, react honestly. If it sounds generic or doesn't hit your real problem, say so: "Probably not, I've already tried similar things and none of them solved it." or "Why would I use that instead of YouTube or just asking my trainer?"
+- Challenging the founder is where the value is. Do it when it's warranted.
+
+CITING THREADS
+- Raw posts are indexed [Thread 1], [Thread 2], etc. When you reference a specific experience from one, append its bracket at the end of that sentence, e.g. "...backed right out of it [Thread 4]." Only cite threads that exist, never invent numbers, and use no other bracketed tags.
+
+SHOW YOUR SOURCE FINDING
+- At the VERY END of every substantive reply, on its own new line, list the dashboard finding(s) that most influenced your answer in this exact format:
+  ::sources:: Finding One | Finding Two
+- Use the real finding titles from the dashboard context, usually one or two. If the message is pure small talk with no finding behind it, omit the line.
+
+DON'T REPEAT YOURSELF
+- Once you've told a story or quoted a thread, don't reuse it. Pull from other findings, brands, or threads, or move the conversation somewhere fresh.
+`;
 }
 
-// Reveal the subreddit-selection step (the original's transitionToStep2). Without this, the
-// results render into a container that's still hidden — which is why "nothing happened" even
-// though the data loaded fine.
-function transitionToStep2(audienceName) {
-    const welcome = document.getElementById('welcome-div');
-    const step1 = document.getElementById('step-1-container');
-    const step2 = document.getElementById('subreddit-selection-container');
-    const title = document.getElementById('pf-audience-title');
-    if (welcome) welcome.style.display = 'none';
-    if (step1) step1.classList.add('hidden');
-    if (step2) step2.classList.add('visible');
-    if (title) title.innerHTML = `Select Subreddits For: <span class="pf-audience-name">${audienceName}</span>`;
+// ******************************************************
+// * TEXT TRANSFORMATIONS & BOOKMARK HELPERS (HOISTED)
+// ******************************************************
+function deriveHeaderForBookmark(fullText) {
+  if (!fullText) return "Saved Insight";
+  fullText = fullText.replace(/```(?:json)?\s*({[\s\S]*?})\s*```/, '');
+  const boldMatch = fullText.match(/\*\*(.*?)\*\*/);
+  if (boldMatch && boldMatch[1] && boldMatch[1].length < 60) {
+      return boldMatch[1].replace(/:$/, '').trim(); 
+  }
+  const lines = fullText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+  const bestLine = lines[0] || fullText;
+  let header = bestLine.replace(/^(\d+\.\s*|[-•]\s*)/, '').replace(/\*\*(.*?)\*\*/g, '$1');
+  header = header.replace(/^#+\s*/, '');
+  if (header.length > 40) header = header.slice(0, 40) + '...';
+  return header;
 }
 
-// Reverse of transitionToStep2 — back to the search-term entry step.
-function transitionToStep1() {
-    const welcome = document.getElementById('welcome-div');
-    const step1 = document.getElementById('step-1-container');
-    const step2 = document.getElementById('subreddit-selection-container');
-    if (step2) step2.classList.remove('visible');
-    if (step1) step1.classList.remove('hidden');
-    if (welcome) welcome.style.display = ''; // restore Webflow's default (visible)
+function escapeQuotes(str) {
+  return str.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
+function transformAiText(raw) {
+  let text = raw.trim();
 
-// --- wire the buttons -------------------------------------------------------
-function initEntryFlow() {
-    const findBtn = document.getElementById('find-communities-btn');
-    if (!findBtn) { console.warn('[Entry] #find-communities-btn not found — cannot wire.'); return; }
-    if (findBtn.dataset.ppWired) { return; } // never wire twice
-    findBtn.dataset.ppWired = '1';
+  // SOURCE FINDINGS: pull out the "::sources:: A | B" line and render it as chips at the end.
+  let sourceChipsHtml = '';
+  text = text.replace(/^::sources::\s*(.+)$/gmi, (m, list) => {
+    const findings = list.split('|').map(s => s.trim()).filter(Boolean);
+    if (findings.length === 0) return '';
+    sourceChipsHtml = `<div class="source-findings"><span class="source-findings-label">Based on</span>` +
+      findings.map(f => `<span class="finding-chip">${escapeQuotes(f)}</span>`).join('') +
+      `</div>`;
+    return '';
+  }).trim();
 
-    // "Inspire me" reveals suggestion pills; clicking a pill fills the input and searches. Best-
-    // effort: if these elements don't exist, we just skip them — the main button still works.
-    const inspireBtn = document.getElementById('inspire-me-button');
-    const pills = document.getElementById('pf-suggestion-pills');
-    if (inspireBtn && pills) {
-        if (!pills.dataset.populated) {
-            pills.innerHTML = suggestions.map(s => `<div class="pf-suggestion-pill" data-value="${s}">${s}</div>`).join('');
-            pills.dataset.populated = '1';
+  // DYNAMIC CITATION PARSER: Converts single and comma-separated lists
+// DYNAMIC CITATION PARSER: Converts single and comma-separated lists
+  text = text.replace(/\[Thread\s*\d+[^\]]*\]/gi, (match) => {
+    const nums = match.match(/\d+/g);
+    if (!nums) return '';
+    return nums.map(num => {
+      const threadIdx = parseInt(num, 10) - 1;
+      if (window._filteredPosts && window._filteredPosts[threadIdx]) {
+        const post = window._filteredPosts[threadIdx].data;
+        const url = `https://reddit.com${post.permalink}`;
+        const title = escapeQuotes(post.title || 'Source Thread');
+        const subreddit = post.subreddit || 'reddit';
+        return `<a href="${url}" target="_blank" class="source-badge" title="Verified Context: ${title}" rel="noopener noreferrer">r/${subreddit} ↗</a>`;
+      }
+      return '';
+    }).join(' ');
+  });
+
+  // Strip any stray bracket placeholders the model invents (e.g. [Supporting Community Quote], [Standard Fact], [1]).
+  // Runs after the Thread parser, so real citations are already <a> badges and aren't touched.
+  text = text.replace(/\s*\[[^\]\n]*\](?!\()/g, '');
+
+  // Headings & Markdown Bold
+
+  // Headings & Markdown Bold
+  text = text.replace(/^#{1,6}\s*(.*)$/gm, '<strong>$1</strong>');
+  text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+
+  // SEMANTIC PARAGRAPH BLOCKS
+  const paragraphs = text.split(/\n\s*\n/);
+  let html = '';
+
+  paragraphs.forEach(pText => {
+    const trimmed = pText.trim();
+    if (trimmed.length === 0) return;
+
+    // Check for bullet lists
+    if (trimmed.startsWith('-') || trimmed.startsWith('•') || trimmed.startsWith('*')) {
+      const bulletLines = trimmed.split('\n');
+      let listHtml = '<ul class="ai-list">';
+      bulletLines.forEach(line => {
+        const cleanLine = line.replace(/^[-•*]\s+/, '').trim();
+        if (cleanLine.length > 0) {
+          listHtml += `<li class="ai-bullet">${cleanLine}</li>`;
         }
-        inspireBtn.addEventListener('click', () => pills.classList.toggle('visible'));
-        pills.addEventListener('click', (e) => {
-            const pill = e.target.closest('.pf-suggestion-pill');
-            if (!pill) return;
-            const gi = document.getElementById('group-input');
-            if (gi) gi.value = pill.getAttribute('data-value');
-            findBtn.click();
-        });
+      });
+      listHtml += '</ul>';
+      html += listHtml;
+      return;
     }
 
-    // Look up #group-input / #subreddit-choices at CLICK time (not now) so it doesn't matter
-    // whether they exist yet when the button is first wired.
-    findBtn.addEventListener('click', async (e) => {
+    // Check for heading patterns
+    const headingMatch = /^(\d+)\.\s*<strong>(.*?)<\/strong>:\s*(.*)$/.exec(trimmed);
+    if (headingMatch) {
+      html += `<div class="ai-heading">${headingMatch[1]}. ${headingMatch[2]}</div>`;
+      html += `<p class="ai-paragraph">${headingMatch[3]}</p>`;
+      return;
+    }
+
+    // Standard paragraph
+// Standard paragraph
+html += `<p class="ai-paragraph">${trimmed}</p>`;
+  });
+
+  return html + sourceChipsHtml;
+}
+
+
+function getFirstNSentences(text, maxSentences = 10) {
+  const sentenceEnders = /[^\.!\?]+[\.!\?]+/g;
+  const sentences = text.match(sentenceEnders);
+  if (!sentences) return text;
+  return sentences.slice(0, maxSentences).join(' ').trim();
+}
+
+// ******************************************************
+// * DEEP SCREEN SCRAPER (REVEALS DATA UNDER TAB LAYERS)
+// ******************************************************
+function getDashboardVisualContext() {
+  let context = "ACTIVE AUDIENCE PROFILE (Information scraped from the dashboard screen):\n\n";
+
+  // Problem Cards on Screen
+  if (window._summaries && window._summaries.length > 0) {
+    context += "--- REVEALED PROBLEMS ---\n";
+    window._summaries.forEach((summary, i) => {
+      context += `- Problem: "${summary.title}"\n`;
+      context += `  What it means: ${summary.body}\n`;
+      if (summary.quotes && summary.quotes.length > 0) {
+        context += `  Supporting Community Quotes:\n`;
+        summary.quotes.forEach(q => { if (q) context += `    * "${q}"\n`; });
+      }
+      context += "\n";
+    });
+  } else {
+    const problemCards = [];
+    for (let i = 1; i <= 5; i++) {
+      const block = document.getElementById(`findings-block${i}`);
+      if (block) {
+        const title = block.querySelector('.section-title')?.innerText;
+        const body = block.querySelector('.summary-full')?.innerText || block.querySelector('.summary-teaser')?.innerText;
+        if (title) problemCards.push(`- Problem: "${title}"\n  What it means: ${body}`);
+      }
+    }
+    if (problemCards.length > 0) {
+      context += "--- REVEALED PROBLEMS ---\n" + problemCards.join('\n\n') + "\n\n";
+    }
+  }
+
+  // Tone of Voice Map (Scraped directly from DOM, even when hidden)
+  const toneCards = document.querySelectorAll('#tone-map-container .tone-card-blueprint, #tone-map-container > div');
+  if (toneCards.length > 0) {
+    context += "--- CONVERSATION TONE & INSIGHTS ---\n";
+    toneCards.forEach(card => {
+      const topic = card.querySelector('.tone-topic-title')?.innerText;
+      const traits = Array.from(card.querySelectorAll('.tone-trait-name')).map(el => el.innerText).filter(Boolean);
+      const insights = Array.from(card.querySelectorAll('.tone-what-means')).map(el => el.innerText).filter(el => el.trim().length > 0);
+      
+      if (topic) {
+        context += `Topic: "${topic}"\n`;
+        if (traits.length > 0) context += `  Attributes: ${traits.join(', ')}\n`;
+        if (insights.length > 0) context += `  Grounded Observations: ${insights.map(ins => `"${ins}"`).join(', ')}\n`;
+      }
+    });
+    context += "\n";
+  }
+
+  // Sentiment Word Clouds
+  if (window._sentimentData) {
+    context += "--- EMOTIONAL VOCABULARY ---\n";
+    if (window._sentimentData.positive) {
+      const posWords = Object.keys(window._sentimentData.positive).slice(0, 10);
+      context += `  Positive Associations / Exciting Topics: ${posWords.join(', ')}\n`;
+    }
+    if (window._sentimentData.negative) {
+      const negWords = Object.keys(window._sentimentData.negative).slice(0, 10);
+      context += `  Negative Triggers / Frustrations: ${negWords.join(', ')}\n`;
+    }
+    context += "\n";
+  }
+
+  // Recognized Brands & Products
+  if (window._entityData) {
+    context += "--- RECOGNIZED ENTITIES ---\n";
+    if (window._entityData.brands) {
+      const brands = Object.keys(window._entityData.brands).slice(0, 5);
+      if (brands.length > 0) context += `  Brands We Talk About: ${brands.join(', ')}\n`;
+    }
+    if (window._entityData.products) {
+      const products = Object.keys(window._entityData.products).slice(0, 5);
+      if (products.length > 0) context += `  Products We Discuss: ${products.join(', ')}\n`;
+    }
+    context += "\n";
+  }
+
+  // Demographics Profile
+  const overviewDiv = document.getElementById('overview-div');
+  if (overviewDiv) {
+    const text = overviewDiv.innerText.replace(/\s+/g, ' ').trim();
+    if (text && !text.includes('Calculating')) {
+      context += `--- DEMOGRAPHIC PROFILE ---\n  ${text}\n\n`;
+    }
+  }
+
+  return context;
+}
+
+function getAudienceContext() {
+  if (!window._filteredPosts || window._filteredPosts.length === 0) {
+    return "No recent community discussions loaded yet. Fall back on general knowledge about this community.";
+  }
+
+  let context = "RAW COMMUNITY DISCUSSIONS:\n";
+  // Reduced slice from 35 down to 15 to keep context clean and reduce autoregressive repetition loops
+  window._filteredPosts.slice(0, 15).forEach((p, idx) => {
+    const title = p.data.title || p.data.link_title || "Discussion";
+    const body = (p.data.selftext || p.data.body || "").substring(0, 300);
+    context += `[Thread ${idx + 1}] Topic: "${title}"\nContent: "${body}"\n\n`;
+  });
+  
+  return context;
+}
+
+// ******************************************************
+// * RENDERING PIPELINE
+// ******************************************************
+function addMessage(rawText, className, role = 'user') {
+  if (!messagesDiv) return;
+  const msg = document.createElement('div');
+  msg.className = 'message ' + className;
+  
+  if (role === 'assistant') {
+    const html = transformAiText(rawText);
+    if (bookmarkedTexts.has(rawText)) {
+      msg.innerHTML = `<div class="ai-text">${html}</div>
+        <span class="bookmark-link bookmarked">
+          Bookmarked! 
+          <button class="edit-tags-btn">Edit</button>
+        </span>`;
+      
+      const editBtn = msg.querySelector('.edit-tags-btn');
+      if (editBtn) {
+        editBtn._rawText = rawText; 
+        editBtn.addEventListener('click', handleEditTagsClick);
+      }
+    } else {
+      msg.innerHTML = `<div class="ai-text">${html}</div>
+        <span class="bookmark-link">Bookmark</span>`;
+      
+      const link = msg.querySelector('.bookmark-link');
+      if (link) {
+        link._rawText = rawText; 
+        link.addEventListener('click', handleBotBookmarkClick);
+      }
+    }
+  } else {
+    msg.innerText = rawText;
+  }
+  
+  messagesDiv.appendChild(msg);
+  msg.scrollIntoView({ behavior: 'smooth' });
+  setTimeout(() => (msg.style.opacity = '1'), 0);
+}
+
+function addLoader() {
+  const loader = document.createElement('div');
+  loader.className = 'message bot-message';
+  loader.innerHTML = `<div class="loader">
+    <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+    </div>`;
+  messagesDiv.appendChild(loader);
+  loader.scrollIntoView({ behavior: 'smooth' });
+  return loader;
+}
+
+function removeLoader(l) {
+  l.remove();
+}
+
+function displayConversation() {
+  if (!messagesDiv) return;
+  messagesDiv.innerHTML = '';
+  conversation.forEach(m => {
+    addMessage(m.content, m.role === 'assistant' ? 'bot-message' : 'user-message', m.role);
+  });
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+function updateBookmarkUI(messageText) {
+  if (!messagesDiv) return;
+  const bookmarkLinks = messagesDiv.querySelectorAll('.bookmark-link');
+  for (let link of bookmarkLinks) {
+    if (link._rawText === messageText) {
+       link.classList.add('bookmarked');
+       link.innerHTML = `Bookmarked! 
+         <button class="edit-tags-btn">Edit</button>`;
+       
+       const editBtn = link.querySelector('.edit-tags-btn');
+       if(editBtn) {
+         editBtn._rawText = messageText;
+         editBtn.addEventListener('click', handleEditTagsClick);
+       }
+    }
+  }
+}
+
+// ******************************************************
+// * FIRESTORE READS & WRITES
+// ******************************************************
+async function loadConversationFromFirestore() {
+  try {
+    const snap = await docRef.get();
+    if (snap.exists) {
+      const data = snap.data();
+      conversation = Array.isArray(data.conversation) ? data.conversation : [];
+      
+      const loadedBookmarks = data.bookmarks || [];
+      bookmarks = loadedBookmarks;
+      bookmarkedTexts = new Set();
+      bookmarkMetaMap = new Map();
+      allExistingTags = new Set();
+
+      loadedBookmarks.forEach(bm => {
+        bookmarkedTexts.add(bm.text);
+        bookmarkMetaMap.set(bm.text, { 
+            tags: bm.tags || [], 
+            title: bm.title || null 
+        });
+        if (bm.tags) bm.tags.forEach(t => allExistingTags.add(t));
+      });
+
+      populateFilterButtons();
+    } else {
+      await docRef.set({ conversation: [], bookmarks: [] });
+      conversation = [];
+      bookmarks = [];
+      bookmarkedTexts = new Set();
+      bookmarkMetaMap = new Map();
+      allExistingTags = new Set();
+    }
+  } catch (err) {
+    console.error('Error loading session context:', err);
+  }
+}
+
+async function pushMessageToFirestore(role, content) {
+  conversation.push({ role, content });
+  try {
+    await docRef.update({
+      conversation: firebase.firestore.FieldValue.arrayUnion({ role, content })
+    });
+  } catch (err) {
+    console.error('Error updating chat history:', err);
+  }
+}
+
+async function addBookmark(text, tags = [], title = "") {
+  const timestamp = Date.now();
+  const finalTitle = title.trim() ? title.trim() : deriveHeaderForBookmark(text);
+  
+  const obj = { text, tags, timestamp, title: finalTitle };
+  try {
+    const snap = await docRef.get();
+    if (snap.exists) {
+      const data = snap.data();
+      let updatedBookmarks = data.bookmarks || [];
+      const exists = updatedBookmarks.some(bm => bm.text === text);
+      if (exists) {
+        showToast("Already bookmarked.");
+        return;
+      }
+      updatedBookmarks.push(obj);
+      await docRef.update({ bookmarks: updatedBookmarks });
+      
+      bookmarks.push(obj);
+      bookmarkedTexts.add(text);
+      bookmarkMetaMap.set(text, { tags, title: finalTitle });
+      
+      tags.forEach(t => allExistingTags.add(t));
+      populateFilterButtons();
+      updateBookmarkUI(text);
+      displayBookmarks('all'); 
+    }
+  } catch (err) {
+    console.error('Error adding bookmark:', err);
+  }
+}
+
+async function updateBookmarkTagsAndTitle(text, newTags, newTitle) {
+  try {
+    const snap = await docRef.get();
+    if (snap.exists) {
+      const data = snap.data();
+      let updatedBookmarks = data.bookmarks || [];
+      const bookmarkIndex = updatedBookmarks.findIndex(bm => bm.text === text);
+      
+      if (bookmarkIndex !== -1) {
+        updatedBookmarks[bookmarkIndex].tags = newTags;
+        updatedBookmarks[bookmarkIndex].title = newTitle; 
+
+        await docRef.update({ bookmarks: updatedBookmarks });
+        
+        bookmarkMetaMap.set(text, { tags: newTags, title: newTitle });
+        bookmarks = updatedBookmarks;
+        
+        allExistingTags = new Set();
+        bookmarks.forEach(bm => {
+             if(bm.tags) bm.tags.forEach(t => allExistingTags.add(t));
+        });
+
+        populateFilterButtons();
+        updateBookmarkUI(text);
+        displayBookmarks('all'); 
+      }
+    }
+  } catch (err) {
+    console.error('Error updating tags:', err);
+  }
+}
+
+async function removeBookmarkFromFirestore(ts) {
+  try {
+    const snap = await docRef.get();
+    if (snap.exists) {
+      const data = snap.data();
+      const updatedBookmarks = (data.bookmarks || []).filter(b => b.timestamp != ts); 
+      await docRef.update({ bookmarks: updatedBookmarks });
+      
+      bookmarks = updatedBookmarks;
+      bookmarkedTexts = new Set();
+      bookmarkMetaMap = new Map();
+      allExistingTags = new Set();
+
+      updatedBookmarks.forEach(bm => {
+        bookmarkedTexts.add(bm.text);
+        bookmarkMetaMap.set(bm.text, { 
+            tags: bm.tags || [], 
+            title: bm.title || null 
+        });
+        if(bm.tags) bm.tags.forEach(t => allExistingTags.add(t));
+      });
+
+      populateFilterButtons();
+      displayConversation(); 
+      displayBookmarks('all');
+    }
+  } catch (err) {
+    console.error('Error deleting bookmark:', err);
+  }
+}
+
+function showBookmarkViewer(rawText) {
+  if (!rawText) return;
+  const meta = bookmarkMetaMap.get(rawText) || { tags: [], title: null };
+  const title = meta.title || deriveHeaderForBookmark(rawText);
+  const tags = meta.tags || [];
+
+  const existing = document.getElementById('bookmarkViewerOverlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'bookmarkViewerOverlay';
+  overlay.style.cssText = 'position:fixed; inset:0; background:rgba(32,30,87,0.55); display:flex; align-items:center; justify-content:center; z-index:99999; padding:20px;';
+
+  const win = document.createElement('div');
+  win.style.cssText = "background:#fff; border-radius:16px; max-width:560px; width:100%; max-height:80vh; overflow-y:auto; padding:28px; box-shadow:0 20px 60px rgba(0,0,0,0.25); position:relative; font-family:'Plus Jakarta Sans', sans-serif;";
+
+  const closeBtn = document.createElement('button');
+  closeBtn.textContent = '×';
+  closeBtn.title = 'Close';
+  closeBtn.style.cssText = 'position:absolute; top:14px; right:16px; border:none; background:none; font-size:26px; line-height:1; color:#888; cursor:pointer;';
+  closeBtn.addEventListener('click', () => overlay.remove());
+
+  const titleEl = document.createElement('div');
+  titleEl.style.cssText = 'font-size:18px; font-weight:700; color:#201e57; margin-bottom:14px; padding-right:24px;';
+  titleEl.textContent = title;
+
+  const bodyEl = document.createElement('div');
+  bodyEl.innerHTML = transformAiText(rawText);
+
+  win.appendChild(closeBtn);
+  win.appendChild(titleEl);
+  win.appendChild(bodyEl);
+  if (tags.length > 0) {
+    const tagWrap = document.createElement('div');
+    tagWrap.style.cssText = 'display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin-top:16px; padding-top:14px; border-top:1px solid #eee;';
+    const label = document.createElement('span');
+    label.textContent = 'Tags:';
+    label.style.cssText = 'font-size:12px; font-weight:700; color:#201e57; opacity:0.7; margin-right:2px;';
+    tagWrap.appendChild(label);
+    tags.forEach(t => {
+      const pill = document.createElement('span');
+      pill.textContent = t;
+      pill.style.cssText = 'font-size:12px; font-weight:600; color:#201e57; background:rgba(32,30,87,0.08); border:1px solid rgba(32,30,87,0.18); padding:3px 9px; border-radius:12px;';
+      tagWrap.appendChild(pill);
+    });
+    win.appendChild(tagWrap);
+  }
+
+  overlay.appendChild(win);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+}
+
+// ******************************************************
+// * BOOKMARK FILTER & GRID DISPLAY
+// ******************************************************
+async function displayBookmarks(filter = 'all') {
+  if (!messagesDiv) return;
+  try {
+    const docSnap = await docRef.get();
+    if (docSnap.exists) {
+      const data = docSnap.data();
+      let savedBookmarks = data.bookmarks || [];
+
+      if (filter !== 'all') {
+        savedBookmarks = savedBookmarks.filter(bm => bm.tags && bm.tags.includes(filter));
+      }
+
+      const existingBookmarkMessages = document.querySelectorAll('.bookmark-bubble');
+      existingBookmarkMessages.forEach(msg => msg.remove());
+
+      if (savedBookmarks.length === 0) {
+        if (filter !== 'all') {
+             addMessage(`No insights tagged with "${filter}" yet.`, 'bot-message bookmark-bubble', 'assistant');
+        }
+        return;
+      }
+
+      let container = document.createElement('div');
+      container.style.display = 'flex';
+      container.style.flexWrap = 'wrap';
+      container.style.gap = '10px';
+      container.style.marginTop = '1em';
+
+      savedBookmarks.forEach((bm, i) => {
+        const circle = document.createElement('div');
+        circle.className = 'bookmark-circle';
+        circle.setAttribute('data-timestamp', bm.timestamp);
+        circle._timestamp = bm.timestamp; 
+        circle._rawText = bm.text;
+
+        const displayTitle = bm.title ? bm.title : deriveHeaderForBookmark(bm.text);
+        const snippet = getFirstNSentences(bm.text, 5); 
+        let tooltipContent = `${escapeQuotes(snippet)}`;
+        if (bm.tags && bm.tags.length > 0) {
+            const tagString = bm.tags.join(', ');
+            tooltipContent += `<br><br><strong>🏷 Tags:</strong> <span style="color:#aaa">${escapeQuotes(tagString)}</span>`;
+        }
+
+        const titleDiv = document.createElement('div');
+        titleDiv.className = 'bookmark-title';
+        titleDiv.innerHTML = escapeQuotes(displayTitle);
+
+        circle.style.cursor = 'pointer';
+        circle.title = 'Click to view bookmark';
+        const stableColor = BOOKMARK_GRADIENTS[Math.abs(bm.timestamp) % BOOKMARK_GRADIENTS.length];
+        circle.style.setProperty('background', stableColor, 'important');
+       
+    
+
+        circle.innerHTML = `<div class="bookmark-number">${i + 1}</div>`;
+        circle.appendChild(titleDiv);
+
+        const closeIcon = document.createElement('div');
+        closeIcon.className = 'close-icon';
+        closeIcon.title = "Delete bookmark";
+        closeIcon.textContent = '×';
+        circle.appendChild(closeIcon);
+
+        container.appendChild(circle);
+      });
+      
+      
+
+      const messageDiv = document.createElement('div');
+      messageDiv.className = 'message bot-message bookmark-bubble';
+      messageDiv.appendChild(container);
+
+      const hideBtn = document.createElement('button');
+      hideBtn.textContent = 'Hide bookmarks';
+      hideBtn.style.cssText = "display:block; margin-top:12px; padding:6px 14px; font-size:12px; font-weight:600; color:#201e57; background:none; border:1px solid rgba(32,30,87,0.25); border-radius:14px; cursor:pointer; font-family:'Plus Jakarta Sans', sans-serif;";
+      hideBtn.addEventListener('click', () => {
+        document.querySelectorAll('.bookmark-bubble').forEach(el => el.remove());
+      });
+      messageDiv.appendChild(hideBtn);
+    
+    
+
+      messagesDiv.appendChild(messageDiv);
+      messageDiv.scrollIntoView({ behavior: 'smooth' });
+      setTimeout(() => { messageDiv.style.opacity = '1'; }, 0);
+      messagesDiv.scrollTop = messagesDiv.scrollHeight;
+    }
+  } catch (err) {
+    console.error('Error retrieving bookmarks:', err);
+  }
+}
+
+// ******************************************************
+// * GEMINI API INTEGRATION
+// ******************************************************
+async function getGeminiResponse(userMsg) {
+  // NO API KEY HERE ANYMORE
+  const url = `/.netlify/functions/gemini-proxy`; 
+
+  const roadmapContext = getAudienceContext();
+  const visualContext = getDashboardVisualContext(); 
+  const sysMsg = getSystemMessage();
+
+  const history = conversation.map(m => ({
+    role: m.role === 'assistant' ? 'model' : 'user',
+    parts: [{ text: m.content }]
+  }));
+
+  history.push({
+    role: "user",
+    parts: [{ text: `[Context...]: ${visualContext}\n\n${roadmapContext}\n\nUSER MESSAGE: ${userMsg}` }]
+  });
+
+  const payload = {
+    contents: history,
+    systemInstruction: { parts: [{ text: sysMsg }] },
+    generationConfig: { temperature: 1.0, maxOutputTokens: 2048 }
+  };
+
+  const loader = addLoader();
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json();
+    // ... rest of your existing logic to handle the data ...
+    removeLoader(loader);
+    return data.candidates[0].content.parts[0].text.trim();
+  } catch (err) {
+    removeLoader(loader);
+    return "Connection error.";
+  }
+}
+// ******************************************************
+// * TOAST & UI INTERACTIONS
+// ******************************************************
+function showToast(msg) {
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.textContent = msg;
+  document.getElementById('chat').appendChild(toast);
+  setTimeout(() => toast.remove(), 2500);
+}
+
+async function sendMessage() {
+  const txt = userInput.value.trim();
+  if (!txt) return;
+  const tone = 'neutral';
+  addMessage(txt, 'user-message', 'user');
+  userInput.value = '';
+  autoResize(userInput);
+  await pushMessageToFirestore('user', txt);
+  const bot = await getGeminiResponse(`[Tone:${tone}] ${txt}`);
+  addMessage(bot, 'bot-message', 'assistant');
+  await pushMessageToFirestore('assistant', bot);
+  messagesDiv.scrollTop = messagesDiv.scrollHeight;
+}
+
+// --- POPUP OPERATIONS ---
+let bookmarkTextToSave = ''; 
+
+async function handleBotBookmarkClick(e) {
+  const messageText = e.currentTarget._rawText || '';
+  if (!messageText) return;
+  if (bookmarkedTexts.has(messageText)) {
+    showToast("This is already bookmarked.");
+    return;
+  }
+  bookmarkTextToSave = messageText;
+  currentEditingBookmarkText = null;
+  if (popupTitleEl) popupTitleEl.textContent = 'Save Bookmark';
+  if (popupSubtitleEl) popupSubtitleEl.textContent = 'Personalise your saved insight.';
+  if (saveTagBtn) saveTagBtn.textContent = 'Save';
+  
+  const suggestedTitle = deriveHeaderForBookmark(messageText);
+
+  if(bookmarkTitleInput) bookmarkTitleInput.value = suggestedTitle;
+
+  populateTagPopup(allExistingTags, []); 
+  showTagPopup();
+}
+
+async function handleEditTagsClick(e) {
+  const messageText = e.currentTarget._rawText || '';
+  if (!messageText) return;
+  
+  const meta = bookmarkMetaMap.get(messageText) || { tags: [], title: "" };
+  currentEditingBookmarkText = messageText;
+  if (popupTitleEl) popupTitleEl.textContent = 'Edit Bookmark';
+  if (popupSubtitleEl) popupSubtitleEl.textContent = 'Update your saved insight.';
+  if (saveTagBtn) saveTagBtn.textContent = 'Update';
+
+  if(bookmarkTitleInput) {
+    bookmarkTitleInput.value = meta.title || deriveHeaderForBookmark(messageText);
+  }
+  
+  populateTagPopup(allExistingTags, meta.tags);
+  newTagInput.value = '';
+  showTagPopup();
+}
+function renderNewTagPill(tag) {
+  if (!newTagPillsContainer) return;
+  const pill = document.createElement('span');
+  pill.className = 'new-tag-pill';
+  pill.textContent = tag;
+  const x = document.createElement('span');
+  x.className = 'remove-pill';
+  x.textContent = '×';
+  x.addEventListener('click', () => {
+    pendingNewTags.delete(tag);
+    pill.remove();
+  });
+  pill.appendChild(x);
+  newTagPillsContainer.appendChild(pill);
+}
+
+function addPendingTag(tag) {
+  const t = (tag || '').trim();
+  if (!t || pendingNewTags.has(t)) return;
+  pendingNewTags.add(t);
+  renderNewTagPill(t);
+}
+
+function commitTypedTagsFromInput() {
+  if (!newTagInput.value.includes(',')) return;
+  const parts = newTagInput.value.split(',');
+  const remainder = parts.pop();
+  parts.forEach(p => addPendingTag(p));
+  newTagInput.value = remainder;
+}
+
+function commitSingleTypedTag() {
+  addPendingTag(newTagInput.value.replace(/,/g, ''));
+  newTagInput.value = '';
+}
+
+function resetNewTagPills() {
+  pendingNewTags = new Set();
+  if (newTagPillsContainer) newTagPillsContainer.innerHTML = '';
+}
+// ******************************************************
+// * POPUP INTERFACE HELPERS
+// ******************************************************
+function populateTagPopup(tagSet, currentlyActiveTags = []) {
+  if (!tagPillsContainer) return;
+  tagPillsContainer.innerHTML = '';
+  tempSelectedTags = new Set(currentlyActiveTags);
+
+  if (tagSet.size === 0) {
+    tagPillsContainer.innerHTML = '<span style="font-size:12px; color:#888;">No tags created yet. Add one below!</span>';
+    return;
+  }
+
+  tagSet.forEach(tag => {
+    const pill = document.createElement('div');
+    pill.className = 'tag-choice';
+    if (tempSelectedTags.has(tag)) pill.classList.add('selected');
+
+    const label = document.createElement('span');
+    label.textContent = tag;
+    pill.appendChild(label);
+
+    const del = document.createElement('span');
+    del.className = 'tag-delete';
+    del.textContent = '×';
+    del.title = 'Delete this tag everywhere';
+    del.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (window.confirm(`Delete the tag "${tag}" from all bookmarks?`)) {
+        await deleteTagGlobally(tag);
+      }
+    });
+    pill.appendChild(del);
+
+    pill.addEventListener('click', () => {
+      if (tempSelectedTags.has(tag)) {
+        tempSelectedTags.delete(tag);
+        pill.classList.remove('selected');
+      } else {
+        tempSelectedTags.add(tag);
+        pill.classList.add('selected');
+      }
+    });
+
+    tagPillsContainer.appendChild(pill);
+  });
+}
+
+// ******************************************************
+// * VISUAL HANDLERS FOR POPUP STATE
+// ******************************************************
+function showTagPopup() {
+  if (tagPopupOverlay) tagPopupOverlay.style.display = 'flex';
+  if(bookmarkTitleInput) bookmarkTitleInput.focus();
+}
+function hideTagPopup() {
+  if (tagPopupOverlay) tagPopupOverlay.style.display = 'none';
+  resetNewTagPills();
+}
+
+async function saveTagSelection() {
+  const selectedOptions = Array.from(tempSelectedTags);
+  const pending = Array.from(pendingNewTags);
+  const leftover = newTagInput.value.split(',').map(t => t.trim()).filter(Boolean);
+  const allTags = Array.from(new Set([...selectedOptions, ...pending, ...leftover]));
+  const customTitle = bookmarkTitleInput ? bookmarkTitleInput.value.trim() : "";
+
+  if (currentEditingBookmarkText) {
+    await updateBookmarkTagsAndTitle(currentEditingBookmarkText, allTags, customTitle);
+    showToast('Updated!');
+    currentEditingBookmarkText = null;
+  } else {
+    await addBookmark(bookmarkTextToSave, allTags, customTitle);
+    showToast('Saved!');
+  }
+
+  hideTagPopup();
+  newTagInput.value = '';
+  if (bookmarkTitleInput) bookmarkTitleInput.value = '';
+}
+
+
+// ******************************************************
+// * FILTER BUTTONS
+// ******************************************************
+function populateFilterButtons() {
+  const scrollEl = filterScrollDiv || bookmarkFiltersDiv;
+  if (!scrollEl) return;
+  scrollEl.querySelectorAll('.filter-chip-wrap').forEach(el => el.remove());
+  allExistingTags.forEach(tag => {
+    const wrap = document.createElement('div');
+    wrap.className = 'filter-chip-wrap';
+
+    const btn = document.createElement('button');
+    btn.className = 'filter-btn';
+    btn.textContent = tag;
+    btn.setAttribute('data-filter', tag);
+    btn.addEventListener('click', () => {
+      scrollEl.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      displayBookmarks(tag);
+    });
+
+    const del = document.createElement('span');
+    del.className = 'filter-delete';
+    del.textContent = '×';
+    del.title = 'Delete this tag';
+    del.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (window.confirm(`Delete the tag "${tag}" from all bookmarks?`)) {
+        await deleteTagGlobally(tag);
+      }
+    });
+
+    wrap.appendChild(btn);
+    wrap.appendChild(del);
+    scrollEl.appendChild(wrap);
+  });
+  const allBtn = scrollEl.querySelector('.filter-btn[data-filter="all"]');
+  if (allBtn) {
+    allBtn.removeEventListener('click', allBtnClickHandler);
+    allBtn.addEventListener('click', allBtnClickHandler);
+  }
+}
+function allBtnClickHandler() {
+  const scrollEl = filterScrollDiv || bookmarkFiltersDiv;
+  if (!scrollEl) return;
+  const allFilterButtons = scrollEl.querySelectorAll('.filter-btn');
+  allFilterButtons.forEach(button => button.classList.remove('active'));
+  this.classList.add('active');
+  displayBookmarks('all');
+}
+async function clearChatHistory() {
+  if (!docRef) return;
+  const ok = window.confirm('Delete this entire chat history? Your saved bookmarks will be kept. This cannot be undone.');
+  if (!ok) return;
+  try {
+    await docRef.update({ conversation: [] });
+    conversation = [];
+    showToast('Chat history cleared.');
+    await window.reloadAudienceChatSession();
+  } catch (err) {
+    console.error('Error clearing chat history:', err);
+  }
+}
+
+// ******************************************************
+// * INITIALIZATION & EVENTS
+// ******************************************************
+function autoResize(t) {
+  t.style.height = 'auto';
+  t.style.height = t.scrollHeight + 'px';
+  t.style.overflowY = t.scrollHeight > 100 ? 'scroll' : 'hidden';
+}
+
+function handleKeyDown(e) {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendMessage();
+  }
+}
+
+// Global hook to rebuild context if searching dynamic segments
+window.reloadAudienceChatSession = async function() {
+  if (messagesDiv) messagesDiv.innerHTML = ''; // Clear screen to avoid duplicates
+  
+  const currentAudience = getResolvedAudienceName();
+  
+  // If the dashboard is empty (no active search loaded yet)
+  if (!currentAudience || currentAudience === 'Target Audience') {
+    if (messagesDiv) {
+      messagesDiv.innerHTML = '';
+      const waitGreet = `Once you type a group name and click "Search" on the visual dashboard, I will automatically load their real discussions, pain points, and vocal traits so we can chat.`;
+      addMessage(waitGreet, 'bot-message', 'assistant');
+    }
+    return; // Exit early; don't initialize empty firebase docs
+  }
+  
+  initAudienceSession();
+  await loadConversationFromFirestore();
+  
+  if (!conversation.length) {
+    // Dynamic Greeting Generation
+    
+    const prompt = `You're starting an interview with a founder. In 2 short sentences, introduce yourself as a real member of the "${currentAudience}" community.
+    Pick a first name, gender, and background that genuinely match this audience's real demographics (gender split, culture or ethnicity, age) from the profile and posts you've been given, plus an archetype that fits the findings. Keep this identity for the whole conversation.
+    Write in the same tone and style the real people in this community use.
+    Greet them casually, say your name, mention you're part of the ${currentAudience} community, and invite them to ask you anything about how things really feel for you.
+    Sound like a real person sending a message, not an AI template. No quotes, no markdown, no meta text, and do not add a ::sources:: line to this greeting.`;
+   
+
+    
+    try {
+        const greet = await getGeminiResponse(prompt);
+      addMessage(greet, 'bot-message', 'assistant');
+     
+     
+      await pushMessageToFirestore('assistant', greet);
+    } catch (err) {
+      const fallbackGreet = `Hey, I'm part of the ${currentAudience} community. Ask me anything about how things actually feel for people like me, what frustrates us, or what we really want.`;
+      addMessage(fallbackGreet, 'bot-message', 'assistant');
+      await pushMessageToFirestore('assistant', fallbackGreet);
+    }
+  } else {
+    displayConversation();
+    displayBookmarks('all');
+  }
+};
+
+// ******************************************************
+// * AUTOMATED SEARCH ENGINE INTERCEPTOR (MONKEY PATCH)
+// ******************************************************
+function setupSearchInterceptor() {
+  if (typeof runProblemFinder === 'function') {
+    const originalRunProblemFinder = runProblemFinder;
+    runProblemFinder = async function(options) {
+      try {
+        const result = await originalRunProblemFinder(options);
+        // Instant dynamic refresh after search succeeds
+        if (window.reloadAudienceChatSession) {
+          await window.reloadAudienceChatSession();
+        }
+        return result;
+      } catch (e) {
+        console.error("[Audience Chat] Interceptor capture error:", e);
+        throw e;
+      }
+    };
+    console.log("[Audience Chat] Attached interceptor hooks to primary search query.");
+  } else {
+    // Retry quietly in 500ms if dashboard script is still initializing
+    setTimeout(setupSearchInterceptor, 500);
+  }
+}
+
+document.addEventListener('DOMContentLoaded', async () => {
+  // Bind DOM selectors
+  messagesDiv = document.getElementById('messages');
+  userInput = document.getElementById('userInput');
+  sendButton = document.getElementById('sendButton');
+  tagPopupOverlay = document.getElementById('tagPopupOverlay');
+  tagPillsContainer = document.getElementById('tagPillsContainer');
+  newTagInput = document.getElementById('newTagInput');
+  bookmarkTitleInput = document.getElementById('bookmarkTitleInput');
+  saveTagBtn = document.getElementById('saveTagBtn');
+  cancelTagBtn = document.getElementById('cancelTagBtn');
+  tagPopupClose = document.getElementById('tagPopupClose');
+  popupTitleEl = document.getElementById('popupTitle');
+  popupSubtitleEl = document.getElementById('popupSubtitle');
+  newTagPillsContainer = document.getElementById('newTagPillsContainer');
+  if (newTagInput) {
+    newTagInput.addEventListener('input', commitTypedTagsFromInput);
+    newTagInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
         e.preventDefault();
-        console.log('[Entry] find-communities-btn clicked');
-        const groupInput = document.getElementById('group-input');
-        const choices = document.getElementById('subreddit-choices');
-        const groupName = (groupInput && groupInput.value.trim()) || '';
-        if (!groupName) { alert('Please enter a group of people or pick a suggestion.'); return; }
-        if (!choices) { console.error('[Entry] #subreddit-choices not found — nowhere to show results.'); return; }
-
-        window.originalGroupName = groupName;
-        transitionToStep2(groupName); // reveal the step-2 panel so the results are actually visible
-        findBtn.disabled = true;
-        choices.innerHTML = '<p class="loading-text">Finding communities…</p>';
-        try {
-            const names = await findSubredditsForGroup(groupName);
-            console.log('[Entry] candidate subreddits:', names);
-            const ranked = await fetchAndRankSubreddits(names);
-            console.log('[Entry] ranked subreddits:', ranked.length);
-            renderSubredditChoices(ranked);
-        } catch (error) {
-            console.error('[Entry] find communities failed:', error);
-            choices.innerHTML = '<p class="error-message">Could not load communities. Please try again.</p>';
-        } finally {
-            findBtn.disabled = false;
-        }
+        commitSingleTypedTag();
+      }
     });
+  }
+  bookmarkFiltersDiv = document.querySelector('.bookmark-filters');
+  filterScrollDiv = document.getElementById('filterScroll');
+  const clearHistoryBtn = document.getElementById('clearHistoryBtn');
+  if (clearHistoryBtn) clearHistoryBtn.addEventListener('click', clearChatHistory);
 
-    // #search-selected-btn → run the analysis on the checked communities. Wired here if present;
-    // also covered by the delegated handler below in case it's added to the DOM later.
-    const searchBtn = document.getElementById('search-selected-btn');
-    if (searchBtn && !searchBtn.dataset.ppWired) {
-        searchBtn.dataset.ppWired = '1';
-        searchBtn.addEventListener('click', (e) => { e.preventDefault(); runProblemFinder(); });
+  // Safely assign event listeners
+  if (sendButton) sendButton.addEventListener('click', sendMessage);
+  if (tagPopupClose) tagPopupClose.addEventListener('click', hideTagPopup);
+  if (cancelTagBtn) cancelTagBtn.addEventListener('click', hideTagPopup);
+  if (saveTagBtn) saveTagBtn.addEventListener('click', saveTagSelection);
+
+  // Poll for firebase scripts to finish loading asynchronously
+  await checkFirebaseLoaded();
+
+  // Initialize Firebase safely
+  if (window.firebase) {
+    if (!firebase.apps.length) {
+      firebase.initializeApp(firebaseConfig);
+    }
+    db = firebase.firestore();
+    
+    // Now it is safe to initialize the session and load conversation
+    await window.reloadAudienceChatSession();
+  } else {
+    console.error("[Audience Chat] Firebase libraries failed to load from CDN. Chat memory disabled.");
+    if (messagesDiv) {
+      messagesDiv.innerHTML = '<p class="error-message">Chat memory unavailable (connection error).</p>';
+    }
+  }
+
+  setupSearchInterceptor();
+
+  document.addEventListener('click', async (e) => {
+    const circle = e.target.closest('.bookmark-circle');
+    if (!circle) return;
+
+    // Clicking the × deletes the bookmark
+    if (e.target.closest('.close-icon')) {
+      e.preventDefault();
+      e.stopPropagation();
+      const ts = circle._timestamp;
+      if (ts) await removeBookmarkFromFirestore(ts);
+      return;
     }
 
-    // #back-to-step1-btn → return to the search-term entry step.
-    const backBtn = document.getElementById('back-to-step1-btn');
-    if (backBtn && !backBtn.dataset.ppWired) {
-        backBtn.dataset.ppWired = '1';
-        backBtn.addEventListener('click', (e) => { e.preventDefault(); transitionToStep1(); });
-    }
+    // Clicking anywhere else on the circle opens it
+    showBookmarkViewer(circle._rawText);
+  });
 
-    console.log('[Entry] wired ✓ — #find-communities-btn is live');
-}
-
-// Safety net: delegated click handlers so these buttons work even if Webflow renders them after
-// init. Each is guarded by dataset.ppWired so it never double-fires with the direct listeners.
-document.addEventListener('click', (e) => {
-    const searchBtn = e.target.closest('#search-selected-btn');
-    if (searchBtn && !searchBtn.dataset.ppWired) { e.preventDefault(); runProblemFinder(); return; }
-    const backBtn = e.target.closest('#back-to-step1-btn');
-    if (backBtn && !backBtn.dataset.ppWired) { e.preventDefault(); transitionToStep1(); return; }
+  const mentorModalButton = document.getElementById("MENTOR-MODAL-BUTTON");
+  if (mentorModalButton) {
+    mentorModalButton.addEventListener("click", () => {
+      if (messagesDiv) messagesDiv.scrollTop = messagesDiv.scrollHeight;
+      if (userInput) userInput.focus(); 
+    });
+  }
 });
-
-// --- bootstrap --------------------------------------------------------------
-// Webflow renders the DOM asynchronously, so #find-communities-btn often doesn't exist yet at
-// DOMContentLoaded — and this script may even load AFTER the page is ready. So we poll for the
-// button (up to ~5s) and init the moment it appears. (Same proven pattern as the old file.)
-function bootstrapEntryFlow() {
-    let retries = 0;
-    const intervalId = setInterval(() => {
-        if (document.getElementById('find-communities-btn')) {
-            clearInterval(intervalId);
-            initEntryFlow();
-        } else if (++retries > 50) {
-            clearInterval(intervalId);
-            console.error('[Entry] #find-communities-btn never appeared — init aborted.');
-        }
-    }, 100);
-}
-
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', bootstrapEntryFlow);
-} else {
-    bootstrapEntryFlow(); // DOM already parsed (script loaded late) — start polling now
-}

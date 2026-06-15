@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 20 — niche frustration terms, density ranking, token pruning', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 21 — prevalence from assignment, no thin cards', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -799,13 +799,29 @@ async function generateAndRenderFindings(corpus, audience) {
         const parsed = await callOpenAI(payload);
         let findings = Array.isArray(parsed.findings) ? parsed.findings : [];
         if (!findings.length) { console.warn('[Findings] none generated'); return; }
-        const ranked = computeFindingPrevalence(findings, corpus).slice(0, 5);
+
+        // Assign posts to problems (semantic) — the SINGLE source of truth for both the supporting
+        // posts AND prevalence, so a card's prevalence always matches how many real posts back it.
+        const buckets = await assignPostsToFindings(findings, corpus);
+        findings.forEach((f, i) => { f._posts = buckets[i] || []; f.support = f._posts.length; });
+
+        // Only show problems genuinely backed by posts (≥3); relax if that's too strict so we never
+        // end up empty. Sorted by how much real support each has.
+        let ranked = findings.filter(f => f.support >= 3).sort((a, b) => b.support - a.support);
+        if (ranked.length < 2) ranked = findings.filter(f => f.support >= 1).sort((a, b) => b.support - a.support);
+        if (!ranked.length) ranked = findings.slice().sort((a, b) => b.support - a.support);
+        ranked = ranked.slice(0, 5);
+
+        // Prevalence relative to the SHOWN problems, so the cards' percentages sum to ~100.
+        const totalShown = ranked.reduce((s, f) => s + f.support, 0) || 1;
+        ranked.forEach(f => { f.prevalence = Math.round((f.support / totalShown) * 100); });
+
         window._findings = ranked;
-        // Semantic AI assignment (no repeats, drops irrelevant posts), most upvoted first.
-        window._findingPosts = await assignPostsToFindings(ranked, corpus, 8);
+        window._findingPosts = ranked.map(f => (f._posts || []).slice(0, 8)); // modal display (cap 8)
+        window._findingPostsFull = ranked.map(f => f._posts || []);            // full set for subproblems
         window._subProblemCache = {}; // new findings → drop cached subproblems
         ranked.forEach((f, idx) => renderFindingCard(idx + 1, f));
-        console.log('[Findings] rendered:', ranked.length);
+        console.log('[Findings] rendered:', ranked.length, '| support counts:', ranked.map(f => f.support), '| prevalence:', ranked.map(f => f.prevalence + '%'));
     } catch (error) {
         console.error('[Findings] failed:', error);
     } finally {
@@ -960,9 +976,8 @@ function dedupeByTitle(posts) {
     });
 }
 
-// Keyword fallback (used only if the AI assignment call fails).
-function assignPostsByKeyword(findings, corpus, perFinding) {
-    perFinding = perFinding || 8;
+// Keyword fallback (used only if the AI assignment call fails). Returns uncapped buckets.
+function assignPostsByKeyword(findings, corpus) {
     const posts = dedupeByTitle(corpus);
     const buckets = findings.map(() => []);
     posts.forEach(post => {
@@ -970,18 +985,18 @@ function assignPostsByKeyword(findings, corpus, perFinding) {
         findings.forEach((f, i) => { const s = scorePostForFinding(post, f); if (s > bestScore) { bestScore = s; bestIdx = i; } });
         if (bestIdx >= 0 && bestScore >= RELEVANCE_MIN_SCORE) buckets[bestIdx].push({ post, score: bestScore });
     });
-    return buckets.map(arr => arr.sort((a, b) => b.score - a.score || (b.post.score - a.post.score)).slice(0, perFinding).map(x => x.post));
+    return buckets.map(arr => arr.sort((a, b) => b.score - a.score || (b.post.score - a.post.score)).map(x => x.post));
 }
 
 // PRIMARY: let the model decide which problem each post genuinely belongs to (or NONE). This is
 // semantic, so it catches things keywords can't — a heart-warming post won't land under "Health",
 // and off-topic/positive/rescue posts get dropped. Falls back to keyword matching on failure.
-async function assignPostsToFindings(findings, corpus, perFinding) {
-    perFinding = perFinding || 8;
-    // Drop near-empty / photo posts (little body), then take a representative set.
+async function assignPostsToFindings(findings, corpus) {
+    // Drop near-empty / photo posts, then take a WIDE density-ranked candidate set so well-supported
+    // problems get enough posts (this pool drives both the modal posts AND prevalence).
     const candidates = dedupeByTitle(corpus)
         .filter(p => ((p.title || '').length + (p.body || '').length) >= 80)
-        .slice(0, 45);
+        .slice(0, 70);
     const buckets = findings.map(() => []);
     try {
         const problemList = findings.map((f, i) => `${i + 1}: ${f.title} — ${f.summary || ''}`).join('\n');
@@ -993,7 +1008,7 @@ async function assignPostsToFindings(findings, corpus, perFinding) {
                 { role: 'system', content: 'You are a precise categorisation engine that outputs only JSON. You err on the side of 0 (none) rather than forcing a weak match.' },
                 { role: 'user', content: prompt }
             ],
-            temperature: 0, max_completion_tokens: 1200, response_format: { type: 'json_object' }
+            temperature: 0, max_completion_tokens: 1500, response_format: { type: 'json_object' }
         });
         const assignments = Array.isArray(parsed.assignments) ? parsed.assignments : [];
         assignments.forEach(a => {
@@ -1004,9 +1019,9 @@ async function assignPostsToFindings(findings, corpus, perFinding) {
         if (buckets.reduce((s, b) => s + b.length, 0) === 0) throw new Error('empty AI assignment');
     } catch (e) {
         console.warn('[Assign] AI assignment failed — keyword fallback:', e && e.message);
-        return assignPostsByKeyword(findings, corpus, perFinding);
+        return assignPostsByKeyword(findings, corpus);
     }
-    return buckets.map(arr => arr.sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, perFinding));
+    return buckets.map(arr => arr.sort((a, b) => (b.score || 0) - (a.score || 0))); // uncapped — caller caps for display
 }
 
 // =============================================================================
@@ -1138,9 +1153,9 @@ async function renderSubproblemsInto(chartEl, finding, blockIndex) {
     const loader = chartEl.querySelector('.subproblem-loader');
     if (loader) loader.style.display = 'block';
     try {
-        // Prefer this finding's AI-assigned posts; fall back to a relevance match if too few.
-        const assigned = window._findingPosts && window._findingPosts[blockIndex - 1];
-        const analysisPosts = (assigned && assigned.length >= 4) ? assigned : matchPostsForFinding(finding, window._corpus || [], 40);
+        // Prefer this finding's full set of AI-assigned posts; fall back to a relevance match if few.
+        const assigned = window._findingPostsFull && window._findingPostsFull[blockIndex - 1];
+        const analysisPosts = (assigned && assigned.length >= 5) ? assigned : matchPostsForFinding(finding, window._corpus || [], 40);
         const subs = await generateSubProblems(finding, analysisPosts, window.originalGroupName || '');
         renderSubProblemChart(chartEl, finding, subs);
     } catch (e) {

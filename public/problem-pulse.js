@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 18 — problems-only findings, AI post assignment, polarity restyle', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 20 — niche frustration terms, density ranking, token pruning', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -205,16 +205,41 @@ function buildSubredditQuery(subreddits) {
     return subreddits.map(s => `subreddit:${s}`).join(' OR ');
 }
 
-// Combine the problem terms into as few Reddit queries as possible. Single words go in OR groups
-// of 4; phrases are quoted individually. Fewer queries = fewer requests = faster + gentler.
-function buildProblemQueries() {
+// Consolidate the given terms into as few Reddit queries as possible (caps keep the request count
+// low): single words in OR groups of 4 (max 8 words → 2 queries), plus up to 4 quoted phrases.
+function buildProblemQueries(terms) {
+    const single = (terms || []).filter(t => t && !/\s/.test(t)).slice(0, 8);
+    const phrases = (terms || []).filter(t => t && /\s/.test(t)).slice(0, 4);
     const queries = [];
-    for (let i = 0; i < PROBLEM_TERMS_SINGLE.length; i += 4) {
-        const group = PROBLEM_TERMS_SINGLE.slice(i, i + 4);
+    for (let i = 0; i < single.length; i += 4) {
+        const group = single.slice(i, i + 4);
         queries.push(group.length > 1 ? '(' + group.join(' OR ') + ')' : group[0]);
     }
-    PROBLEM_TERMS_PHRASE.forEach(p => queries.push(`"${p}"`));
-    return queries;
+    phrases.forEach(p => queries.push(`"${p}"`));
+    return queries.length ? queries : ['(problem OR struggle OR advice)'];
+}
+
+// Ask the model for the audience's OWN complaint vocabulary so the corpus search surfaces real
+// problem posts (not generic noise). Fails soft to the static terms.
+async function getDomainFrustrationTerms(audience) {
+    const fallback = PROBLEM_TERMS_SINGLE.concat(PROBLEM_TERMS_PHRASE);
+    if (!audience) return fallback;
+    try {
+        const parsed = await callOpenAI({
+            model: 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: 'You output only JSON.' },
+                { role: 'user', content: `For the audience "${audience}", list 8-10 words or short phrases this group actually uses when describing PROBLEMS, frustrations or struggles — the specific vocabulary of their complaints. Examples — Home Bakers: ["dense","gummy","didn't rise","flat","overproofed"]; Runners: ["shin splints","hit the wall","DNF","IT band"]. Mix single words and short phrases. Respond ONLY with JSON: {"terms":["...","..."]}.` }
+            ],
+            temperature: 0.4, max_completion_tokens: 200, response_format: { type: 'json_object' }
+        });
+        const terms = Array.isArray(parsed.terms) ? parsed.terms.map(t => String(t).trim().toLowerCase()).filter(Boolean) : [];
+        const blended = Array.from(new Set(terms.concat(['problem', 'struggle', 'advice']))); // always keep a few generic anchors
+        return blended.length >= 4 ? blended : fallback;
+    } catch (e) {
+        console.warn('[Corpus] frustration terms failed, using static terms:', e && e.message);
+        return fallback;
+    }
 }
 
 // One Reddit search → array of post children. Fails soft to [].
@@ -247,8 +272,22 @@ function dedupePosts(children) {
     });
 }
 
-// Keep posts with a real title and at least a little traction; flatten to a lean shape so the rest
-// of the app never touches Reddit's raw envelope.
+// Strip Reddit boilerplate (URLs, markdown, "Edit: thanks for the gold") so the text we store and
+// send to the model is lean and clean — fewer tokens, faster inference, better signal.
+function pruneText(text) {
+    if (!text) return '';
+    let t = String(text);
+    t = t.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');                 // [text](url) -> text (before URL strip)
+    t = t.replace(/https?:\/\/\S+/gi, ' ');                       // bare URLs
+    t = t.replace(/[*_`#>]+/g, ' ');                              // markdown emphasis / headings / quotes
+    t = t.replace(/\b(edit|update)\s*\d*\s*:\s*(thank|thanks|thx|wow|rip|holy)[^\n]*/gi, ''); // "Edit: thanks…" boilerplate
+    t = t.replace(/thank[s]?\s+(you\s+)?(so much\s+|all\s+)?for\s+the\s+(gold|award|awards|upvotes|silver)[^\n]*/gi, '');
+    t = t.replace(/\s+/g, ' ').trim();
+    return t;
+}
+
+// Keep posts with a real title and at least a little traction; flatten to a lean shape (clean body)
+// so the rest of the app never touches Reddit's raw envelope.
 function normalizeCorpus(children) {
     return children
         .map(c => c.data)
@@ -257,7 +296,7 @@ function normalizeCorpus(children) {
             id: d.id,
             subreddit: d.subreddit,
             title: d.title,
-            body: d.selftext || '',
+            body: pruneText(d.selftext || ''),
             score: d.ups || 0,
             comments: d.num_comments || 0,
             created: d.created_utc || 0,
@@ -265,13 +304,31 @@ function normalizeCorpus(children) {
         }));
 }
 
-// Build the corpus: consolidated queries (gate-throttled) → dedupe → normalize. One fetch, reused.
-async function buildCorpus(subreddits) {
+// Context density: long, problem-word-rich self-text means a genuine problem write-up; short link/
+// image/meme posts score low. We rank by this instead of raw upvotes (which favour viral rescue/meme
+// posts), so every downstream analysis sees the real problem discussions first.
+const PROBLEM_SIGNAL_WORDS = ['problem', 'struggl', 'frustrat', 'annoy', 'hate', 'wish', 'cant', "can't", 'cannot', 'help', 'advice', 'issue', 'difficult', 'stuck', 'fail', 'worry', 'worried', 'scared', 'confus', 'overwhelm', 'tired', 'exhaust', 'pain', 'worse', 'wont', "won't", 'tried', 'desperate', 'how do i', 'anyone else', 'nightmare', 'driving me'];
+function densityScore(post) {
+    const text = `${post.title} ${post.body}`.toLowerCase();
+    const lenFactor = Math.min((post.body || '').length / 100, 6); // up to 6 for ~600+ chars of body
+    let pw = 0; PROBLEM_SIGNAL_WORDS.forEach(w => { if (text.includes(w)) pw++; });
+    return lenFactor + Math.min(pw, 6);
+}
+function rankByDensity(corpus) {
+    corpus.forEach(p => { p._density = densityScore(p); });
+    corpus.sort((a, b) => (b._density - a._density) || (b.score - a.score));
+}
+
+// Build the corpus: audience-specific terms → consolidated queries (gate-throttled) → dedupe →
+// normalize (clean text) → rank by density (problem discussions first). One fetch, reused.
+async function buildCorpus(subreddits, audience) {
     const subredditQuery = buildSubredditQuery(subreddits);
-    const queries = buildProblemQueries();
+    const terms = await getDomainFrustrationTerms(audience);
+    console.log('[Corpus] frustration terms:', terms);
+    const queries = buildProblemQueries(terms);
     const batches = await Promise.all(queries.map(q => fetchPostsForQuery(subredditQuery, q)));
     const corpus = normalizeCorpus(dedupePosts(batches.flat()));
-    corpus.sort((a, b) => b.score - a.score); // most-upvoted first
+    rankByDensity(corpus);
     return corpus;
 }
 
@@ -334,7 +391,7 @@ async function runProblemFinder() {
 
     showLoader('Gathering discussions…');
     try {
-        const corpus = await buildCorpus(subreddits);
+        const corpus = await buildCorpus(subreddits, window.originalGroupName || '');
         window._corpus = corpus;
         window._analysisSubreddits = subreddits;
         window._tabLoaded = {}; // new search → invalidate cached tabs so they reload for this audience
@@ -921,14 +978,19 @@ function assignPostsByKeyword(findings, corpus, perFinding) {
 // and off-topic/positive/rescue posts get dropped. Falls back to keyword matching on failure.
 async function assignPostsToFindings(findings, corpus, perFinding) {
     perFinding = perFinding || 8;
-    const candidates = dedupeByTitle(corpus).slice(0, 50); // top 50 by upvotes
+    // Drop near-empty / photo posts (little body), then take a representative set.
+    const candidates = dedupeByTitle(corpus)
+        .filter(p => ((p.title || '').length + (p.body || '').length) >= 80)
+        .slice(0, 45);
     const buckets = findings.map(() => []);
     try {
-        const prompt = `You are categorising Reddit posts by which problem they genuinely belong to.\n\nProblems:\n${findings.map((f, i) => `${i + 1}: ${f.title}`).join('\n')}\n\nPosts:\n${candidates.map((p, i) => `${i + 1}: ${(p.title || '').slice(0, 160)}`).join('\n')}\n\nFor each post, give the number of the SINGLE most relevant problem, or 0 if the post does not genuinely belong to ANY of them (off-topic, a positive/heart-warming story, a rescue/adoption plea, or unrelated). Be STRICT — only assign a post if it is clearly about that specific problem. Respond ONLY with JSON: {"assignments":[{"post":1,"problem":2}]}.`;
+        const problemList = findings.map((f, i) => `${i + 1}: ${f.title} — ${f.summary || ''}`).join('\n');
+        const postList = candidates.map((p, i) => `${i + 1}: "${(p.title || '').slice(0, 120)}" — ${(p.body || '').replace(/\s+/g, ' ').slice(0, 160)}`).join('\n');
+        const prompt = `You are matching Reddit posts to the problem each one is genuinely about.\n\nProblems:\n${problemList}\n\nPosts:\n${postList}\n\nFor each post, give the number of the SINGLE problem the AUTHOR is actually describing, experiencing, or asking for help with. Use 0 (none) if it does not clearly belong to any problem — this INCLUDES positive or heart-warming stories, rescue/adoption pleas, "help me name my dog", breed-identification requests, photo/picture posts, and anything off-topic. Be STRICT: when in doubt, use 0. Respond ONLY with JSON: {"assignments":[{"post":1,"problem":2}]}.`;
         const parsed = await callOpenAI({
             model: 'gpt-4o-mini',
             messages: [
-                { role: 'system', content: 'You are a precise categorisation engine that outputs only JSON.' },
+                { role: 'system', content: 'You are a precise categorisation engine that outputs only JSON. You err on the side of 0 (none) rather than forcing a weak match.' },
                 { role: 'user', content: prompt }
             ],
             temperature: 0, max_completion_tokens: 1200, response_format: { type: 'json_object' }
@@ -1124,12 +1186,12 @@ function renderPolarityMap(findings) {
         chart: { type: 'bubble', backgroundColor: 'transparent', spacing: [16, 16, 16, 16], reflow: true },
         title: { text: '' }, credits: { enabled: false }, legend: { enabled: false },
         exporting: { enabled: false }, // removes the hamburger/context menu icon (top right)
-        xAxis: { title: { text: 'How often it comes up', style: { color: '#888' } }, min: 0, gridLineColor: 'rgba(0,0,0,0.06)', lineColor: 'rgba(0,0,0,0.15)', labels: { style: { color: '#888' } } },
-        yAxis: { title: { text: 'How painful it is', style: { color: '#888' } }, min: 0, max: 100, tickInterval: 25, gridLineColor: 'rgba(0,0,0,0.06)', lineColor: 'rgba(0,0,0,0.15)', labels: { style: { color: '#888' } } },
+        xAxis: { title: { text: 'How often it comes up', style: { color: 'rgba(255,255,255,0.7)' } }, min: 0, gridLineColor: 'rgba(255,255,255,0.15)', lineColor: 'rgba(255,255,255,0.3)', tickColor: 'rgba(255,255,255,0.3)', labels: { style: { color: 'rgba(255,255,255,0.7)' } } },
+        yAxis: { title: { text: 'How painful it is', style: { color: 'rgba(255,255,255,0.7)' } }, min: 0, max: 100, tickInterval: 25, gridLineColor: 'rgba(255,255,255,0.15)', lineColor: 'rgba(255,255,255,0.3)', tickColor: 'rgba(255,255,255,0.3)', labels: { style: { color: 'rgba(255,255,255,0.7)' } } },
         tooltip: { useHTML: true, headerFormat: '', pointFormat: '<b>{point.label}</b><br>Frequency: {point.x}%<br>Intensity: {point.y}/100' },
         plotOptions: {
             bubble: { minSize: 18, maxSize: 64, marker: { fillColor: '#00a5ce', fillOpacity: 1, lineColor: '#00a5ce', lineWidth: 0 } },
-            series: { dataLabels: { enabled: true, format: '{point.label}', style: { color: '#ffffff', textOutline: 'none', fontWeight: '600', fontSize: '11px' }, allowOverlap: false } }
+            series: { dataLabels: { enabled: false } } // labels show on hover (tooltip) only — keeps it uncluttered
         },
         series: [{ data }],
         responsive: { rules: [{ condition: { maxWidth: 500 }, chartOptions: { xAxis: { title: { text: 'Frequency' } }, yAxis: { title: { text: 'Intensity' } }, plotOptions: { series: { dataLabels: { style: { fontSize: '9px' } } } } } }] }

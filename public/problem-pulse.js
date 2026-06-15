@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 27 — Firebase corpus cache (fail-soft) + bubble-guide white text', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 28 — also cache the find-communities step (no Reddit on repeat audiences)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -373,6 +373,29 @@ async function setCachedCorpus(audience, posts) {
         await db.collection('corpora').doc(_audienceSlug(audience)).set({ audience, posts: lean, updatedAt: Date.now() });
         console.log(`[Cache] corpus SAVED for "${audience}" (${lean.length} posts)`);
     } catch (e) { console.warn('[Cache] write failed (ignored):', e && e.message); }
+}
+
+// Cache the ranked communities per audience, so a repeat audience skips the ~20 Reddit subreddit
+// lookups AND the 2 OpenAI calls the find-communities step makes. Same fail-soft pattern.
+async function getCachedSubreddits(audience) {
+    const db = _firestore();
+    if (!db) return null;
+    try {
+        const doc = await db.collection('subreddits').doc(_audienceSlug(audience)).get();
+        if (!doc.exists) return null;
+        const data = doc.data() || {};
+        if (!Array.isArray(data.ranked) || !data.ranked.length) return null;
+        if (Date.now() - (data.updatedAt || 0) > CORPUS_CACHE_TTL_MS) return null; // stale
+        return data.ranked;
+    } catch (e) { console.warn('[Cache] subreddits read failed (continuing live):', e && e.message); return null; }
+}
+async function setCachedSubreddits(audience, ranked) {
+    const db = _firestore();
+    if (!db || !ranked || !ranked.length) return;
+    try {
+        await db.collection('subreddits').doc(_audienceSlug(audience)).set({ audience, ranked: ranked.slice(0, 40), updatedAt: Date.now() });
+        console.log(`[Cache] communities SAVED for "${audience}" (${ranked.length})`);
+    } catch (e) { console.warn('[Cache] subreddits write failed (ignored):', e && e.message); }
 }
 
 // --- selection + loader -----------------------------------------------------
@@ -1460,9 +1483,17 @@ function initEntryFlow() {
         findBtn.disabled = true;
         choices.innerHTML = '<p class="loading-text">Finding communities…</p>';
         try {
-            const names = await findSubredditsForGroup(groupName);
-            console.log('[Entry] candidate subreddits:', names);
-            const ranked = await fetchAndRankSubreddits(names);
+            // CACHE: reuse a recent ranked-communities list for this audience (skips ~20 Reddit
+            // lookups + 2 OpenAI calls). Falls through to live discovery (and saves it) on a miss.
+            let ranked = await getCachedSubreddits(groupName);
+            if (ranked && ranked.length) {
+                console.log(`[Cache] communities HIT for "${groupName}" — skipped AI + Reddit`);
+            } else {
+                const names = await findSubredditsForGroup(groupName);
+                console.log('[Entry] candidate subreddits:', names);
+                ranked = await fetchAndRankSubreddits(names);
+                setCachedSubreddits(groupName, ranked); // fire-and-forget save
+            }
             console.log('[Entry] ranked subreddits:', ranked.length);
             renderSubredditChoices(ranked);
         } catch (error) {

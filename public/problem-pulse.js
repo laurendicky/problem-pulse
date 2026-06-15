@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 11 — + tab 2 findings (#tab-hurts, lazy)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 12 — fears→.pillar-item-fear, custom prevalence wrapper', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -536,12 +536,17 @@ function captureMindsetBlueprints(container) {
     const tpls = container.querySelectorAll('.mindset-item-template');
     return tpls.length ? Array.from(tpls).map(t => t.cloneNode(true)) : null; // keep all 3 to preserve their static numbers
 }
-function populatePillars(container, blueprint, items) {
+// textSelector lets each pillar use its own styled text element — goals use .pillar-item-text,
+// fears use .pillar-item-fear (the combo-class fear styling). Falls back gracefully either way.
+function populatePillars(container, blueprint, items, textSelector) {
     container.innerHTML = '';
     (items || []).slice(0, 3).forEach(text => {
         const clone = blueprint.cloneNode(true);
         clone.style.removeProperty('display');
-        const textNode = clone.querySelector('.pillar-item-text') || clone;
+        const textNode = (textSelector && clone.querySelector(textSelector))
+            || clone.querySelector('.pillar-item-text')
+            || clone.querySelector('.pillar-item-fear')
+            || clone;
         textNode.innerText = text;
         container.appendChild(clone);
     });
@@ -594,8 +599,8 @@ Ground every line in the posts. Posts:\n${sample}` }
 
     try {
         const parsed = await callOpenAI(payload);
-        if (goalsC && window._bp.goals) populatePillars(goalsC, window._bp.goals, parsed.goals);
-        if (fearsC && window._bp.fears) populatePillars(fearsC, window._bp.fears, parsed.fears);
+        if (goalsC && window._bp.goals) populatePillars(goalsC, window._bp.goals, parsed.goals, '.pillar-item-text');
+        if (fearsC && window._bp.fears) populatePillars(fearsC, window._bp.fears, parsed.fears, '.pillar-item-fear');
         if (charsC && window._bp.chars) populateMindset(charsC, window._bp.chars, parsed.characteristics);
         if (rejectC && window._bp.reject) populateMindset(rejectC, window._bp.reject, parsed.rejects);
         console.log('[Profile] rendered:', {
@@ -643,8 +648,32 @@ function computeFindingPrevalence(findings, corpus) {
         .sort((a, b) => b.prevalence - a.prevalence);
 }
 
-// The prevalence bar HTML goes INSIDE .prevalence-container-wrapper (a generated bar, not one of
-// your designed combo-class elements, so replacing its innerHTML is safe).
+// Prevalence. PREFERRED path: you build the bar in Webflow and we just fill values into your
+// elements (.prevalence-bar-foreground width, .prevalence-percent, .prevalence-label,
+// .prevalence-subtitle) — your styling, untouched. FALLBACK: if you haven't built those elements
+// yet, we inject a simple default bar so the card isn't blank.
+function populatePrevalence(block, prevalence) {
+    const wrap = block.querySelector('.prevalence-container-wrapper');
+    if (!wrap) return;
+    const lvl = prevalence >= 30 ? 'high' : prevalence >= 15 ? 'medium' : 'low';
+
+    const fill = wrap.querySelector('.prevalence-bar-foreground');
+    const pct = wrap.querySelector('.prevalence-percent');
+    const label = wrap.querySelector('.prevalence-label, .prevalence-header');
+    const subtitle = wrap.querySelector('.prevalence-subtitle');
+
+    if (fill || pct || label || subtitle) {
+        // Your own Webflow structure — fill values only, never touch your styling/classes.
+        wrap.setAttribute('data-level', lvl); // lets you colour high/medium/low in Webflow via CSS
+        if (fill) fill.style.width = prevalence + '%';
+        if (pct) pct.textContent = prevalence + '%';
+        if (label) label.textContent = lvl.charAt(0).toUpperCase() + lvl.slice(1) + ' Prevalence';
+        if (subtitle) subtitle.textContent = prevalence + '% of problems';
+    } else {
+        wrap.innerHTML = renderPrevalenceBar(prevalence); // fallback until you build your own
+    }
+}
+
 function renderPrevalenceBar(prevalence) {
     const level = prevalence >= 30 ? 'High' : prevalence >= 15 ? 'Medium' : 'Low';
     const color = prevalence >= 30 ? '#296fd3' : prevalence >= 15 ? '#5b98eb' : '#aecbfa';
@@ -653,7 +682,7 @@ function renderPrevalenceBar(prevalence) {
         <div class="prevalence-bar-background" style="background:#1e2a38;border-radius:4px;overflow:hidden;height:18px;">
             <div class="prevalence-bar-foreground" style="width:${prevalence}%;background:${color};height:100%;color:#fff;font-size:11px;text-align:right;padding-right:6px;line-height:18px;box-sizing:border-box;">${prevalence}%</div>
         </div>
-        <div class="prevalence-subtitle" style="font-size:11px;color:#888;margin-top:6px;">Represents ${prevalence}% of identified problems.</div>
+        <div class="prevalence-subtitle" style="font-size:11px;color:#888;margin-top:6px;">${prevalence}% of problems</div>
     </div>`;
 }
 
@@ -681,8 +710,7 @@ function renderFindingCard(i, finding) {
         });
     }
 
-    const prev = block.querySelector('.prevalence-container-wrapper');
-    if (prev) prev.innerHTML = renderPrevalenceBar(finding.prevalence);
+    populatePrevalence(block, finding.prevalence);
     return true;
 }
 

@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('[problem-pulse-v2] script loaded');
+console.log('%c[problem-pulse-v2] BUILD 9 — counts + archetype + audit + loader#loading-code-1', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -281,17 +281,36 @@ function getSelectedSubreddits() {
     return Array.from(boxes).map(b => b.value).filter(v => v && v !== 'undefined');
 }
 
-// The loader div (#full-loader-msg) is display:none in Webflow, so we must set an explicit visible
-// value to override that — setting '' would just fall back to the none. The user owns its look.
+// DIAGNOSTIC: is #id actually on screen? If not, which ancestor is hiding it? This pinpoints the
+// "rendered but invisible" case — an element whose own styles are fine but whose parent is hidden.
+function _debugVisibility(id) {
+    const el = document.getElementById(id);
+    if (!el) { console.warn(`[Debug] #${id} NOT FOUND in DOM`); return; }
+    let node = el;
+    while (node && node !== document.body) {
+        const cs = getComputedStyle(node);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') {
+            const who = node.id ? '#' + node.id : (node.className ? '.' + String(node.className).split(' ').join('.') : node.tagName);
+            console.warn(`[Debug] #${id} is HIDDEN by ancestor ${who} (display:${cs.display}, visibility:${cs.visibility}, opacity:${cs.opacity})`);
+            return;
+        }
+        node = node.parentElement;
+    }
+    console.log(`[Debug] #${id} is visible ✓`);
+}
+
+// The loader is display:none in Webflow, so we set an explicit visible value to override that
+// (setting '' would just fall back to none). We look for #loading-code-1 first, then #full-loader-msg.
+const LOADER_IDS = ['loading-code-1', 'full-loader-msg'];
 function showLoader(message) {
-    const el = document.getElementById('full-loader-msg');
-    if (!el) return;
+    const el = LOADER_IDS.map(id => document.getElementById(id)).find(Boolean);
+    if (!el) { console.warn('[Loader] no loader found (#loading-code-1 / #full-loader-msg)'); return; }
     el.style.display = 'flex';
     if (message) el.setAttribute('data-status', message);
+    _debugVisibility(el.id);
 }
 function hideLoader() {
-    const el = document.getElementById('full-loader-msg');
-    if (el) el.style.display = 'none';
+    LOADER_IDS.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
 }
 
 // Re-entrancy guard. Another script on the page (audience-chat.js) also hooks the search and
@@ -311,6 +330,7 @@ async function runProblemFinder() {
 
     _analysisRunning = true; // set synchronously, before any await, so concurrent calls bail here
     console.log('[Analysis] selected subreddits:', subreddits);
+    auditTab1Elements(); // logs which Webflow elements actually exist, so we can fix any selector
 
     showLoader('Gathering discussions…');
     try {
@@ -322,9 +342,18 @@ async function runProblemFinder() {
             alert('No discussions found for those communities. Try different ones.');
             return;
         }
-        // Part 3 — first analysis: audience demographics. Reads from the corpus; nothing refetched.
+        // Part 3 — Tab 1 ("Who they are"). All read from the corpus; nothing refetched.
         showLoader('Analysing audience…');
-        await generateAndRenderWho(corpus, window.originalGroupName || '');
+        const audience = window.originalGroupName || '';
+        // "insights" = total discussion signals mined (sum of comment counts). Flagged: tell me the
+        // exact definition you want and I'll change this one line.
+        const insightsCount = corpus.reduce((sum, p) => sum + (p.comments || 0), 0);
+        renderTab1Counts(audience, corpus.length, insightsCount); // instant, from data we already have
+        // The two AI panels run in parallel (2 OpenAI calls) so the tab fills as fast as possible.
+        await Promise.all([
+            generateAndRenderWho(corpus, audience),
+            generateAndRenderArchetype(corpus, audience)
+        ]);
         revealResults();
     } catch (error) {
         console.error('[Analysis] failed to build corpus:', error);
@@ -410,14 +439,94 @@ async function generateAndRenderWho(corpus, audience) {
     }
 }
 
+// BLUEPRINT METHOD: these elements are designed in Webflow, so we fill the existing element's text
+// and never touch its parent's HTML — the design stays intact, only the value changes.
+function setDesignedText(selector, value) {
+    document.querySelectorAll(selector).forEach(el => { el.innerText = value; });
+}
+
+// One-time audit so we can SEE exactly which Webflow elements exist (and under what selector).
+function auditTab1Elements() {
+    const idCheck = (id) => document.getElementById(id) ? 'FOUND' : 'missing';
+    const clsCheck = (sel) => document.querySelectorAll(sel).length;
+    console.log('[Audit] tab-1 elements:', {
+        'id#loading-code-1': idCheck('loading-code-1'),
+        'id#full-loader-msg': idCheck('full-loader-msg'),
+        'id#results-wrapper-b': idCheck('results-wrapper-b'),
+        'id#overview-div': idCheck('overview-div'),
+        'id#architype-heading': idCheck('architype-heading'),
+        'id#archetype-heading': idCheck('archetype-heading'),
+        'id#archetype-d': idCheck('archetype-d'),
+        '.count-audience': clsCheck('.count-audience'),
+        '.count-insights': clsCheck('.count-insights'),
+        '.count-insight': clsCheck('.count-insight'),
+        '.count-posts': clsCheck('.count-posts')
+    });
+}
+
+// Tab-1 count line — "[insights] insights found in [posts] posts" + the audience name. Logs how many
+// elements each selector matched so a zero-match (wrong class) is obvious.
+function renderTab1Counts(audience, postsCount, insightCount) {
+    const set = (sel, val) => {
+        const els = document.querySelectorAll(sel);
+        console.log(`[Counts] "${sel}" matched ${els.length} element(s)`);
+        els.forEach(el => { el.innerText = val; });
+    };
+    set('.count-audience', audience || '');
+    set('.count-posts', Number(postsCount).toLocaleString());
+    set('.count-insights, .count-insight', Number(insightCount).toLocaleString());
+}
+
+// Audience archetype — a 2-3 word name + a 2-sentence character study. Fills the designed
+// #archetype-heading (/.archetype-heading/.architype-heading) and #archetype-d in place.
+async function generateAndRenderArchetype(corpus, audience) {
+    // Cover every spelling/form: ID or class, "archetype" or "architype".
+    const headingEl = document.querySelector('#architype-heading, #archetype-heading, .architype-heading, .archetype-heading');
+    const descEl = document.querySelector('#archetype-d, #architype-d, .archetype-d, .architype-d');
+    console.log('[Archetype] heading el:', headingEl ? (headingEl.id || headingEl.className) : 'NONE', '| desc el:', descEl ? (descEl.id || descEl.className) : 'NONE');
+    if (!headingEl && !descEl) { console.warn('[Archetype] no archetype elements found.'); return; }
+    if (headingEl) headingEl.textContent = 'Analysing…';
+    if (descEl) descEl.textContent = '';
+
+    const sample = corpus.slice(0, 20)
+        .map(p => `Title: ${p.title}\nContent: ${p.body}`.substring(0, 450))
+        .join('\n---\n');
+
+    const payload = {
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: 'You are a sharp cultural observer who writes psychologically specific field notes about online communities. You output only valid JSON and never sound like a marketing deck.' },
+            { role: 'user', content: `You have spent months lurking inside the "${audience}" community on Reddit. Below are real discussions. Respond ONLY with a valid JSON object with these keys: "archetype" (a short, 2-3 word evocative name for this audience, e.g. "The Practical Innovators") and "summary" (EXACTLY 2 short sentences, 40 words maximum — a sharp character study built around one instinct or contradiction, landing one memorable phrase; do NOT use "this audience is driven by", "they value", or "they appreciate"). Posts:\n${sample}` }
+        ],
+        temperature: 0.6,
+        max_completion_tokens: 300,
+        response_format: { type: 'json_object' }
+    };
+
+    try {
+        const parsed = await callOpenAI(payload);
+        if (headingEl) headingEl.textContent = parsed.archetype || '';
+        if (descEl) descEl.textContent = parsed.summary || '';
+        console.log('[Archetype] rendered:', parsed.archetype);
+    } catch (error) {
+        console.error('[Archetype] failed:', error);
+        if (headingEl) headingEl.textContent = 'Analysis Failed';
+        if (descEl) descEl.textContent = 'Could not generate the audience summary. Please try again.';
+    }
+}
+
 // Reveal the main results container (hidden until the first analysis is ready). display:flex is set
 // with !important to beat any Webflow inline/none, then we fade in and scroll to it.
 function revealResults() {
     const wrapper = document.getElementById('results-wrapper-b');
-    if (!wrapper) { console.warn('[Analysis] #results-wrapper-b not found — results may already be visible.'); return; }
-    wrapper.style.setProperty('display', 'flex', 'important');
-    wrapper.style.opacity = '1';
-    setTimeout(() => wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    if (!wrapper) { console.warn('[Analysis] #results-wrapper-b NOT FOUND — cannot reveal results.'); }
+    else {
+        wrapper.style.setProperty('display', 'flex', 'important');
+        wrapper.style.opacity = '1';
+        setTimeout(() => wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    }
+    // Tell us whether the demographics panel is actually on screen now (and if not, what's hiding it).
+    _debugVisibility('overview-div');
 }
 
 // Reveal the subreddit-selection step (the original's transitionToStep2). Without this, the

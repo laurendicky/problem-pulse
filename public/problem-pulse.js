@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 17 — stronger relevance, clickable posts, Highcharts polarity map', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 18 — problems-only findings, AI post assignment, polarity restyle', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -730,7 +730,7 @@ async function generateAndRenderFindings(corpus, audience) {
         model: 'gpt-4o-mini',
         messages: [
             { role: 'system', content: 'You distil community discussions into a few core problems with authentic quotes. Output only valid JSON.' },
-            { role: 'user', content: `Analyse these discussions about "${audience}" and identify 1 to 5 of the most common, clearly recurring problems. Respond ONLY with a JSON object: {"findings":[{"title","summary","quotes","keywords","intensity"}]}. Rules — "title": 3-6 words, plain and specific. "summary": ONE or TWO short sentences, punchy, human-sounding, intriguing, NO waffle, ~30 words max, and naturally mention "${audience}". "quotes": exactly 3 short authentic-sounding strings, each ≤ 80 characters. "keywords": 3-6 lowercase words for matching related posts. "intensity": an integer 0-100 rating how emotionally severe/painful this problem is for ${audience} (how much stress/distress it causes), judged INDEPENDENTLY of how often it comes up. Prioritise the most common recurring problems; avoid one-off complaints. Posts:\n${sample}` }
+            { role: 'user', content: `Analyse these discussions about "${audience}" and identify 1 to 5 of the most common, clearly recurring PROBLEMS — genuine pain points, frustrations, struggles, worries, or unmet needs. IMPORTANT: include ONLY real problems/difficulties. Do NOT include positive or heart-warming themes, things they love or enjoy, or ways their dog helps them — e.g. "emotional support from dogs" is NOT a problem and must be excluded. Respond ONLY with a JSON object: {"findings":[{"title","summary","quotes","keywords","intensity"}]}. Rules — "title": 3-6 words naming a problem, plain and specific. "summary": ONE or TWO short sentences, punchy, human-sounding, intriguing, NO waffle, ~30 words max, naturally mentioning "${audience}". "quotes": exactly 3 short authentic-sounding strings that express the PROBLEM (a complaint or struggle, not praise), each ≤ 80 characters. "keywords": 3-6 lowercase words for matching related posts. "intensity": an integer 0-100 rating how emotionally severe/painful this problem is for ${audience}, judged INDEPENDENTLY of how often it comes up. Prioritise the most common recurring problems; avoid one-off complaints. Posts:\n${sample}` }
         ],
         temperature: 0.2,
         max_completion_tokens: 1100,
@@ -744,8 +744,8 @@ async function generateAndRenderFindings(corpus, audience) {
         if (!findings.length) { console.warn('[Findings] none generated'); return; }
         const ranked = computeFindingPrevalence(findings, corpus).slice(0, 5);
         window._findings = ranked;
-        // Assign each post to its single best-matching finding (no repeats), most relevant first.
-        window._findingPosts = assignPostsToFindings(ranked, corpus, 8);
+        // Semantic AI assignment (no repeats, drops irrelevant posts), most upvoted first.
+        window._findingPosts = await assignPostsToFindings(ranked, corpus, 8);
         window._subProblemCache = {}; // new findings → drop cached subproblems
         ranked.forEach((f, idx) => renderFindingCard(idx + 1, f));
         console.log('[Findings] rendered:', ranked.length);
@@ -856,7 +856,7 @@ function openFindingModal(blockIndex) {
 
     modal.style.display = 'flex'; // open first so the chart has a measurable width
     const chartEl = modal.querySelector('.subproblem-chart');
-    if (chartEl && finding) renderSubproblemsInto(chartEl, finding); // fire-and-forget; loader shows meanwhile
+    if (chartEl && finding) renderSubproblemsInto(chartEl, finding, blockIndex); // fire-and-forget; loader shows meanwhile
 }
 
 function closeFindingModal(modal) {
@@ -903,9 +903,8 @@ function dedupeByTitle(posts) {
     });
 }
 
-// Each post goes to its single best-matching finding (no repeats across findings), only if it clears
-// the relevance bar; keep the most relevant per finding.
-function assignPostsToFindings(findings, corpus, perFinding) {
+// Keyword fallback (used only if the AI assignment call fails).
+function assignPostsByKeyword(findings, corpus, perFinding) {
     perFinding = perFinding || 8;
     const posts = dedupeByTitle(corpus);
     const buckets = findings.map(() => []);
@@ -914,10 +913,38 @@ function assignPostsToFindings(findings, corpus, perFinding) {
         findings.forEach((f, i) => { const s = scorePostForFinding(post, f); if (s > bestScore) { bestScore = s; bestIdx = i; } });
         if (bestIdx >= 0 && bestScore >= RELEVANCE_MIN_SCORE) buckets[bestIdx].push({ post, score: bestScore });
     });
-    return buckets.map(arr => arr
-        .sort((a, b) => b.score - a.score || (b.post.score - a.post.score))
-        .slice(0, perFinding)
-        .map(x => x.post));
+    return buckets.map(arr => arr.sort((a, b) => b.score - a.score || (b.post.score - a.post.score)).slice(0, perFinding).map(x => x.post));
+}
+
+// PRIMARY: let the model decide which problem each post genuinely belongs to (or NONE). This is
+// semantic, so it catches things keywords can't — a heart-warming post won't land under "Health",
+// and off-topic/positive/rescue posts get dropped. Falls back to keyword matching on failure.
+async function assignPostsToFindings(findings, corpus, perFinding) {
+    perFinding = perFinding || 8;
+    const candidates = dedupeByTitle(corpus).slice(0, 50); // top 50 by upvotes
+    const buckets = findings.map(() => []);
+    try {
+        const prompt = `You are categorising Reddit posts by which problem they genuinely belong to.\n\nProblems:\n${findings.map((f, i) => `${i + 1}: ${f.title}`).join('\n')}\n\nPosts:\n${candidates.map((p, i) => `${i + 1}: ${(p.title || '').slice(0, 160)}`).join('\n')}\n\nFor each post, give the number of the SINGLE most relevant problem, or 0 if the post does not genuinely belong to ANY of them (off-topic, a positive/heart-warming story, a rescue/adoption plea, or unrelated). Be STRICT — only assign a post if it is clearly about that specific problem. Respond ONLY with JSON: {"assignments":[{"post":1,"problem":2}]}.`;
+        const parsed = await callOpenAI({
+            model: 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: 'You are a precise categorisation engine that outputs only JSON.' },
+                { role: 'user', content: prompt }
+            ],
+            temperature: 0, max_completion_tokens: 1200, response_format: { type: 'json_object' }
+        });
+        const assignments = Array.isArray(parsed.assignments) ? parsed.assignments : [];
+        assignments.forEach(a => {
+            const pIdx = (parseInt(a.post, 10) || 0) - 1;
+            const fIdx = (parseInt(a.problem, 10) || 0) - 1;
+            if (pIdx >= 0 && pIdx < candidates.length && fIdx >= 0 && fIdx < findings.length) buckets[fIdx].push(candidates[pIdx]);
+        });
+        if (buckets.reduce((s, b) => s + b.length, 0) === 0) throw new Error('empty AI assignment');
+    } catch (e) {
+        console.warn('[Assign] AI assignment failed — keyword fallback:', e && e.message);
+        return assignPostsByKeyword(findings, corpus, perFinding);
+    }
+    return buckets.map(arr => arr.sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, perFinding));
 }
 
 // =============================================================================
@@ -1045,11 +1072,13 @@ function renderSubProblemChart(chartEl, finding, subProblems) {
 }
 
 // Fire-and-forget: show the chart's loader, generate (cached) subproblems, then render the ring.
-async function renderSubproblemsInto(chartEl, finding) {
+async function renderSubproblemsInto(chartEl, finding, blockIndex) {
     const loader = chartEl.querySelector('.subproblem-loader');
     if (loader) loader.style.display = 'block';
     try {
-        const analysisPosts = matchPostsForFinding(finding, window._corpus || [], 40);
+        // Prefer this finding's AI-assigned posts; fall back to a relevance match if too few.
+        const assigned = window._findingPosts && window._findingPosts[blockIndex - 1];
+        const analysisPosts = (assigned && assigned.length >= 4) ? assigned : matchPostsForFinding(finding, window._corpus || [], 40);
         const subs = await generateSubProblems(finding, analysisPosts, window.originalGroupName || '');
         renderSubProblemChart(chartEl, finding, subs);
     } catch (e) {
@@ -1092,18 +1121,20 @@ function renderPolarityMap(findings) {
 
     if (window._polarityChart && window._polarityChart.destroy) window._polarityChart.destroy();
     window._polarityChart = Highcharts.chart(container, {
-        chart: { type: 'bubble', backgroundColor: 'transparent', spacing: [20, 20, 20, 20] },
+        chart: { type: 'bubble', backgroundColor: 'transparent', spacing: [16, 16, 16, 16], reflow: true },
         title: { text: '' }, credits: { enabled: false }, legend: { enabled: false },
+        exporting: { enabled: false }, // removes the hamburger/context menu icon (top right)
         xAxis: { title: { text: 'How often it comes up', style: { color: '#888' } }, min: 0, gridLineColor: 'rgba(0,0,0,0.06)', lineColor: 'rgba(0,0,0,0.15)', labels: { style: { color: '#888' } } },
         yAxis: { title: { text: 'How painful it is', style: { color: '#888' } }, min: 0, max: 100, tickInterval: 25, gridLineColor: 'rgba(0,0,0,0.06)', lineColor: 'rgba(0,0,0,0.15)', labels: { style: { color: '#888' } } },
         tooltip: { useHTML: true, headerFormat: '', pointFormat: '<b>{point.label}</b><br>Frequency: {point.x}%<br>Intensity: {point.y}/100' },
         plotOptions: {
-            bubble: { minSize: 18, maxSize: 70, marker: { fillColor: 'rgba(0,165,206,0.75)', lineColor: '#ffffff', lineWidth: 1.5 } },
-            series: { dataLabels: { enabled: true, format: '{point.label}', style: { color: '#1f2d3d', textOutline: 'none', fontWeight: '500', fontSize: '11px' }, allowOverlap: false } }
+            bubble: { minSize: 18, maxSize: 64, marker: { fillColor: '#00a5ce', fillOpacity: 1, lineColor: '#00a5ce', lineWidth: 0 } },
+            series: { dataLabels: { enabled: true, format: '{point.label}', style: { color: '#ffffff', textOutline: 'none', fontWeight: '600', fontSize: '11px' }, allowOverlap: false } }
         },
         series: [{ data }],
         responsive: { rules: [{ condition: { maxWidth: 500 }, chartOptions: { xAxis: { title: { text: 'Frequency' } }, yAxis: { title: { text: 'Intensity' } }, plotOptions: { series: { dataLabels: { style: { fontSize: '9px' } } } } } }] }
     });
+    setTimeout(() => { if (window._polarityChart && window._polarityChart.reflow) window._polarityChart.reflow(); }, 60); // fit container exactly
     console.log('[Polarity] map rendered with', data.length, 'problems');
 }
 

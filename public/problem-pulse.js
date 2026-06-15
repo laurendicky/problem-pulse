@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 24 — fast cards (background assignment), polarity bubbles coloured by parent', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 25 — cards in prevalence order, #bubble-guide legend, clean subproblem loader', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -833,14 +833,19 @@ async function generateAndRenderFindings(corpus, audience) {
         window._assignmentPromise = assignPostsToFindings(ranked, corpus)
             .then(buckets => {
                 ranked.forEach((f, i) => { f._posts = buckets[i] || []; f.support = (buckets[i] || []).length; });
+                // Re-sort by REAL support so cards display highest → lowest prevalence, then re-render
+                // every card in the new order (the per-block colours stay; only the content moves).
+                ranked.sort((a, b) => b.support - a.support);
                 const totalShown = ranked.reduce((s, f) => s + f.support, 0) || 1;
                 ranked.forEach((f, idx) => {
                     f.prevalence = Math.round((f.support / totalShown) * 100);
-                    populatePrevalence(document.getElementById('findings-block' + (idx + 1)), f.prevalence);
+                    renderFindingCard(idx + 1, f);
                 });
+                window._findings = ranked;
                 window._findingPosts = ranked.map(f => (f._posts || []).slice(0, 8));
                 window._findingPostsFull = ranked.map(f => f._posts || []);
-                console.log('[Findings] background assignment done | support:', ranked.map(f => f.support), '| prevalence refined:', ranked.map(f => f.prevalence + '%'));
+                renderBubbleGuide(ranked); // keep the polarity legend in sync if already shown
+                console.log('[Findings] background done | order:', ranked.map(f => `${f.title} ${f.prevalence}%`));
             })
             .catch(e => {
                 console.warn('[Findings] assignment failed — keyword posts:', e && e.message);
@@ -1186,6 +1191,12 @@ function renderSubProblemChart(chartEl, finding, subProblems) {
 // Fire-and-forget: show the chart's loader, generate (cached) subproblems, then render the ring.
 async function renderSubproblemsInto(chartEl, finding, blockIndex) {
     const loader = chartEl.querySelector('.subproblem-loader');
+    // Hide the Webflow placeholders (hub + node templates + any old generated nodes) so ONLY the
+    // loader shows while we generate — otherwise the empty hub/templates look messy.
+    const hub = chartEl.querySelector('.subproblem-hub');
+    if (hub) hub.style.display = 'none';
+    chartEl.querySelectorAll('.subproblem-node-template').forEach(t => { t.style.display = 'none'; });
+    chartEl.querySelectorAll('.sp-generated').forEach(el => el.remove());
     if (loader) loader.style.display = 'block';
     try {
         // Prefer this finding's full set of AI-assigned posts; fall back to a relevance match if few.
@@ -1211,6 +1222,24 @@ function ensureFindings() {
     if (window._findings && window._findings.length) return Promise.resolve(window._findings);
     if (!window._corpus || !window._corpus.length) return Promise.resolve([]);
     return generateAndRenderFindings(window._corpus, window.originalGroupName || '').then(() => window._findings || []);
+}
+
+// Shared palette: bubble colour for parent problem i == legend swatch for finding i.
+const PARENT_PALETTE = ['#6C5CE7', '#00A5CE', '#E84393', '#0984E3', '#00B894', '#FDCB6E'];
+
+function _escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+
+// Subtle legend in #bubble-guide: a coloured dot per finding so users know which card each bubble
+// colour ties to. Dots carry the palette colour; the label text inherits #bubble-guide's own colour
+// (style it in Webflow).
+function renderBubbleGuide(findings) {
+    const el = document.getElementById('bubble-guide');
+    if (!el) return;
+    el.innerHTML = (findings || []).map((f, i) => `
+        <span style="display:inline-flex;align-items:center;gap:6px;margin:0 14px 6px 0;font-size:12px;line-height:1.2;">
+            <span style="width:11px;height:11px;border-radius:50%;flex:0 0 auto;background:${PARENT_PALETTE[i % PARENT_PALETTE.length]};border:1px solid rgba(255,255,255,0.6);"></span>
+            ${_escapeHtml(f.title || '')}
+        </span>`).join('');
 }
 
 // Richer map WITHOUT contradicting the cards: one call breaks the SAME findings into their concrete
@@ -1253,7 +1282,6 @@ function renderPolarityMap(points) {
     if (!points || !points.length) { container.innerHTML = '<p class="chart-placeholder-text">Not enough problems to map yet.</p>'; return; }
 
     // Colour each bubble by its parent problem (so the map visually groups by card), thin white border.
-    const PARENT_PALETTE = ['#6C5CE7', '#00A5CE', '#E84393', '#0984E3', '#00B894', '#FDCB6E'];
     const data = points.map(p => ({
         x: p.x, y: p.y, z: Math.max(1, p.x), label: p.label,
         color: PARENT_PALETTE[((p.parent || 1) - 1) % PARENT_PALETTE.length]
@@ -1294,9 +1322,10 @@ function loadPolarityMap() {
         let points = await generatePolarityData(findings, window._corpus || [], window.originalGroupName || '');
         if (!points) { // fallback to the findings themselves
             points = (findings || []).filter(f => typeof f.intensity === 'number')
-                .map(f => ({ label: f.title, x: Math.round(f.prevalence || 0), y: Math.round(f.intensity || 0) }));
+                .map((f, i) => ({ label: f.title, parent: i + 1, x: Math.round(f.prevalence || 0), y: Math.round(f.intensity || 0) }));
         }
         renderPolarityMap(points);
+        renderBubbleGuide(findings); // legend below the map
     });
 }
 

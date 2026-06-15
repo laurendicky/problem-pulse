@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 16 — + subproblems ring chart, relevance-scored posts', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 17 — stronger relevance, clickable posts, Highcharts polarity map', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -789,15 +789,15 @@ function formatPostDate(utc) {
     catch (e) { return ''; }
 }
 
-// Posts whose title/body match the finding's keywords; fall back to top corpus posts.
+// Relevance-scored, deduped posts for a finding; falls back to top corpus posts only if nothing
+// clears a positive score.
 function matchPostsForFinding(finding, corpus, limit) {
-    const kws = ((finding && finding.keywords) || []).map(k => String(k).toLowerCase()).filter(k => k.length > 2);
-    let matched = corpus;
-    if (kws.length) {
-        const hit = corpus.filter(p => { const t = `${p.title} ${p.body}`.toLowerCase(); return kws.some(k => t.includes(k)); });
-        if (hit.length) matched = hit;
-    }
-    return matched.slice(0, limit);
+    const scored = dedupeByTitle(corpus)
+        .map(p => ({ p, s: scorePostForFinding(p, finding) }))
+        .filter(x => x.s > 0)
+        .sort((a, b) => b.s - a.s || (b.p.score - a.p.score));
+    const list = scored.length ? scored.map(x => x.p) : corpus;
+    return list.slice(0, limit);
 }
 
 // Capture each modal's own .sample-insight template once (per modal — preserves its card colour).
@@ -832,6 +832,10 @@ function renderFindingPosts(modal, modalIndex, finding) {
         set('.likes', formatMemberCount(p.score));
         set('.comments', String(p.comments || 0));
         set('.date', formatPostDate(p.created));
+        if (p.permalink) {
+            card.style.cursor = 'pointer';
+            card.addEventListener('click', () => window.open(p.permalink, '_blank', 'noopener'));
+        }
         container.appendChild(card);
     });
     console.log(`[Modal] finding ${modalIndex}: rendered ${posts.length} sample posts`);
@@ -860,25 +864,55 @@ function closeFindingModal(modal) {
 }
 
 // --- relevance-scored post assignment (fixes repeats + weak matches) --------
+const RELEVANCE_STOPWORDS = ['the', 'and', 'for', 'with', 'that', 'this', 'your', 'you', 'are', 'was', 'their', 'they', 'from', 'have', 'has', 'about', 'what', 'when', 'which', 'will', 'would', 'could', 'should', 'just', 'really', 'some', 'very', 'being', 'into', 'more', 'most', 'than', 'then', 'them', 'those', 'these', 'issues', 'issue', 'problem', 'problems'];
+const RELEVANCE_MIN_SCORE = 5; // a post must at least share a title word with the finding to qualify
+
+// Niche words (e.g. "dog", "owners") are treated as stopwords — otherwise everything looks relevant.
+function _nicheStopSet() {
+    const s = new Set(RELEVANCE_STOPWORDS);
+    (window.originalGroupName || '').toLowerCase().split(/\s+/).forEach(w => {
+        if (w.length > 2) { s.add(w); s.add(w.replace(/s$/, '')); s.add(w + 's'); }
+    });
+    return s;
+}
+function _wordRegex(w) { return new RegExp('\\b' + w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i'); }
+
+// Word-boundary relevance (original algorithm): finding title words + keywords, title hits weighted
+// higher, with a bonus when BOTH a title word and a keyword match. Far stricter than substring.
 function scorePostForFinding(post, finding) {
-    const kws = ((finding && finding.keywords) || []).map(k => String(k).toLowerCase()).filter(k => k.length > 2);
-    if (!kws.length) return 0;
-    const title = (post.title || '').toLowerCase();
-    const body = (post.body || '').toLowerCase();
-    let score = 0;
-    kws.forEach(k => { if (title.includes(k)) score += 3; else if (body.includes(k)) score += 1; }); // title weighted higher
+    const stop = _nicheStopSet();
+    const titleWords = (finding.title || '').toLowerCase().split(/\s+/).filter(w => w.length > 3 && !stop.has(w));
+    const keywords = (finding.keywords || []).map(k => String(k).toLowerCase()).filter(k => k && k.length > 2 && !stop.has(k));
+    const postTitle = (post.title || '').toLowerCase();
+    const postBody = (post.body || '').toLowerCase();
+    let score = 0, titleMatched = false, keywordMatched = false;
+    titleWords.forEach(w => { const r = _wordRegex(w); if (r.test(postTitle)) { score += 5; titleMatched = true; } if (r.test(postBody)) { score += 2; titleMatched = true; } });
+    keywords.forEach(k => { const r = _wordRegex(k); if (r.test(postTitle)) { score += 3; keywordMatched = true; } if (r.test(postBody)) { score += 1; keywordMatched = true; } });
+    if (titleMatched && keywordMatched) score += 10;
     return score;
 }
 
-// Each post goes to its single best-matching finding (so it can't repeat across findings); keep the
-// most relevant per finding, drop posts that match nothing.
+// Drop cross-post duplicates (identical titles) — keeps the first, which is highest-scored since the
+// corpus is sorted by upvotes.
+function dedupeByTitle(posts) {
+    const seen = new Set();
+    return posts.filter(p => {
+        const k = (p.title || '').toLowerCase().replace(/\s+/g, ' ').trim();
+        if (!k || seen.has(k)) return false;
+        seen.add(k); return true;
+    });
+}
+
+// Each post goes to its single best-matching finding (no repeats across findings), only if it clears
+// the relevance bar; keep the most relevant per finding.
 function assignPostsToFindings(findings, corpus, perFinding) {
     perFinding = perFinding || 8;
+    const posts = dedupeByTitle(corpus);
     const buckets = findings.map(() => []);
-    corpus.forEach(post => {
+    posts.forEach(post => {
         let bestIdx = -1, bestScore = 0;
         findings.forEach((f, i) => { const s = scorePostForFinding(post, f); if (s > bestScore) { bestScore = s; bestIdx = i; } });
-        if (bestIdx >= 0) buckets[bestIdx].push({ post, score: bestScore });
+        if (bestIdx >= 0 && bestScore >= RELEVANCE_MIN_SCORE) buckets[bestIdx].push({ post, score: bestScore });
     });
     return buckets.map(arr => arr
         .sort((a, b) => b.score - a.score || (b.post.score - a.post.score))
@@ -1025,6 +1059,61 @@ async function renderSubproblemsInto(chartEl, finding) {
     }
 }
 
+// =============================================================================
+// PART 4d — Polarity Map (#polarity-tab → #emotion-map-container), Highcharts.
+// Plots the SAME findings (frequency × intensity) so it can't contradict the cards. Teal bubbles
+// matching the old emotion map; responsive.
+// =============================================================================
+
+// Make sure findings exist before the map needs them (in case Polarity is opened first).
+function ensureFindings() {
+    if (window._findings && window._findings.length) return Promise.resolve(window._findings);
+    if (!window._corpus || !window._corpus.length) return Promise.resolve([]);
+    return generateAndRenderFindings(window._corpus, window.originalGroupName || '').then(() => window._findings || []);
+}
+
+function renderPolarityMap(findings) {
+    const container = document.getElementById('emotion-map-container');
+    if (!container) { console.warn('[Polarity] #emotion-map-container not found'); return; }
+    if (typeof Highcharts === 'undefined') {
+        console.error('[Polarity] Highcharts not loaded');
+        container.innerHTML = '<p class="chart-placeholder-text">Chart library not found.</p>';
+        return;
+    }
+    const pts = (findings || []).filter(f => typeof f.intensity === 'number');
+    if (!pts.length) { container.innerHTML = '<p class="chart-placeholder-text">Not enough problems to map yet.</p>'; return; }
+
+    const data = pts.map(f => ({
+        x: Math.max(0, Math.min(100, Math.round(f.prevalence || 0))),
+        y: Math.max(0, Math.min(100, Math.round(f.intensity || 0))),
+        z: Math.max(1, Math.round(f.prevalence || 1)),
+        label: f.title
+    }));
+
+    if (window._polarityChart && window._polarityChart.destroy) window._polarityChart.destroy();
+    window._polarityChart = Highcharts.chart(container, {
+        chart: { type: 'bubble', backgroundColor: 'transparent', spacing: [20, 20, 20, 20] },
+        title: { text: '' }, credits: { enabled: false }, legend: { enabled: false },
+        xAxis: { title: { text: 'How often it comes up', style: { color: '#888' } }, min: 0, gridLineColor: 'rgba(0,0,0,0.06)', lineColor: 'rgba(0,0,0,0.15)', labels: { style: { color: '#888' } } },
+        yAxis: { title: { text: 'How painful it is', style: { color: '#888' } }, min: 0, max: 100, tickInterval: 25, gridLineColor: 'rgba(0,0,0,0.06)', lineColor: 'rgba(0,0,0,0.15)', labels: { style: { color: '#888' } } },
+        tooltip: { useHTML: true, headerFormat: '', pointFormat: '<b>{point.label}</b><br>Frequency: {point.x}%<br>Intensity: {point.y}/100' },
+        plotOptions: {
+            bubble: { minSize: 18, maxSize: 70, marker: { fillColor: 'rgba(0,165,206,0.75)', lineColor: '#ffffff', lineWidth: 1.5 } },
+            series: { dataLabels: { enabled: true, format: '{point.label}', style: { color: '#1f2d3d', textOutline: 'none', fontWeight: '500', fontSize: '11px' }, allowOverlap: false } }
+        },
+        series: [{ data }],
+        responsive: { rules: [{ condition: { maxWidth: 500 }, chartOptions: { xAxis: { title: { text: 'Frequency' } }, yAxis: { title: { text: 'Intensity' } }, plotOptions: { series: { dataLabels: { style: { fontSize: '9px' } } } } } }] }
+    });
+    console.log('[Polarity] map rendered with', data.length, 'problems');
+}
+
+function loadPolarityMap() {
+    _runTabOnce('polarity', async () => {
+        const findings = await ensureFindings();
+        renderPolarityMap(findings);
+    });
+}
+
 // Reveal the main results container (hidden until the first analysis is ready). display:flex is set
 // with !important to beat any Webflow inline/none, then we fade in and scroll to it.
 function revealResults() {
@@ -1140,6 +1229,13 @@ function initEntryFlow() {
         hurtsTab.addEventListener('click', loadTabHurts);
     }
 
+    // #polarity-tab → lazy-load the polarity map on first open.
+    const polarityTab = document.getElementById('polarity-tab');
+    if (polarityTab && !polarityTab.dataset.ppWired) {
+        polarityTab.dataset.ppWired = '1';
+        polarityTab.addEventListener('click', loadPolarityMap);
+    }
+
     console.log('[Entry] wired ✓ — #find-communities-btn is live');
 }
 
@@ -1152,6 +1248,8 @@ document.addEventListener('click', (e) => {
     if (backBtn && !backBtn.dataset.ppWired) { e.preventDefault(); transitionToStep1(); return; }
     const hurtsTab = e.target.closest('#tab-hurts');
     if (hurtsTab && !hurtsTab.dataset.ppWired) { loadTabHurts(); return; } // don't preventDefault — let Webflow switch the tab
+    const polTab = e.target.closest('#polarity-tab');
+    if (polTab && !polTab.dataset.ppWired) { loadPolarityMap(); return; }
 
     // .see-more on a finding card → open that finding's modal with its sample posts.
     const seeMore = e.target.closest('.see-more, .see-more-btn');

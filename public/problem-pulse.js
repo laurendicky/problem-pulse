@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 23 — richer polarity map (sub-problems), responsive, no axis titles; shorter summaries', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 24 — fast cards (background assignment), polarity bubbles coloured by parent', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -692,6 +692,14 @@ function auditTab2Elements() {
     });
 }
 
+// Fast, instant estimate of how many corpus posts back a finding (word-boundary keyword match).
+// Used for the immediate card render before the slower semantic assignment refines it.
+function keywordSupport(finding, corpus) {
+    let n = 0;
+    for (const p of corpus) { if (scorePostForFinding(p, finding) >= RELEVANCE_MIN_SCORE) n++; }
+    return n;
+}
+
 // Local prevalence: how many corpus posts relate to each finding (keyword match). No fetch.
 function computeFindingPrevalence(findings, corpus) {
     const texts = corpus.map(p => `${p.title} ${p.body}`.toLowerCase());
@@ -802,29 +810,44 @@ async function generateAndRenderFindings(corpus, audience) {
         let findings = Array.isArray(parsed.findings) ? parsed.findings : [];
         if (!findings.length) { console.warn('[Findings] none generated'); return; }
 
-        // Assign posts to problems (semantic) — the SINGLE source of truth for both the supporting
-        // posts AND prevalence, so a card's prevalence always matches how many real posts back it.
-        const buckets = await assignPostsToFindings(findings, corpus);
-        findings.forEach((f, i) => { f._posts = buckets[i] || []; f.support = f._posts.length; });
-
-        // Show up to 5 problems, each genuinely backed (≥3 posts), strongest first. With the wider
-        // sampling + assignment below, active niches give well-supported cards; only a genuinely tiny
-        // niche relaxes the floor so we never end up empty.
+        // FAST PASS (instant, no AI): keyword support to order/filter/prevalence so cards appear in
+        // ~the findings-call time (~8s) instead of waiting on the slow post-assignment.
+        findings.forEach(f => { f.support = keywordSupport(f, corpus); });
         let ranked = findings.filter(f => f.support >= 3).sort((a, b) => b.support - a.support);
         if (ranked.length < 2) ranked = findings.filter(f => f.support >= 1).sort((a, b) => b.support - a.support);
         if (!ranked.length) ranked = findings.slice().sort((a, b) => b.support - a.support);
         ranked = ranked.slice(0, 5);
-
-        // Prevalence relative to the SHOWN problems, so the cards' percentages sum to ~100.
-        const totalShown = ranked.reduce((s, f) => s + f.support, 0) || 1;
-        ranked.forEach(f => { f.prevalence = Math.round((f.support / totalShown) * 100); });
+        const totalKw = ranked.reduce((s, f) => s + f.support, 0) || 1;
+        ranked.forEach(f => { f.prevalence = Math.round((f.support / totalKw) * 100); });
 
         window._findings = ranked;
-        window._findingPosts = ranked.map(f => (f._posts || []).slice(0, 8)); // modal display (cap 8)
-        window._findingPostsFull = ranked.map(f => f._posts || []);            // full set for subproblems
-        window._subProblemCache = {}; // new findings → drop cached subproblems
+        window._subProblemCache = {};       // new findings → drop cached subproblems
+        window._findingPosts = null;        // not assigned yet — modal waits on _assignmentPromise
+        window._findingPostsFull = null;
         ranked.forEach((f, idx) => renderFindingCard(idx + 1, f));
-        console.log('[Findings] rendered:', ranked.length, '| support counts:', ranked.map(f => f.support), '| prevalence:', ranked.map(f => f.prevalence + '%'));
+        console.log('[Findings] cards rendered (fast):', ranked.length, '| keyword support:', ranked.map(f => f.support));
+        hideLoader(); // cards are visible now — the rest happens in the background
+
+        // BACKGROUND: the accurate semantic assignment. When it lands we store the posts AND refine
+        // each card's prevalence bar so it matches the real supporting-post counts. .see-more awaits this.
+        window._assignmentPromise = assignPostsToFindings(ranked, corpus)
+            .then(buckets => {
+                ranked.forEach((f, i) => { f._posts = buckets[i] || []; f.support = (buckets[i] || []).length; });
+                const totalShown = ranked.reduce((s, f) => s + f.support, 0) || 1;
+                ranked.forEach((f, idx) => {
+                    f.prevalence = Math.round((f.support / totalShown) * 100);
+                    populatePrevalence(document.getElementById('findings-block' + (idx + 1)), f.prevalence);
+                });
+                window._findingPosts = ranked.map(f => (f._posts || []).slice(0, 8));
+                window._findingPostsFull = ranked.map(f => f._posts || []);
+                console.log('[Findings] background assignment done | support:', ranked.map(f => f.support), '| prevalence refined:', ranked.map(f => f.prevalence + '%'));
+            })
+            .catch(e => {
+                console.warn('[Findings] assignment failed — keyword posts:', e && e.message);
+                const kw = assignPostsByKeyword(ranked, corpus);
+                window._findingPosts = kw.map(arr => arr.slice(0, 8));
+                window._findingPostsFull = kw;
+            });
     } catch (error) {
         console.error('[Findings] failed:', error);
     } finally {
@@ -917,7 +940,7 @@ function renderFindingPosts(modal, modalIndex, finding) {
     console.log(`[Modal] finding ${modalIndex}: rendered ${posts.length} sample posts`);
 }
 
-function openFindingModal(blockIndex) {
+async function openFindingModal(blockIndex) {
     const modal = getFindingModal(blockIndex);
     if (!modal) { console.warn(`[Modal] #findings-${blockIndex}-modal not found`); return; }
     const finding = (window._findings || [])[blockIndex - 1];
@@ -928,11 +951,20 @@ function openFindingModal(blockIndex) {
         const fallback = block && block.querySelector('.section-title') ? block.querySelector('.section-title').textContent : '';
         header.textContent = (finding && finding.title) || fallback;
     }
-    renderFindingPosts(modal, blockIndex, finding);
 
     modal.style.display = 'flex'; // open first so the chart has a measurable width
+
+    // Subproblems don't need the assignment — they fall back to keyword-matched posts, so fire now.
     const chartEl = modal.querySelector('.subproblem-chart');
-    if (chartEl && finding) renderSubproblemsInto(chartEl, finding, blockIndex); // fire-and-forget; loader shows meanwhile
+    if (chartEl && finding) renderSubproblemsInto(chartEl, finding, blockIndex);
+
+    // Posts come from the background assignment. If it hasn't finished, show an inline loader and wait.
+    const postsContainer = modal.querySelector('.reddit-samples-posts');
+    if (!window._findingPosts && window._assignmentPromise) {
+        if (postsContainer) postsContainer.innerHTML = '<p class="loading-text">Matching the most relevant discussions…</p>';
+        try { await window._assignmentPromise; } catch (e) { /* fallback already set in the catch */ }
+    }
+    renderFindingPosts(modal, blockIndex, finding);
 }
 
 function closeFindingModal(modal) {
@@ -1192,13 +1224,14 @@ async function generatePolarityData(findings, corpus, audience) {
             model: 'gpt-4o-mini',
             messages: [
                 { role: 'system', content: 'You output only valid JSON.' },
-                { role: 'user', content: `For "${audience}", the main problems are:\n${main}\n\nUsing these and the discussions below, produce 12-16 specific problems this audience faces. They MUST be facets/sub-problems OF the main problems above — do not invent unrelated ones. For each: "label" (2-5 words), "frequency" (integer 1-100 = how often it comes up), "intensity" (integer 1-100 = how painful/severe). Respond ONLY with JSON: {"points":[{"label","frequency","intensity"}]}. Discussions:\n${sample}` }
+                { role: 'user', content: `For "${audience}", the main problems are:\n${main}\n\nUsing these and the discussions below, produce 12-16 specific problems this audience faces. They MUST be facets/sub-problems OF the main problems above — do not invent unrelated ones. For each: "label" (2-5 words), "parent" (the number of the main problem it belongs to), "frequency" (integer 1-100 = how often it comes up), "intensity" (integer 1-100 = how painful/severe). Respond ONLY with JSON: {"points":[{"label","parent","frequency","intensity"}]}. Discussions:\n${sample}` }
             ],
             temperature: 0.3, max_completion_tokens: 900, response_format: { type: 'json_object' }
         });
         const pts = Array.isArray(parsed.points) ? parsed.points : [];
         const clean = pts.map(p => ({
             label: String(p.label || '').trim(),
+            parent: (parseInt(p.parent, 10) || 1),
             x: Math.max(0, Math.min(100, Math.round(Number(p.frequency) || 0))),
             y: Math.max(0, Math.min(100, Math.round(Number(p.intensity) || 0)))
         })).filter(p => p.label && (p.x > 0 || p.y > 0));
@@ -1219,7 +1252,12 @@ function renderPolarityMap(points) {
     }
     if (!points || !points.length) { container.innerHTML = '<p class="chart-placeholder-text">Not enough problems to map yet.</p>'; return; }
 
-    const data = points.map(p => ({ x: p.x, y: p.y, z: Math.max(1, p.x), label: p.label }));
+    // Colour each bubble by its parent problem (so the map visually groups by card), thin white border.
+    const PARENT_PALETTE = ['#6C5CE7', '#00A5CE', '#E84393', '#0984E3', '#00B894', '#FDCB6E'];
+    const data = points.map(p => ({
+        x: p.x, y: p.y, z: Math.max(1, p.x), label: p.label,
+        color: PARENT_PALETTE[((p.parent || 1) - 1) % PARENT_PALETTE.length]
+    }));
 
     if (window._polarityChart && window._polarityChart.destroy) window._polarityChart.destroy();
     window._polarityChart = Highcharts.chart(container, {
@@ -1231,7 +1269,7 @@ function renderPolarityMap(points) {
         yAxis: { title: { text: null }, min: 0, max: 100, tickInterval: 25, gridLineColor: 'rgba(255,255,255,0.15)', lineColor: 'rgba(255,255,255,0.3)', tickColor: 'rgba(255,255,255,0.3)', labels: { style: { color: 'rgba(255,255,255,0.7)' } } },
         tooltip: { useHTML: true, headerFormat: '', pointFormat: '<b>{point.label}</b><br>Frequency: {point.x}/100<br>Intensity: {point.y}/100' },
         plotOptions: {
-            bubble: { minSize: 12, maxSize: 46, marker: { fillColor: '#00a5ce', fillOpacity: 1, lineColor: '#00a5ce', lineWidth: 0 } },
+            bubble: { minSize: 12, maxSize: 46, marker: { fillOpacity: 1, lineColor: 'rgba(255,255,255,0.85)', lineWidth: 1 } }, // per-point colour set in data; thin white border
             series: { dataLabels: { enabled: false } } // labels show on hover (tooltip) only
         },
         series: [{ data }]

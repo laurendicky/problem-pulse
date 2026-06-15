@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 10 — + goals/fears/characteristics/rejects profile', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 11 — + tab 2 findings (#tab-hurts, lazy)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -337,6 +337,7 @@ async function runProblemFinder() {
         const corpus = await buildCorpus(subreddits);
         window._corpus = corpus;
         window._analysisSubreddits = subreddits;
+        window._tabLoaded = {}; // new search → invalidate cached tabs so they reload for this audience
         console.log(`[Analysis] corpus ready: ${corpus.length} posts from ${subreddits.length} subreddits`);
         if (!corpus.length) {
             alert('No discussions found for those communities. Try different ones.');
@@ -606,6 +607,138 @@ Ground every line in the posts. Posts:\n${sample}` }
     }
 }
 
+// =============================================================================
+// PART 4 — Tab 2 "What hurts them" (#tab-hurts): the problem/findings cards.
+//
+// LAZY: generated the first time the tab is opened, then cached. ONE AI call over the existing
+// corpus — no new Reddit fetch. Sample posts + subproblems come in Stage 2 (on .see-more).
+// =============================================================================
+
+// Quick visibility audit for the tab-2 card elements (parallels auditTab1Elements).
+function auditTab2Elements() {
+    const b1 = document.getElementById('findings-block1');
+    console.log('[Audit tab2]', {
+        'findings-block1': b1 ? 'FOUND' : 'missing',
+        '.section-title': b1 ? !!b1.querySelector('.section-title') : '-',
+        '.summary-full': b1 ? !!b1.querySelector('.summary-full') : '-',
+        '.quote count': b1 ? b1.querySelectorAll('.quote').length : '-',
+        '.prevalence-container-wrapper': b1 ? !!b1.querySelector('.prevalence-container-wrapper') : '-',
+        'blocks 1-5 present': [1, 2, 3, 4, 5].map(i => document.getElementById('findings-block' + i) ? 1 : 0).join('')
+    });
+}
+
+// Local prevalence: how many corpus posts relate to each finding (keyword match). No fetch.
+function computeFindingPrevalence(findings, corpus) {
+    const texts = corpus.map(p => `${p.title} ${p.body}`.toLowerCase());
+    const withSupport = findings.map(f => {
+        const kws = ((f.keywords && f.keywords.length) ? f.keywords : (f.title || '').split(/\s+/))
+            .map(k => String(k).toLowerCase()).filter(k => k.length > 2);
+        let support = 0;
+        texts.forEach(t => { if (kws.some(k => t.includes(k))) support++; });
+        return Object.assign({}, f, { support });
+    });
+    const total = withSupport.reduce((s, f) => s + f.support, 0) || 1;
+    return withSupport
+        .map(f => Object.assign({}, f, { prevalence: Math.round((f.support / total) * 100) }))
+        .sort((a, b) => b.prevalence - a.prevalence);
+}
+
+// The prevalence bar HTML goes INSIDE .prevalence-container-wrapper (a generated bar, not one of
+// your designed combo-class elements, so replacing its innerHTML is safe).
+function renderPrevalenceBar(prevalence) {
+    const level = prevalence >= 30 ? 'High' : prevalence >= 15 ? 'Medium' : 'Low';
+    const color = prevalence >= 30 ? '#296fd3' : prevalence >= 15 ? '#5b98eb' : '#aecbfa';
+    return `<div class="prevalence-container">
+        <div class="prevalence-header" style="font-size:12px;color:#888;margin-bottom:6px;">${level} Prevalence</div>
+        <div class="prevalence-bar-background" style="background:#1e2a38;border-radius:4px;overflow:hidden;height:18px;">
+            <div class="prevalence-bar-foreground" style="width:${prevalence}%;background:${color};height:100%;color:#fff;font-size:11px;text-align:right;padding-right:6px;line-height:18px;box-sizing:border-box;">${prevalence}%</div>
+        </div>
+        <div class="prevalence-subtitle" style="font-size:11px;color:#888;margin-top:6px;">Represents ${prevalence}% of identified problems.</div>
+    </div>`;
+}
+
+// Fill one card. Only sets text on leaf elements + the prevalence wrapper — never touches the
+// block's combo classes, so card colours are preserved.
+function renderFindingCard(i, finding) {
+    const block = document.getElementById('findings-block' + i);
+    if (!block) return false;
+    block.style.removeProperty('display'); // show (respect the Webflow default display)
+
+    const title = block.querySelector('.section-title');
+    if (title) title.textContent = finding.title || '';
+
+    const full = block.querySelector('.summary-full');
+    if (full) full.textContent = finding.summary || '';
+    const teaser = block.querySelector('.summary-teaser');
+    if (teaser) teaser.style.display = 'none'; // dropped: summary-full is now short + punchy
+
+    const quotesC = block.querySelector('.quotes-container');
+    if (quotesC) {
+        quotesC.querySelectorAll('.quote').forEach((el, idx) => {
+            const text = (finding.quotes || [])[idx];
+            if (text) { el.textContent = `“${text}”`; el.style.removeProperty('display'); }
+            else { el.style.display = 'none'; }
+        });
+    }
+
+    const prev = block.querySelector('.prevalence-container-wrapper');
+    if (prev) prev.innerHTML = renderPrevalenceBar(finding.prevalence);
+    return true;
+}
+
+async function generateAndRenderFindings(corpus, audience) {
+    auditTab2Elements();
+    for (let i = 1; i <= 5; i++) { const b = document.getElementById('findings-block' + i); if (b) b.style.display = 'none'; }
+
+    showLoader('Finding the core problems…');
+    const sample = corpus.slice(0, 30)
+        .map(p => `Title: ${p.title}\nContent: ${p.body}`.substring(0, 500))
+        .join('\n---\n');
+
+    const payload = {
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: 'You distil community discussions into a few core problems with authentic quotes. Output only valid JSON.' },
+            { role: 'user', content: `Analyse these discussions about "${audience}" and identify 1 to 5 of the most common, clearly recurring problems. Respond ONLY with a JSON object: {"findings":[{"title","summary","quotes","keywords"}]}. Rules — "title": 3-6 words, plain and specific. "summary": ONE or TWO short sentences, punchy, human-sounding, intriguing, NO waffle, ~30 words max, and naturally mention "${audience}". "quotes": exactly 3 short authentic-sounding strings, each ≤ 80 characters. "keywords": 3-6 lowercase words for matching related posts. Prioritise the most common recurring problems; avoid one-off complaints. Posts:\n${sample}` }
+        ],
+        temperature: 0.2,
+        max_completion_tokens: 1100,
+        seed: 11,
+        response_format: { type: 'json_object' }
+    };
+
+    try {
+        const parsed = await callOpenAI(payload);
+        let findings = Array.isArray(parsed.findings) ? parsed.findings : [];
+        if (!findings.length) { console.warn('[Findings] none generated'); return; }
+        const ranked = computeFindingPrevalence(findings, corpus).slice(0, 5);
+        window._findings = ranked;
+        ranked.forEach((f, idx) => renderFindingCard(idx + 1, f));
+        console.log('[Findings] rendered:', ranked.length);
+    } catch (error) {
+        console.error('[Findings] failed:', error);
+    } finally {
+        hideLoader();
+    }
+}
+
+// Run a tab's work once, only after the corpus exists; cache so re-clicks are instant.
+function _runTabOnce(key, fn) {
+    if (!window._tabLoaded) window._tabLoaded = {};
+    if (window._tabLoaded[key]) return;
+    if (!window._corpus || !window._corpus.length) {
+        console.warn(`[Tab ${key}] corpus not ready — run a search first.`);
+        return;
+    }
+    window._tabLoaded[key] = true;
+    Promise.resolve(fn(window._corpus, window.originalGroupName || ''))
+        .catch(e => { console.warn(`[Tab ${key}] failed`, e); window._tabLoaded[key] = false; });
+}
+
+function loadTabHurts() {
+    _runTabOnce('hurts', (corpus, audience) => generateAndRenderFindings(corpus, audience));
+}
+
 // Reveal the main results container (hidden until the first analysis is ready). display:flex is set
 // with !important to beat any Webflow inline/none, then we fade in and scroll to it.
 function revealResults() {
@@ -714,6 +847,13 @@ function initEntryFlow() {
         backBtn.addEventListener('click', (e) => { e.preventDefault(); transitionToStep1(); });
     }
 
+    // #tab-hurts → lazy-load tab 2 (findings) on first open. Cached after that.
+    const hurtsTab = document.getElementById('tab-hurts');
+    if (hurtsTab && !hurtsTab.dataset.ppWired) {
+        hurtsTab.dataset.ppWired = '1';
+        hurtsTab.addEventListener('click', loadTabHurts);
+    }
+
     console.log('[Entry] wired ✓ — #find-communities-btn is live');
 }
 
@@ -724,6 +864,8 @@ document.addEventListener('click', (e) => {
     if (searchBtn && !searchBtn.dataset.ppWired) { e.preventDefault(); runProblemFinder(); return; }
     const backBtn = e.target.closest('#back-to-step1-btn');
     if (backBtn && !backBtn.dataset.ppWired) { e.preventDefault(); transitionToStep1(); return; }
+    const hurtsTab = e.target.closest('#tab-hurts');
+    if (hurtsTab && !hurtsTab.dataset.ppWired) { loadTabHurts(); return; } // don't preventDefault — let Webflow switch the tab
 });
 
 // --- bootstrap --------------------------------------------------------------

@@ -330,6 +330,7 @@ async function runProblemFinder() {
 
     _analysisRunning = true; // set synchronously, before any await, so concurrent calls bail here
     console.log('[Analysis] selected subreddits:', subreddits);
+    auditTab1Elements(); // logs which Webflow elements actually exist, so we can fix any selector
 
     showLoader('Gathering discussions…');
     try {
@@ -344,7 +345,10 @@ async function runProblemFinder() {
         // Part 3 — Tab 1 ("Who they are"). All read from the corpus; nothing refetched.
         showLoader('Analysing audience…');
         const audience = window.originalGroupName || '';
-        renderTab1Counts(audience, corpus.length, subreddits.length); // instant, from data we already have
+        // "insights" = total discussion signals mined (sum of comment counts). Flagged: tell me the
+        // exact definition you want and I'll change this one line.
+        const insightsCount = corpus.reduce((sum, p) => sum + (p.comments || 0), 0);
+        renderTab1Counts(audience, corpus.length, insightsCount); // instant, from data we already have
         // The two AI panels run in parallel (2 OpenAI calls) so the tab fills as fast as possible.
         await Promise.all([
             generateAndRenderWho(corpus, audience),
@@ -441,19 +445,45 @@ function setDesignedText(selector, value) {
     document.querySelectorAll(selector).forEach(el => { el.innerText = value; });
 }
 
-// Tab-1 count line: audience name + posts analysed + an insight count. (count-insight currently =
-// number of communities analysed; tell me if it should be findings/themes once that tab exists.)
+// One-time audit so we can SEE exactly which Webflow elements exist (and under what selector).
+function auditTab1Elements() {
+    const idCheck = (id) => document.getElementById(id) ? 'FOUND' : 'missing';
+    const clsCheck = (sel) => document.querySelectorAll(sel).length;
+    console.log('[Audit] tab-1 elements:', {
+        'id#loading-code-1': idCheck('loading-code-1'),
+        'id#full-loader-msg': idCheck('full-loader-msg'),
+        'id#results-wrapper-b': idCheck('results-wrapper-b'),
+        'id#overview-div': idCheck('overview-div'),
+        'id#architype-heading': idCheck('architype-heading'),
+        'id#archetype-heading': idCheck('archetype-heading'),
+        'id#archetype-d': idCheck('archetype-d'),
+        '.count-audience': clsCheck('.count-audience'),
+        '.count-insights': clsCheck('.count-insights'),
+        '.count-insight': clsCheck('.count-insight'),
+        '.count-posts': clsCheck('.count-posts')
+    });
+}
+
+// Tab-1 count line — "[insights] insights found in [posts] posts" + the audience name. Logs how many
+// elements each selector matched so a zero-match (wrong class) is obvious.
 function renderTab1Counts(audience, postsCount, insightCount) {
-    setDesignedText('.count-audience', audience || '');
-    setDesignedText('.count-posts', Number(postsCount).toLocaleString());
-    setDesignedText('.count-insight, .count-insights', Number(insightCount).toLocaleString());
+    const set = (sel, val) => {
+        const els = document.querySelectorAll(sel);
+        console.log(`[Counts] "${sel}" matched ${els.length} element(s)`);
+        els.forEach(el => { el.innerText = val; });
+    };
+    set('.count-audience', audience || '');
+    set('.count-posts', Number(postsCount).toLocaleString());
+    set('.count-insights, .count-insight', Number(insightCount).toLocaleString());
 }
 
 // Audience archetype — a 2-3 word name + a 2-sentence character study. Fills the designed
 // #archetype-heading (/.archetype-heading/.architype-heading) and #archetype-d in place.
 async function generateAndRenderArchetype(corpus, audience) {
-    const headingEl = document.querySelector('#archetype-heading, .archetype-heading, .architype-heading');
-    const descEl = document.getElementById('archetype-d');
+    // Cover every spelling/form: ID or class, "archetype" or "architype".
+    const headingEl = document.querySelector('#architype-heading, #archetype-heading, .architype-heading, .archetype-heading');
+    const descEl = document.querySelector('#archetype-d, #architype-d, .archetype-d, .architype-d');
+    console.log('[Archetype] heading el:', headingEl ? (headingEl.id || headingEl.className) : 'NONE', '| desc el:', descEl ? (descEl.id || descEl.className) : 'NONE');
     if (!headingEl && !descEl) { console.warn('[Archetype] no archetype elements found.'); return; }
     if (headingEl) headingEl.textContent = 'Analysing…';
     if (descEl) descEl.textContent = '';

@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 22 — wider findings sample + larger assignment pool (fuller, well-supported cards)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 23 — richer polarity map (sub-problems), responsive, no axis titles; shorter summaries', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -789,7 +789,7 @@ async function generateAndRenderFindings(corpus, audience) {
         model: 'gpt-4o-mini',
         messages: [
             { role: 'system', content: 'You distil community discussions into a few core problems with authentic quotes. Output only valid JSON.' },
-            { role: 'user', content: `Analyse these discussions about "${audience}" and identify 4 to 6 of the most common, clearly recurring, DISTINCT PROBLEMS — genuine pain points, frustrations, struggles, worries, or unmet needs. Make them genuinely different from each other (no near-duplicate or overlapping problems). IMPORTANT: include ONLY real problems/difficulties. Do NOT include positive or heart-warming themes, things they love or enjoy, or ways their dog helps them — e.g. "emotional support from dogs" is NOT a problem and must be excluded. Respond ONLY with a JSON object: {"findings":[{"title","summary","quotes","keywords","intensity"}]}. Rules — "title": 3-6 words naming a problem, plain and specific. "summary": ONE or TWO short sentences, punchy, human-sounding, intriguing, NO waffle, ~30 words max, naturally mentioning "${audience}". "quotes": exactly 3 short authentic-sounding strings that express the PROBLEM (a complaint or struggle, not praise), each ≤ 80 characters. "keywords": 3-6 lowercase words for matching related posts. "intensity": an integer 0-100 rating how emotionally severe/painful this problem is for ${audience}, judged INDEPENDENTLY of how often it comes up. Prioritise the most common recurring problems; avoid one-off complaints. Posts:\n${sample}` }
+            { role: 'user', content: `Analyse these discussions about "${audience}" and identify 4 to 6 of the most common, clearly recurring, DISTINCT PROBLEMS — genuine pain points, frustrations, struggles, worries, or unmet needs. Make them genuinely different from each other (no near-duplicate or overlapping problems). IMPORTANT: include ONLY real problems/difficulties. Do NOT include positive or heart-warming themes, things they love or enjoy, or ways their dog helps them — e.g. "emotional support from dogs" is NOT a problem and must be excluded. Respond ONLY with a JSON object: {"findings":[{"title","summary","quotes","keywords","intensity"}]}. Rules — "title": 3-6 words naming a problem, plain and specific. "summary": ONE short, punchy, human-sounding sentence (about 18 words, 25 max), intriguing, NO waffle. Describe the problem directly — do NOT name the audience ("${audience}") in the summary. "quotes": exactly 3 short authentic-sounding strings that express the PROBLEM (a complaint or struggle, not praise), each ≤ 80 characters. "keywords": 3-6 lowercase words for matching related posts. "intensity": an integer 0-100 rating how emotionally severe/painful this problem is for ${audience}, judged INDEPENDENTLY of how often it comes up. Prioritise the most common recurring problems; avoid one-off complaints. Posts:\n${sample}` }
         ],
         temperature: 0.2,
         max_completion_tokens: 1400, // room for up to 6 findings
@@ -1181,7 +1181,35 @@ function ensureFindings() {
     return generateAndRenderFindings(window._corpus, window.originalGroupName || '').then(() => window._findings || []);
 }
 
-function renderPolarityMap(findings) {
+// Richer map WITHOUT contradicting the cards: one call breaks the SAME findings into their concrete
+// sub-problems (frequency × intensity, both 1-100), so every point is a facet of a card's problem —
+// honest and consistent, just finer-grained. Falls back to the findings themselves if it fails.
+async function generatePolarityData(findings, corpus, audience) {
+    const main = (findings || []).map((f, i) => `${i + 1}: ${f.title}`).join('\n');
+    const sample = (corpus || []).slice(0, 30).map(p => `${p.title} ${p.body}`.substring(0, 220)).join('\n---\n');
+    try {
+        const parsed = await callOpenAI({
+            model: 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: 'You output only valid JSON.' },
+                { role: 'user', content: `For "${audience}", the main problems are:\n${main}\n\nUsing these and the discussions below, produce 12-16 specific problems this audience faces. They MUST be facets/sub-problems OF the main problems above — do not invent unrelated ones. For each: "label" (2-5 words), "frequency" (integer 1-100 = how often it comes up), "intensity" (integer 1-100 = how painful/severe). Respond ONLY with JSON: {"points":[{"label","frequency","intensity"}]}. Discussions:\n${sample}` }
+            ],
+            temperature: 0.3, max_completion_tokens: 900, response_format: { type: 'json_object' }
+        });
+        const pts = Array.isArray(parsed.points) ? parsed.points : [];
+        const clean = pts.map(p => ({
+            label: String(p.label || '').trim(),
+            x: Math.max(0, Math.min(100, Math.round(Number(p.frequency) || 0))),
+            y: Math.max(0, Math.min(100, Math.round(Number(p.intensity) || 0)))
+        })).filter(p => p.label && (p.x > 0 || p.y > 0));
+        return clean.length >= 3 ? clean : null;
+    } catch (e) {
+        console.warn('[Polarity] data gen failed, using findings only:', e && e.message);
+        return null;
+    }
+}
+
+function renderPolarityMap(points) {
     const container = document.getElementById('emotion-map-container');
     if (!container) { console.warn('[Polarity] #emotion-map-container not found'); return; }
     if (typeof Highcharts === 'undefined') {
@@ -1189,39 +1217,48 @@ function renderPolarityMap(findings) {
         container.innerHTML = '<p class="chart-placeholder-text">Chart library not found.</p>';
         return;
     }
-    const pts = (findings || []).filter(f => typeof f.intensity === 'number');
-    if (!pts.length) { container.innerHTML = '<p class="chart-placeholder-text">Not enough problems to map yet.</p>'; return; }
+    if (!points || !points.length) { container.innerHTML = '<p class="chart-placeholder-text">Not enough problems to map yet.</p>'; return; }
 
-    const data = pts.map(f => ({
-        x: Math.max(0, Math.min(100, Math.round(f.prevalence || 0))),
-        y: Math.max(0, Math.min(100, Math.round(f.intensity || 0))),
-        z: Math.max(1, Math.round(f.prevalence || 1)),
-        label: f.title
-    }));
+    const data = points.map(p => ({ x: p.x, y: p.y, z: Math.max(1, p.x), label: p.label }));
 
     if (window._polarityChart && window._polarityChart.destroy) window._polarityChart.destroy();
     window._polarityChart = Highcharts.chart(container, {
-        chart: { type: 'bubble', backgroundColor: 'transparent', spacing: [16, 16, 16, 16], reflow: true },
+        chart: { type: 'bubble', backgroundColor: 'transparent', spacing: [12, 12, 12, 12], reflow: true },
         title: { text: '' }, credits: { enabled: false }, legend: { enabled: false },
         exporting: { enabled: false }, // removes the hamburger/context menu icon (top right)
-        xAxis: { title: { text: 'How often it comes up', style: { color: 'rgba(255,255,255,0.7)' } }, min: 0, gridLineColor: 'rgba(255,255,255,0.15)', lineColor: 'rgba(255,255,255,0.3)', tickColor: 'rgba(255,255,255,0.3)', labels: { style: { color: 'rgba(255,255,255,0.7)' } } },
-        yAxis: { title: { text: 'How painful it is', style: { color: 'rgba(255,255,255,0.7)' } }, min: 0, max: 100, tickInterval: 25, gridLineColor: 'rgba(255,255,255,0.15)', lineColor: 'rgba(255,255,255,0.3)', tickColor: 'rgba(255,255,255,0.3)', labels: { style: { color: 'rgba(255,255,255,0.7)' } } },
-        tooltip: { useHTML: true, headerFormat: '', pointFormat: '<b>{point.label}</b><br>Frequency: {point.x}%<br>Intensity: {point.y}/100' },
+        // Axis titles removed — built in Webflow. Numbers/grid stay white-70%.
+        xAxis: { title: { text: null }, min: 0, max: 100, tickInterval: 25, gridLineColor: 'rgba(255,255,255,0.15)', lineColor: 'rgba(255,255,255,0.3)', tickColor: 'rgba(255,255,255,0.3)', labels: { style: { color: 'rgba(255,255,255,0.7)' } } },
+        yAxis: { title: { text: null }, min: 0, max: 100, tickInterval: 25, gridLineColor: 'rgba(255,255,255,0.15)', lineColor: 'rgba(255,255,255,0.3)', tickColor: 'rgba(255,255,255,0.3)', labels: { style: { color: 'rgba(255,255,255,0.7)' } } },
+        tooltip: { useHTML: true, headerFormat: '', pointFormat: '<b>{point.label}</b><br>Frequency: {point.x}/100<br>Intensity: {point.y}/100' },
         plotOptions: {
-            bubble: { minSize: 18, maxSize: 64, marker: { fillColor: '#00a5ce', fillOpacity: 1, lineColor: '#00a5ce', lineWidth: 0 } },
-            series: { dataLabels: { enabled: false } } // labels show on hover (tooltip) only — keeps it uncluttered
+            bubble: { minSize: 12, maxSize: 46, marker: { fillColor: '#00a5ce', fillOpacity: 1, lineColor: '#00a5ce', lineWidth: 0 } },
+            series: { dataLabels: { enabled: false } } // labels show on hover (tooltip) only
         },
-        series: [{ data }],
-        responsive: { rules: [{ condition: { maxWidth: 500 }, chartOptions: { xAxis: { title: { text: 'Frequency' } }, yAxis: { title: { text: 'Intensity' } }, plotOptions: { series: { dataLabels: { style: { fontSize: '9px' } } } } } }] }
+        series: [{ data }]
     });
-    setTimeout(() => { if (window._polarityChart && window._polarityChart.reflow) window._polarityChart.reflow(); }, 60); // fit container exactly
+
+    // True responsiveness: Highcharts pins an inline pixel width/height at render. A ResizeObserver
+    // reflows it whenever #emotion-map-container changes size (not just on window resize).
+    if (window._polarityResizeObserver) window._polarityResizeObserver.disconnect();
+    if (typeof ResizeObserver !== 'undefined') {
+        window._polarityResizeObserver = new ResizeObserver(() => {
+            if (window._polarityChart && window._polarityChart.reflow) window._polarityChart.reflow();
+        });
+        window._polarityResizeObserver.observe(container);
+    }
+    setTimeout(() => { if (window._polarityChart && window._polarityChart.reflow) window._polarityChart.reflow(); }, 60);
     console.log('[Polarity] map rendered with', data.length, 'problems');
 }
 
 function loadPolarityMap() {
     _runTabOnce('polarity', async () => {
         const findings = await ensureFindings();
-        renderPolarityMap(findings);
+        let points = await generatePolarityData(findings, window._corpus || [], window.originalGroupName || '');
+        if (!points) { // fallback to the findings themselves
+            points = (findings || []).filter(f => typeof f.intensity === 'number')
+                .map(f => ({ label: f.title, x: Math.round(f.prevalence || 0), y: Math.round(f.intensity || 0) }));
+        }
+        renderPolarityMap(points);
     });
 }
 

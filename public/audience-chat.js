@@ -299,18 +299,18 @@ function _debugVisibility(id) {
     console.log(`[Debug] #${id} is visible ✓`);
 }
 
-// The loader div (#full-loader-msg) is display:none in Webflow, so we must set an explicit visible
-// value to override that — setting '' would just fall back to the none. The user owns its look.
+// The loader is display:none in Webflow, so we set an explicit visible value to override that
+// (setting '' would just fall back to none). We look for #loading-code-1 first, then #full-loader-msg.
+const LOADER_IDS = ['loading-code-1', 'full-loader-msg'];
 function showLoader(message) {
-    const el = document.getElementById('full-loader-msg');
-    if (!el) { console.warn('[Loader] #full-loader-msg NOT FOUND'); return; }
+    const el = LOADER_IDS.map(id => document.getElementById(id)).find(Boolean);
+    if (!el) { console.warn('[Loader] no loader found (#loading-code-1 / #full-loader-msg)'); return; }
     el.style.display = 'flex';
     if (message) el.setAttribute('data-status', message);
-    _debugVisibility('full-loader-msg');
+    _debugVisibility(el.id);
 }
 function hideLoader() {
-    const el = document.getElementById('full-loader-msg');
-    if (el) el.style.display = 'none';
+    LOADER_IDS.forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
 }
 
 // Re-entrancy guard. Another script on the page (audience-chat.js) also hooks the search and
@@ -341,9 +341,15 @@ async function runProblemFinder() {
             alert('No discussions found for those communities. Try different ones.');
             return;
         }
-        // Part 3 — first analysis: audience demographics. Reads from the corpus; nothing refetched.
+        // Part 3 — Tab 1 ("Who they are"). All read from the corpus; nothing refetched.
         showLoader('Analysing audience…');
-        await generateAndRenderWho(corpus, window.originalGroupName || '');
+        const audience = window.originalGroupName || '';
+        renderTab1Counts(audience, corpus.length, subreddits.length); // instant, from data we already have
+        // The two AI panels run in parallel (2 OpenAI calls) so the tab fills as fast as possible.
+        await Promise.all([
+            generateAndRenderWho(corpus, audience),
+            generateAndRenderArchetype(corpus, audience)
+        ]);
         revealResults();
     } catch (error) {
         console.error('[Analysis] failed to build corpus:', error);
@@ -426,6 +432,56 @@ async function generateAndRenderWho(corpus, audience) {
     } catch (error) {
         console.error('[Who] demographics failed:', error);
         container.innerHTML = '<p class="error-message">Could not analyse demographics. Please try again.</p>';
+    }
+}
+
+// BLUEPRINT METHOD: these elements are designed in Webflow, so we fill the existing element's text
+// and never touch its parent's HTML — the design stays intact, only the value changes.
+function setDesignedText(selector, value) {
+    document.querySelectorAll(selector).forEach(el => { el.innerText = value; });
+}
+
+// Tab-1 count line: audience name + posts analysed + an insight count. (count-insight currently =
+// number of communities analysed; tell me if it should be findings/themes once that tab exists.)
+function renderTab1Counts(audience, postsCount, insightCount) {
+    setDesignedText('.count-audience', audience || '');
+    setDesignedText('.count-posts', Number(postsCount).toLocaleString());
+    setDesignedText('.count-insight, .count-insights', Number(insightCount).toLocaleString());
+}
+
+// Audience archetype — a 2-3 word name + a 2-sentence character study. Fills the designed
+// #archetype-heading (/.archetype-heading/.architype-heading) and #archetype-d in place.
+async function generateAndRenderArchetype(corpus, audience) {
+    const headingEl = document.querySelector('#archetype-heading, .archetype-heading, .architype-heading');
+    const descEl = document.getElementById('archetype-d');
+    if (!headingEl && !descEl) { console.warn('[Archetype] no archetype elements found.'); return; }
+    if (headingEl) headingEl.textContent = 'Analysing…';
+    if (descEl) descEl.textContent = '';
+
+    const sample = corpus.slice(0, 20)
+        .map(p => `Title: ${p.title}\nContent: ${p.body}`.substring(0, 450))
+        .join('\n---\n');
+
+    const payload = {
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: 'You are a sharp cultural observer who writes psychologically specific field notes about online communities. You output only valid JSON and never sound like a marketing deck.' },
+            { role: 'user', content: `You have spent months lurking inside the "${audience}" community on Reddit. Below are real discussions. Respond ONLY with a valid JSON object with these keys: "archetype" (a short, 2-3 word evocative name for this audience, e.g. "The Practical Innovators") and "summary" (EXACTLY 2 short sentences, 40 words maximum — a sharp character study built around one instinct or contradiction, landing one memorable phrase; do NOT use "this audience is driven by", "they value", or "they appreciate"). Posts:\n${sample}` }
+        ],
+        temperature: 0.6,
+        max_completion_tokens: 300,
+        response_format: { type: 'json_object' }
+    };
+
+    try {
+        const parsed = await callOpenAI(payload);
+        if (headingEl) headingEl.textContent = parsed.archetype || '';
+        if (descEl) descEl.textContent = parsed.summary || '';
+        console.log('[Archetype] rendered:', parsed.archetype);
+    } catch (error) {
+        console.error('[Archetype] failed:', error);
+        if (headingEl) headingEl.textContent = 'Analysis Failed';
+        if (descEl) descEl.textContent = 'Could not generate the audience summary. Please try again.';
     }
 }
 

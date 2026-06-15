@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 15 — + see-more modal with sample posts', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 16 — + subproblems ring chart, relevance-scored posts', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -744,6 +744,9 @@ async function generateAndRenderFindings(corpus, audience) {
         if (!findings.length) { console.warn('[Findings] none generated'); return; }
         const ranked = computeFindingPrevalence(findings, corpus).slice(0, 5);
         window._findings = ranked;
+        // Assign each post to its single best-matching finding (no repeats), most relevant first.
+        window._findingPosts = assignPostsToFindings(ranked, corpus, 8);
+        window._subProblemCache = {}; // new findings → drop cached subproblems
         ranked.forEach((f, idx) => renderFindingCard(idx + 1, f));
         console.log('[Findings] rendered:', ranked.length);
     } catch (error) {
@@ -813,7 +816,10 @@ function renderFindingPosts(modal, modalIndex, finding) {
     const tpl = getSampleTemplate(modalIndex, container);
     if (!tpl) { console.warn('[Modal] .sample-insight template not found'); return; }
 
-    const posts = matchPostsForFinding(finding, window._corpus || [], 8);
+    // Prefer the de-duplicated, relevance-ranked posts assigned to this finding; fall back to a
+    // loose keyword match only if assignment produced nothing.
+    const assigned = window._findingPosts && window._findingPosts[modalIndex - 1];
+    const posts = (assigned && assigned.length) ? assigned : matchPostsForFinding(finding, window._corpus || [], 8);
     container.innerHTML = '';
     posts.forEach(p => {
         const card = tpl.cloneNode(true);
@@ -843,13 +849,180 @@ function openFindingModal(blockIndex) {
         header.textContent = (finding && finding.title) || fallback;
     }
     renderFindingPosts(modal, blockIndex, finding);
-    // TODO (next stage): render the subproblems chart into modal .subproblem-chart here.
 
-    modal.style.display = 'flex';
+    modal.style.display = 'flex'; // open first so the chart has a measurable width
+    const chartEl = modal.querySelector('.subproblem-chart');
+    if (chartEl && finding) renderSubproblemsInto(chartEl, finding); // fire-and-forget; loader shows meanwhile
 }
 
 function closeFindingModal(modal) {
     if (modal) modal.style.display = 'none';
+}
+
+// --- relevance-scored post assignment (fixes repeats + weak matches) --------
+function scorePostForFinding(post, finding) {
+    const kws = ((finding && finding.keywords) || []).map(k => String(k).toLowerCase()).filter(k => k.length > 2);
+    if (!kws.length) return 0;
+    const title = (post.title || '').toLowerCase();
+    const body = (post.body || '').toLowerCase();
+    let score = 0;
+    kws.forEach(k => { if (title.includes(k)) score += 3; else if (body.includes(k)) score += 1; }); // title weighted higher
+    return score;
+}
+
+// Each post goes to its single best-matching finding (so it can't repeat across findings); keep the
+// most relevant per finding, drop posts that match nothing.
+function assignPostsToFindings(findings, corpus, perFinding) {
+    perFinding = perFinding || 8;
+    const buckets = findings.map(() => []);
+    corpus.forEach(post => {
+        let bestIdx = -1, bestScore = 0;
+        findings.forEach((f, i) => { const s = scorePostForFinding(post, f); if (s > bestScore) { bestScore = s; bestIdx = i; } });
+        if (bestIdx >= 0) buckets[bestIdx].push({ post, score: bestScore });
+    });
+    return buckets.map(arr => arr
+        .sort((a, b) => b.score - a.score || (b.post.score - a.post.score))
+        .slice(0, perFinding)
+        .map(x => x.post));
+}
+
+// =============================================================================
+// PART 4c — Subproblems ring chart (.subproblem-chart inside each modal).
+// Restored from the original: AI finds 6-8 sub-problems from corpus text (no comments), then we
+// position them as a ring of .subproblem-node-template nodes with SVG spokes + lucide icons.
+// =============================================================================
+
+const SUBPROBLEM_ICONS = ['alert-triangle', 'heart', 'clock', 'shield', 'home', 'car', 'moon', 'sun', 'bone', 'dog', 'cat', 'dollar-sign', 'shopping-cart', 'trending-down', 'frown', 'zap', 'flame', 'droplet', 'scissors', 'wrench', 'lock', 'users', 'message-circle', 'help-circle', 'search', 'book-open', 'calendar', 'map-pin', 'phone', 'briefcase', 'target', 'lightbulb', 'bed', 'utensils', 'dumbbell', 'baby', 'package', 'truck', 'star', 'eye', 'brain', 'activity', 'thermometer', 'pill', 'leaf', 'circle-dot'];
+let _subProblemNodeBlueprint = null;
+
+// AI → [{label, icon, pct}], cached per finding title. Counts keyword mentions over the finding's
+// matched posts for the pct (corpus text only — no comment fetching).
+async function generateSubProblems(finding, posts, audience) {
+    window._subProblemCache = window._subProblemCache || {};
+    const key = finding.title;
+    if (window._subProblemCache[key]) return window._subProblemCache[key];
+
+    const texts = (posts || []).map(p => `${p.title} ${p.body}`.toLowerCase());
+    const corpusText = (posts || []).slice(0, 40).map(p => `${p.title} ${(p.body || '').substring(0, 300)}`.trim()).join('\n---\n');
+
+    const payload = {
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: 'You break a problem category into concrete recurring sub-problems and output only valid JSON.' },
+            { role: 'user', content: `You are analysing the "${audience}" audience. The broad problem is "${finding.title}": ${finding.summary || ''}. From the real discussions below, identify 6 to 8 specific recurring sub-problems WITHIN this category. Each must be a concrete issue people actually raise, not a restatement. For each return a short 2-4 word "label", 2-4 "keywords" (single words/short phrases in the audience's own language to detect mentions), and an "icon" chosen VERBATIM from this list: [${SUBPROBLEM_ICONS.join(', ')}] (use "circle-dot" if none fit). Respond ONLY with JSON: {"sub_problems":[{"label","keywords","icon"}]}. Discussions:\n${corpusText}` }
+        ],
+        temperature: 0.2, seed: 11, max_completion_tokens: 1000,
+        response_format: { type: 'json_object' }
+    };
+
+    let raw = [];
+    try { const parsed = await callOpenAI(payload); raw = Array.isArray(parsed.sub_problems) ? parsed.sub_problems : []; }
+    catch (e) { console.error('[Subproblems] failed:', e); return []; }
+
+    const size = texts.length || 1;
+    const countMentions = (keywords) => {
+        let n = 0;
+        for (const t of texts) {
+            const hit = (keywords || []).some(kw => {
+                const words = String(kw).toLowerCase().split(/\s+/).filter(w => w.length > 2);
+                if (!words.length) return false;
+                let m = 0; for (const w of words) if (t.includes(w)) m++;
+                return m / words.length >= 0.5;
+            });
+            if (hit) n++;
+        }
+        return n;
+    };
+
+    const subs = raw
+        .map(sp => {
+            const icon = SUBPROBLEM_ICONS.includes((sp.icon || '').toLowerCase().trim()) ? sp.icon.toLowerCase().trim() : 'circle-dot';
+            return { label: sp.label, icon, pct: Math.round((countMentions(sp.keywords) / size) * 100) };
+        })
+        .filter(sp => sp.label)
+        .sort((a, b) => b.pct - a.pct)
+        .slice(0, 8);
+
+    window._subProblemCache[key] = subs;
+    return subs;
+}
+
+// Position the nodes in a ring around the hub, with SVG spokes behind them (original algorithm).
+function renderSubProblemChart(chartEl, finding, subProblems) {
+    if (!chartEl) return;
+    const tpls = chartEl.querySelectorAll('.subproblem-node-template');
+    if (tpls.length && !_subProblemNodeBlueprint) {
+        const clean = Array.from(tpls).find(t => !t.classList.contains('node-green') && !t.classList.contains('node-orange')) || tpls[0];
+        _subProblemNodeBlueprint = clean.cloneNode(true);
+        _subProblemNodeBlueprint.classList.remove('node-green', 'node-orange');
+    }
+    tpls.forEach(t => { t.style.display = 'none'; });
+    if (!_subProblemNodeBlueprint) { console.error('[Subproblems] .subproblem-node-template not found'); return; }
+
+    const hub = chartEl.querySelector('.subproblem-hub');
+    if (hub) { hub.style.zIndex = '3'; const t = hub.querySelector('.subproblem-hub-title'); if (t) t.innerText = finding.title || ''; }
+
+    chartEl.querySelectorAll('.sp-generated').forEach(el => el.remove());
+    if (!subProblems || !subProblems.length) { if (hub) hub.style.display = 'none'; return; }
+    if (hub) hub.style.display = '';
+
+    const size = chartEl.clientWidth || chartEl.offsetWidth || 560;
+    const center = size / 2, radius = size * 0.36, N = subProblems.length;
+    const svgNS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(svgNS, 'svg');
+    svg.classList.add('sp-generated');
+    svg.setAttribute('width', size); svg.setAttribute('height', size);
+    svg.style.position = 'absolute'; svg.style.left = '0'; svg.style.top = '0'; svg.style.pointerEvents = 'none'; svg.style.zIndex = '0';
+
+    const placed = [];
+    subProblems.forEach((sp, i) => {
+        const angle = (-90 + i * (360 / N)) * Math.PI / 180;
+        const x = center + radius * Math.cos(angle), y = center + radius * Math.sin(angle);
+        placed.push({ x, y });
+        const line = document.createElementNS(svgNS, 'line');
+        line.setAttribute('x1', center); line.setAttribute('y1', center);
+        line.setAttribute('x2', x); line.setAttribute('y2', y);
+        line.setAttribute('stroke', '#ffffff'); line.setAttribute('stroke-width', '1.5');
+        svg.appendChild(line);
+    });
+    chartEl.insertBefore(svg, chartEl.firstChild);
+
+    subProblems.forEach((sp, i) => {
+        const { x, y } = placed[i];
+        const node = _subProblemNodeBlueprint.cloneNode(true);
+        node.classList.add('sp-generated');
+        node.classList.add(i % 2 === 0 ? 'node-green' : 'node-orange');
+        node.style.display = '';
+        node.style.position = 'absolute';
+        node.style.left = `${x}px`;
+        node.style.top = `${y}px`;
+        node.style.transform = 'translate(-50%, -50%)';
+        node.style.zIndex = '2';
+        const labelEl = node.querySelector('.subproblem-node-label');
+        const pctEl = node.querySelector('.subproblem-node-pct');
+        const iconEl = node.querySelector('.subproblem-node-icon');
+        if (labelEl) labelEl.innerText = sp.label;
+        if (pctEl) pctEl.innerText = `${sp.pct}%`;
+        if (iconEl) iconEl.innerHTML = `<i data-lucide="${sp.icon}"></i>`;
+        chartEl.appendChild(node);
+    });
+
+    if (window.lucide && typeof window.lucide.createIcons === 'function') window.lucide.createIcons();
+}
+
+// Fire-and-forget: show the chart's loader, generate (cached) subproblems, then render the ring.
+async function renderSubproblemsInto(chartEl, finding) {
+    const loader = chartEl.querySelector('.subproblem-loader');
+    if (loader) loader.style.display = 'block';
+    try {
+        const analysisPosts = matchPostsForFinding(finding, window._corpus || [], 40);
+        const subs = await generateSubProblems(finding, analysisPosts, window.originalGroupName || '');
+        renderSubProblemChart(chartEl, finding, subs);
+    } catch (e) {
+        console.warn('[Subproblems] render failed', e);
+    } finally {
+        if (loader) loader.style.display = 'none';
+    }
 }
 
 // Reveal the main results container (hidden until the first analysis is ready). display:flex is set

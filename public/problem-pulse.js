@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 12 — fears→.pillar-item-fear, custom prevalence wrapper', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 15 — + see-more modal with sample posts', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -536,18 +536,21 @@ function captureMindsetBlueprints(container) {
     const tpls = container.querySelectorAll('.mindset-item-template');
     return tpls.length ? Array.from(tpls).map(t => t.cloneNode(true)) : null; // keep all 3 to preserve their static numbers
 }
-// textSelector lets each pillar use its own styled text element — goals use .pillar-item-text,
-// fears use .pillar-item-fear (the combo-class fear styling). Falls back gracefully either way.
-function populatePillars(container, blueprint, items, textSelector) {
+// opts.textSelector picks the styled text element; opts.addClass guarantees the styling class is
+// present even when the template is a bare div (fears: the text node may have no .pillar-item-fear,
+// so we ADD it, which is what makes the Webflow fear style apply).
+function populatePillars(container, blueprint, items, opts) {
+    opts = opts || {};
     container.innerHTML = '';
     (items || []).slice(0, 3).forEach(text => {
         const clone = blueprint.cloneNode(true);
         clone.style.removeProperty('display');
-        const textNode = (textSelector && clone.querySelector(textSelector))
+        const textNode = (opts.textSelector && clone.querySelector(opts.textSelector))
             || clone.querySelector('.pillar-item-text')
             || clone.querySelector('.pillar-item-fear')
             || clone;
         textNode.innerText = text;
+        if (opts.addClass) textNode.classList.add(opts.addClass);
         container.appendChild(clone);
     });
 }
@@ -599,8 +602,8 @@ Ground every line in the posts. Posts:\n${sample}` }
 
     try {
         const parsed = await callOpenAI(payload);
-        if (goalsC && window._bp.goals) populatePillars(goalsC, window._bp.goals, parsed.goals, '.pillar-item-text');
-        if (fearsC && window._bp.fears) populatePillars(fearsC, window._bp.fears, parsed.fears, '.pillar-item-fear');
+        if (goalsC && window._bp.goals) populatePillars(goalsC, window._bp.goals, parsed.goals, { textSelector: '.pillar-item-text' });
+        if (fearsC && window._bp.fears) populatePillars(fearsC, window._bp.fears, parsed.fears, { textSelector: '.pillar-item-fear', addClass: 'pillar-item-fear' });
         if (charsC && window._bp.chars) populateMindset(charsC, window._bp.chars, parsed.characteristics);
         if (rejectC && window._bp.reject) populateMindset(rejectC, window._bp.reject, parsed.rejects);
         console.log('[Profile] rendered:', {
@@ -727,7 +730,7 @@ async function generateAndRenderFindings(corpus, audience) {
         model: 'gpt-4o-mini',
         messages: [
             { role: 'system', content: 'You distil community discussions into a few core problems with authentic quotes. Output only valid JSON.' },
-            { role: 'user', content: `Analyse these discussions about "${audience}" and identify 1 to 5 of the most common, clearly recurring problems. Respond ONLY with a JSON object: {"findings":[{"title","summary","quotes","keywords"}]}. Rules — "title": 3-6 words, plain and specific. "summary": ONE or TWO short sentences, punchy, human-sounding, intriguing, NO waffle, ~30 words max, and naturally mention "${audience}". "quotes": exactly 3 short authentic-sounding strings, each ≤ 80 characters. "keywords": 3-6 lowercase words for matching related posts. Prioritise the most common recurring problems; avoid one-off complaints. Posts:\n${sample}` }
+            { role: 'user', content: `Analyse these discussions about "${audience}" and identify 1 to 5 of the most common, clearly recurring problems. Respond ONLY with a JSON object: {"findings":[{"title","summary","quotes","keywords","intensity"}]}. Rules — "title": 3-6 words, plain and specific. "summary": ONE or TWO short sentences, punchy, human-sounding, intriguing, NO waffle, ~30 words max, and naturally mention "${audience}". "quotes": exactly 3 short authentic-sounding strings, each ≤ 80 characters. "keywords": 3-6 lowercase words for matching related posts. "intensity": an integer 0-100 rating how emotionally severe/painful this problem is for ${audience} (how much stress/distress it causes), judged INDEPENDENTLY of how often it comes up. Prioritise the most common recurring problems; avoid one-off complaints. Posts:\n${sample}` }
         ],
         temperature: 0.2,
         max_completion_tokens: 1100,
@@ -765,6 +768,88 @@ function _runTabOnce(key, fn) {
 
 function loadTabHurts() {
     _runTabOnce('hurts', (corpus, audience) => generateAndRenderFindings(corpus, audience));
+}
+
+// =============================================================================
+// PART 4b — Finding detail modal (.see-more → #findings-N-modal): sample posts.
+// Posts come straight from the corpus (matched by the finding's keywords) — no fetch.
+// (Subproblems chart renders into the modal in the next stage.)
+// =============================================================================
+
+function getFindingModal(i) {
+    return document.getElementById(`findings-${i}-modal`) || document.getElementById(`Findings-${i}-modal`);
+}
+
+function formatPostDate(utc) {
+    if (!utc) return '';
+    try { return new Date(utc * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); }
+    catch (e) { return ''; }
+}
+
+// Posts whose title/body match the finding's keywords; fall back to top corpus posts.
+function matchPostsForFinding(finding, corpus, limit) {
+    const kws = ((finding && finding.keywords) || []).map(k => String(k).toLowerCase()).filter(k => k.length > 2);
+    let matched = corpus;
+    if (kws.length) {
+        const hit = corpus.filter(p => { const t = `${p.title} ${p.body}`.toLowerCase(); return kws.some(k => t.includes(k)); });
+        if (hit.length) matched = hit;
+    }
+    return matched.slice(0, limit);
+}
+
+// Capture each modal's own .sample-insight template once (per modal — preserves its card colour).
+function getSampleTemplate(modalIndex, container) {
+    window._sampleTpl = window._sampleTpl || {};
+    if (!window._sampleTpl[modalIndex]) {
+        const t = container.querySelector('.sample-insight');
+        if (t) window._sampleTpl[modalIndex] = t.cloneNode(true);
+    }
+    return window._sampleTpl[modalIndex];
+}
+
+function renderFindingPosts(modal, modalIndex, finding) {
+    const container = modal.querySelector('.reddit-samples-posts');
+    if (!container) { console.warn('[Modal] .reddit-samples-posts not found'); return; }
+    const tpl = getSampleTemplate(modalIndex, container);
+    if (!tpl) { console.warn('[Modal] .sample-insight template not found'); return; }
+
+    const posts = matchPostsForFinding(finding, window._corpus || [], 8);
+    container.innerHTML = '';
+    posts.forEach(p => {
+        const card = tpl.cloneNode(true);
+        card.style.removeProperty('display');
+        const set = (sel, val) => { const e = card.querySelector(sel); if (e) e.textContent = val; };
+        set('.sample-insight-title', p.title || '');
+        const body = (p.body || '').trim();
+        set('.sample-insight-content', body ? body.slice(0, 180) + (body.length > 180 ? '…' : '') : '');
+        set('.subreddit', 'r/' + p.subreddit);
+        set('.likes', formatMemberCount(p.score));
+        set('.comments', String(p.comments || 0));
+        set('.date', formatPostDate(p.created));
+        container.appendChild(card);
+    });
+    console.log(`[Modal] finding ${modalIndex}: rendered ${posts.length} sample posts`);
+}
+
+function openFindingModal(blockIndex) {
+    const modal = getFindingModal(blockIndex);
+    if (!modal) { console.warn(`[Modal] #findings-${blockIndex}-modal not found`); return; }
+    const finding = (window._findings || [])[blockIndex - 1];
+
+    const header = modal.querySelector('.reddit-samples-header');
+    if (header) {
+        const block = document.getElementById('findings-block' + blockIndex);
+        const fallback = block && block.querySelector('.section-title') ? block.querySelector('.section-title').textContent : '';
+        header.textContent = (finding && finding.title) || fallback;
+    }
+    renderFindingPosts(modal, blockIndex, finding);
+    // TODO (next stage): render the subproblems chart into modal .subproblem-chart here.
+
+    modal.style.display = 'flex';
+}
+
+function closeFindingModal(modal) {
+    if (modal) modal.style.display = 'none';
 }
 
 // Reveal the main results container (hidden until the first analysis is ready). display:flex is set
@@ -894,6 +979,30 @@ document.addEventListener('click', (e) => {
     if (backBtn && !backBtn.dataset.ppWired) { e.preventDefault(); transitionToStep1(); return; }
     const hurtsTab = e.target.closest('#tab-hurts');
     if (hurtsTab && !hurtsTab.dataset.ppWired) { loadTabHurts(); return; } // don't preventDefault — let Webflow switch the tab
+
+    // .see-more on a finding card → open that finding's modal with its sample posts.
+    const seeMore = e.target.closest('.see-more, .see-more-btn');
+    if (seeMore) {
+        const block = seeMore.closest('[id^="findings-block"]');
+        if (block) {
+            const idx = parseInt(block.id.replace(/\D+/g, ''), 10);
+            if (idx) { e.preventDefault(); openFindingModal(idx); }
+        }
+        return;
+    }
+    // Modal close: an explicit close control, or clicking the modal backdrop itself.
+    const closer = e.target.closest('.modal-close, .close-modal, [data-modal-close]');
+    if (closer) { closeFindingModal(closer.closest('[id$="-modal"], [id$="-Modal"]')); return; }
+    if (e.target.id && /-modal$/i.test(e.target.id)) { closeFindingModal(e.target); return; }
+});
+
+// Esc closes any open finding modal.
+document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    for (let i = 1; i <= 5; i++) {
+        const m = getFindingModal(i);
+        if (m && m.style.display !== 'none' && m.style.display !== '') closeFindingModal(m);
+    }
 });
 
 // --- bootstrap --------------------------------------------------------------

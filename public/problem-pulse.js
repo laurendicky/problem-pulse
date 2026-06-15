@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 28 — also cache the find-communities step (no Reddit on repeat audiences)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 29 — cache TTL 14 days', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -336,7 +336,7 @@ async function buildCorpus(subreddits, audience) {
 // FIREBASE CORPUS CACHE — repeat searches for the same audience skip Reddit entirely.
 // All fail-soft: if Firebase isn't on the page or errors, we just fetch live as before.
 // =============================================================================
-const CORPUS_CACHE_TTL_MS = 3 * 24 * 60 * 60 * 1000; // re-fetch if the cached corpus is >3 days old
+const CORPUS_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // re-fetch if the cached data is >14 days old
 
 function _firestore() {
     try { return (typeof firebase !== 'undefined' && firebase.firestore) ? firebase.firestore() : null; }

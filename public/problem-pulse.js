@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 21 — prevalence from assignment, no thin cards', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 22 — wider findings sample + larger assignment pool (fuller, well-supported cards)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -779,18 +779,20 @@ async function generateAndRenderFindings(corpus, audience) {
     for (let i = 1; i <= 5; i++) { const b = document.getElementById('findings-block' + i); if (b) b.style.display = 'none'; }
 
     showLoader('Finding the core problems…');
-    const sample = corpus.slice(0, 30)
-        .map(p => `Title: ${p.title}\nContent: ${p.body}`.substring(0, 500))
+    // Sample widely (60 posts) so the model sees the full RANGE of problems, not just the few densest
+    // themes — this is what lets it name 4-6 genuinely distinct problems.
+    const sample = corpus.slice(0, 60)
+        .map(p => `Title: ${p.title}\nContent: ${p.body}`.substring(0, 400))
         .join('\n---\n');
 
     const payload = {
         model: 'gpt-4o-mini',
         messages: [
             { role: 'system', content: 'You distil community discussions into a few core problems with authentic quotes. Output only valid JSON.' },
-            { role: 'user', content: `Analyse these discussions about "${audience}" and identify 1 to 5 of the most common, clearly recurring PROBLEMS — genuine pain points, frustrations, struggles, worries, or unmet needs. IMPORTANT: include ONLY real problems/difficulties. Do NOT include positive or heart-warming themes, things they love or enjoy, or ways their dog helps them — e.g. "emotional support from dogs" is NOT a problem and must be excluded. Respond ONLY with a JSON object: {"findings":[{"title","summary","quotes","keywords","intensity"}]}. Rules — "title": 3-6 words naming a problem, plain and specific. "summary": ONE or TWO short sentences, punchy, human-sounding, intriguing, NO waffle, ~30 words max, naturally mentioning "${audience}". "quotes": exactly 3 short authentic-sounding strings that express the PROBLEM (a complaint or struggle, not praise), each ≤ 80 characters. "keywords": 3-6 lowercase words for matching related posts. "intensity": an integer 0-100 rating how emotionally severe/painful this problem is for ${audience}, judged INDEPENDENTLY of how often it comes up. Prioritise the most common recurring problems; avoid one-off complaints. Posts:\n${sample}` }
+            { role: 'user', content: `Analyse these discussions about "${audience}" and identify 4 to 6 of the most common, clearly recurring, DISTINCT PROBLEMS — genuine pain points, frustrations, struggles, worries, or unmet needs. Make them genuinely different from each other (no near-duplicate or overlapping problems). IMPORTANT: include ONLY real problems/difficulties. Do NOT include positive or heart-warming themes, things they love or enjoy, or ways their dog helps them — e.g. "emotional support from dogs" is NOT a problem and must be excluded. Respond ONLY with a JSON object: {"findings":[{"title","summary","quotes","keywords","intensity"}]}. Rules — "title": 3-6 words naming a problem, plain and specific. "summary": ONE or TWO short sentences, punchy, human-sounding, intriguing, NO waffle, ~30 words max, naturally mentioning "${audience}". "quotes": exactly 3 short authentic-sounding strings that express the PROBLEM (a complaint or struggle, not praise), each ≤ 80 characters. "keywords": 3-6 lowercase words for matching related posts. "intensity": an integer 0-100 rating how emotionally severe/painful this problem is for ${audience}, judged INDEPENDENTLY of how often it comes up. Prioritise the most common recurring problems; avoid one-off complaints. Posts:\n${sample}` }
         ],
         temperature: 0.2,
-        max_completion_tokens: 1100,
+        max_completion_tokens: 1400, // room for up to 6 findings
         seed: 11,
         response_format: { type: 'json_object' }
     };
@@ -805,8 +807,9 @@ async function generateAndRenderFindings(corpus, audience) {
         const buckets = await assignPostsToFindings(findings, corpus);
         findings.forEach((f, i) => { f._posts = buckets[i] || []; f.support = f._posts.length; });
 
-        // Only show problems genuinely backed by posts (≥3); relax if that's too strict so we never
-        // end up empty. Sorted by how much real support each has.
+        // Show up to 5 problems, each genuinely backed (≥3 posts), strongest first. With the wider
+        // sampling + assignment below, active niches give well-supported cards; only a genuinely tiny
+        // niche relaxes the floor so we never end up empty.
         let ranked = findings.filter(f => f.support >= 3).sort((a, b) => b.support - a.support);
         if (ranked.length < 2) ranked = findings.filter(f => f.support >= 1).sort((a, b) => b.support - a.support);
         if (!ranked.length) ranked = findings.slice().sort((a, b) => b.support - a.support);
@@ -992,11 +995,11 @@ function assignPostsByKeyword(findings, corpus) {
 // semantic, so it catches things keywords can't — a heart-warming post won't land under "Health",
 // and off-topic/positive/rescue posts get dropped. Falls back to keyword matching on failure.
 async function assignPostsToFindings(findings, corpus) {
-    // Drop near-empty / photo posts, then take a WIDE density-ranked candidate set so well-supported
-    // problems get enough posts (this pool drives both the modal posts AND prevalence).
+    // Drop near-empty / photo posts, then take a LARGE density-ranked candidate set so every real
+    // problem can gather lots of posts (this pool drives both the modal posts AND prevalence).
     const candidates = dedupeByTitle(corpus)
         .filter(p => ((p.title || '').length + (p.body || '').length) >= 80)
-        .slice(0, 70);
+        .slice(0, 120);
     const buckets = findings.map(() => []);
     try {
         const problemList = findings.map((f, i) => `${i + 1}: ${f.title} — ${f.summary || ''}`).join('\n');
@@ -1008,7 +1011,7 @@ async function assignPostsToFindings(findings, corpus) {
                 { role: 'system', content: 'You are a precise categorisation engine that outputs only JSON. You err on the side of 0 (none) rather than forcing a weak match.' },
                 { role: 'user', content: prompt }
             ],
-            temperature: 0, max_completion_tokens: 1500, response_format: { type: 'json_object' }
+            temperature: 0, max_completion_tokens: 2500, response_format: { type: 'json_object' }
         });
         const assignments = Array.isArray(parsed.assignments) ? parsed.assignments : [];
         assignments.forEach(a => {

@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 25 — cards in prevalence order, #bubble-guide legend, clean subproblem loader', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 27 — Firebase corpus cache (fail-soft) + bubble-guide white text', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -332,6 +332,49 @@ async function buildCorpus(subreddits, audience) {
     return corpus;
 }
 
+// =============================================================================
+// FIREBASE CORPUS CACHE — repeat searches for the same audience skip Reddit entirely.
+// All fail-soft: if Firebase isn't on the page or errors, we just fetch live as before.
+// =============================================================================
+const CORPUS_CACHE_TTL_MS = 3 * 24 * 60 * 60 * 1000; // re-fetch if the cached corpus is >3 days old
+
+function _firestore() {
+    try { return (typeof firebase !== 'undefined' && firebase.firestore) ? firebase.firestore() : null; }
+    catch (e) { return null; }
+}
+function _audienceSlug(audience) {
+    return String(audience || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+}
+
+async function getCachedCorpus(audience) {
+    const db = _firestore();
+    if (!db) return null; // Firebase not configured — behave exactly as before
+    try {
+        const doc = await db.collection('corpora').doc(_audienceSlug(audience)).get();
+        if (!doc.exists) return null;
+        const data = doc.data() || {};
+        if (!Array.isArray(data.posts) || !data.posts.length) return null;
+        const ageMs = Date.now() - (data.updatedAt || 0);
+        if (ageMs > CORPUS_CACHE_TTL_MS) { console.log(`[Cache] corpus for "${audience}" is stale (${Math.round(ageMs / 3600000)}h) — refetching`); return null; }
+        return data.posts;
+    } catch (e) { console.warn('[Cache] read failed (continuing live):', e && e.message); return null; }
+}
+
+async function setCachedCorpus(audience, posts) {
+    const db = _firestore();
+    if (!db || !posts || !posts.length) return;
+    try {
+        // Trim bodies so the document stays well under Firestore's 1MB limit.
+        const lean = posts.slice(0, 220).map(p => ({
+            id: p.id, subreddit: p.subreddit, title: p.title,
+            body: (p.body || '').slice(0, 600),
+            score: p.score, comments: p.comments, created: p.created, permalink: p.permalink
+        }));
+        await db.collection('corpora').doc(_audienceSlug(audience)).set({ audience, posts: lean, updatedAt: Date.now() });
+        console.log(`[Cache] corpus SAVED for "${audience}" (${lean.length} posts)`);
+    } catch (e) { console.warn('[Cache] write failed (ignored):', e && e.message); }
+}
+
 // --- selection + loader -----------------------------------------------------
 function getSelectedSubreddits() {
     const boxes = document.querySelectorAll('#subreddit-choices input[type="checkbox"]:checked');
@@ -391,18 +434,26 @@ async function runProblemFinder() {
 
     showLoader('Gathering discussions…');
     try {
-        const corpus = await buildCorpus(subreddits, window.originalGroupName || '');
+        const audience = window.originalGroupName || '';
+        // CACHE: serve a recent corpus from Firebase if we have one (skips Reddit entirely — the
+        // scale/rate-limit risk). Falls through to a live fetch (and saves it) on a miss.
+        let corpus = await getCachedCorpus(audience);
+        if (corpus && corpus.length) {
+            console.log(`[Analysis] cache HIT — using ${corpus.length} cached posts, skipped Reddit`);
+        } else {
+            corpus = await buildCorpus(subreddits, audience);
+            setCachedCorpus(audience, corpus); // fire-and-forget save for the next searcher
+        }
         window._corpus = corpus;
         window._analysisSubreddits = subreddits;
         window._tabLoaded = {}; // new search → invalidate cached tabs so they reload for this audience
-        console.log(`[Analysis] corpus ready: ${corpus.length} posts from ${subreddits.length} subreddits`);
+        console.log(`[Analysis] corpus ready: ${corpus.length} posts`);
         if (!corpus.length) {
             alert('No discussions found for those communities. Try different ones.');
             return;
         }
         // Part 3 — Tab 1 ("Who they are"). All read from the corpus; nothing refetched.
         showLoader('Analysing audience…');
-        const audience = window.originalGroupName || '';
         // "insights" = total discussion signals mined (sum of comment counts). Flagged: tell me the
         // exact definition you want and I'll change this one line.
         const insightsCount = corpus.reduce((sum, p) => sum + (p.comments || 0), 0);
@@ -1236,7 +1287,7 @@ function renderBubbleGuide(findings) {
     const el = document.getElementById('bubble-guide');
     if (!el) return;
     el.innerHTML = (findings || []).map((f, i) => `
-        <span style="display:inline-flex;align-items:center;gap:6px;margin:0 14px 6px 0;font-size:12px;line-height:1.2;">
+        <span style="display:inline-flex;align-items:center;gap:6px;margin:0 14px 6px 0;font-size:12px;line-height:1.2;color:#ffffff;">
             <span style="width:11px;height:11px;border-radius:50%;flex:0 0 auto;background:${PARENT_PALETTE[i % PARENT_PALETTE.length]};border:1px solid rgba(255,255,255,0.6);"></span>
             ${_escapeHtml(f.title || '')}
         </span>`).join('');

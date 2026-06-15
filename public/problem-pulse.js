@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 9 — counts + archetype + audit + loader#loading-code-1', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 10 — + goals/fears/characteristics/rejects profile', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -352,7 +352,8 @@ async function runProblemFinder() {
         // The two AI panels run in parallel (2 OpenAI calls) so the tab fills as fast as possible.
         await Promise.all([
             generateAndRenderWho(corpus, audience),
-            generateAndRenderArchetype(corpus, audience)
+            generateAndRenderArchetype(corpus, audience),
+            generateAndRenderProfile(corpus, audience)
         ]);
         revealResults();
     } catch (error) {
@@ -460,7 +461,15 @@ function auditTab1Elements() {
         '.count-audience': clsCheck('.count-audience'),
         '.count-insights': clsCheck('.count-insights'),
         '.count-insight': clsCheck('.count-insight'),
-        '.count-posts': clsCheck('.count-posts')
+        '.count-posts': clsCheck('.count-posts'),
+        'id#goals-pillar': idCheck('goals-pillar'),
+        'id#fears-pillar': idCheck('fears-pillar'),
+        'goals .pillar-item-template': clsCheck('#goals-pillar .pillar-item-template'),
+        'fears .pillar-item-template': clsCheck('#fears-pillar .pillar-item-template'),
+        'id#characteristics-d': idCheck('characteristics-d'),
+        'id#reject-d': idCheck('reject-d'),
+        'chars .mindset-item-template': clsCheck('#characteristics-d .mindset-item-template'),
+        'reject .mindset-item-template': clsCheck('#reject-d .mindset-item-template')
     });
 }
 
@@ -512,6 +521,88 @@ async function generateAndRenderArchetype(corpus, audience) {
         console.error('[Archetype] failed:', error);
         if (headingEl) headingEl.textContent = 'Analysis Failed';
         if (descEl) descEl.textContent = 'Could not generate the audience summary. Please try again.';
+    }
+}
+
+// --- audience profile: goals / fears / characteristics / rejects -----------
+// All four are designed in Webflow as repeating templates, so we use the blueprint method:
+// capture the template ONCE (before clearing), then clone it per item and fill the text node.
+function capturePillarBlueprint(container) {
+    const tpl = container.querySelector('.pillar-item-template');
+    return tpl ? tpl.cloneNode(true) : null;
+}
+function captureMindsetBlueprints(container) {
+    const tpls = container.querySelectorAll('.mindset-item-template');
+    return tpls.length ? Array.from(tpls).map(t => t.cloneNode(true)) : null; // keep all 3 to preserve their static numbers
+}
+function populatePillars(container, blueprint, items) {
+    container.innerHTML = '';
+    (items || []).slice(0, 3).forEach(text => {
+        const clone = blueprint.cloneNode(true);
+        clone.style.removeProperty('display');
+        const textNode = clone.querySelector('.pillar-item-text') || clone;
+        textNode.innerText = text;
+        container.appendChild(clone);
+    });
+}
+function populateMindset(container, blueprints, items) {
+    container.innerHTML = '';
+    (items || []).slice(0, 3).forEach((text, i) => {
+        const bp = blueprints[i] || blueprints[blueprints.length - 1]; // matching template keeps its number (1/2/3)
+        const clone = bp.cloneNode(true);
+        clone.style.removeProperty('display');
+        const descEl = clone.querySelector('.mindset-item-desc') || clone;
+        descEl.innerText = text;
+        container.appendChild(clone);
+    });
+}
+
+async function generateAndRenderProfile(corpus, audience) {
+    const goalsC = document.getElementById('goals-pillar');
+    const fearsC = document.getElementById('fears-pillar');
+    const charsC = document.getElementById('characteristics-d');
+    const rejectC = document.getElementById('reject-d');
+    if (!goalsC && !fearsC && !charsC && !rejectC) { console.warn('[Profile] no profile containers found.'); return; }
+
+    // Capture blueprints ONCE, before any clear, so the Webflow design is never lost.
+    window._bp = window._bp || {};
+    if (goalsC && !window._bp.goals) window._bp.goals = capturePillarBlueprint(goalsC);
+    if (fearsC && !window._bp.fears) window._bp.fears = capturePillarBlueprint(fearsC);
+    if (charsC && !window._bp.chars) window._bp.chars = captureMindsetBlueprints(charsC);
+    if (rejectC && !window._bp.reject) window._bp.reject = captureMindsetBlueprints(rejectC);
+
+    const sample = corpus.slice(0, 20)
+        .map(p => `Title: ${p.title}\nContent: ${p.body}`.substring(0, 450))
+        .join('\n---\n');
+
+    const payload = {
+        model: 'gpt-4o-mini',
+        messages: [
+            { role: 'system', content: 'You are a perceptive observer of human motivation who writes honest, specific, non-corporate insight about online communities. Output only valid JSON.' },
+            { role: 'user', content: `You have spent months inside the "${audience}" community reading how they really talk. Below are real discussions. Respond ONLY with a valid JSON object with these four keys, each an array of EXACTLY 3 short strings in a plain human voice — easy to grasp instantly, no waffle, ~12 words or fewer, never corporate or strategy-deck language:
+"goals": 3 things they quietly hope for, in emotional human terms.
+"fears": 3 things that genuinely worry or keep them up at night.
+"characteristics": 3 defining traits or instincts of this audience.
+"rejects": 3 things this audience dislikes, distrusts, or pushes back against.
+Ground every line in the posts. Posts:\n${sample}` }
+        ],
+        temperature: 0.6,
+        max_completion_tokens: 500,
+        response_format: { type: 'json_object' }
+    };
+
+    try {
+        const parsed = await callOpenAI(payload);
+        if (goalsC && window._bp.goals) populatePillars(goalsC, window._bp.goals, parsed.goals);
+        if (fearsC && window._bp.fears) populatePillars(fearsC, window._bp.fears, parsed.fears);
+        if (charsC && window._bp.chars) populateMindset(charsC, window._bp.chars, parsed.characteristics);
+        if (rejectC && window._bp.reject) populateMindset(rejectC, window._bp.reject, parsed.rejects);
+        console.log('[Profile] rendered:', {
+            goals: (parsed.goals || []).length, fears: (parsed.fears || []).length,
+            characteristics: (parsed.characteristics || []).length, rejects: (parsed.rejects || []).length
+        });
+    } catch (error) {
+        console.error('[Profile] failed:', error);
     }
 }
 

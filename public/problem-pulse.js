@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 30 — posts cache 14 days, communities cache indefinite (seedable)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 31 — fix first-card modal stuck on "Matching…" (template captured before loader)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -1025,28 +1025,38 @@ function renderFindingPosts(modal, modalIndex, finding) {
 async function openFindingModal(blockIndex) {
     const modal = getFindingModal(blockIndex);
     if (!modal) { console.warn(`[Modal] #findings-${blockIndex}-modal not found`); return; }
-    const finding = (window._findings || [])[blockIndex - 1];
+    modal.style.display = 'flex'; // open first so the chart has a measurable width
 
+    // CRITICAL: capture the .sample-insight template BEFORE anything can overwrite the container —
+    // otherwise the "Matching…" loading message wipes the template and posts never render (the
+    // first-card stuck bug).
+    const postsContainer = modal.querySelector('.reddit-samples-posts');
+    if (postsContainer) getSampleTemplate(blockIndex, postsContainer);
+
+    // Hide the subproblem placeholders immediately so nothing messy shows while we wait.
+    const chartEl = modal.querySelector('.subproblem-chart');
+    if (chartEl) {
+        const hub = chartEl.querySelector('.subproblem-hub'); if (hub) hub.style.display = 'none';
+        chartEl.querySelectorAll('.subproblem-node-template').forEach(t => { t.style.display = 'none'; });
+        const ldr = chartEl.querySelector('.subproblem-loader'); if (ldr) ldr.style.display = 'block';
+    }
+
+    // If posts aren't ready, show the loader and wait for the background assignment (which also
+    // reorders the cards). We render everything AFTER, so header/posts/subproblems all match.
+    if (!window._findingPosts && window._assignmentPromise) {
+        if (postsContainer) postsContainer.innerHTML = '<p class="loading-text">Matching the most relevant discussions…</p>';
+        try { await window._assignmentPromise; } catch (e) { /* fallback already set in the catch */ }
+    }
+
+    const finding = (window._findings || [])[blockIndex - 1]; // read AFTER the wait (post-reorder)
     const header = modal.querySelector('.reddit-samples-header');
     if (header) {
         const block = document.getElementById('findings-block' + blockIndex);
         const fallback = block && block.querySelector('.section-title') ? block.querySelector('.section-title').textContent : '';
         header.textContent = (finding && finding.title) || fallback;
     }
-
-    modal.style.display = 'flex'; // open first so the chart has a measurable width
-
-    // Subproblems don't need the assignment — they fall back to keyword-matched posts, so fire now.
-    const chartEl = modal.querySelector('.subproblem-chart');
-    if (chartEl && finding) renderSubproblemsInto(chartEl, finding, blockIndex);
-
-    // Posts come from the background assignment. If it hasn't finished, show an inline loader and wait.
-    const postsContainer = modal.querySelector('.reddit-samples-posts');
-    if (!window._findingPosts && window._assignmentPromise) {
-        if (postsContainer) postsContainer.innerHTML = '<p class="loading-text">Matching the most relevant discussions…</p>';
-        try { await window._assignmentPromise; } catch (e) { /* fallback already set in the catch */ }
-    }
     renderFindingPosts(modal, blockIndex, finding);
+    if (chartEl && finding) renderSubproblemsInto(chartEl, finding, blockIndex);
 }
 
 function closeFindingModal(modal) {

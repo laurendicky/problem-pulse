@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 33 — background pre-fetch of Tab 2 + polarity (near-instant tab switching)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 36 — tab shimmer matches .main-tab-text or .tab-text-2', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -942,9 +942,11 @@ async function generateAndRenderFindings(corpus, audience) {
                 ranked.sort((a, b) => b.support - a.support);
                 const totalShown = ranked.reduce((s, f) => s + f.support, 0) || 1;
                 ranked.forEach((f, idx) => {
-                    f.prevalence = Math.round((f.support / totalShown) * 100);
+                    f.prevalence = Math.round((f.support / totalShown) * 100); // prevalence = TRUE AI support
                     renderFindingCard(idx + 1, f);
                 });
+                // Top up thin findings' display posts (prevalence above is left untouched).
+                topUpFindingPosts(ranked, corpus, 6, 8);
                 window._findings = ranked;
                 window._findingPosts = ranked.map(f => (f._posts || []).slice(0, 8));
                 window._findingPostsFull = ranked.map(f => f._posts || []);
@@ -962,14 +964,27 @@ async function generateAndRenderFindings(corpus, audience) {
     }
 }
 
+// Non-blocking "preparing" cue: toggles .pp-tab-loading on the tab's TEXT (.main-tab-text) while its
+// content generates, so you can shimmer the label in Webflow. The tab stays clickable throughout.
+function setTabLoading(tabId, loading) {
+    const el = document.getElementById(tabId);
+    if (!el) return;
+    // Tab labels use different classes (#tab-hurts → .main-tab-text, #polarity-tab → .tab-text-2),
+    // so match either; fall back to the tab link itself if neither is found.
+    const textEl = el.querySelector('.main-tab-text, .tab-text-2') || el;
+    textEl.classList.toggle('pp-tab-loading', !!loading);
+}
+
 // Shared findings loader — used by both the pre-fetch and the tab click. The shared promise means
 // findings generate exactly ONCE even if polarity + tab-hurts + pre-fetch all ask at the same time.
 function ensureFindings() {
     if (window._findings && window._findings.length) return Promise.resolve(window._findings);
     if (window._findingsPromise) return window._findingsPromise; // generation already in flight
     if (!window._corpus || !window._corpus.length) return Promise.resolve([]);
+    setTabLoading('tab-hurts', true);
     window._findingsPromise = generateAndRenderFindings(window._corpus, window.originalGroupName || '')
-        .then(() => window._findings || []);
+        .then(() => window._findings || [])
+        .finally(() => setTabLoading('tab-hurts', false));
     return window._findingsPromise;
 }
 
@@ -1130,6 +1145,28 @@ function dedupeByTitle(posts) {
         const k = (p.title || '').toLowerCase().replace(/\s+/g, ' ').trim();
         if (!k || seen.has(k)) return false;
         seen.add(k); return true;
+    });
+}
+
+// Fill thin findings' DISPLAY posts with keyword-relevant matches (word-boundary scored, no
+// cross-finding repeats) so a modal never looks sparse. Does NOT change support/prevalence — those
+// stay based on the strict AI assignment, so the % bar remains honest.
+function topUpFindingPosts(findings, corpus, minPosts, maxPosts) {
+    const used = new Set();
+    findings.forEach(f => (f._posts || []).forEach(p => used.add(p.id)));
+    const pool = dedupeByTitle(corpus);
+    findings.forEach(f => {
+        if (!f._posts) f._posts = [];
+        if (f._posts.length >= minPosts) return;
+        const extra = pool
+            .filter(p => !used.has(p.id))
+            .map(p => ({ p, s: scorePostForFinding(p, f) }))
+            .filter(x => x.s >= RELEVANCE_MIN_SCORE)
+            .sort((a, b) => b.s - a.s || (b.p.score - a.p.score));
+        for (const x of extra) {
+            if (f._posts.length >= maxPosts) break;
+            f._posts.push(x.p); used.add(x.p.id);
+        }
     });
 }
 
@@ -1434,6 +1471,7 @@ function loadPolarityMap() {
     if (window._polarityChart) return Promise.resolve();          // already rendered
     if (window._polarityPromise) return window._polarityPromise;  // already in flight
     if (!window._corpus || !window._corpus.length) return Promise.resolve();
+    setTabLoading('polarity-tab', true);
     window._polarityPromise = (async () => {
         const findings = await ensureFindings();
         let points = await generatePolarityData(findings, window._corpus || [], window.originalGroupName || '');
@@ -1443,7 +1481,9 @@ function loadPolarityMap() {
         }
         renderPolarityMap(points);
         renderBubbleGuide(findings); // legend below the map
-    })().catch(e => { console.warn('[Polarity] failed', e); window._polarityPromise = null; });
+    })()
+        .catch(e => { console.warn('[Polarity] failed', e); window._polarityPromise = null; })
+        .finally(() => setTabLoading('polarity-tab', false));
     return window._polarityPromise;
 }
 

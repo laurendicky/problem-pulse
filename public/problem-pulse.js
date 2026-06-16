@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 48 — sentiment clouds restored (palette colours + rotation + flowing layout)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 49 — demographics anchored on audience name, tab-talk pre-fetch, smaller clouds, emotion-hook "&"', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -578,7 +578,7 @@ async function runProblemFinder() {
         // Pre-warm Tab 2 (findings + post assignment) and the polarity map in the background while
         // the user reads Tab 1, so switching to those tabs is near-instant. No Reddit here, so it's
         // safe to run quietly. A small delay lets Tab 1's render settle first.
-        setTimeout(() => { try { loadTabHurts(); loadPolarityMap(); } catch (e) { /* non-fatal */ } }, 400);
+        setTimeout(() => { try { loadTabHurts(); loadPolarityMap(); loadTabTalk(); } catch (e) { /* non-fatal */ } }, 400);
     } catch (error) {
         console.error('[Analysis] failed to build corpus:', error);
         showMessage('Something went wrong gathering discussions. Please try again.');
@@ -647,7 +647,7 @@ async function generateAndRenderWho(corpus, audience) {
         model: 'gpt-4o-mini',
         messages: [
             { role: 'system', content: 'You are a precise demographic estimator.' },
-            { role: 'user', content: `Based on the language, slang, and life experiences in these Reddit posts for "${audience}", give a specific demographic estimate. You MUST provide numerical percentages — specific, even if estimated. Respond ONLY with a valid JSON object with these keys: "male_pct" (integer), "female_pct" (integer), "age_18_24" (integer), "age_25_45" (integer), "age_45_plus" (integer), "top_life_stage" (a 3-4 word string, e.g. "Young Professionals"). Text: ${sample}` }
+            { role: 'user', content: `Estimate the demographics of the audience "${audience}" using BOTH the audience name and the language/slang/life-experiences in these Reddit posts. CRITICAL: if the audience name itself explicitly implies a gender, age, or life stage, let that strongly anchor the estimate — e.g. "Women in Business" or "New Moms" → ~90-100% female; "New Dads" → ~90-100% male; "Retirees" → mostly 45+; "Teen ..." → mostly 18-24. Only deviate from an explicit cue if the posts clearly contradict it. You MUST provide numerical percentages. Respond ONLY with a valid JSON object: "male_pct" (integer), "female_pct" (integer), "age_18_24" (integer), "age_25_45" (integer), "age_45_plus" (integer), "top_life_stage" (a 3-4 word string, e.g. "Young Professionals"). Text: ${sample}` }
         ],
         temperature: 0.1,
         response_format: { type: 'json_object' }
@@ -1712,7 +1712,7 @@ async function generateAndRenderHookPatterns(corpus, audience) {
             model: 'gpt-4o-mini',
             messages: [
                 { role: 'system', content: 'You are a content strategist. You are brief and punchy. Output only valid JSON.' },
-                { role: 'user', content: `Analyse these top posts for "${audience}". Identify 4-6 modern hook patterns. Respond ONLY as valid JSON with key "patterns", each object: "category" (hook name), "short_summary" (≤10 words), "strategy" (≤20 words on why it works), "example_ids" (array of 3 post IDs from the list), "emotion_type" (2-4 word emotional driver, unique to this pattern), "impact_level" (exactly one of "Very High Impact","High Impact","Medium Impact"), "emotional_intensity" (integer 0-100), "viral_potential" (integer 0-100), "community_impact" (one of "Very High","High","Medium","Low"). Posts:\n${listForAI}` }
+                { role: 'user', content: `Analyse these top posts for "${audience}". Identify 4-6 modern hook patterns. Respond ONLY as valid JSON with key "patterns", each object: "category" (hook name), "short_summary" (≤10 words), "strategy" (≤20 words on why it works), "example_ids" (array of 3 post IDs from the list), "emotion_type" (a SHORT 2-3 word emotional driver, unique to this pattern; use "&" instead of "and"), "impact_level" (exactly one of "Very High Impact","High Impact","Medium Impact"), "emotional_intensity" (integer 0-100), "viral_potential" (integer 0-100), "community_impact" (one of "Very High","High","Medium","Low"). Posts:\n${listForAI}` }
             ],
             temperature: 0.1, max_completion_tokens: 1200, response_format: { type: 'json_object' }
         });
@@ -1724,7 +1724,7 @@ async function generateAndRenderHookPatterns(corpus, audience) {
             set('.hook-category', pattern.category || '');
             set('.hook-why', pattern.short_summary || '');
             set('.why-reason', pattern.strategy || '');
-            set('.emotion-hook', pattern.emotion_type || '');
+            set('.emotion-hook', (pattern.emotion_type || '').replace(/\s+and\s+/gi, ' & ')); // enforce "&"
             set('.impact-label', pattern.impact_level || '');
             set('.emotional-intensity-p', pattern.emotional_intensity != null ? `${pattern.emotional_intensity}%` : '');
             set('.viral-potential-p', pattern.viral_potential != null ? `${pattern.viral_potential}%` : '');
@@ -1761,7 +1761,7 @@ function renderSentimentCloud(container, items, colors) {
     if (list.length < 3) { container.innerHTML = '<p class="chart-placeholder-text">Not enough distinct terms found.</p>'; return; }
     const weights = list.map(it => Number(it.weight) || 1);
     const max = Math.max(...weights), min = Math.min(...weights);
-    const minF = 16, maxF = 42;
+    const minF = 11, maxF = 24; // smaller, more compact cloud (was 16-42, far too big)
     const palette = colors || POSITIVE_CLOUD_COLORS;
     // Exactly like the original: font-size scaled by weight, a colour from the palette, a slight
     // rotation. Wrapped in a plain block div so the words FLOW as a cloud (the words were stacking

@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 36 — tab shimmer matches .main-tab-text or .tab-text-2', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 37 — checkbox customisation bypasses cache, hide #full-header on results, full reset on back', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -182,6 +182,8 @@ function renderSubredditChoices(subs) {
                 <span class="pill activity-pill" data-activity="${sub.activityLabel}">${sub.activityLabel}</span>
             </label>
         </div>`).join('');
+    // Remember the FULL set so we can tell if the user later customises (unchecks some) the selection.
+    window._allRankedSubredditNames = subs.map(s => s.name);
 }
 
 // =============================================================================
@@ -480,14 +482,19 @@ async function runProblemFinder() {
     showLoader('Gathering discussions…');
     try {
         const audience = window.originalGroupName || '';
-        // CACHE: serve a recent corpus from Firebase if we have one (skips Reddit entirely — the
-        // scale/rate-limit risk). Falls through to a live fetch (and saves it) on a miss.
-        let corpus = await getCachedCorpus(audience);
+        // Did the user customise the selection (uncheck some communities)? If so, the corpus is a
+        // bespoke subset — DON'T serve the cached full-audience corpus, and DON'T save this one
+        // (it isn't the canonical mapping). Only the default full selection uses/writes the cache.
+        const fullSet = window._allRankedSubredditNames || [];
+        const isCustomised = fullSet.length > 0 && subreddits.length < fullSet.length;
+
+        let corpus = isCustomised ? null : await getCachedCorpus(audience);
         if (corpus && corpus.length) {
             console.log(`[Analysis] cache HIT — using ${corpus.length} cached posts, skipped Reddit`);
         } else {
             corpus = await buildCorpus(subreddits, audience);
-            setCachedCorpus(audience, corpus); // fire-and-forget save for the next searcher
+            if (isCustomised) console.log('[Analysis] customised selection — corpus NOT cached');
+            else setCachedCorpus(audience, corpus); // fire-and-forget save for the next searcher
         }
         window._corpus = corpus;
         window._analysisSubreddits = subreddits;
@@ -1505,7 +1512,9 @@ function revealResults() {
         wrapper.style.opacity = '1';
         setTimeout(() => wrapper.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
     }
-    // Tell us whether the demographics panel is actually on screen now (and if not, what's hiding it).
+    // Hide the landing header now that results are showing (restored on back-to-step1).
+    const fullHeader = document.getElementById('full-header');
+    if (fullHeader) fullHeader.style.setProperty('display', 'none', 'important');
     _debugVisibility('overview-div');
 }
 
@@ -1523,14 +1532,35 @@ function transitionToStep2(audienceName) {
     if (title) title.innerHTML = `Select Subreddits For: <span class="pf-audience-name">${audienceName}</span>`;
 }
 
-// Reverse of transitionToStep2 — back to the search-term entry step.
+// #back-to-step1-btn — full reset to the original load state so the user can start a fresh search.
 function transitionToStep1() {
+    // Step containers back to the start.
     const welcome = document.getElementById('welcome-div');
     const step1 = document.getElementById('step-1-container');
     const step2 = document.getElementById('subreddit-selection-container');
     if (step2) step2.classList.remove('visible');
     if (step1) step1.classList.remove('hidden');
     if (welcome) welcome.style.display = ''; // restore Webflow's default (visible)
+
+    // Hide the results, restore the landing header.
+    const results = document.getElementById('results-wrapper-b');
+    if (results) { results.style.setProperty('display', 'none', 'important'); results.style.opacity = '0'; }
+    const fullHeader = document.getElementById('full-header');
+    if (fullHeader) fullHeader.style.removeProperty('display'); // back to Webflow default (visible)
+
+    // Clear the previous run's inputs/output so a new search starts clean.
+    const choices = document.getElementById('subreddit-choices');
+    if (choices) choices.innerHTML = '';
+    const groupInput = document.getElementById('group-input');
+    if (groupInput) groupInput.value = '';
+
+    // Wipe analysis state (corpus, findings, tabs, polarity) so the next search regenerates fresh.
+    window._corpus = null; window._analysisSubreddits = null; window._allRankedSubredditNames = null;
+    window._findings = null; window._findingsPromise = null; window._assignmentPromise = null;
+    window._findingPosts = null; window._findingPostsFull = null;
+    window._polarityPromise = null; window._subProblemCache = {}; window._tabLoaded = {};
+    if (window._polarityChart && window._polarityChart.destroy) { window._polarityChart.destroy(); window._polarityChart = null; }
+    console.log('[Reset] back to start — ready for a new search');
 }
 
 // --- wire the buttons -------------------------------------------------------

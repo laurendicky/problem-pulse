@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 37 — checkbox customisation bypasses cache, hide #full-header on results, full reset on back', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 38 — land on #tab-who each search + thin-community warning', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -182,8 +182,9 @@ function renderSubredditChoices(subs) {
                 <span class="pill activity-pill" data-activity="${sub.activityLabel}">${sub.activityLabel}</span>
             </label>
         </div>`).join('');
-    // Remember the FULL set so we can tell if the user later customises (unchecks some) the selection.
+    // Remember the FULL set (names for the customise check, objects for member counts / warnings).
     window._allRankedSubredditNames = subs.map(s => s.name);
+    window._allRankedSubreddits = subs;
 }
 
 // =============================================================================
@@ -474,6 +475,15 @@ async function runProblemFinder() {
     }
     const subreddits = getSelectedSubreddits();
     if (!subreddits.length) { alert('Select at least one community to analyse.'); return; }
+
+    // Thin-data warning: a single small community rarely has enough discussion for rich insights.
+    if (subreddits.length === 1) {
+        const one = (window._allRankedSubreddits || []).find(r => r.name === subreddits[0]);
+        if (one && (one.members || 0) < 100000) {
+            const ok = confirm(`Heads up: you've selected just one small community (r/${one.name}, ${formatMemberCount(one.members)} members). The results may be thin — selecting a few more communities gives much richer insights.\n\nContinue anyway?`);
+            if (!ok) return; // let them go back and add more (guard not yet set, so safe to bail)
+        }
+    }
 
     _analysisRunning = true; // set synchronously, before any await, so concurrent calls bail here
     console.log('[Analysis] selected subreddits:', subreddits);
@@ -1515,6 +1525,12 @@ function revealResults() {
     // Hide the landing header now that results are showing (restored on back-to-step1).
     const fullHeader = document.getElementById('full-header');
     if (fullHeader) fullHeader.style.setProperty('display', 'none', 'important');
+
+    // Always land on Tab 1 (Who). Clicking it makes Webflow set it current and reset the other tabs
+    // to their default (non-current) state — so a new search never drops you on a stale/empty tab.
+    const whoTab = document.getElementById('tab-who');
+    if (whoTab && typeof whoTab.click === 'function') whoTab.click();
+
     _debugVisibility('overview-div');
 }
 

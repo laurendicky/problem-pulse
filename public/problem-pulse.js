@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 45 — Tab 3 stage 2 (hooks + sentiment); fresh commit to dodge jsDelivr edge-cache', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 47 — Tab 3 complete: + sentiment shift (corpus-only) + benchmark text', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -1795,6 +1795,17 @@ function renderSentimentScore(positiveCount, negativeCount) {
         else vibe = 'High frustration community, pain points dominate';
         vibeLabel.textContent = vibe;
     }
+
+    // Benchmark vs a typical-community baseline (Reddit positive sentiment averages ~58%).
+    const benchmarkEl = container.querySelector('.sentiment-benchmark-text');
+    if (benchmarkEl) {
+        const diff = positivePercent - 58;
+        let benchmark;
+        if (Math.abs(diff) <= 2) benchmark = 'About as positive as the average audience';
+        else if (diff > 0) benchmark = `${diff}% more positive than the average audience`;
+        else benchmark = `${Math.abs(diff)}% less positive than the average audience`;
+        benchmarkEl.textContent = benchmark;
+    }
 }
 
 async function generateAndRenderSentiment(corpus, audience) {
@@ -1821,29 +1832,96 @@ async function generateAndRenderSentiment(corpus, audience) {
     } catch (e) { console.error('[Talk] sentiment failed:', e); posC.innerHTML = ''; negC.innerHTML = ''; }
 }
 
+// Historical sentiment ("sentiment shift") — REBUILT corpus-only: bucket the corpus posts by recency
+// window (using their timestamps) and score each with a small inline sentiment word list (no big
+// dictionaries, no extra Reddit). Renders a Highcharts areaspline into .history-sentiment.
+const HIST_POS_WORDS = ['love', 'great', 'best', 'amazing', 'helpful', 'perfect', 'easy', 'happy', 'thank', 'recommend', 'worth', 'works', 'better', 'good', 'excited', 'glad', 'awesome', 'fantastic', 'grateful', 'relief', 'enjoy', 'solved', 'wonderful', 'win', 'lifesaver'];
+const HIST_NEG_WORDS = ['hate', 'worst', 'terrible', 'awful', 'frustrat', 'annoy', 'difficult', 'struggl', 'problem', 'fail', 'pain', 'hard', 'disappoint', 'useless', 'waste', 'broken', 'confus', 'stuck', 'tired', 'exhaust', 'horrible', 'nightmare', 'stress', 'worry', 'angry', 'upset', 'wont', 'cant', 'impossible', 'overwhelm'];
+
+function countSentimentLocal(posts) {
+    let positive = 0, negative = 0;
+    posts.forEach(p => {
+        const text = `${p.title} ${p.body}`.toLowerCase();
+        HIST_POS_WORDS.forEach(w => { if (text.includes(w)) positive++; });
+        HIST_NEG_WORDS.forEach(w => { if (text.includes(w)) negative++; });
+    });
+    return { positive, negative };
+}
+
+function renderHistoricalSentimentChart(data) {
+    const container = document.querySelector('.history-sentiment');
+    if (!container) return;
+    if (typeof Highcharts === 'undefined' || !data || data.length < 2) {
+        container.innerHTML = '<p class="placeholder-text">Not enough historical data to chart sentiment over time.</p>';
+        return;
+    }
+    container.innerHTML = '';
+    Highcharts.chart(container, {
+        chart: { type: 'areaspline', backgroundColor: 'transparent', height: 280 },
+        title: { text: null }, credits: { enabled: false }, legend: { enabled: false }, exporting: { enabled: false },
+        xAxis: { categories: data.map(d => d.period), labels: { style: { color: '#475569' } }, lineColor: 'rgba(0,0,0,0.12)', tickColor: 'rgba(0,0,0,0.12)' },
+        yAxis: {
+            title: { text: '% Positive', style: { color: '#64748b' } }, min: 0, max: 100,
+            labels: { format: '{value}%', style: { color: '#475569' } }, gridLineColor: 'rgba(0,0,0,0.06)',
+            plotLines: [{ value: 58, color: 'rgba(100,116,139,0.5)', dashStyle: 'Dash', width: 1, label: { text: 'Avg', style: { color: '#94a3b8', fontSize: '11px' }, align: 'left', x: 5, y: -4 } }]
+        },
+        tooltip: { valueSuffix: '% positive', backgroundColor: '#ffffff' },
+        plotOptions: {
+            areaspline: {
+                color: '#00a5ce', lineWidth: 2, marker: { enabled: true, radius: 4, fillColor: '#00a5ce' },
+                fillColor: { linearGradient: { x1: 0, y1: 0, x2: 0, y2: 1 }, stops: [[0, 'rgba(0,165,206,0.18)'], [1, 'rgba(0,165,206,0.0)']] }
+            }
+        },
+        series: [{ name: '% Positive', data: data.map(d => d.positive) }]
+    });
+}
+
+function generateAndRenderHistoricalSentiment(corpus) {
+    const container = document.querySelector('.history-sentiment');
+    if (!container) { console.warn('[Talk] .history-sentiment not found'); return; }
+    const nowSec = Date.now() / 1000, DAY = 86400;
+    const periods = [
+        { label: 'Past 6 Mo', days: 182 }, { label: 'Past 3 Mo', days: 91 },
+        { label: 'Past Month', days: 30 }, { label: 'Past Week', days: 7 }
+    ];
+    const trend = [];
+    periods.forEach(per => {
+        const inWindow = corpus.filter(p => (p.created || 0) >= nowSec - per.days * DAY);
+        if (!inWindow.length) return;
+        const { positive, negative } = countSentimentLocal(inWindow);
+        const total = positive + negative;
+        if (total === 0) return;
+        trend.push({ period: per.label, positive: Math.round((positive / total) * 100) });
+    });
+    renderHistoricalSentimentChart(trend);
+    console.log('[Talk] historical sentiment rendered:', trend.length, 'periods');
+}
+
 // Lazy load Tab 3 once, cached. Runs the panels in parallel (corpus-only).
 function loadTabTalk() {
     if (!window._tabLoaded) window._tabLoaded = {};
     if (window._tabLoaded.talk) return window._talkPromise || Promise.resolve();
     if (!window._corpus || !window._corpus.length) return Promise.resolve();
     window._tabLoaded.talk = true;
+    setTabLoading('tab-talk', true);
     const corpus = window._corpus, audience = window.originalGroupName || '';
     window._talkPromise = Promise.all([
         generateAndRenderVoiceProfile(corpus, audience),
         generateAndRenderToneMap(corpus, audience),
         generateAndRenderLanguageToAvoid(corpus, audience),
         generateAndRenderHookPatterns(corpus, audience),
-        generateAndRenderSentiment(corpus, audience)
-    ]).catch(e => { console.warn('[Talk] failed', e); window._tabLoaded.talk = false; });
+        generateAndRenderSentiment(corpus, audience),
+        Promise.resolve(generateAndRenderHistoricalSentiment(corpus)) // synchronous, corpus-only
+    ]).catch(e => { console.warn('[Talk] failed', e); window._tabLoaded.talk = false; })
+        .finally(() => setTabLoading('tab-talk', false));
     return window._talkPromise;
 }
 
-// Tab click: load on first open with the loader; instant after that (cached).
+// Tab click: shimmer the label while it loads on first open; instant after that (cached).
 function openTabTalk() {
     if (window._tabLoaded && window._tabLoaded.talk) return;
     if (!window._corpus || !window._corpus.length) return;
-    showLoader('Analysing how they talk…');
-    Promise.resolve(loadTabTalk()).finally(() => hideLoader());
+    loadTabTalk();
 }
 
 // Reveal the main results container (hidden until the first analysis is ready). display:flex is set

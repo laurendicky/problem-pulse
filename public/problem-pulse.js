@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 40 — checkbox fix + on-brand #pp-modal messages (native fallback)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 41 — bubble-guide text is Webflow-styleable (.pp-guide-label)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -1444,10 +1444,12 @@ function _escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp
 function renderBubbleGuide(findings) {
     const el = document.getElementById('bubble-guide');
     if (!el) return;
+    // Layout stays inline (so it lays out fine unstyled), but the TEXT carries .pp-guide-label with NO
+    // inline text styles — so you fully control its font/size/colour/weight from Webflow.
     el.innerHTML = (findings || []).map((f, i) => `
-        <span style="display:inline-flex;align-items:center;gap:6px;margin:0 14px 6px 0;font-size:12px;line-height:1.2;color:#ffffff;">
-            <span style="width:11px;height:11px;border-radius:50%;flex:0 0 auto;background:${PARENT_PALETTE[i % PARENT_PALETTE.length]};border:1px solid rgba(255,255,255,0.6);"></span>
-            ${_escapeHtml(f.title || '')}
+        <span class="pp-guide-item" style="display:inline-flex;align-items:center;gap:6px;margin:0 14px 6px 0;">
+            <span class="pp-guide-dot" style="width:11px;height:11px;border-radius:50%;flex:0 0 auto;background:${PARENT_PALETTE[i % PARENT_PALETTE.length]};border:1px solid rgba(255,255,255,0.6);"></span>
+            <span class="pp-guide-label">${_escapeHtml(f.title || '')}</span>
         </span>`).join('');
 }
 

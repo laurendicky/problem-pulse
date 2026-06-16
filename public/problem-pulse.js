@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 31 — fix first-card modal stuck on "Matching…" (template captured before loader)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 32 — cap subreddit query (fixes 0 posts on big audiences) + broad retry', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -322,12 +322,31 @@ function rankByDensity(corpus) {
 // Build the corpus: audience-specific terms → consolidated queries (gate-throttled) → dedupe →
 // normalize (clean text) → rank by density (problem discussions first). One fetch, reused.
 async function buildCorpus(subreddits, audience) {
-    const subredditQuery = buildSubredditQuery(subreddits);
+    // Cap the subreddit OR-query: Reddit search silently returns NOTHING when there are too many
+    // "subreddit:" filters (this is why 19-subreddit audiences came back with 0 posts). The top ~12
+    // by membership cover the bulk of the discussion.
+    const searchSubs = subreddits.slice(0, 12);
+    const subredditQuery = buildSubredditQuery(searchSubs);
     const terms = await getDomainFrustrationTerms(audience);
-    console.log('[Corpus] frustration terms:', terms);
+    console.log('[Corpus] frustration terms:', terms, `| searching ${searchSubs.length}/${subreddits.length} subreddits`);
+
     const queries = buildProblemQueries(terms);
-    const batches = await Promise.all(queries.map(q => fetchPostsForQuery(subredditQuery, q)));
-    const corpus = normalizeCorpus(dedupePosts(batches.flat()));
+    let batches = await Promise.all(queries.map(q => fetchPostsForQuery(subredditQuery, q)));
+    let corpus = normalizeCorpus(dedupePosts(batches.flat()));
+
+    // Safety net: if the query came back empty (over-narrow phrases, or still-too-long), retry
+    // broad with fewer subreddits so we never strand the user at "0 posts".
+    if (!corpus.length) {
+        console.warn('[Corpus] 0 posts — retrying broad with fewer subreddits');
+        const broadQuery = buildSubredditQuery(subreddits.slice(0, 8));
+        const broadBatches = await Promise.all(
+            ['(problem OR struggle OR advice OR help)', '(how OR why OR recommend OR best)']
+                .map(q => fetchPostsForQuery(broadQuery, q))
+        );
+        corpus = normalizeCorpus(dedupePosts(broadBatches.flat()));
+        console.log(`[Corpus] broad retry returned ${corpus.length} posts`);
+    }
+
     rankByDensity(corpus);
     return corpus;
 }

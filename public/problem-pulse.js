@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 42 — Tab 3 stage 1: voice profile + tone map + language-to-avoid (lazy, corpus-only)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 44 — Tab 3 stage 2: + hooks + sentiment (AI-first clouds + score)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -1689,7 +1689,139 @@ async function generateAndRenderLanguageToAvoid(corpus, audience) {
     } catch (e) { console.error('[Talk] language-to-avoid failed:', e); }
 }
 
-// Lazy load Tab 3 once, cached. Runs the three panels in parallel (corpus-only).
+// Hooks: 4-6 engagement patterns into #hook-wrapper (HOOK_CARD_BLUEPRINT), each with example posts
+// (HOOK_ITEM_BLUEPRINT). Corpus-only; example posts link to Reddit.
+async function generateAndRenderHookPatterns(corpus, audience) {
+    const wrapper = document.getElementById('hook-wrapper');
+    if (!wrapper) { console.warn('[Talk] #hook-wrapper not found'); return; }
+    if (!window._hookCardBlueprint) {
+        const card = wrapper.firstElementChild;
+        if (card) {
+            window._hookCardBlueprint = card.cloneNode(true);
+            const list = window._hookCardBlueprint.querySelector('.hook-examples-list');
+            if (list && list.firstElementChild) window._hookItemBlueprint = list.firstElementChild.cloneNode(true);
+        }
+    }
+    if (!window._hookCardBlueprint) { console.warn('[Talk] hook card blueprint not found'); return; }
+    wrapper.innerHTML = '<p class="loading-text">Analysing engagement patterns…</p>';
+
+    const topPosts = [...corpus].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 40);
+    const listForAI = topPosts.map((p, i) => `ID: ${i} | UPS: ${p.score} | TITLE: ${p.title}`).join('\n');
+    try {
+        const parsed = await callOpenAI({
+            model: 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: 'You are a content strategist. You are brief and punchy. Output only valid JSON.' },
+                { role: 'user', content: `Analyse these top posts for "${audience}". Identify 4-6 modern hook patterns. Respond ONLY as valid JSON with key "patterns", each object: "category" (hook name), "short_summary" (≤10 words), "strategy" (≤20 words on why it works), "example_ids" (array of 3 post IDs from the list), "emotion_type" (2-4 word emotional driver, unique to this pattern), "impact_level" (exactly one of "Very High Impact","High Impact","Medium Impact"), "emotional_intensity" (integer 0-100), "viral_potential" (integer 0-100), "community_impact" (one of "Very High","High","Medium","Low"). Posts:\n${listForAI}` }
+            ],
+            temperature: 0.1, max_completion_tokens: 1200, response_format: { type: 'json_object' }
+        });
+        wrapper.innerHTML = '';
+        (parsed.patterns || []).forEach(pattern => {
+            const card = window._hookCardBlueprint.cloneNode(true);
+            card.style.removeProperty('display');
+            const set = (sel, val) => { const e = card.querySelector(sel); if (e) e.innerText = val; };
+            set('.hook-category', pattern.category || '');
+            set('.hook-why', pattern.short_summary || '');
+            set('.why-reason', pattern.strategy || '');
+            set('.emotion-hook', pattern.emotion_type || '');
+            set('.impact-label', pattern.impact_level || '');
+            set('.emotional-intensity-p', pattern.emotional_intensity != null ? `${pattern.emotional_intensity}%` : '');
+            set('.viral-potential-p', pattern.viral_potential != null ? `${pattern.viral_potential}%` : '');
+            set('.community-impact', pattern.community_impact || '');
+            const list = card.querySelector('.hook-examples-list');
+            if (list) {
+                list.innerHTML = '';
+                (pattern.example_ids || []).map(id => topPosts[parseInt(id, 10)]).filter(Boolean).forEach(post => {
+                    if (!window._hookItemBlueprint) return;
+                    const item = window._hookItemBlueprint.cloneNode(true);
+                    item.style.removeProperty('display');
+                    const t = item.querySelector('.hook-proof-title'); if (t) { const raw = post.title || ''; t.innerText = raw.length > 130 ? raw.substring(0, 127) + '…' : raw; }
+                    const up = item.querySelector('.proof-badge-upvotes'); if (up) up.innerText = `👍 ${(post.score || 0).toLocaleString()}`;
+                    const cm = item.querySelector('.proof-badge-comments'); if (cm) cm.innerText = `💬 ${(post.comments || 0).toLocaleString()}`;
+                    const link = item.tagName === 'A' ? item : item.querySelector('a');
+                    if (link && post.permalink) { link.href = post.permalink; link.target = '_blank'; }
+                    list.appendChild(item);
+                });
+            }
+            wrapper.appendChild(card);
+        });
+        console.log('[Talk] hooks rendered:', (parsed.patterns || []).length);
+    } catch (e) { console.error('[Talk] hooks failed:', e); }
+}
+
+// Sentiment (AI-first, corpus-only): one call returns weighted positive/negative terms + the overall
+// balance. We render two word clouds (.cloud-word sized by weight) and the score bar — no dictionaries.
+function renderSentimentCloud(container, items) {
+    const list = (items || []).filter(it => it && it.term);
+    if (list.length < 3) { container.innerHTML = '<p class="chart-placeholder-text">Not enough distinct terms found.</p>'; return; }
+    const weights = list.map(it => Number(it.weight) || 1);
+    const max = Math.max(...weights), min = Math.min(...weights);
+    const minF = 16, maxF = 42;
+    // font-size is dynamic (by weight); colour is left to Webflow — style #positive-cloud .cloud-word
+    // and #negative-cloud .cloud-word (e.g. green / red).
+    container.innerHTML = list.map(it => {
+        const w = Number(it.weight) || 1;
+        const size = (minF + ((w - min) / ((max - min) || 1)) * (maxF - minF)).toFixed(1);
+        const term = _escapeHtml(it.term);
+        return `<span class="cloud-word" data-word="${term}" style="font-size:${size}px;">${term}</span>`;
+    }).join('');
+}
+
+function renderSentimentScore(positiveCount, negativeCount) {
+    const container = document.getElementById('sentiment-score-container');
+    if (!container) return;
+    const total = positiveCount + negativeCount;
+    if (total === 0) { container.style.display = 'none'; return; }
+    container.style.display = '';
+    const positivePercent = Math.round((positiveCount / total) * 100);
+    const negativePercent = 100 - positivePercent;
+    const segments = container.querySelectorAll('.score-segment');
+    if (segments.length >= 2) {
+        segments[0].style.width = `${positivePercent}%`;
+        segments[1].style.width = `${negativePercent}%`;
+        const pv = segments[0].querySelector('.score-value'); if (pv) pv.textContent = `${positivePercent}% Positive`;
+        const nv = segments[1].querySelector('.score-value'); if (nv) nv.textContent = `${negativePercent}% Negative`;
+    }
+    const vibeLabel = container.querySelector('.sentiment-vibe-label');
+    if (vibeLabel) {
+        let vibe;
+        if (positivePercent >= 70) vibe = 'Enthusiastic and highly engaged';
+        else if (positivePercent >= 60) vibe = 'Largely positive with pockets of frustration';
+        else if (positivePercent >= 52) vibe = 'Leaning positive, but genuinely mixed';
+        else if (positivePercent >= 48) vibe = 'Evenly split, optimism and frustration in tension';
+        else if (positivePercent >= 40) vibe = 'Leaning negative, frustration outweighs optimism';
+        else if (positivePercent >= 30) vibe = 'Frequently frustrated, actively seeking solutions';
+        else vibe = 'High frustration community, pain points dominate';
+        vibeLabel.textContent = vibe;
+    }
+}
+
+async function generateAndRenderSentiment(corpus, audience) {
+    const posC = document.getElementById('positive-cloud');
+    const negC = document.getElementById('negative-cloud');
+    if (!posC || !negC) { console.warn('[Talk] sentiment cloud containers not found'); return; }
+    posC.innerHTML = '<p class="loading-text">Analysing sentiment…</p>';
+    negC.innerHTML = '<p class="loading-text">Analysing sentiment…</p>';
+    const sample = corpus.slice(0, 50).map(p => `${p.title}. ${(p.body || '').substring(0, 300)}`).join('\n---\n');
+    try {
+        const parsed = await callOpenAI({
+            model: 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: 'You are a market-research sentiment analyst. Output only valid JSON.' },
+                { role: 'user', content: `From these "${audience}" discussions, extract the language that carries clear sentiment. Respond ONLY as valid JSON: {"positive":[{"term":"...","weight":1-10}], "negative":[{"term":"...","weight":1-10}], "positive_pct": <integer 0-100, the overall share of positive vs negative sentiment>}. Give 15-22 items each for positive and negative — use the audience's ACTUAL words and short phrases (2-4 words), not generic labels; weight = how common/strong it is. Posts:\n${sample}` }
+            ],
+            temperature: 0.2, max_completion_tokens: 1100, response_format: { type: 'json_object' }
+        });
+        renderSentimentCloud(posC, parsed.positive || []);
+        renderSentimentCloud(negC, parsed.negative || []);
+        const posPct = Math.max(0, Math.min(100, Math.round(parsed.positive_pct != null ? parsed.positive_pct : 50)));
+        renderSentimentScore(posPct, 100 - posPct);
+        console.log(`[Talk] sentiment rendered: ${(parsed.positive || []).length} pos / ${(parsed.negative || []).length} neg, ${posPct}% positive`);
+    } catch (e) { console.error('[Talk] sentiment failed:', e); posC.innerHTML = ''; negC.innerHTML = ''; }
+}
+
+// Lazy load Tab 3 once, cached. Runs the panels in parallel (corpus-only).
 function loadTabTalk() {
     if (!window._tabLoaded) window._tabLoaded = {};
     if (window._tabLoaded.talk) return window._talkPromise || Promise.resolve();
@@ -1699,7 +1831,9 @@ function loadTabTalk() {
     window._talkPromise = Promise.all([
         generateAndRenderVoiceProfile(corpus, audience),
         generateAndRenderToneMap(corpus, audience),
-        generateAndRenderLanguageToAvoid(corpus, audience)
+        generateAndRenderLanguageToAvoid(corpus, audience),
+        generateAndRenderHookPatterns(corpus, audience),
+        generateAndRenderSentiment(corpus, audience)
     ]).catch(e => { console.warn('[Talk] failed', e); window._tabLoaded.talk = false; });
     return window._talkPromise;
 }

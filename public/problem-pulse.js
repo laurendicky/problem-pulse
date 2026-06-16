@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 41 — bubble-guide text is Webflow-styleable (.pp-guide-label)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 42 — Tab 3 stage 1: voice profile + tone map + language-to-avoid (lazy, corpus-only)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -555,6 +555,7 @@ async function runProblemFinder() {
         window._tabLoaded = {};
         window._findings = null; window._findingsPromise = null; window._assignmentPromise = null;
         window._findingPosts = null; window._findingPostsFull = null; window._polarityPromise = null;
+        window._talkPromise = null; // Tab 3 regenerates for the new audience
         if (window._polarityChart && window._polarityChart.destroy) { window._polarityChart.destroy(); window._polarityChart = null; }
         console.log(`[Analysis] corpus ready: ${corpus.length} posts`);
         if (!corpus.length) {
@@ -1557,6 +1558,160 @@ function openPolarityMap() {
     Promise.resolve(loadPolarityMap()).finally(() => hideLoader());
 }
 
+// =============================================================================
+// PART 5 — Tab 3 "How they talk" (#tab-talk). Lazy on click, cached, corpus-only.
+// Stage 1: Voice Profile + Tone Map + Language-to-Avoid (3 parallel calls).
+// =============================================================================
+
+// Voice profile: 5 tone sentences (.voice-p-context) + 6 adjective pills (.voice-adjective-tags).
+async function generateAndRenderVoiceProfile(corpus, audience) {
+    const container = document.getElementById('voice-profile-container');
+    if (!container) { console.warn('[Talk] #voice-profile-container not found'); return; }
+    const tagsContainer = container.querySelector('.voice-adjective-tags');
+    if (tagsContainer && !window._voicePillBlueprint) {
+        const pill = tagsContainer.firstElementChild; // capture the designed pill once
+        if (pill) window._voicePillBlueprint = pill.cloneNode(true);
+    }
+    const sample = corpus.slice(0, 40).map(p => `Title: ${p.title}\nBody: ${(p.body || '').substring(0, 400)}`).join('\n---\n');
+    try {
+        const parsed = await callOpenAI({
+            model: 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: 'You are a brand strategist who outputs only valid JSON.' },
+                { role: 'user', content: `You are a sharp cultural observer studying how the "${audience}" community actually talks. Write an observational, psychologically sharp, slightly editorial tone-of-voice read (avoid marketing cliches). Respond ONLY as valid JSON with two keys: "tone_description" — an array of EXACTLY 5 one-sentence strings in this order: (1) their emotional state, (2) how they communicate, (3) how they relate to each other, (4) what they're really seeking, (5) what messaging lands with them; and "voice_adjectives" — an array of exactly 6 evocative adjectives. Posts: ${sample}` }
+            ],
+            temperature: 0.3, max_completion_tokens: 500, response_format: { type: 'json_object' }
+        });
+        const wrap = container.querySelector('.voice-p-wrap');
+        if (wrap && Array.isArray(parsed.tone_description)) {
+            const ctx = wrap.querySelectorAll('.voice-p-context');
+            parsed.tone_description.forEach((t, i) => { if (ctx[i]) ctx[i].textContent = t; });
+        }
+        if (tagsContainer) {
+            tagsContainer.innerHTML = '';
+            (parsed.voice_adjectives || []).forEach(adj => {
+                if (window._voicePillBlueprint) {
+                    const pill = window._voicePillBlueprint.cloneNode(true);
+                    pill.style.removeProperty('display'); pill.innerText = adj;
+                    tagsContainer.appendChild(pill);
+                }
+            });
+        }
+        console.log('[Talk] voice profile rendered');
+    } catch (e) { console.error('[Talk] voice profile failed:', e); }
+}
+
+// Tone map: 4 topic cards (.tone-card-blueprint) — title, 3 insights (.tone-what-means), intensity
+// label, and trait bars (.tone-trait-row → .tone-trait-name + .tone-bar-fill width).
+async function generateAndRenderToneMap(corpus, audience) {
+    const container = document.getElementById('tone-map-container');
+    if (!container) { console.warn('[Talk] #tone-map-container not found'); return; }
+    if (!window._toneCardBlueprint) {
+        const card = container.querySelector('.tone-card-blueprint') || container.querySelector('.tone-card');
+        if (card) {
+            window._toneCardBlueprint = card.cloneNode(true);
+            const row = window._toneCardBlueprint.querySelector('.tone-trait-row');
+            if (row) window._toneTraitBlueprint = row.cloneNode(true);
+        }
+    }
+    if (!window._toneCardBlueprint) { console.warn('[Talk] .tone-card-blueprint not found'); return; }
+    container.innerHTML = '<p class="loading-text">Performing deep tonal analysis…</p>';
+    const sample = corpus.slice(0, 40).map(p => `Topic: ${p.title} - ${(p.body || '').substring(0, 200)}`).join('\n---\n');
+    try {
+        const parsed = await callOpenAI({
+            model: 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: 'You are a brand psychologist who outputs only valid JSON.' },
+                { role: 'user', content: `Analyse the "${audience}" community. Identify 4 distinct conversation topics. For each: "topic" (short title), "traits" (array of 4 objects, each {"name": adjective, "score": integer 10-100 intensity}), "insights" (array of EXACTLY 3 standalone sentences, each under 15 words, one observation each), "level" (LOW, MEDIUM, or HIGH). Respond ONLY as valid JSON with key "tone_analysis". Posts: ${sample}` }
+            ],
+            temperature: 0.2, max_completion_tokens: 1200, response_format: { type: 'json_object' }
+        });
+        container.innerHTML = '';
+        (parsed.tone_analysis || []).forEach(item => {
+            const card = window._toneCardBlueprint.cloneNode(true);
+            card.style.removeProperty('display');
+            const titleEl = card.querySelector('.tone-topic-title'); if (titleEl) titleEl.innerText = item.topic || '';
+            const meaning = card.querySelectorAll('.tone-what-means');
+            const insights = Array.isArray(item.insights) ? item.insights : [];
+            meaning.forEach((el, i) => { el.innerText = insights[i] || ''; });
+            const lvl = card.querySelector('.tone-intensity-label'); if (lvl) lvl.innerText = `INTENSITY: ${item.level || ''}`;
+            const traitsC = card.querySelector('.tone-traits-container');
+            if (traitsC) {
+                traitsC.innerHTML = '';
+                (item.traits || []).forEach(tr => {
+                    const base = window._toneTraitBlueprint;
+                    if (!base) return;
+                    const row = base.cloneNode(true);
+                    const nameEl = row.querySelector('.tone-trait-name'); if (nameEl) nameEl.innerText = tr.name || tr.adjective || tr.word || '';
+                    const fill = row.querySelector('.tone-bar-fill'); if (fill) fill.style.width = `${Math.max(0, Math.min(100, tr.score || 0))}%`;
+                    traitsC.appendChild(row);
+                });
+            }
+            container.appendChild(card);
+        });
+        console.log('[Talk] tone map rendered');
+    } catch (e) { console.error('[Talk] tone map failed:', e); container.innerHTML = '<p class="error-message">Tonal analysis unavailable.</p>'; }
+}
+
+// Language to avoid: pairs of insider/outsider terms → .avoid-items-wrap (.avoid-term-template:
+// .term-avoid + .term-avoid-reason) and .use-items-wrap (.use-term-template: .term-use + .term-use-reason).
+async function generateAndRenderLanguageToAvoid(corpus, audience) {
+    const wrapper = document.getElementById('language-to-avoid-container');
+    if (!wrapper) { console.warn('[Talk] #language-to-avoid-container not found'); return; }
+    const avoidC = wrapper.querySelector('.avoid-items-wrap');
+    const useC = wrapper.querySelector('.use-items-wrap');
+    if (!avoidC || !useC) { console.warn('[Talk] language wraps not found'); return; }
+    if (!window._avoidBlueprint) { const t = avoidC.querySelector('.avoid-term-template'); if (t) window._avoidBlueprint = t.cloneNode(true); }
+    if (!window._useBlueprint) { const t = useC.querySelector('.use-term-template'); if (t) window._useBlueprint = t.cloneNode(true); }
+    if (!window._avoidBlueprint || !window._useBlueprint) { console.warn('[Talk] language templates not found'); return; }
+    const sample = corpus.slice(0, 40).map(p => `Title: ${p.title}\nBody: ${(p.body || '').substring(0, 400)}`).join('\n---\n');
+    try {
+        const parsed = await callOpenAI({
+            model: 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: 'You are a brand linguist who outputs only valid JSON.' },
+                { role: 'user', content: `You are a brand linguist analysing the "${audience}" community. Identify 8-10 language pairs: terms outsiders/marketers use that insiders find inauthentic, paired with the authentic alternative insiders actually use. For each: "avoid", "avoid_reason" (max 12 words), "use", "use_reason" (max 12 words). Respond ONLY as valid JSON with key "pairs" (array of objects). Posts: ${sample}` }
+            ],
+            temperature: 0.3, max_completion_tokens: 900, response_format: { type: 'json_object' }
+        });
+        avoidC.innerHTML = ''; useC.innerHTML = '';
+        (parsed.pairs || []).forEach(pair => {
+            const a = window._avoidBlueprint.cloneNode(true); a.style.removeProperty('display');
+            const ae = a.querySelector('.term-avoid'); if (ae) ae.innerText = pair.avoid || '';
+            const ar = a.querySelector('.term-avoid-reason'); if (ar) ar.innerText = pair.avoid_reason || '';
+            avoidC.appendChild(a);
+            const u = window._useBlueprint.cloneNode(true); u.style.removeProperty('display');
+            const ue = u.querySelector('.term-use'); if (ue) ue.innerText = pair.use || '';
+            const ur = u.querySelector('.term-use-reason'); if (ur) ur.innerText = pair.use_reason || '';
+            useC.appendChild(u);
+        });
+        console.log('[Talk] language-to-avoid rendered');
+    } catch (e) { console.error('[Talk] language-to-avoid failed:', e); }
+}
+
+// Lazy load Tab 3 once, cached. Runs the three panels in parallel (corpus-only).
+function loadTabTalk() {
+    if (!window._tabLoaded) window._tabLoaded = {};
+    if (window._tabLoaded.talk) return window._talkPromise || Promise.resolve();
+    if (!window._corpus || !window._corpus.length) return Promise.resolve();
+    window._tabLoaded.talk = true;
+    const corpus = window._corpus, audience = window.originalGroupName || '';
+    window._talkPromise = Promise.all([
+        generateAndRenderVoiceProfile(corpus, audience),
+        generateAndRenderToneMap(corpus, audience),
+        generateAndRenderLanguageToAvoid(corpus, audience)
+    ]).catch(e => { console.warn('[Talk] failed', e); window._tabLoaded.talk = false; });
+    return window._talkPromise;
+}
+
+// Tab click: load on first open with the loader; instant after that (cached).
+function openTabTalk() {
+    if (window._tabLoaded && window._tabLoaded.talk) return;
+    if (!window._corpus || !window._corpus.length) return;
+    showLoader('Analysing how they talk…');
+    Promise.resolve(loadTabTalk()).finally(() => hideLoader());
+}
+
 // Reveal the main results container (hidden until the first analysis is ready). display:flex is set
 // with !important to beat any Webflow inline/none, then we fade in and scroll to it.
 function revealResults() {
@@ -1716,6 +1871,13 @@ function initEntryFlow() {
         polarityTab.addEventListener('click', openPolarityMap);
     }
 
+    // #tab-talk → lazy-load Tab 3 (How they talk) on first open.
+    const talkTab = document.getElementById('tab-talk');
+    if (talkTab && !talkTab.dataset.ppWired) {
+        talkTab.dataset.ppWired = '1';
+        talkTab.addEventListener('click', openTabTalk);
+    }
+
     console.log('[Entry] wired ✓ — #find-communities-btn is live');
 }
 
@@ -1730,6 +1892,8 @@ document.addEventListener('click', (e) => {
     if (hurtsTab && !hurtsTab.dataset.ppWired) { openTabHurts(); return; } // don't preventDefault — let Webflow switch the tab
     const polTab = e.target.closest('#polarity-tab');
     if (polTab && !polTab.dataset.ppWired) { openPolarityMap(); return; }
+    const talkTab = e.target.closest('#tab-talk');
+    if (talkTab && !talkTab.dataset.ppWired) { openTabTalk(); return; }
 
     // .see-more on a finding card → open that finding's modal with its sample posts.
     const seeMore = e.target.closest('.see-more, .see-more-btn');

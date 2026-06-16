@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 47 — Tab 3 complete: + sentiment shift (corpus-only) + benchmark text', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 48 — sentiment clouds restored (palette colours + rotation + flowing layout)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -1752,20 +1752,29 @@ async function generateAndRenderHookPatterns(corpus, audience) {
 
 // Sentiment (AI-first, corpus-only): one call returns weighted positive/negative terms + the overall
 // balance. We render two word clouds (.cloud-word sized by weight) and the score bar — no dictionaries.
-function renderSentimentCloud(container, items) {
+// Exact original palettes (teal family = positive, pink family = negative).
+const POSITIVE_CLOUD_COLORS = ['#00a5ce', '#0090b5', '#00c0e6', '#7bd9ec', '#b3e8f3', '#006d85'];
+const NEGATIVE_CLOUD_COLORS = ['#fd80c7', '#d6539d', '#ff4fa3', '#ff99d6', '#fbb6ce', '#f472b6'];
+
+function renderSentimentCloud(container, items, colors) {
     const list = (items || []).filter(it => it && it.term);
     if (list.length < 3) { container.innerHTML = '<p class="chart-placeholder-text">Not enough distinct terms found.</p>'; return; }
     const weights = list.map(it => Number(it.weight) || 1);
     const max = Math.max(...weights), min = Math.min(...weights);
     const minF = 16, maxF = 42;
-    // font-size is dynamic (by weight); colour is left to Webflow — style #positive-cloud .cloud-word
-    // and #negative-cloud .cloud-word (e.g. green / red).
-    container.innerHTML = list.map(it => {
+    const palette = colors || POSITIVE_CLOUD_COLORS;
+    // Exactly like the original: font-size scaled by weight, a colour from the palette, a slight
+    // rotation. Wrapped in a plain block div so the words FLOW as a cloud (the words were stacking
+    // because they were direct children of a flex container).
+    const spans = list.map(it => {
         const w = Number(it.weight) || 1;
         const size = (minF + ((w - min) / ((max - min) || 1)) * (maxF - minF)).toFixed(1);
+        const color = palette[Math.floor(Math.random() * palette.length)];
+        const rot = (Math.random() * 8 - 4).toFixed(1);
         const term = _escapeHtml(it.term);
-        return `<span class="cloud-word" data-word="${term}" style="font-size:${size}px;">${term}</span>`;
+        return `<span class="cloud-word" data-word="${term}" style="font-size:${size}px; color:${color}; transform:rotate(${rot}deg);">${term}</span>`;
     }).join('');
+    container.innerHTML = `<div class="cloud-inner">${spans}</div>`;
 }
 
 function renderSentimentScore(positiveCount, negativeCount) {
@@ -1824,8 +1833,8 @@ async function generateAndRenderSentiment(corpus, audience) {
             ],
             temperature: 0.2, max_completion_tokens: 1100, response_format: { type: 'json_object' }
         });
-        renderSentimentCloud(posC, parsed.positive || []);
-        renderSentimentCloud(negC, parsed.negative || []);
+        renderSentimentCloud(posC, parsed.positive || [], POSITIVE_CLOUD_COLORS);
+        renderSentimentCloud(negC, parsed.negative || [], NEGATIVE_CLOUD_COLORS);
         const posPct = Math.max(0, Math.min(100, Math.round(parsed.positive_pct != null ? parsed.positive_pct : 50)));
         renderSentimentScore(posPct, 100 - posPct);
         console.log(`[Talk] sentiment rendered: ${(parsed.positive || []).length} pos / ${(parsed.negative || []).length} neg, ${posPct}% positive`);

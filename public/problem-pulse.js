@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 38 — land on #tab-who each search + thin-community warning', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 40 — checkbox fix + on-brand #pp-modal messages (native fallback)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -170,10 +170,20 @@ function renderSubredditChoices(subs) {
         container.innerHTML = '<p class="placeholder-text">No communities found. Try another audience.</p>';
         return;
     }
-    container.innerHTML = subs.map(sub => `
+    // Dedupe by name (case-insensitive) so the same community can't appear twice — duplicates were
+    // causing colliding checkbox ids (clicking one toggled the one beside it).
+    const seen = new Set();
+    subs = subs.filter(s => {
+        const k = (s.name || '').toLowerCase();
+        if (!k || seen.has(k)) return false;
+        seen.add(k); return true;
+    });
+
+    // Index-based ids guarantee each checkbox/label pair is unique regardless of the name.
+    container.innerHTML = subs.map((sub, i) => `
         <div class="subreddit-choice">
-            <input type="checkbox" id="sub-${sub.name}" value="${sub.name}" checked>
-            <label for="sub-${sub.name}">
+            <input type="checkbox" id="sub-choice-${i}" value="${sub.name}" checked>
+            <label for="sub-choice-${i}">
                 <span class="sub-checkbox"></span>
                 <span class="sub-info">
                     <span class="sub-name">r/${sub.name}</span>
@@ -423,6 +433,39 @@ async function setCachedSubreddits(audience, ranked) {
     } catch (e) { console.warn('[Cache] subreddits write failed (ignored):', e && e.message); }
 }
 
+// On-brand message modal driven by Webflow elements (#pp-modal + .pp-modal-message / .pp-modal-ok /
+// .pp-modal-cancel). Returns a promise: true = OK/confirm, false = cancel. If the modal isn't on the
+// page yet, it falls back to the native alert/confirm so nothing breaks.
+function showMessage(message, opts) {
+    opts = opts || {};
+    const modal = document.getElementById('pp-modal');
+    const okBtn = modal && modal.querySelector('.pp-modal-ok');
+    if (!modal || !okBtn) { // fail-soft: native dialog
+        if (opts.confirm) return Promise.resolve(window.confirm(message));
+        window.alert(message); return Promise.resolve(true);
+    }
+    const msgEl = modal.querySelector('.pp-modal-message');
+    const cancelBtn = modal.querySelector('.pp-modal-cancel');
+    if (msgEl) msgEl.textContent = message;
+    if (cancelBtn) cancelBtn.style.display = opts.confirm ? '' : 'none'; // Cancel only for confirms
+    modal.style.setProperty('display', 'flex', 'important');
+    return new Promise(resolve => {
+        const done = (result) => {
+            modal.style.display = 'none';
+            okBtn.removeEventListener('click', onOk);
+            if (cancelBtn) cancelBtn.removeEventListener('click', onCancel);
+            modal.removeEventListener('click', onBackdrop);
+            resolve(result);
+        };
+        const onOk = () => done(true);
+        const onCancel = () => done(false);
+        const onBackdrop = (e) => { if (e.target === modal) done(false); }; // click outside = cancel
+        okBtn.addEventListener('click', onOk);
+        if (cancelBtn) cancelBtn.addEventListener('click', onCancel);
+        modal.addEventListener('click', onBackdrop);
+    });
+}
+
 // --- selection + loader -----------------------------------------------------
 function getSelectedSubreddits() {
     const boxes = document.querySelectorAll('#subreddit-choices input[type="checkbox"]:checked');
@@ -474,13 +517,13 @@ async function runProblemFinder() {
         return;
     }
     const subreddits = getSelectedSubreddits();
-    if (!subreddits.length) { alert('Select at least one community to analyse.'); return; }
+    if (!subreddits.length) { showMessage('Select at least one community to analyse.'); return; }
 
     // Thin-data warning: a single small community rarely has enough discussion for rich insights.
     if (subreddits.length === 1) {
         const one = (window._allRankedSubreddits || []).find(r => r.name === subreddits[0]);
         if (one && (one.members || 0) < 100000) {
-            const ok = confirm(`Heads up: you've selected just one small community (r/${one.name}, ${formatMemberCount(one.members)} members). The results may be thin — selecting a few more communities gives much richer insights.\n\nContinue anyway?`);
+            const ok = await showMessage(`Heads up: you've selected just one small community (r/${one.name}, ${formatMemberCount(one.members)} members). The results may be thin — selecting a few more communities gives much richer insights. Continue anyway?`, { confirm: true });
             if (!ok) return; // let them go back and add more (guard not yet set, so safe to bail)
         }
     }
@@ -515,7 +558,7 @@ async function runProblemFinder() {
         if (window._polarityChart && window._polarityChart.destroy) { window._polarityChart.destroy(); window._polarityChart = null; }
         console.log(`[Analysis] corpus ready: ${corpus.length} posts`);
         if (!corpus.length) {
-            alert('No discussions found for those communities. Try different ones.');
+            showMessage('No discussions found for those communities. Try different ones.');
             return;
         }
         // Part 3 — Tab 1 ("Who they are"). All read from the corpus; nothing refetched.
@@ -537,7 +580,7 @@ async function runProblemFinder() {
         setTimeout(() => { try { loadTabHurts(); loadPolarityMap(); } catch (e) { /* non-fatal */ } }, 400);
     } catch (error) {
         console.error('[Analysis] failed to build corpus:', error);
-        alert('Something went wrong gathering discussions. Please try again.');
+        showMessage('Something went wrong gathering discussions. Please try again.');
     } finally {
         hideLoader();
         _analysisRunning = false;
@@ -1613,7 +1656,7 @@ function initEntryFlow() {
         const groupInput = document.getElementById('group-input');
         const choices = document.getElementById('subreddit-choices');
         const groupName = (groupInput && groupInput.value.trim()) || '';
-        if (!groupName) { alert('Please enter a group of people or pick a suggestion.'); return; }
+        if (!groupName) { showMessage('Please enter a group of people or pick a suggestion.'); return; }
         if (!choices) { console.error('[Entry] #subreddit-choices not found — nowhere to show results.'); return; }
 
         window.originalGroupName = groupName;

@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 32 — cap subreddit query (fixes 0 posts on big audiences) + broad retry', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 33 — background pre-fetch of Tab 2 + polarity (near-instant tab switching)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -491,7 +491,11 @@ async function runProblemFinder() {
         }
         window._corpus = corpus;
         window._analysisSubreddits = subreddits;
-        window._tabLoaded = {}; // new search → invalidate cached tabs so they reload for this audience
+        // New search → clear everything tab-related so it regenerates for this audience.
+        window._tabLoaded = {};
+        window._findings = null; window._findingsPromise = null; window._assignmentPromise = null;
+        window._findingPosts = null; window._findingPostsFull = null; window._polarityPromise = null;
+        if (window._polarityChart && window._polarityChart.destroy) { window._polarityChart.destroy(); window._polarityChart = null; }
         console.log(`[Analysis] corpus ready: ${corpus.length} posts`);
         if (!corpus.length) {
             alert('No discussions found for those communities. Try different ones.');
@@ -510,6 +514,10 @@ async function runProblemFinder() {
             generateAndRenderProfile(corpus, audience)
         ]);
         revealResults();
+        // Pre-warm Tab 2 (findings + post assignment) and the polarity map in the background while
+        // the user reads Tab 1, so switching to those tabs is near-instant. No Reddit here, so it's
+        // safe to run quietly. A small delay lets Tab 1's render settle first.
+        setTimeout(() => { try { loadTabHurts(); loadPolarityMap(); } catch (e) { /* non-fatal */ } }, 400);
     } catch (error) {
         console.error('[Analysis] failed to build corpus:', error);
         alert('Something went wrong gathering discussions. Please try again.');
@@ -882,7 +890,8 @@ async function generateAndRenderFindings(corpus, audience) {
     auditTab2Elements();
     for (let i = 1; i <= 5; i++) { const b = document.getElementById('findings-block' + i); if (b) b.style.display = 'none'; }
 
-    showLoader('Finding the core problems…');
+    // NOTE: no global loader here — findings are pre-fetched in the background after Tab 1 reveals.
+    // The #tab-hurts click handler shows a loader only if you open the tab before it's ready.
     // Sample widely (60 posts) so the model sees the full RANGE of problems, not just the few densest
     // themes — this is what lets it name 4-6 genuinely distinct problems.
     const sample = corpus.slice(0, 60)
@@ -922,7 +931,6 @@ async function generateAndRenderFindings(corpus, audience) {
         window._findingPostsFull = null;
         ranked.forEach((f, idx) => renderFindingCard(idx + 1, f));
         console.log('[Findings] cards rendered (fast):', ranked.length, '| keyword support:', ranked.map(f => f.support));
-        hideLoader(); // cards are visible now — the rest happens in the background
 
         // BACKGROUND: the accurate semantic assignment. When it lands we store the posts AND refine
         // each card's prevalence bar so it matches the real supporting-post counts. .see-more awaits this.
@@ -951,26 +959,29 @@ async function generateAndRenderFindings(corpus, audience) {
             });
     } catch (error) {
         console.error('[Findings] failed:', error);
-    } finally {
-        hideLoader();
     }
 }
 
-// Run a tab's work once, only after the corpus exists; cache so re-clicks are instant.
-function _runTabOnce(key, fn) {
-    if (!window._tabLoaded) window._tabLoaded = {};
-    if (window._tabLoaded[key]) return;
-    if (!window._corpus || !window._corpus.length) {
-        console.warn(`[Tab ${key}] corpus not ready — run a search first.`);
-        return;
-    }
-    window._tabLoaded[key] = true;
-    Promise.resolve(fn(window._corpus, window.originalGroupName || ''))
-        .catch(e => { console.warn(`[Tab ${key}] failed`, e); window._tabLoaded[key] = false; });
+// Shared findings loader — used by both the pre-fetch and the tab click. The shared promise means
+// findings generate exactly ONCE even if polarity + tab-hurts + pre-fetch all ask at the same time.
+function ensureFindings() {
+    if (window._findings && window._findings.length) return Promise.resolve(window._findings);
+    if (window._findingsPromise) return window._findingsPromise; // generation already in flight
+    if (!window._corpus || !window._corpus.length) return Promise.resolve([]);
+    window._findingsPromise = generateAndRenderFindings(window._corpus, window.originalGroupName || '')
+        .then(() => window._findings || []);
+    return window._findingsPromise;
 }
 
-function loadTabHurts() {
-    _runTabOnce('hurts', (corpus, audience) => generateAndRenderFindings(corpus, audience));
+// Pre-fetch (background, no loader). Called after Tab 1 reveals so Tab 2 is ready before it's clicked.
+function loadTabHurts() { ensureFindings(); }
+
+// Tab click: instant if already pre-fetched; otherwise show the loader until findings are ready.
+function openTabHurts() {
+    if (window._findings && window._findings.length) return; // already there
+    if (!window._corpus || !window._corpus.length) return;
+    showLoader('Finding the core problems…');
+    ensureFindings().finally(() => hideLoader());
 }
 
 // =============================================================================
@@ -1323,12 +1334,7 @@ async function renderSubproblemsInto(chartEl, finding, blockIndex) {
 // matching the old emotion map; responsive.
 // =============================================================================
 
-// Make sure findings exist before the map needs them (in case Polarity is opened first).
-function ensureFindings() {
-    if (window._findings && window._findings.length) return Promise.resolve(window._findings);
-    if (!window._corpus || !window._corpus.length) return Promise.resolve([]);
-    return generateAndRenderFindings(window._corpus, window.originalGroupName || '').then(() => window._findings || []);
-}
+// (ensureFindings is defined once, earlier, with a shared promise so findings generate only once.)
 
 // Shared palette: bubble colour for parent problem i == legend swatch for finding i.
 const PARENT_PALETTE = ['#6C5CE7', '#00A5CE', '#E84393', '#0984E3', '#00B894', '#FDCB6E'];
@@ -1422,8 +1428,13 @@ function renderPolarityMap(points) {
     console.log('[Polarity] map rendered with', data.length, 'problems');
 }
 
+// Pre-fetch / load the polarity map. Self-guarding + returns a shared promise so it runs once and
+// the tab click can await it. Reuses findings via ensureFindings (no double generation).
 function loadPolarityMap() {
-    _runTabOnce('polarity', async () => {
+    if (window._polarityChart) return Promise.resolve();          // already rendered
+    if (window._polarityPromise) return window._polarityPromise;  // already in flight
+    if (!window._corpus || !window._corpus.length) return Promise.resolve();
+    window._polarityPromise = (async () => {
         const findings = await ensureFindings();
         let points = await generatePolarityData(findings, window._corpus || [], window.originalGroupName || '');
         if (!points) { // fallback to the findings themselves
@@ -1432,7 +1443,16 @@ function loadPolarityMap() {
         }
         renderPolarityMap(points);
         renderBubbleGuide(findings); // legend below the map
-    });
+    })().catch(e => { console.warn('[Polarity] failed', e); window._polarityPromise = null; });
+    return window._polarityPromise;
+}
+
+// Tab click: instant if already pre-fetched; otherwise show the loader until the map is ready.
+function openPolarityMap() {
+    if (window._polarityChart) return; // already rendered
+    if (!window._corpus || !window._corpus.length) return;
+    showLoader('Building the polarity map…');
+    Promise.resolve(loadPolarityMap()).finally(() => hideLoader());
 }
 
 // Reveal the main results container (hidden until the first analysis is ready). display:flex is set
@@ -1551,18 +1571,18 @@ function initEntryFlow() {
         backBtn.addEventListener('click', (e) => { e.preventDefault(); transitionToStep1(); });
     }
 
-    // #tab-hurts → lazy-load tab 2 (findings) on first open. Cached after that.
+    // #tab-hurts → usually pre-fetched already (instant); loader only if opened before ready.
     const hurtsTab = document.getElementById('tab-hurts');
     if (hurtsTab && !hurtsTab.dataset.ppWired) {
         hurtsTab.dataset.ppWired = '1';
-        hurtsTab.addEventListener('click', loadTabHurts);
+        hurtsTab.addEventListener('click', openTabHurts);
     }
 
-    // #polarity-tab → lazy-load the polarity map on first open.
+    // #polarity-tab → usually pre-fetched already (instant); loader only if opened before ready.
     const polarityTab = document.getElementById('polarity-tab');
     if (polarityTab && !polarityTab.dataset.ppWired) {
         polarityTab.dataset.ppWired = '1';
-        polarityTab.addEventListener('click', loadPolarityMap);
+        polarityTab.addEventListener('click', openPolarityMap);
     }
 
     console.log('[Entry] wired ✓ — #find-communities-btn is live');
@@ -1576,9 +1596,9 @@ document.addEventListener('click', (e) => {
     const backBtn = e.target.closest('#back-to-step1-btn');
     if (backBtn && !backBtn.dataset.ppWired) { e.preventDefault(); transitionToStep1(); return; }
     const hurtsTab = e.target.closest('#tab-hurts');
-    if (hurtsTab && !hurtsTab.dataset.ppWired) { loadTabHurts(); return; } // don't preventDefault — let Webflow switch the tab
+    if (hurtsTab && !hurtsTab.dataset.ppWired) { openTabHurts(); return; } // don't preventDefault — let Webflow switch the tab
     const polTab = e.target.closest('#polarity-tab');
-    if (polTab && !polTab.dataset.ppWired) { loadPolarityMap(); return; }
+    if (polTab && !polTab.dataset.ppWired) { openPolarityMap(); return; }
 
     // .see-more on a finding card → open that finding's modal with its sample posts.
     const seeMore = e.target.closest('.see-more, .see-more-btn');

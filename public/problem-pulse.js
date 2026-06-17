@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 51 — per-item .is-loading shimmer on findings + voice/insider/hook/sentiment/clouds (auto-restores normal styling when each loads)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 53 — each panel owns its shimmer (clears independently), polarity-map-wrap shimmer, balanced sentiment clouds', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -976,7 +976,8 @@ async function generateAndRenderFindings(corpus, audience) {
     // each block clears to its normal styling as soon as its card is filled below.
     for (let i = 1; i <= 5; i++) {
         const b = document.getElementById('findings-block' + i);
-        if (b) { b.style.removeProperty('display'); b.classList.add('is-loading'); }
+        if (b) b.style.removeProperty('display');
+        setItemLoading('findings-block' + i, true);
     }
 
     // NOTE: no global loader here — findings are pre-fetched in the background after Tab 1 reveals.
@@ -1023,13 +1024,8 @@ async function generateAndRenderFindings(corpus, audience) {
         window._findingPosts = null;        // not assigned yet — modal waits on _assignmentPromise
         window._findingPostsFull = null;
         ranked.forEach((f, idx) => renderFindingCard(idx + 1, f));
-        // Cards are in: clear the shimmer on filled blocks; hide any slots with no finding.
-        for (let i = 1; i <= 5; i++) {
-            const b = document.getElementById('findings-block' + i);
-            if (!b) continue;
-            b.classList.remove('is-loading');
-            if (i > ranked.length) b.style.display = 'none';
-        }
+        // Hide any slots with no finding (the shimmer itself is cleared in the finally below).
+        for (let i = ranked.length + 1; i <= 5; i++) { const b = document.getElementById('findings-block' + i); if (b) b.style.display = 'none'; }
         console.log('[Findings] cards rendered (fast):', ranked.length, '| keyword support:', ranked.map(f => f.support));
 
         // BACKGROUND: the accurate semantic assignment. When it lands we store the posts AND refine
@@ -1062,8 +1058,8 @@ async function generateAndRenderFindings(corpus, audience) {
     } catch (error) {
         console.error('[Findings] failed:', error);
     } finally {
-        // Never leave a block shimmering if something went wrong above.
-        for (let i = 1; i <= 5; i++) { const b = document.getElementById('findings-block' + i); if (b) b.classList.remove('is-loading'); }
+        // Clear the shimmer on every block (also covers the early-return / error cases above).
+        for (let i = 1; i <= 5; i++) setItemLoading('findings-block' + i, false);
     }
 }
 
@@ -1081,13 +1077,24 @@ function setTabLoading(tabId, loading) {
 // Per-ITEM loading shimmer (separate from the tab-label shimmer). Toggles the Webflow `.is-loading`
 // class on a content wrapper while its data generates, then removes it so the "normal" styling is
 // restored. Ref-counted so a wrapper shared by two panels (e.g. #insider-language = tone map +
-// language-to-avoid) only clears once BOTH have finished.
+// language-to-avoid) only clears once BOTH have finished. A minimum on-screen time keeps the shimmer
+// from flashing-and-vanishing when a panel resolves almost instantly (e.g. a cached corpus).
 const _itemLoadCounts = {};
+const _itemLoadStart = {};
+const MIN_SHIMMER_MS = 650;
 function setItemLoading(id, loading) {
     const el = document.getElementById(id);
     if (!el) return;
-    _itemLoadCounts[id] = Math.max(0, (_itemLoadCounts[id] || 0) + (loading ? 1 : -1));
-    el.classList.toggle('is-loading', _itemLoadCounts[id] > 0);
+    if (loading) {
+        _itemLoadCounts[id] = (_itemLoadCounts[id] || 0) + 1;
+        if (_itemLoadCounts[id] === 1) { _itemLoadStart[id] = Date.now(); el.classList.add('is-loading'); }
+    } else {
+        _itemLoadCounts[id] = Math.max(0, (_itemLoadCounts[id] || 0) - 1);
+        if (_itemLoadCounts[id] === 0) {
+            const wait = Math.max(0, MIN_SHIMMER_MS - (Date.now() - (_itemLoadStart[id] || 0)));
+            setTimeout(() => { if ((_itemLoadCounts[id] || 0) === 0) el.classList.remove('is-loading'); }, wait);
+        }
+    }
 }
 function setItemsLoading(ids, loading) { ids.forEach(id => setItemLoading(id, loading)); }
 
@@ -1590,6 +1597,7 @@ function loadPolarityMap() {
     if (window._polarityPromise) return window._polarityPromise;  // already in flight
     if (!window._corpus || !window._corpus.length) return Promise.resolve();
     setTabLoading('polarity-tab', true);
+    setItemLoading('polarity-map-wrap', true); // shimmer the map panel while it builds
     window._polarityPromise = (async () => {
         const findings = await ensureFindings();
         let points = await generatePolarityData(findings, window._corpus || [], window.originalGroupName || '');
@@ -1601,7 +1609,7 @@ function loadPolarityMap() {
         renderBubbleGuide(findings); // legend below the map
     })()
         .catch(e => { console.warn('[Polarity] failed', e); window._polarityPromise = null; })
-        .finally(() => setTabLoading('polarity-tab', false));
+        .finally(() => { setTabLoading('polarity-tab', false); setItemLoading('polarity-map-wrap', false); });
     return window._polarityPromise;
 }
 
@@ -1620,8 +1628,9 @@ function openPolarityMap() {
 
 // Voice profile: 5 tone sentences (.voice-p-context) + 6 adjective pills (.voice-adjective-tags).
 async function generateAndRenderVoiceProfile(corpus, audience) {
+    setItemLoading('voice-p-wrap', true);
     const container = document.getElementById('voice-profile-container');
-    if (!container) { console.warn('[Talk] #voice-profile-container not found'); return; }
+    if (!container) { console.warn('[Talk] #voice-profile-container not found'); setItemLoading('voice-p-wrap', false); return; }
     const tagsContainer = container.querySelector('.voice-adjective-tags');
     if (tagsContainer && !window._voicePillBlueprint) {
         const pill = tagsContainer.firstElementChild; // capture the designed pill once
@@ -1654,13 +1663,15 @@ async function generateAndRenderVoiceProfile(corpus, audience) {
         }
         console.log('[Talk] voice profile rendered');
     } catch (e) { console.error('[Talk] voice profile failed:', e); }
+    finally { setItemLoading('voice-p-wrap', false); }
 }
 
 // Tone map: 4 topic cards (.tone-card-blueprint) — title, 3 insights (.tone-what-means), intensity
 // label, and trait bars (.tone-trait-row → .tone-trait-name + .tone-bar-fill width).
 async function generateAndRenderToneMap(corpus, audience) {
+    setItemLoading('insider-language', true);
     const container = document.getElementById('tone-map-container');
-    if (!container) { console.warn('[Talk] #tone-map-container not found'); return; }
+    if (!container) { console.warn('[Talk] #tone-map-container not found'); setItemLoading('insider-language', false); return; }
     if (!window._toneCardBlueprint) {
         const card = container.querySelector('.tone-card-blueprint') || container.querySelector('.tone-card');
         if (card) {
@@ -1669,7 +1680,7 @@ async function generateAndRenderToneMap(corpus, audience) {
             if (row) window._toneTraitBlueprint = row.cloneNode(true);
         }
     }
-    if (!window._toneCardBlueprint) { console.warn('[Talk] .tone-card-blueprint not found'); return; }
+    if (!window._toneCardBlueprint) { console.warn('[Talk] .tone-card-blueprint not found'); setItemLoading('insider-language', false); return; }
     container.innerHTML = '<p class="loading-text">Performing deep tonal analysis…</p>';
     const sample = corpus.slice(0, 40).map(p => `Topic: ${p.title} - ${(p.body || '').substring(0, 200)}`).join('\n---\n');
     try {
@@ -1717,19 +1728,21 @@ async function generateAndRenderToneMap(corpus, audience) {
         });
         console.log('[Talk] tone map rendered');
     } catch (e) { console.error('[Talk] tone map failed:', e); container.innerHTML = '<p class="error-message">Tonal analysis unavailable.</p>'; }
+    finally { setItemLoading('insider-language', false); }
 }
 
 // Language to avoid: pairs of insider/outsider terms → .avoid-items-wrap (.avoid-term-template:
 // .term-avoid + .term-avoid-reason) and .use-items-wrap (.use-term-template: .term-use + .term-use-reason).
 async function generateAndRenderLanguageToAvoid(corpus, audience) {
+    setItemLoading('insider-language', true);
     const wrapper = document.getElementById('language-to-avoid-container');
-    if (!wrapper) { console.warn('[Talk] #language-to-avoid-container not found'); return; }
+    if (!wrapper) { console.warn('[Talk] #language-to-avoid-container not found'); setItemLoading('insider-language', false); return; }
     const avoidC = wrapper.querySelector('.avoid-items-wrap');
     const useC = wrapper.querySelector('.use-items-wrap');
-    if (!avoidC || !useC) { console.warn('[Talk] language wraps not found'); return; }
+    if (!avoidC || !useC) { console.warn('[Talk] language wraps not found'); setItemLoading('insider-language', false); return; }
     if (!window._avoidBlueprint) { const t = avoidC.querySelector('.avoid-term-template'); if (t) window._avoidBlueprint = t.cloneNode(true); }
     if (!window._useBlueprint) { const t = useC.querySelector('.use-term-template'); if (t) window._useBlueprint = t.cloneNode(true); }
-    if (!window._avoidBlueprint || !window._useBlueprint) { console.warn('[Talk] language templates not found'); return; }
+    if (!window._avoidBlueprint || !window._useBlueprint) { console.warn('[Talk] language templates not found'); setItemLoading('insider-language', false); return; }
     const sample = corpus.slice(0, 40).map(p => `Title: ${p.title}\nBody: ${(p.body || '').substring(0, 400)}`).join('\n---\n');
     try {
         const parsed = await callOpenAI({
@@ -1753,13 +1766,15 @@ async function generateAndRenderLanguageToAvoid(corpus, audience) {
         });
         console.log('[Talk] language-to-avoid rendered');
     } catch (e) { console.error('[Talk] language-to-avoid failed:', e); }
+    finally { setItemLoading('insider-language', false); }
 }
 
 // Hooks: 4-6 engagement patterns into #hook-wrapper (HOOK_CARD_BLUEPRINT), each with example posts
 // (HOOK_ITEM_BLUEPRINT). Corpus-only; example posts link to Reddit.
 async function generateAndRenderHookPatterns(corpus, audience) {
+    setItemLoading('hook-wrap', true);
     const wrapper = document.getElementById('hook-wrapper');
-    if (!wrapper) { console.warn('[Talk] #hook-wrapper not found'); return; }
+    if (!wrapper) { console.warn('[Talk] #hook-wrapper not found'); setItemLoading('hook-wrap', false); return; }
     if (!window._hookCardBlueprint) {
         const card = wrapper.firstElementChild;
         if (card) {
@@ -1768,7 +1783,7 @@ async function generateAndRenderHookPatterns(corpus, audience) {
             if (list && list.firstElementChild) window._hookItemBlueprint = list.firstElementChild.cloneNode(true);
         }
     }
-    if (!window._hookCardBlueprint) { console.warn('[Talk] hook card blueprint not found'); return; }
+    if (!window._hookCardBlueprint) { console.warn('[Talk] hook card blueprint not found'); setItemLoading('hook-wrap', false); return; }
     wrapper.innerHTML = '<p class="loading-text">Analysing engagement patterns…</p>';
 
     // Hooks are meant to be PROVEN by high engagement, so only let genuinely engaging posts be
@@ -1826,6 +1841,7 @@ async function generateAndRenderHookPatterns(corpus, audience) {
         });
         console.log('[Talk] hooks rendered:', (parsed.patterns || []).length);
     } catch (e) { console.error('[Talk] hooks failed:', e); }
+    finally { setItemLoading('hook-wrap', false); }
 }
 
 // Sentiment (AI-first, corpus-only): one call returns weighted positive/negative terms + the overall
@@ -1905,9 +1921,10 @@ function renderSentimentScore(positiveCount, negativeCount) {
 }
 
 async function generateAndRenderSentiment(corpus, audience) {
+    setItemsLoading(['sentiment-wrap', 'positive-wrap', 'nega-wrap'], true);
     const posC = document.getElementById('positive-cloud');
     const negC = document.getElementById('negative-cloud');
-    if (!posC || !negC) { console.warn('[Talk] sentiment cloud containers not found'); return; }
+    if (!posC || !negC) { console.warn('[Talk] sentiment cloud containers not found'); setItemsLoading(['sentiment-wrap', 'positive-wrap', 'nega-wrap'], false); return; }
     posC.innerHTML = '<p class="loading-text">Analysing sentiment…</p>';
     negC.innerHTML = '<p class="loading-text">Analysing sentiment…</p>';
     const sample = corpus.slice(0, 50).map(p => `${p.title}. ${(p.body || '').substring(0, 300)}`).join('\n---\n');
@@ -1920,12 +1937,20 @@ async function generateAndRenderSentiment(corpus, audience) {
             ],
             temperature: 0.2, max_completion_tokens: 1100, response_format: { type: 'json_object' }
         });
-        renderSentimentCloud(posC, parsed.positive || [], POSITIVE_CLOUD_COLORS);
-        renderSentimentCloud(negC, parsed.negative || [], NEGATIVE_CLOUD_COLORS);
+        // Balance the two clouds so neither side dominates: sort each by weight (strongest first) and
+        // trim both to the SAME count (the smaller of the two, capped at 16).
+        const byWeight = arr => (arr || []).filter(it => it && it.term).sort((a, b) => (Number(b.weight) || 0) - (Number(a.weight) || 0));
+        let posTerms = byWeight(parsed.positive), negTerms = byWeight(parsed.negative);
+        const n = Math.min(posTerms.length, negTerms.length, 16);
+        posTerms = posTerms.slice(0, n);
+        negTerms = negTerms.slice(0, n);
+        renderSentimentCloud(posC, posTerms, POSITIVE_CLOUD_COLORS);
+        renderSentimentCloud(negC, negTerms, NEGATIVE_CLOUD_COLORS);
         const posPct = Math.max(0, Math.min(100, Math.round(parsed.positive_pct != null ? parsed.positive_pct : 50)));
         renderSentimentScore(posPct, 100 - posPct);
         console.log(`[Talk] sentiment rendered: ${(parsed.positive || []).length} pos / ${(parsed.negative || []).length} neg, ${posPct}% positive`);
     } catch (e) { console.error('[Talk] sentiment failed:', e); posC.innerHTML = ''; negC.innerHTML = ''; }
+    finally { setItemsLoading(['sentiment-wrap', 'positive-wrap', 'nega-wrap'], false); }
 }
 
 // Historical sentiment ("sentiment shift") — REBUILT corpus-only: bucket the corpus posts by recency
@@ -2001,19 +2026,16 @@ function loadTabTalk() {
     window._tabLoaded.talk = true;
     setTabLoading('tab-talk', true);
     const corpus = window._corpus, audience = window.originalGroupName || '';
-    // Light up each panel's shimmer right away; clear each one the moment ITS data lands (not when
-    // the whole tab finishes), so panels reveal independently. #insider-language is shared by the
-    // tone map + language-to-avoid, so it clears only after both resolve (Promise.all below).
-    setItemsLoading(['voice-p-wrap', 'insider-language', 'hook-wrap', 'sentiment-wrap', 'positive-wrap', 'nega-wrap'], true);
+    // Each render function now owns its OWN panel shimmer (sets .is-loading on entry, clears it in its
+    // finally), so every panel reveals the instant ITS data lands — fully independent of the others.
+    // #insider-language is ref-counted across the tone map + language-to-avoid, so it only clears
+    // once BOTH have finished.
     window._talkPromise = Promise.all([
-        generateAndRenderVoiceProfile(corpus, audience).finally(() => setItemLoading('voice-p-wrap', false)),
-        Promise.all([
-            generateAndRenderToneMap(corpus, audience),
-            generateAndRenderLanguageToAvoid(corpus, audience)
-        ]).finally(() => setItemLoading('insider-language', false)),
-        generateAndRenderHookPatterns(corpus, audience).finally(() => setItemLoading('hook-wrap', false)),
-        generateAndRenderSentiment(corpus, audience)
-            .finally(() => setItemsLoading(['sentiment-wrap', 'positive-wrap', 'nega-wrap'], false)),
+        generateAndRenderVoiceProfile(corpus, audience),
+        generateAndRenderToneMap(corpus, audience),
+        generateAndRenderLanguageToAvoid(corpus, audience),
+        generateAndRenderHookPatterns(corpus, audience),
+        generateAndRenderSentiment(corpus, audience),
         Promise.resolve(generateAndRenderHistoricalSentiment(corpus)) // synchronous, corpus-only
     ]).catch(e => { console.warn('[Talk] failed', e); window._tabLoaded.talk = false; })
         .finally(() => setTabLoading('tab-talk', false));

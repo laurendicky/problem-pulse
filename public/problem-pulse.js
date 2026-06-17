@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 49 — demographics anchored on audience name, tab-talk pre-fetch, smaller clouds, emotion-hook "&"', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 50 — tone map array-coerce fix, readable cloud colors, hook engagement floor, audience snapshot populated (tabs stay clickable w/ shimmer)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -511,6 +511,28 @@ function hideLoader() {
 let _analysisRunning = false;
 
 // #search-selected-btn handler. Builds the corpus, stores it, then hands off to analysis (Part 3).
+// Fills the always-visible snapshot chip (#audience-snapshot) so the user can see which audience
+// they're looking at. Populated the instant a search starts — independent of any AI/tab loading.
+function populateAudienceSnapshot(audience) {
+    const nameEl = document.getElementById('audience-name');
+    const dateEl = document.getElementById('search-date');
+    const timeEl = document.getElementById('search-time');
+    if (nameEl) nameEl.textContent = audience || '—';
+    const now = new Date();
+    if (dateEl) {
+        const dd = String(now.getDate()).padStart(2, '0');
+        const mm = String(now.getMonth() + 1).padStart(2, '0');
+        dateEl.textContent = `${dd}/${mm}/${now.getFullYear()}`;
+    }
+    if (timeEl) {
+        let h = now.getHours();
+        const m = String(now.getMinutes()).padStart(2, '0');
+        const ampm = h >= 12 ? 'pm' : 'am';
+        h = h % 12; if (h === 0) h = 12;
+        timeEl.textContent = `${h}:${m}${ampm}`;
+    }
+}
+
 async function runProblemFinder() {
     if (_analysisRunning) {
         console.warn('[Analysis] already running — ignoring duplicate trigger.');
@@ -529,6 +551,7 @@ async function runProblemFinder() {
     }
 
     _analysisRunning = true; // set synchronously, before any await, so concurrent calls bail here
+    populateAudienceSnapshot(window.originalGroupName || ''); // show the audience chip immediately
     console.log('[Analysis] selected subreddits:', subreddits);
     auditTab1Elements(); // logs which Webflow elements actually exist, so we can fix any selector
 
@@ -1033,7 +1056,7 @@ function setTabLoading(tabId, loading) {
     // Tab labels use different classes (#tab-hurts → .main-tab-text, #polarity-tab → .tab-text-2),
     // so match either; fall back to the tab link itself if neither is found.
     const textEl = el.querySelector('.main-tab-text, .tab-text-2') || el;
-    textEl.classList.toggle('pp-tab-loading', !!loading);
+    textEl.classList.toggle('pp-tab-loading', !!loading); // shimmer only; tabs stay clickable
 }
 
 // Shared findings loader — used by both the pre-fetch and the tab click. The shared promise means
@@ -1622,12 +1645,23 @@ async function generateAndRenderToneMap(corpus, audience) {
             model: 'gpt-4o-mini',
             messages: [
                 { role: 'system', content: 'You are a brand psychologist who outputs only valid JSON.' },
-                { role: 'user', content: `Analyse the "${audience}" community. Identify 4 distinct conversation topics. For each: "topic" (short title), "traits" (array of 4 objects, each {"name": adjective, "score": integer 10-100 intensity}), "insights" (array of EXACTLY 3 standalone sentences, each under 15 words, one observation each), "level" (LOW, MEDIUM, or HIGH). Respond ONLY as valid JSON with key "tone_analysis". Posts: ${sample}` }
+                { role: 'user', content: `Analyse the "${audience}" community. Identify 4 distinct conversation topics. For each: "topic" (short title), "traits" (array of 4 objects, each {"name": adjective, "score": integer 10-100 intensity}), "insights" (array of EXACTLY 3 standalone sentences, each under 15 words, one observation each), "level" (LOW, MEDIUM, or HIGH). Respond ONLY as valid JSON where the value of key "tone_analysis" is a JSON ARRAY of exactly 4 such objects (not an object). Posts: ${sample}` }
             ],
             temperature: 0.2, max_completion_tokens: 1200, response_format: { type: 'json_object' }
         });
         container.innerHTML = '';
-        (parsed.tone_analysis || []).forEach(item => {
+        // The model sometimes returns tone_analysis as an object (keyed by topic) instead of an array,
+        // or nests the array under a different key — coerce to an array either way so we never crash.
+        let toneList = parsed.tone_analysis;
+        if (!Array.isArray(toneList)) {
+            if (toneList && typeof toneList === 'object') toneList = Object.values(toneList);
+            else toneList = [];
+        }
+        if (!toneList.length) {
+            const firstArray = Object.values(parsed).find(v => Array.isArray(v));
+            if (firstArray) toneList = firstArray;
+        }
+        toneList.forEach(item => {
             const card = window._toneCardBlueprint.cloneNode(true);
             card.style.removeProperty('display');
             const titleEl = card.querySelector('.tone-topic-title'); if (titleEl) titleEl.innerText = item.topic || '';
@@ -1705,8 +1739,16 @@ async function generateAndRenderHookPatterns(corpus, audience) {
     if (!window._hookCardBlueprint) { console.warn('[Talk] hook card blueprint not found'); return; }
     wrapper.innerHTML = '<p class="loading-text">Analysing engagement patterns…</p>';
 
-    const topPosts = [...corpus].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 40);
-    const listForAI = topPosts.map((p, i) => `ID: ${i} | UPS: ${p.score} | TITLE: ${p.title}`).join('\n');
+    // Hooks are meant to be PROVEN by high engagement, so only let genuinely engaging posts be
+    // candidates. Rank by a combined metric (upvotes + comments weigh in), then require a real
+    // engagement floor — but fall back gracefully for small niches where 50+ upvotes is rare.
+    const engagement = p => (p.score || 0) + 2 * (p.comments || 0);
+    const ranked = [...corpus].sort((a, b) => engagement(b) - engagement(a));
+    const ENGAGEMENT_FLOOR = 50;
+    let topPosts = ranked.filter(p => (p.score || 0) >= ENGAGEMENT_FLOOR);
+    if (topPosts.length < 15) topPosts = ranked; // small community — keep the best we have
+    topPosts = topPosts.slice(0, 40);
+    const listForAI = topPosts.map((p, i) => `ID: ${i} | UPS: ${p.score} | COMMENTS: ${p.comments || 0} | TITLE: ${p.title}`).join('\n');
     try {
         const parsed = await callOpenAI({
             model: 'gpt-4o-mini',
@@ -1732,7 +1774,11 @@ async function generateAndRenderHookPatterns(corpus, audience) {
             const list = card.querySelector('.hook-examples-list');
             if (list) {
                 list.innerHTML = '';
-                (pattern.example_ids || []).map(id => topPosts[parseInt(id, 10)]).filter(Boolean).forEach(post => {
+                (pattern.example_ids || [])
+                    .map(id => topPosts[parseInt(id, 10)])
+                    .filter(Boolean)
+                    .sort((a, b) => (b.score || 0) - (a.score || 0)) // show the strongest proof first
+                    .forEach(post => {
                     if (!window._hookItemBlueprint) return;
                     const item = window._hookItemBlueprint.cloneNode(true);
                     item.style.removeProperty('display');
@@ -1753,8 +1799,10 @@ async function generateAndRenderHookPatterns(corpus, audience) {
 // Sentiment (AI-first, corpus-only): one call returns weighted positive/negative terms + the overall
 // balance. We render two word clouds (.cloud-word sized by weight) and the score bar — no dictionaries.
 // Exact original palettes (teal family = positive, pink family = negative).
-const POSITIVE_CLOUD_COLORS = ['#00a5ce', '#0090b5', '#00c0e6', '#7bd9ec', '#b3e8f3', '#006d85'];
-const NEGATIVE_CLOUD_COLORS = ['#fd80c7', '#d6539d', '#ff4fa3', '#ff99d6', '#fbb6ce', '#f472b6'];
+// Ordered DARK → LIGHT. Small/low-weight words get the darker, more saturated end so they stay
+// readable on the light panel; only the biggest words use the pale tints.
+const POSITIVE_CLOUD_COLORS = ['#006d85', '#0090b5', '#00a5ce', '#00c0e6', '#7bd9ec', '#b3e8f3'];
+const NEGATIVE_CLOUD_COLORS = ['#d6539d', '#ff4fa3', '#fd80c7', '#f472b6', '#ff99d6', '#fbb6ce'];
 
 function renderSentimentCloud(container, items, colors) {
     const list = (items || []).filter(it => it && it.term);
@@ -1768,8 +1816,15 @@ function renderSentimentCloud(container, items, colors) {
     // because they were direct children of a flex container).
     const spans = list.map(it => {
         const w = Number(it.weight) || 1;
-        const size = (minF + ((w - min) / ((max - min) || 1)) * (maxF - minF)).toFixed(1);
-        const color = palette[Math.floor(Math.random() * palette.length)];
+        const t = (w - min) / ((max - min) || 1); // 0 = smallest word, 1 = biggest word
+        const size = (minF + t * (maxF - minF)).toFixed(1);
+        // Palette is dark→light: index by weight so small words (t≈0) take the darkest, most legible
+        // shades and only the largest words use the pale tints. Cap the two lightest tints to the top
+        // ~third of weights so no small word is ever near-invisible.
+        let idx = Math.round(t * (palette.length - 1));
+        if (t < 0.66) idx = Math.min(idx, palette.length - 3);
+        idx = Math.max(0, Math.min(palette.length - 1, idx));
+        const color = palette[idx];
         const rot = (Math.random() * 8 - 4).toFixed(1);
         const term = _escapeHtml(it.term);
         return `<span class="cloud-word" data-word="${term}" style="font-size:${size}px; color:${color}; transform:rotate(${rot}deg);">${term}</span>`;

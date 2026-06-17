@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 54 — OpenAI concurrency gate (max 4) + retry/backoff to ride out intermittent proxy timeouts/CORS failures', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 55 — Tab 4 "Where they are": social split + location + active hours (instant) + waterholes/media/experts/tools/events (AI, corpus-only, parallel, pre-fetched)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -617,6 +617,7 @@ async function runProblemFinder() {
         window._findings = null; window._findingsPromise = null; window._assignmentPromise = null;
         window._findingPosts = null; window._findingPostsFull = null; window._polarityPromise = null;
         window._talkPromise = null; // Tab 3 regenerates for the new audience
+        window._wherePromise = null; window._platformPanelsRendered = false; // Tab 4 regenerates too
         if (window._polarityChart && window._polarityChart.destroy) { window._polarityChart.destroy(); window._polarityChart = null; }
         console.log(`[Analysis] corpus ready: ${corpus.length} posts`);
         if (!corpus.length) {
@@ -639,7 +640,7 @@ async function runProblemFinder() {
         // Pre-warm Tab 2 (findings + post assignment) and the polarity map in the background while
         // the user reads Tab 1, so switching to those tabs is near-instant. No Reddit here, so it's
         // safe to run quietly. A small delay lets Tab 1's render settle first.
-        setTimeout(() => { try { loadTabHurts(); loadPolarityMap(); loadTabTalk(); } catch (e) { /* non-fatal */ } }, 400);
+        setTimeout(() => { try { loadTabHurts(); loadPolarityMap(); loadTabTalk(); loadTabWhere(); } catch (e) { /* non-fatal */ } }, 400);
     } catch (error) {
         console.error('[Analysis] failed to build corpus:', error);
         showMessage('Something went wrong gathering discussions. Please try again.');
@@ -2087,6 +2088,600 @@ function openTabTalk() {
     loadTabTalk();
 }
 
+// =============================================================================
+// PART 6 — Tab 4 "Where they are" (#tab-where). Lazy on click + pre-fetched.
+// Corpus-only (no extra Reddit): 3 instant charts (social split, location, active
+// hours) + 5 AI panels (waterholes, media, experts, tools, events) run in parallel.
+// Ported from the original app and optimised: dropped the dedicated media Reddit
+// search and the per-podcast iTunes lookups, so the whole tab is corpus-only & fast.
+// =============================================================================
+
+const _whereStop = ['the', 'and', 'for', 'with', 'your', 'that', 'this', 'from', 'have', 'about', 'into', 'what', 'when', 'how', 'are', 'you', 'they', 'their'];
+const _whereTextOf = p => `${p.title || ''} ${p.body || ''}`;
+
+// Count real mentions of a name in the joined corpus text; falls back to its most
+// distinctive token so "Huberman Lab" still grounds via "huberman".
+function groundNameCount(key, allText) {
+    if (!key) return 0;
+    const esc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const exact = allText.match(new RegExp(`\\b${esc}\\b`, 'gi'));
+    if (exact && exact.length) return exact.length;
+    const sig = key.split(/\s+/).filter(t => t.length > 3 && !_whereStop.includes(t)).sort((a, b) => b.length - a.length)[0];
+    if (!sig) return 0;
+    const escSig = sig.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const m2 = allText.match(new RegExp(`\\b${escSig}\\b`, 'gi'));
+    return m2 ? m2.length : 0;
+}
+
+// Count a name's mentions AND how many sit near an "influence/use/visit" signal word.
+// Per-segment scan so a window never bleeds across post boundaries.
+function countNameInContext(key, segments, signalRe, windowSize) {
+    const esc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp('\\b' + esc + '\\b', 'gi');
+    const w = windowSize || 70;
+    let total = 0, contextHits = 0;
+    for (const seg of segments) {
+        re.lastIndex = 0; let m;
+        while ((m = re.exec(seg)) !== null) {
+            total++;
+            const s = Math.max(0, m.index - w);
+            const e = Math.min(seg.length, m.index + key.length + w);
+            if (signalRe.test(seg.slice(s, e))) contextHits++;
+            if (total > 800) break;
+        }
+        if (total > 800) break;
+    }
+    return { total, contextHits };
+}
+
+// Thin-results fallback: clearly-labelled AI suggestions (never counted as real mentions).
+async function aiSuggestEntities(audience, spec, avoid, want) {
+    if (want <= 0) return [];
+    const prompt = `For a "${audience}" audience, name up to ${want} of the most prominent, real, widely-recognised ${spec.what} that this kind of audience typically ${spec.verb}. ${spec.examples || ''}
+Return only REAL, well-known names — never invented ones — and avoid generic categories.${avoid && avoid.length ? ` Do NOT repeat any of these: ${avoid.join(', ')}.` : ''}
+Respond ONLY with JSON: {"items":[{"name":"...","note":"<= 6 word description, or empty"}]}`;
+    try {
+        const parsed = await callOpenAI({
+            model: 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: 'You suggest only real, well-known names relevant to a given audience. You never invent names, and you output only valid JSON.' },
+                { role: 'user', content: prompt }
+            ],
+            temperature: 0.3, max_completion_tokens: 400, response_format: { type: 'json_object' }
+        });
+        return parsed.items || [];
+    } catch (e) { console.warn('[Where/Suggest] failed:', e && e.message); return []; }
+}
+
+function mentionTier(count) {
+    if (count >= 20) return 'Huge Mentions';
+    if (count >= 6) return 'High Mentions';
+    if (count >= 2) return 'Medium Mentions';
+    return 'A Few Mentions';
+}
+
+// --- 1) SOCIAL SPLIT donut (#social-split-chart) — instant, no AI ------------
+function renderSocialSplitChart(posts) {
+    const el = document.getElementById('social-split-chart');
+    if (!el) return;
+    const texts = (posts || []).map(p => _whereTextOf(p).toLowerCase());
+    if (!texts.length) return;
+    const PLATFORMS = [
+        { name: 'Instagram', color: '#FF6FB5', keys: ['instagram', 'insta', 'reels'] },
+        { name: 'TikTok', color: '#36E0D0', keys: ['tiktok', 'tik tok'] },
+        { name: 'YouTube', color: '#FF8C66', keys: ['youtube'] },
+        { name: 'Facebook', color: '#6C8CFF', keys: ['facebook', 'fb group', 'fb groups'] },
+        { name: 'X / Twitter', color: '#7CC7FF', keys: ['twitter', 'tweet', 'x.com'] },
+        { name: 'Discord', color: '#8B7CFF', keys: ['discord'] },
+        { name: 'Telegram', color: '#5ED1D8', keys: ['telegram'] },
+        { name: 'WhatsApp', color: '#57D9A3', keys: ['whatsapp', 'whats app'] },
+        { name: 'Snapchat', color: '#FFD56B', keys: ['snapchat'] },
+        { name: 'Pinterest', color: '#FF8FA3', keys: ['pinterest'] },
+        { name: 'LinkedIn', color: '#5B9BD5', keys: ['linkedin'] }
+    ];
+    const fullText = texts.join(' \n ');
+    const countKeys = (keys) => {
+        const pat = keys.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')).join('|');
+        const m = fullText.match(new RegExp('\\b(' + pat + ')\\b', 'gi'));
+        return m ? m.length : 0;
+    };
+    let data = PLATFORMS.map(pl => ({ name: pl.name, color: pl.color, count: countKeys(pl.keys) }))
+        .filter(d => d.count > 0).sort((a, b) => b.count - a.count);
+    const grandTotal = data.reduce((n, d) => n + d.count, 0);
+    if (data.length === 0 || grandTotal < 12) {
+        el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">This audience rarely names social platforms in their discussions (only ${grandTotal} mention${grandTotal === 1 ? '' : 's'}), so there isn't enough signal to chart a reliable split.</p>`;
+        return;
+    }
+    if (data.length > 8) {
+        const otherCount = data.slice(8).reduce((n, d) => n + d.count, 0);
+        data = data.slice(0, 8);
+        if (otherCount > 0) data.push({ name: 'Other', color: '#C9C9D6', count: otherCount });
+    }
+    const total = data.reduce((n, d) => n + d.count, 0) || 1;
+    data.forEach(d => { d.pct = Math.round((d.count / total) * 100); });
+    const GAP = data.length > 1 ? 1.6 : 0;
+    let acc = 0; const stops = [];
+    data.forEach((d) => {
+        const start = acc, end = start + (d.count / total) * 360;
+        stops.push(`${d.color} ${start}deg ${Math.max(start, end - GAP)}deg`);
+        if (GAP) stops.push(`#ffffff ${Math.max(start, end - GAP)}deg ${end}deg`);
+        acc = end;
+    });
+    const gradient = `conic-gradient(from -90deg, ${stops.join(', ')})`;
+    const top = data[0];
+    el.innerHTML = `
+      <div class="social-split" style="display:flex; gap:28px; align-items:center; flex-wrap:wrap; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
+        <div class="social-split-donut" style="position:relative; width:190px; height:190px; flex:0 0 auto; border-radius:50%; background:${gradient}; box-shadow:0 12px 30px rgba(124,92,255,0.20);">
+          <div class="social-split-center" style="position:absolute; inset:27%; border-radius:50%; background:rgba(255,255,255,0.85); backdrop-filter:blur(6px); display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; box-shadow:inset 0 1px 5px rgba(0,0,0,0.06);">
+            <div style="font-size:1.55rem; font-weight:800; color:#1f2937; line-height:1;">${top.pct}%</div>
+            <div style="font-size:0.72rem; font-weight:600; color:#6b7280; margin-top:3px; padding:0 6px;">${top.name}</div>
+          </div>
+        </div>
+        <div class="social-split-legend" style="display:flex; flex-direction:column; gap:9px; min-width:170px;">
+          ${data.map(d => `
+            <div class="social-split-chip" style="display:flex; align-items:center; gap:10px; font-size:0.95rem; color:#1f2937;">
+              <span style="width:12px; height:12px; border-radius:50%; background:${d.color}; flex:0 0 auto; box-shadow:0 1px 3px rgba(0,0,0,0.15);"></span>
+              <span style="flex:1;">${d.name}</span>
+              <b style="color:#374151;">${d.pct}%</b>
+            </div>`).join('')}
+        </div>
+      </div>`;
+}
+
+// --- 2) LOCATION ranked bars (#location) — instant, no AI --------------------
+function renderLocationChart(posts) {
+    const el = document.getElementById('location');
+    if (!el) return;
+    const texts = (posts || []).map(p => _whereTextOf(p).toLowerCase());
+    if (!texts.length) return;
+    const COUNTRIES = [
+        { name: 'United States', color: '#7C5CFF', keys: ['united states', 'usa', 'america', 'american', 'americans'] },
+        { name: 'United Kingdom', color: '#FF6FB5', keys: ['united kingdom', 'uk', 'britain', 'british', 'england', 'scotland', 'wales'] },
+        { name: 'Canada', color: '#36E0D0', keys: ['canada', 'canadian', 'canadians'] },
+        { name: 'Australia', color: '#FF8C66', keys: ['australia', 'australian', 'aussie', 'aussies'] },
+        { name: 'India', color: '#6C8CFF', keys: ['india', 'indian', 'indians'] },
+        { name: 'Germany', color: '#7CC7FF', keys: ['germany', 'german', 'germans'] },
+        { name: 'France', color: '#8B7CFF', keys: ['france', 'french'] },
+        { name: 'Netherlands', color: '#5ED1D8', keys: ['netherlands', 'dutch', 'holland'] },
+        { name: 'Ireland', color: '#57D9A3', keys: ['ireland', 'irish'] },
+        { name: 'New Zealand', color: '#FFD56B', keys: ['new zealand', 'kiwi', 'kiwis'] },
+        { name: 'Italy', color: '#FF8FA3', keys: ['italy', 'italian', 'italians'] },
+        { name: 'Spain', color: '#5B9BD5', keys: ['spain', 'spaniard'] },
+        { name: 'Brazil', color: '#9CE37D', keys: ['brazil', 'brasil', 'brazilian', 'brazilians'] },
+        { name: 'Mexico', color: '#F78C6B', keys: ['mexico', 'mexican', 'mexicans'] },
+        { name: 'Sweden', color: '#8FD3F4', keys: ['sweden', 'swedish', 'swede'] },
+        { name: 'Norway', color: '#B388FF', keys: ['norway', 'norwegian', 'norwegians'] },
+        { name: 'Denmark', color: '#F48FB1', keys: ['denmark', 'danish'] },
+        { name: 'Finland', color: '#80DEEA', keys: ['finland', 'finnish'] },
+        { name: 'Poland', color: '#A5D6A7', keys: ['poland'] },
+        { name: 'Japan', color: '#FF7597', keys: ['japan', 'japanese'] },
+        { name: 'Philippines', color: '#4DD0E1', keys: ['philippines', 'filipino', 'filipina', 'pinoy'] },
+        { name: 'Singapore', color: '#CE93D8', keys: ['singapore', 'singaporean'] },
+        { name: 'South Africa', color: '#FFB74D', keys: ['south africa', 'south african'] },
+        { name: 'UAE / Dubai', color: '#9FA8DA', keys: ['dubai', 'uae', 'emirates'] },
+        { name: 'Portugal', color: '#80CBC4', keys: ['portugal', 'portuguese'] },
+        { name: 'Switzerland', color: '#EF9A9A', keys: ['switzerland', 'swiss'] }
+    ];
+    const fullText = texts.join(' \n ');
+    const esc = (k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
+    const countKeys = (keys) => { const pat = keys.map(esc).join('|'); const m = fullText.match(new RegExp('\\b(' + pat + ')\\b', 'gi')); return m ? m.length : 0; };
+    const LOC_INTENT = "(?:i'?m|i am|we'?re|we are)\\s+(?:from|in|living\\s+in|based\\s+in|located\\s+in)|live\\s+in|living\\s+in|based\\s+in|located\\s+in|here\\s+in|from";
+    const countStrong = (keys) => { const pat = keys.map(esc).join('|'); const m = fullText.match(new RegExp('\\b(?:' + LOC_INTENT + ')\\s+(?:the\\s+)?(' + pat + ')\\b', 'gi')); return m ? m.length : 0; };
+    let data = COUNTRIES.map(c => {
+        const mentions = countKeys(c.keys), strong = countStrong(c.keys);
+        return { name: c.name, color: c.color, mentions, strong, score: strong * 4 + Math.max(0, mentions - strong) };
+    }).filter(d => d.mentions > 0).sort((a, b) => b.score - a.score);
+    const grandTotal = data.reduce((n, d) => n + d.mentions, 0);
+    const strongTotal = data.reduce((n, d) => n + d.strong, 0);
+    if (data.length === 0 || grandTotal < 12) {
+        el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">This audience rarely names a country or region in their discussions (only ${grandTotal} mention${grandTotal === 1 ? '' : 's'}), so there isn't enough signal to chart where they're based.</p>`;
+        return;
+    }
+    if (data.length > 8) {
+        const otherScore = data.slice(8).reduce((n, d) => n + d.score, 0);
+        data = data.slice(0, 8);
+        if (otherScore > 0) data.push({ name: 'Other', color: '#C9C9D6', score: otherScore, strong: 0, mentions: 0 });
+    }
+    const total = data.reduce((n, d) => n + d.score, 0) || 1;
+    const max = data[0].score || 1;
+    data.forEach(d => { d.pct = Math.round((d.score / total) * 100); });
+    const footnote = strongTotal > 0
+        ? `Weighted toward stated location — ${strongTotal} explicit "I'm based in…" phrase${strongTotal === 1 ? '' : 's'} found among ${grandTotal} country mentions, and counted more heavily.`
+        : `Based on ${grandTotal} country/region mentions. No explicit "I'm based in…" phrases were found, so this reflects countries discussed rather than confirmed residence.`;
+    el.innerHTML = `
+      <div class="location-chart" style="display:flex; flex-direction:column; gap:11px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
+        ${data.map(d => `
+          <div class="location-row" style="display:flex; align-items:center; gap:12px; font-size:0.95rem; color:#1f2937;">
+            <span style="flex:0 0 120px; text-align:right; color:#374151;">${d.name}</span>
+            <div style="flex:1; height:14px; background:rgba(124,92,255,0.08); border-radius:7px; overflow:hidden;">
+              <div style="width:${Math.max(4, (d.score / max) * 100)}%; height:100%; background:${d.color}; border-radius:7px; box-shadow:0 1px 3px rgba(0,0,0,0.15);"></div>
+            </div>
+            <b style="flex:0 0 38px; text-align:right; color:#374151;">${d.pct}%</b>
+          </div>`).join('')}
+        <p style="margin:6px 0 0; font-size:0.72rem; color:#9ca3af;">${footnote}</p>
+      </div>`;
+}
+
+// --- 3) ACTIVE HOURS histogram (#active-hours) — instant, no AI --------------
+function renderActiveHours(posts) {
+    const el = document.getElementById('active-hours');
+    if (!el) return;
+    const corpus = posts || [];
+    const bins = new Array(24).fill(0);
+    let n = 0;
+    corpus.forEach(p => {
+        const ts = p && p.created;
+        if (!ts) return;
+        const h = new Date(ts * 1000).getUTCHours();
+        if (h >= 0 && h < 24) { bins[h]++; n++; }
+    });
+    if (n < 20) {
+        el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">Only ${n} post${n === 1 ? '' : 's'} carried a timestamp, so there isn't enough signal to chart a reliable posting rhythm.</p>`;
+        return;
+    }
+    const max = Math.max.apply(null, bins) || 1;
+    const winSum = [];
+    for (let i = 0; i < 24; i++) { let s = 0; for (let k = 0; k < 4; k++) s += bins[(i + k) % 24]; winSum.push(s); }
+    let peakStart = 0;
+    for (let i = 1; i < 24; i++) if (winSum[i] > winSum[peakStart]) peakStart = i;
+    const apart = (a, b) => { const d = Math.abs(a - b); return Math.min(d, 24 - d) >= 4; };
+    let secStart = -1;
+    for (let i = 0; i < 24; i++) if (apart(i, peakStart) && (secStart === -1 || winSum[i] > winSum[secStart])) secStart = i;
+    const bimodal = secStart !== -1 && winSum[secStart] >= winSum[peakStart] * 0.8;
+    const fmt = (h) => String(h).padStart(2, '0') + ':00';
+    const win = (s) => `${fmt(s)}–${fmt((s + 4) % 24)}`;
+    const peakHours = new Set();
+    [peakStart].concat(bimodal ? [secStart] : []).forEach(st => [0, 1, 2, 3].forEach(k => peakHours.add((st + k) % 24)));
+    const peakShare = Math.round((winSum[peakStart] / n) * 100);
+    let callout;
+    if (bimodal) {
+        const a = Math.min(peakStart, secStart), b = Math.max(peakStart, secStart);
+        const combined = Math.round(((winSum[peakStart] + winSum[secStart]) / n) * 100);
+        callout = `Two active windows: <b>${win(a)} and ${win(b)} UTC</b> — together ${combined}% of posts.`;
+    } else {
+        callout = `Most active around <b>${win(peakStart)} UTC</b> — ${peakShare}% of posts land in that 4-hour window.`;
+    }
+    el.innerHTML = `
+      <div class="active-hours" style="font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
+        <div style="display:flex; align-items:flex-end; gap:3px; height:140px;">
+          ${bins.map((c, h) => {
+              const inPeak = peakHours.has(h);
+              const col = inPeak ? '#7C5CFF' : 'rgba(124,92,255,0.22)';
+              const ht = Math.max(3, Math.round((c / max) * 132));
+              return `<div title="${fmt(h)} — ${c} post${c === 1 ? '' : 's'}" style="flex:1 1 0; height:${ht}px; background:${col}; border-radius:4px 4px 0 0; box-shadow:${inPeak ? '0 1px 4px rgba(124,92,255,0.35)' : 'none'};"></div>`;
+          }).join('')}
+        </div>
+        <div style="display:flex; gap:3px; margin-top:6px;">
+          ${bins.map((c, h) => `<div style="flex:1; text-align:center; font-size:0.6rem; color:#9ca3af;">${h % 6 === 0 ? fmt(h) : ''}</div>`).join('')}
+        </div>
+        <p style="margin:11px 0 0; font-size:0.9rem; color:#1f2937;">${callout}</p>
+        <p style="margin:4px 0 0; font-size:0.72rem; color:#9ca3af;">Based on ${n} timestamped posts. Times are UTC — shift to your audience's timezone to plan posting and launches.</p>
+      </div>`;
+}
+
+// --- Shared engine for the named-entity panels (experts / tools / events) ----
+// All three: filter corpus by signal → sample → AI extract → ground against the
+// corpus → top up with labelled AI suggestions if thin → render self-contained HTML.
+async function _renderWhereEntityPanel(corpus, audience, cfg) {
+    const el = document.getElementById(cfg.elId);
+    if (!el) return;
+    if ((corpus || []).length < 5) return;
+    el.innerHTML = `<p class="loading-text" style="text-align:center; color:#9ca3af; padding:1rem;">${cfg.loading}</p>`;
+    let pool = corpus.filter(p => cfg.signal.test(_whereTextOf(p)));
+    if (pool.length < 15) pool = corpus.slice();
+    const stableId = p => String(p.id || '');
+    const sample = pool.sort((a, b) => ((b.score || 0) - (a.score || 0)) || (stableId(a) < stableId(b) ? -1 : 1))
+        .slice(0, 70).map((p, i) => `[${i}] ${_whereTextOf(p).replace(/\s+/g, ' ').slice(0, 450)}`).join('\n');
+    let parsed = [];
+    try {
+        const data = await callOpenAI({
+            model: 'gpt-4o-mini',
+            messages: [{ role: 'system', content: cfg.system }, { role: 'user', content: cfg.prompt(audience, sample) }],
+            temperature: 0.1, max_completion_tokens: 700, response_format: { type: 'json_object' }
+        });
+        parsed = data[cfg.key] || [];
+    } catch (e) { console.warn(`[Where/${cfg.elId}] extraction failed:`, e && e.message); }
+    const segments = corpus.map(p => _whereTextOf(p).toLowerCase());
+    const audienceTokens = new Set(String(audience || '').toLowerCase().split(/\s+/).filter(Boolean));
+    const seen = new Set(); const items = [];
+    (parsed || []).forEach(w => {
+        if (!w || !w.name) return;
+        const name = String(w.name).trim(); const key = name.toLowerCase();
+        const minLen = cfg.minLen || 3;
+        if (seen.has(key) || key.length < minLen) return;
+        const tokens = key.split(/\s+/).filter(Boolean);
+        if (minLen >= 4 && tokens.length === 1 && key.length < 5) return;
+        if (tokens.every(t => audienceTokens.has(t))) return;
+        const { total, contextHits } = countNameInContext(key, segments, cfg.context);
+        if (total === 0) return;
+        if (contextHits === 0 && total < 2) return;
+        seen.add(key);
+        items.push({ name, sub: (w[cfg.subKey] || '').trim(), count: total, strong: contextHits });
+    });
+    items.sort((a, b) => (b.strong - a.strong) || (b.count - a.count));
+    let top = items.slice(0, 8).map(it => ({ ...it, suggested: false }));
+    if (top.length < 4) {
+        const have = new Set(top.map(it => it.name.toLowerCase()));
+        const suggestions = await aiSuggestEntities(audience, cfg.suggest, [...have], 6 - top.length);
+        suggestions.forEach(s => {
+            if (!s || !s.name) return;
+            const nm = String(s.name).trim();
+            if (!nm || have.has(nm.toLowerCase())) return;
+            have.add(nm.toLowerCase());
+            top.push({ name: nm, sub: (s.note || '').trim(), count: 0, strong: 0, suggested: true });
+        });
+    }
+    if (!top.length) { el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">${cfg.empty}</p>`; return; }
+    const radius = cfg.round ? '50%' : '9px';
+    const sBadge = `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:${cfg.accent}; background:${cfg.accentBg}; padding:2px 8px; border-radius:999px;">Suggested</span>`;
+    el.innerHTML = `
+      <div style="display:flex; flex-direction:column; gap:10px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
+        ${top.map(it => `
+          <div style="display:flex; align-items:center; gap:12px;">
+            <span style="flex:0 0 34px; height:34px; border-radius:${radius}; background:${cfg.accentBg}; color:${cfg.accent}; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:0.82rem;">${(it.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2) || '?').toUpperCase()}</span>
+            <div style="flex:1; min-width:0;">
+              <div style="font-size:0.98rem; font-weight:700; color:#1f2937;">${_escapeHtml(it.name)}</div>
+              ${it.sub ? `<div style="font-size:0.8rem; color:#6b7280;">${_escapeHtml(it.sub)}</div>` : ''}
+            </div>
+            ${it.suggested ? sBadge : `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:#6b7280; background:rgba(0,0,0,0.06); padding:2px 8px; border-radius:999px;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>`}
+          </div>`).join('')}
+        ${top.some(it => it.suggested) ? `<p style="margin:8px 0 0; font-size:0.72rem; color:#9ca3af;">“Suggested” entries are common for this audience, added by AI because few were explicitly named — not verified mentions.</p>` : ''}
+      </div>`;
+}
+
+// --- 4) EXPERTS / influencers (#thought-leaders) ----------------------------
+function generateAndRenderExperts(corpus, audience) {
+    return _renderWhereEntityPanel(corpus, audience, {
+        elId: 'thought-leaders', key: 'people', subKey: 'role', minLen: 4, round: true,
+        accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)',
+        loading: 'Finding the people they follow…',
+        empty: 'No influencers, creators or channels were clearly named in these discussions.',
+        signal: /\b(recommend|recommends|recommended|follow|following|read|reading|author|wrote|writes|expert|guru|coach|mentor|trainer|trainers|vet|vets|behaviou?rist|breeder|listen|listening|interview|influencer|creator|podcast|channel|youtube|video|videos|account|method|book|books)\b/i,
+        context: /\b(recommend|recommends|recommended|follow|following|watch|watching|subscribe|subscribed|guru|coach|mentor|expert|trainer|trainers|vet|vets|behaviou?rist|breeder|advice|teaches|taught|course|method|channel|video|videos|account|page|insta|instagram|tiktok|youtube|podcast|interview|influencer|creator|author|wrote)\b/i,
+        system: 'You extract only explicitly-named people, content creators, channels and social accounts that an audience follows or references. You never invent names or roles, and you output only valid JSON.',
+        prompt: (a, s) => `From these "${a}" discussions, extract the INFLUENCERS and PEOPLE this audience follows, watches, recommends, or cites — including content creators, YouTubers, TikTokers, Instagram accounts, podcast hosts, named channels, coaches, authors, experts and well-known figures in this space.
+For each return:
+- "name": the real name, channel name, or @handle exactly as commonly written. Never a description or a generic role.
+- "role": a SHORT phrase for who they are / their platform, ONLY if clear from context; otherwise "".
+RULES: Only real, clearly-named people, creators or channels actually referenced by this audience. NEVER invent names or roles. Do not return the audience's own anonymous usernames, generic role words, or product/company brands that aren't a creator or personality. If none are clearly named, return an empty list.
+Discussions:
+${s}
+Respond ONLY with JSON: {"people":[{"name":"...","role":"..."}]}`,
+        suggest: { what: 'influencers, content creators and channels (YouTubers, TikTok / Instagram creators, well-known coaches or experts)', verb: 'follows, watches or learns from', examples: 'Give actual names or @handles people in this space would recognise.' }
+    });
+}
+
+// --- 5) TOOLS & apps (#tools-apps) ------------------------------------------
+function generateAndRenderTools(corpus, audience) {
+    return _renderWhereEntityPanel(corpus, audience, {
+        elId: 'tools-apps', key: 'tools', subKey: 'use', minLen: 3, round: false,
+        accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)',
+        loading: 'Finding the apps & tools they use…',
+        empty: 'No specific apps, tools or websites were clearly named in these discussions.',
+        signal: /\b(app|apps|website|websites|site|online|tool|tools|software|platform|use|using|used|tried|subscription|subscribe|account|sign up|signed up|download|downloaded|login|log in|switched)\b|\.(com|io|app|net|org)\b/i,
+        context: /\b(use|using|used|app|website|site|online|tool|software|platform|switch|switched|tried|recommend|subscription|subscribe|download|downloaded|account|sign up|signed up|login|log in|workflow|setup|set up|plugin|integration|dashboard)\b/i,
+        system: 'You extract only explicitly-named apps, websites, online services, software and digital tools that an audience uses. You never invent names, never return physical products/gear/food/clothing or generic categories, and you output only valid JSON.',
+        prompt: (a, s) => `From these "${a}" discussions, extract the real APPS, WEBSITES, online SERVICES, SOFTWARE and digital TOOLS this audience actually uses (e.g. an app like Rover, software like Notion, a website like Chewy, a platform like YouTube).
+For each return:
+- "name": the real app / website / tool name exactly as commonly written. A real proper name — never a generic category, an activity, or a description.
+- "use": a SHORT phrase for what it is / what they use it for, ONLY if clear from context; otherwise "".
+RULES: Only real, clearly-named apps, websites, online services or software actually referenced by this audience. NEVER invent names. Do NOT return PHYSICAL products, gear, food, supplements or clothing, nor generic categories or personal names. If none are clearly named, return an empty list.
+Discussions:
+${s}
+Respond ONLY with JSON: {"tools":[{"name":"...","use":"..."}]}`,
+        suggest: { what: 'apps, websites, online services and digital tools', verb: 'uses', examples: 'Real app / website / software names only (no physical products).' }
+    });
+}
+
+// --- 6) EVENTS & places (#events-places) ------------------------------------
+function generateAndRenderEvents(corpus, audience) {
+    return _renderWhereEntityPanel(corpus, audience, {
+        elId: 'events-places', key: 'events', subKey: 'what', minLen: 3, round: false,
+        accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)',
+        loading: 'Finding where they go in the real world…',
+        empty: 'No specific events or places were clearly named in these discussions.',
+        signal: /\b(attend|attended|attending|went|going|visit|visited|store|stores|shop|shops|park|parks|trail|trails|club|clubs|facility|center|centre|clinic|vet|daycare|kennel|conference|convention|expo|meetup|meet up|show|shows|festival|workshop|class|classes|competition|trial|trials|seminar|event|events|fair|venue|near me|local|location)\b/i,
+        context: /\b(attend|attended|attending|went|going|visit|visited|go|take|took|drove|near|nearby|local|store|shop|shopping|bought|buy|park|parks|trail|club|facility|center|centre|clinic|vet|daycare|kennel|conference|convention|expo|meetup|show|shows|festival|workshop|class|classes|competition|trial|trials|venue|booth|ticket|tickets|hosted|held|located|at the)\b/i,
+        system: 'You extract only explicitly-named real-world places and events an audience physically visits or attends — stores, shops, parks, clubs, venues, vet clinics, shows, expos, competitions. You never invent names, never return generic categories or online-only platforms, and you output only valid JSON.',
+        prompt: (a, s) => `From these "${a}" discussions, extract the real-world PLACES and EVENTS this audience physically goes to — named stores/shops, parks, trails, clubs, training facilities, vet clinics, daycares, venues, AND named shows, expos, meetups, competitions, classes, conferences or festivals.
+For each return:
+- "name": the real place or event name exactly as commonly written. A real proper name — never a generic category, an activity, or a description.
+- "what": a SHORT phrase for what it is, ONLY if clear from context; otherwise "".
+RULES: Only real, clearly-named places or events actually referenced by this audience. NEVER invent names. Do NOT return generic categories, online-only websites/apps, personal names, or vague descriptions. If none are clearly named, return an empty list.
+Discussions:
+${s}
+Respond ONLY with JSON: {"events":[{"name":"...","what":"..."}]}`,
+        suggest: { what: 'real-world events, conferences, expos, meetups, shows, competitions or notable places/venues', verb: 'attends or visits in person', examples: 'Real, named events or places only — no online-only platforms.' }
+    });
+}
+
+// --- 7) WATERHOLES (#watering-holes, blueprint .watering-holes-list-item) -----
+async function generateAndRenderWaterholes(corpus, audience) {
+    const container = document.getElementById('watering-holes');
+    if (!container) return;
+    if (!window._waterholeBlueprint) {
+        const bp = container.querySelector('.watering-holes-list-item');
+        if (bp) window._waterholeBlueprint = bp.cloneNode(true);
+    }
+    const blueprint = window._waterholeBlueprint;
+    if (!blueprint) { console.warn('[Where/Waterholes] no .watering-holes-list-item template'); return; }
+    if ((corpus || []).length < 5) return;
+    const sampleText = corpus.slice(0, 60).map((p, i) => `[${i}] ${_whereTextOf(p).replace(/\s+/g, ' ').slice(0, 500)}`).join('\n');
+    const prompt = `From these "${audience}" discussions, find WHERE THIS AUDIENCE ACTUALLY HANGS OUT outside of Reddit - their "watering holes". Look across EVERY kind of gathering place they mention, not just chat apps:
+- Chat groups: Discord servers, Slack workspaces, Telegram groups/channels.
+- Social groups: Facebook Groups, WhatsApp groups, Instagram pages/hashtags, YouTube channels/communities, TikTok, X/Twitter communities.
+- Sites & apps: dedicated forums, niche websites, blogs, or apps where they congregate.
+- Real life: recurring in-person meetups, clubs, events, conventions, or local groups.
+For each place return:
+- "platform": the kind of place, e.g. "Discord", "Slack", "Telegram", "Facebook", "Instagram", "YouTube", "TikTok", "Forum", "Website", "App", "In-person", or "Other".
+- "name": the place's name exactly as it appears (verbatim).
+- "context": a SHORT phrase for what it is about, ONLY if clearly stated; otherwise "".
+RULES: Only include places actually NAMED in the text. NEVER invent names, member counts or descriptions. Reddit and subreddits do NOT count. If they genuinely name no off-Reddit places, return an empty list.
+Discussions:
+${sampleText}
+Respond ONLY with JSON: {"waterholes":[{"platform":"Facebook","name":"...","context":"..."}]}`;
+    let parsed = [];
+    try {
+        const data = await callOpenAI({
+            model: 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: 'You find where an audience gathers OFF Reddit - any named community, group, forum, site, app, social account, or in-person meetup - across every platform, not just chat apps. You never invent names, numbers or descriptions, and you output only valid JSON.' },
+                { role: 'user', content: prompt }
+            ],
+            temperature: 0.1, max_completion_tokens: 800, response_format: { type: 'json_object' }
+        });
+        parsed = data.waterholes || [];
+    } catch (e) { console.warn('[Where/Waterholes] extraction failed:', e && e.message); }
+    const allText = corpus.map(p => _whereTextOf(p)).join(' [SEP] ').toLowerCase();
+    const seen = new Set(); const items = [];
+    (parsed || []).forEach(w => {
+        if (!w || !w.name) return;
+        const name = String(w.name).trim(); const key = name.toLowerCase();
+        if (key.length < 2 || seen.has(key)) return;
+        const count = groundNameCount(key, allText);
+        if (count === 0) return;
+        seen.add(key);
+        items.push({ platform: (w.platform && String(w.platform).trim()) || 'Other', name, context: (w.context || '').trim(), count });
+    });
+    items.sort((a, b) => b.count - a.count);
+    renderWhereWaterholes(container, blueprint, items.slice(0, 8));
+}
+
+function renderWhereWaterholes(container, blueprint, items) {
+    container.querySelectorAll('.watering-holes-list-item').forEach(el => el.remove());
+    if (!items || !items.length) {
+        const empty = blueprint.cloneNode(true); empty.style.display = '';
+        const set = (sel, val) => { const e = empty.querySelector(sel); if (e) e.innerText = val; };
+        set('.waterhole-platform', ''); set('.waterhole-meta', '');
+        const nameEl = empty.querySelector('.waterhole-name'); if (nameEl) nameEl.innerText = 'No non-Reddit communities were named in these discussions.';
+        container.appendChild(empty); return;
+    }
+    items.forEach(it => {
+        const node = blueprint.cloneNode(true); node.style.display = '';
+        node.setAttribute('data-platform', it.platform.toLowerCase());
+        const set = (sel, val) => { const e = node.querySelector(sel); if (e) e.innerText = val; };
+        set('.waterhole-platform', it.platform);
+        set('.waterhole-name', it.name);
+        set('.waterhole-meta', it.context || `Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}`);
+        container.appendChild(node);
+    });
+}
+
+// --- 8) MEDIA: podcasts / channels (#podcasts, blueprint .podcasts-list-item) -
+// Corpus-only: dropped the dedicated Reddit media search + per-podcast iTunes lookups
+// for speed. Grounds names in the corpus and links to a search; no cover art.
+async function generateAndRenderMedia(corpus, audience) {
+    const container = document.getElementById('podcasts');
+    if (!container) return;
+    if (!window._podcastBlueprint) {
+        const bp = container.querySelector('.podcasts-list-item');
+        if (bp) window._podcastBlueprint = bp.cloneNode(true);
+    }
+    const blueprint = window._podcastBlueprint;
+    if (!blueprint) { console.warn('[Where/Media] no .podcasts-list-item template'); return; }
+    if ((corpus || []).length < 5) return;
+    const mediaMatch = /\b(podcast|podcasts|episode|episodes|youtube|yt|channel|channels|video|videos|watch|series|show|shows)\b/i;
+    let pool = corpus.filter(p => mediaMatch.test(_whereTextOf(p)));
+    if (!pool.length) { renderWherePodcasts(container, blueprint, []); return; }
+    const STRONG_MEDIA = /\b(podcast|podcasts|episode|episodes|youtube|channel|channels|substack|newsletter|spotify)\b/i;
+    pool.sort((a, b) => (STRONG_MEDIA.test(_whereTextOf(b)) ? 1 : 0) - (STRONG_MEDIA.test(_whereTextOf(a)) ? 1 : 0));
+    const sampleText = pool.slice(0, 40).map((p, i) => `[${i}] ${_whereTextOf(p).replace(/\s+/g, ' ').slice(0, 450)}`).join('\n');
+    const prompt = `From these "${audience}" discussions, extract the SHOWS & CHANNELS this audience follows: PODCASTS, YOUTUBE channels, and audio/video shows they mention watching, listening to, or recommending.
+For each, return:
+- "type": "podcast", "youtube", or "show".
+- "name": the actual TITLE / channel name exactly as mentioned - a real proper name, NEVER a descriptive phrase or sentence fragment.
+- "focus": a SHORT phrase for what it is about, ONLY if clearly stated; otherwise "".
+RULES: Only return real, clearly-named shows or channels. NEVER invent names or numbers, and never return generic phrases or fragments. If none are clearly named, return an empty list.
+Discussions:
+${sampleText}
+Respond ONLY with JSON: {"media":[{"type":"youtube","name":"...","focus":"..."}]}`;
+    let parsed = [];
+    try {
+        const data = await callOpenAI({
+            model: 'gpt-4o-mini',
+            messages: [
+                { role: 'system', content: 'You extract only explicitly-named podcasts, YouTube channels and shows from text. You never invent names, numbers or descriptions, and you output only valid JSON.' },
+                { role: 'user', content: prompt }
+            ],
+            temperature: 0.1, max_completion_tokens: 800, response_format: { type: 'json_object' }
+        });
+        parsed = data.media || [];
+    } catch (e) { console.warn('[Where/Media] extraction failed:', e && e.message); }
+    const allText = pool.map(p => _whereTextOf(p)).join(' [SEP] ').toLowerCase();
+    const seen = new Set(); const items = [];
+    (parsed || []).forEach(w => {
+        if (!w || !w.name) return;
+        const name = String(w.name).trim(); const key = name.toLowerCase();
+        if (key.length < 3 || seen.has(key)) return;
+        const count = groundNameCount(key, allText);
+        if (count === 0) return;
+        seen.add(key);
+        const type = ['podcast', 'youtube', 'show'].includes(String(w.type || '').toLowerCase()) ? String(w.type).toLowerCase() : 'show';
+        items.push({ type, name, focus: (w.focus || '').trim(), count });
+    });
+    items.sort((a, b) => b.count - a.count);
+    renderWherePodcasts(container, blueprint, items.slice(0, 8));
+}
+
+function renderWherePodcasts(container, blueprint, items) {
+    container.querySelectorAll('.podcasts-list-item').forEach(el => el.remove());
+    if (!items || !items.length) {
+        const empty = blueprint.cloneNode(true); empty.style.display = '';
+        const n = empty.querySelector('.podcast-name'); if (n) n.innerText = 'No podcasts or channels were named in these discussions.';
+        ['.podcast-focus', '.podcast-meta', '.media-type', '.prevalence-tag', '.prevelance-tag'].forEach(sel => { const e = empty.querySelector(sel); if (e) e.innerText = ''; });
+        const img = empty.querySelector('.podcast-image'); if (img) img.style.display = 'none';
+        container.appendChild(empty); return;
+    }
+    items.forEach(it => {
+        const node = blueprint.cloneNode(true); node.style.display = '';
+        node.setAttribute('data-media-type', it.type || 'podcast');
+        const set = (sel, val) => { const e = node.querySelector(sel); if (e) e.innerText = val; };
+        set('.podcast-name', it.name);
+        set('.podcast-focus', it.focus ? `Focus: ${it.focus}` : '');
+        set('.media-type', it.type === 'youtube' ? 'YouTube' : (it.type === 'show' ? 'Show' : 'Podcast'));
+        set('.podcast-meta', '');
+        const tier = mentionTier(it.count); set('.prevalence-tag', tier); set('.prevelance-tag', tier);
+        const img = node.querySelector('.podcast-image'); if (img) img.style.display = 'none'; // corpus-only: no cover art
+        const link = node.querySelector('.podcast-link');
+        if (link) {
+            const url = it.type === 'podcast'
+                ? `https://www.google.com/search?q=${encodeURIComponent(it.name + ' podcast')}`
+                : `https://www.youtube.com/results?search_query=${encodeURIComponent(it.name)}`;
+            link.setAttribute('href', url); link.setAttribute('target', '_blank');
+        }
+        container.appendChild(node);
+    });
+}
+
+// Lazy-load Tab 4 once, cached. Instant charts render synchronously; the 5 AI panels
+// run in parallel (corpus-only). The tab label shimmers until all panels resolve.
+function loadTabWhere() {
+    if (!window._tabLoaded) window._tabLoaded = {};
+    if (window._tabLoaded.where) return window._wherePromise || Promise.resolve();
+    if (!window._corpus || !window._corpus.length) return Promise.resolve();
+    window._tabLoaded.where = true;
+    setTabLoading('tab-where', true);
+    const corpus = window._corpus, audience = window.originalGroupName || '';
+    try { renderSocialSplitChart(corpus); } catch (e) { console.warn('[Where/Social] failed', e); }
+    try { renderLocationChart(corpus); } catch (e) { console.warn('[Where/Location] failed', e); }
+    try { renderActiveHours(corpus); } catch (e) { console.warn('[Where/Hours] failed', e); }
+    window._wherePromise = Promise.all([
+        generateAndRenderWaterholes(corpus, audience),
+        generateAndRenderMedia(corpus, audience),
+        generateAndRenderExperts(corpus, audience),
+        generateAndRenderTools(corpus, audience),
+        generateAndRenderEvents(corpus, audience)
+    ]).catch(e => { console.warn('[Where] failed', e); window._tabLoaded.where = false; })
+        .finally(() => setTabLoading('tab-where', false));
+    return window._wherePromise;
+}
+
+function openTabWhere() {
+    if (window._tabLoaded && window._tabLoaded.where) return;
+    if (!window._corpus || !window._corpus.length) return;
+    loadTabWhere();
+}
+
 // Reveal the main results container (hidden until the first analysis is ready). display:flex is set
 // with !important to beat any Webflow inline/none, then we fade in and scroll to it.
 function revealResults() {
@@ -2253,6 +2848,13 @@ function initEntryFlow() {
         talkTab.addEventListener('click', openTabTalk);
     }
 
+    // #tab-where → lazy-load Tab 4 (Where they are) on first open.
+    const whereTab = document.getElementById('tab-where');
+    if (whereTab && !whereTab.dataset.ppWired) {
+        whereTab.dataset.ppWired = '1';
+        whereTab.addEventListener('click', openTabWhere);
+    }
+
     console.log('[Entry] wired ✓ — #find-communities-btn is live');
 }
 
@@ -2269,6 +2871,8 @@ document.addEventListener('click', (e) => {
     if (polTab && !polTab.dataset.ppWired) { openPolarityMap(); return; }
     const talkTab = e.target.closest('#tab-talk');
     if (talkTab && !talkTab.dataset.ppWired) { openTabTalk(); return; }
+    const whereTab = e.target.closest('#tab-where');
+    if (whereTab && !whereTab.dataset.ppWired) { openTabWhere(); return; }
 
     // .see-more on a finding card → open that finding's modal with its sample posts.
     const seeMore = e.target.closest('.see-more, .see-more-btn');

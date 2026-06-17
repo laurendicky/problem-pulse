@@ -1,76 +1,90 @@
 // =============================================================================
-// openai-proxy.js  (Netlify function) — fail-fast on rate limits
+// Netlify function: openai-proxy
+// Path on your site: /.netlify/functions/openai-proxy
+// Drop this in at: netlify/functions/openai-proxy.js  (replace your current one)
 //
-// DEPLOY THIS to your Netlify project (netlify/functions/openai-proxy.js).
+// THE FIX: CORS headers are returned on EVERY path — the OPTIONS preflight, the
+// success response, AND every error/exception. Previously the error/timeout path
+// returned no Access-Control-Allow-Origin header, so the browser reported those
+// failures as "CORS policy" errors even though the real cause was a 5xx/timeout.
 //
-// The key change: `maxRetries: 0` + a 45s SDK timeout on the OpenAI client, plus a 45s backstop
-// race (both comfortably under Netlify Pro's 60s function ceiling) and a cached CORS preflight.
-// Previously the OpenAI SDK silently retried on 429 (rate-limit) errors with backoff, which burned
-// 20-30s and surfaced as "OpenAI_Latency_Limit" and silent client stalls. Now a throttled call
-// returns an error in a couple of seconds, and the frontend retries/falls back gracefully.
+// Requires an env var in Netlify: OPENAI_API_KEY  (Site settings → Environment).
 // =============================================================================
-const OpenAI = require('openai');
 
-const allowedOrigins = [
-  'https://minky.ai', 'https://www.minky.ai',
-  'https://problempop.io', 'https://www.problempop.io',
-  'http://localhost:8888'
+// Lock this down to your real origins (recommended). Use '*' only while testing.
+const ALLOWED_ORIGINS = [
+  'https://www.problempop.io',
+  'https://problempop.io'
 ];
 
-exports.handler = async (event) => {
-  const origin = event.headers.origin;
-  const headers = {
+function corsHeaders(origin) {
+  const allow = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
+  return {
+    'Access-Control-Allow-Origin': allow,
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': allowedOrigins.includes(origin) ? origin : '*',
-    // Cache the CORS preflight for 24h so the browser stops sending an OPTIONS before EVERY POST.
-    // Uncached preflights doubled the request count and were timing out under burst.
-    'Access-Control-Max-Age': '86400'
+    'Content-Type': 'application/json'
   };
-  if (event.httpMethod === 'OPTIONS') return { statusCode: 204, headers, body: '' };
-  if (event.httpMethod !== 'POST') {
-    return { statusCode: 405, headers, body: JSON.stringify({ error: true, message: 'POST required' }) };
+}
+
+exports.handler = async (event) => {
+  const origin = (event.headers && (event.headers.origin || event.headers.Origin)) || '';
+  const headers = corsHeaders(origin);
+
+  // 1) Preflight — must succeed with CORS headers and no body.
+  if (event.httpMethod === 'OPTIONS') {
+    return { statusCode: 204, headers, body: '' };
   }
-  if (!event.body) {
-    return { statusCode: 400, headers, body: JSON.stringify({ error: true, message: 'Missing request body' }) };
+
+  // 2) Only POST is supported — but still answer WITH CORS headers.
+  if (event.httpMethod !== 'POST') {
+    return { statusCode: 405, headers, body: JSON.stringify({ error: true, message: 'Method not allowed' }) };
   }
 
   try {
-    const apiKey = process.env.OPENAI_API_KEY;
-    // maxRetries: 0  -> never sit in a silent backoff loop on a 429; fail fast and let the
-    //                   frontend's own retry/fallback handle it.
-    // timeout: 45000 -> Netlify allows synchronous functions up to 60s, so give a slow OpenAI
-    //                   call room to finish (the old 20-25s cutoff was killing valid calls).
-    const openai = new OpenAI({ apiKey, maxRetries: 0, timeout: 45000 });
-    const { openaiPayload } = JSON.parse(event.body);
+    const { openaiPayload } = JSON.parse(event.body || '{}');
+    if (!openaiPayload) {
+      return { statusCode: 400, headers, body: JSON.stringify({ error: true, message: 'Missing openaiPayload' }) };
+    }
 
-    // Backstop race, comfortably under Netlify's 60s function ceiling.
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('OpenAI_Latency_Limit')), 45000)
-    );
-    const chatCompletion = await Promise.race([
-      openai.chat.completions.create(openaiPayload),
-      timeoutPromise
-    ]);
+    // Abort before Netlify's own timeout so we can return a CORS'd error instead of a header-less 502.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 24000); // Netlify max ~26s; leave headroom
 
+    let res;
+    try {
+      res = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+        },
+        body: JSON.stringify(openaiPayload),
+        signal: controller.signal
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (!res.ok) {
+      const detail = await res.text().catch(() => '');
+      return { statusCode: 502, headers, body: JSON.stringify({ error: true, message: `OpenAI ${res.status}`, detail }) };
+    }
+
+    const data = await res.json();
+    const content = data && data.choices && data.choices[0] && data.choices[0].message
+      ? data.choices[0].message.content
+      : '';
+
+    // Client expects { openaiResponse: "<stringified JSON content>" }
+    return { statusCode: 200, headers, body: JSON.stringify({ openaiResponse: content }) };
+
+  } catch (err) {
+    const aborted = err && err.name === 'AbortError';
     return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({ openaiResponse: chatCompletion.choices[0].message.content })
-    };
-  } catch (error) {
-    // Surface the REAL reason in the Netlify log so we can tell rate-limit (429) from key/quota.
-    console.error('[PROXY LOG]', error.status || '', error.message);
-    // 200 + error flag so the browser handles it gracefully (no CORS/fatal).
-    return {
-      statusCode: 200,
-      headers,
-      body: JSON.stringify({
-        error: true,
-        status: error.status || null,
-        message: error.message || 'OpenAI request failed'
-      })
+      statusCode: aborted ? 504 : 500,
+      headers, // <-- CORS headers present even on failure: this is what fixes your error
+      body: JSON.stringify({ error: true, message: aborted ? 'OpenAI request timed out' : (err && err.message) || 'Proxy error' })
     };
   }
 };

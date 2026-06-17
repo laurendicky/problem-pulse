@@ -19,12 +19,28 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 53 — each panel owns its shimmer (clears independently), polarity-map-wrap shimmer, balanced sentiment clouds', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 54 — OpenAI concurrency gate (max 4) + retry/backoff to ride out intermittent proxy timeouts/CORS failures', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
 // --- proxy helpers ----------------------------------------------------------
-async function callOpenAI(payload, { timeoutMs = 45000 } = {}) {
+// Shared OpenAI concurrency gate. We fire a LOT of AI calls (findings + 5 talk panels + sub-problems
+// + polarity), and bursting them all at once overloads the single Netlify function — the slow ones
+// then time out and come back WITHOUT the CORS header, which the browser reports as a CORS error.
+// Capping concurrency + retrying transient failures makes that self-heal.
+const OPENAI_MAX_CONCURRENT = 4;
+let _openaiInFlight = 0;
+const _openaiQueue = [];
+function _acquireOpenAISlot() {
+    if (_openaiInFlight < OPENAI_MAX_CONCURRENT) { _openaiInFlight++; return Promise.resolve(); }
+    return new Promise(resolve => _openaiQueue.push(resolve));
+}
+function _releaseOpenAISlot() {
+    if (_openaiQueue.length) _openaiQueue.shift()();
+    else _openaiInFlight = Math.max(0, _openaiInFlight - 1);
+}
+
+async function _callOpenAIOnce(payload, timeoutMs) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
@@ -34,11 +50,33 @@ async function callOpenAI(payload, { timeoutMs = 45000 } = {}) {
             body: JSON.stringify({ openaiPayload: payload }),
             signal: ctrl.signal
         });
+        if (!res.ok) throw new Error('OpenAI proxy status ' + res.status); // 5xx/timeout → retry
         const data = await res.json();
         if (!data || data.error) throw new Error((data && data.message) || 'OpenAI proxy error');
         return JSON.parse(data.openaiResponse);
     } finally {
         clearTimeout(timer);
+    }
+}
+
+async function callOpenAI(payload, { timeoutMs = 45000, retries = 2 } = {}) {
+    await _acquireOpenAISlot();
+    try {
+        let lastErr;
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                return await _callOpenAIOnce(payload, timeoutMs);
+            } catch (e) {
+                lastErr = e;
+                if (attempt < retries) {
+                    // brief backoff (400ms, 900ms) — handles intermittent timeouts / header-less errors
+                    await new Promise(r => setTimeout(r, 400 + attempt * 500));
+                }
+            }
+        }
+        throw lastErr;
+    } finally {
+        _releaseOpenAISlot();
     }
 }
 

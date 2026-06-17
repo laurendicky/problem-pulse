@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 50 — tone map array-coerce fix, readable cloud colors, hook engagement floor, audience snapshot populated (tabs stay clickable w/ shimmer)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 51 — per-item .is-loading shimmer on findings + voice/insider/hook/sentiment/clouds (auto-restores normal styling when each loads)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -972,7 +972,12 @@ function renderFindingCard(i, finding) {
 
 async function generateAndRenderFindings(corpus, audience) {
     auditTab2Elements();
-    for (let i = 1; i <= 5; i++) { const b = document.getElementById('findings-block' + i); if (b) b.style.display = 'none'; }
+    // Show every block in its loading state (shimmer + dimmed + floating section-title) right away;
+    // each block clears to its normal styling as soon as its card is filled below.
+    for (let i = 1; i <= 5; i++) {
+        const b = document.getElementById('findings-block' + i);
+        if (b) { b.style.removeProperty('display'); b.classList.add('is-loading'); }
+    }
 
     // NOTE: no global loader here — findings are pre-fetched in the background after Tab 1 reveals.
     // The #tab-hurts click handler shows a loader only if you open the tab before it's ready.
@@ -997,7 +1002,11 @@ async function generateAndRenderFindings(corpus, audience) {
     try {
         const parsed = await callOpenAI(payload);
         let findings = Array.isArray(parsed.findings) ? parsed.findings : [];
-        if (!findings.length) { console.warn('[Findings] none generated'); return; }
+        if (!findings.length) {
+            console.warn('[Findings] none generated');
+            for (let i = 1; i <= 5; i++) { const b = document.getElementById('findings-block' + i); if (b) b.style.display = 'none'; }
+            return;
+        }
 
         // FAST PASS (instant, no AI): keyword support to order/filter/prevalence so cards appear in
         // ~the findings-call time (~8s) instead of waiting on the slow post-assignment.
@@ -1014,6 +1023,13 @@ async function generateAndRenderFindings(corpus, audience) {
         window._findingPosts = null;        // not assigned yet — modal waits on _assignmentPromise
         window._findingPostsFull = null;
         ranked.forEach((f, idx) => renderFindingCard(idx + 1, f));
+        // Cards are in: clear the shimmer on filled blocks; hide any slots with no finding.
+        for (let i = 1; i <= 5; i++) {
+            const b = document.getElementById('findings-block' + i);
+            if (!b) continue;
+            b.classList.remove('is-loading');
+            if (i > ranked.length) b.style.display = 'none';
+        }
         console.log('[Findings] cards rendered (fast):', ranked.length, '| keyword support:', ranked.map(f => f.support));
 
         // BACKGROUND: the accurate semantic assignment. When it lands we store the posts AND refine
@@ -1045,6 +1061,9 @@ async function generateAndRenderFindings(corpus, audience) {
             });
     } catch (error) {
         console.error('[Findings] failed:', error);
+    } finally {
+        // Never leave a block shimmering if something went wrong above.
+        for (let i = 1; i <= 5; i++) { const b = document.getElementById('findings-block' + i); if (b) b.classList.remove('is-loading'); }
     }
 }
 
@@ -1058,6 +1077,19 @@ function setTabLoading(tabId, loading) {
     const textEl = el.querySelector('.main-tab-text, .tab-text-2') || el;
     textEl.classList.toggle('pp-tab-loading', !!loading); // shimmer only; tabs stay clickable
 }
+
+// Per-ITEM loading shimmer (separate from the tab-label shimmer). Toggles the Webflow `.is-loading`
+// class on a content wrapper while its data generates, then removes it so the "normal" styling is
+// restored. Ref-counted so a wrapper shared by two panels (e.g. #insider-language = tone map +
+// language-to-avoid) only clears once BOTH have finished.
+const _itemLoadCounts = {};
+function setItemLoading(id, loading) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    _itemLoadCounts[id] = Math.max(0, (_itemLoadCounts[id] || 0) + (loading ? 1 : -1));
+    el.classList.toggle('is-loading', _itemLoadCounts[id] > 0);
+}
+function setItemsLoading(ids, loading) { ids.forEach(id => setItemLoading(id, loading)); }
 
 // Shared findings loader — used by both the pre-fetch and the tab click. The shared promise means
 // findings generate exactly ONCE even if polarity + tab-hurts + pre-fetch all ask at the same time.
@@ -1969,12 +2001,19 @@ function loadTabTalk() {
     window._tabLoaded.talk = true;
     setTabLoading('tab-talk', true);
     const corpus = window._corpus, audience = window.originalGroupName || '';
+    // Light up each panel's shimmer right away; clear each one the moment ITS data lands (not when
+    // the whole tab finishes), so panels reveal independently. #insider-language is shared by the
+    // tone map + language-to-avoid, so it clears only after both resolve (Promise.all below).
+    setItemsLoading(['voice-p-wrap', 'insider-language', 'hook-wrap', 'sentiment-wrap', 'positive-wrap', 'nega-wrap'], true);
     window._talkPromise = Promise.all([
-        generateAndRenderVoiceProfile(corpus, audience),
-        generateAndRenderToneMap(corpus, audience),
-        generateAndRenderLanguageToAvoid(corpus, audience),
-        generateAndRenderHookPatterns(corpus, audience),
-        generateAndRenderSentiment(corpus, audience),
+        generateAndRenderVoiceProfile(corpus, audience).finally(() => setItemLoading('voice-p-wrap', false)),
+        Promise.all([
+            generateAndRenderToneMap(corpus, audience),
+            generateAndRenderLanguageToAvoid(corpus, audience)
+        ]).finally(() => setItemLoading('insider-language', false)),
+        generateAndRenderHookPatterns(corpus, audience).finally(() => setItemLoading('hook-wrap', false)),
+        generateAndRenderSentiment(corpus, audience)
+            .finally(() => setItemsLoading(['sentiment-wrap', 'positive-wrap', 'nega-wrap'], false)),
         Promise.resolve(generateAndRenderHistoricalSentiment(corpus)) // synchronous, corpus-only
     ]).catch(e => { console.warn('[Talk] failed', e); window._tabLoaded.talk = false; })
         .finally(() => setTabLoading('tab-talk', false));

@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 67 — comment enrichment 8→22 threads (resource-first), enriched threads fed to AI first — recovers real mentions for influencers/events/media', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 68 — corpus cache schema v2 (auto-rebuilds stale corpora, no manual Firestore deletes) + deeper cached comment text', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -433,6 +433,9 @@ async function buildCorpus(subreddits, audience) {
 // All fail-soft: if Firebase isn't on the page or errors, we just fetch live as before.
 // =============================================================================
 const CORPUS_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;   // posts: re-fetch if >14 days old (content goes stale)
+// Bump this whenever the corpus pipeline changes (discovery lane, deeper comments, etc.) so every
+// older cached corpus is treated as stale and rebuilt automatically — no manual Firestore deletes.
+const CORPUS_SCHEMA_VERSION = 2;
 const SUBREDDIT_CACHE_TTL_MS = Infinity;                // communities: never expire — the mapping is stable,
                                                         // and this lets pre-launch seeding persist. Delete a
                                                         // doc in Firebase to force a refresh for one audience.
@@ -453,6 +456,7 @@ async function getCachedCorpus(audience) {
         if (!doc.exists) return null;
         const data = doc.data() || {};
         if (!Array.isArray(data.posts) || !data.posts.length) return null;
+        if (data.schema !== CORPUS_SCHEMA_VERSION) { console.log(`[Cache] corpus for "${audience}" is an old schema (v${data.schema || 1}) — rebuilding with the current pipeline`); return null; }
         const ageMs = Date.now() - (data.updatedAt || 0);
         if (ageMs > CORPUS_CACHE_TTL_MS) { console.log(`[Cache] corpus for "${audience}" is stale (${Math.round(ageMs / 3600000)}h) — refetching`); return null; }
         return data.posts;
@@ -467,10 +471,10 @@ async function setCachedCorpus(audience, posts) {
         const lean = posts.slice(0, 300).map(p => ({
             id: p.id, subreddit: p.subreddit, title: p.title,
             body: (p.body || '').slice(0, 600),
-            commentsText: (p.commentsText || '').slice(0, 1500), // top-comment text (Where-tab signal)
+            commentsText: (p.commentsText || '').slice(0, 4000), // deep comment text (Where/Shop signal)
             score: p.score, comments: p.comments, created: p.created, permalink: p.permalink
         }));
-        await db.collection('corpora').doc(_audienceSlug(audience)).set({ audience, posts: lean, updatedAt: Date.now() });
+        await db.collection('corpora').doc(_audienceSlug(audience)).set({ audience, posts: lean, updatedAt: Date.now(), schema: CORPUS_SCHEMA_VERSION });
         console.log(`[Cache] corpus SAVED for "${audience}" (${lean.length} posts)`);
     } catch (e) { console.warn('[Cache] write failed (ignored):', e && e.message); }
 }

@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 66 — Tab 4 multi-tier sampling (top 100 titles + 30 bodies/comments), grounding-driven labels, softer "AI Choice" badge — fewer suggested, more real mentions', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 67 — comment enrichment 8→22 threads (resource-first), enriched threads fed to AI first — recovers real mentions for influencers/events/media', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -2164,13 +2164,17 @@ async function fetchPostComments(postId) {
     return bodies;
 }
 
-// Deeper comments from FEWER posts: fetch only the top 8 most-discussed threads (cuts Reddit calls
-// ~73% vs 30) but keep up to 4000 chars each — denser entity signal, far less rate-limit risk.
-async function enrichCorpusWithComments(corpus, topN = 8) {
+// Comment enrichment — names of creators/podcasts/events live in COMMENTS, not titles, so this is
+// what makes the Where panels show real "Mentioned" data instead of AI picks. We fetch the top ~22
+// threads (gated + cached, so scale stays fine), PRIORITISING resource/recommendation threads where
+// people actually list names, then the most-discussed. Up to 4000 chars of comment text each.
+const _RESOURCE_SIGNAL = /\b(recommend|recommendation|favou?rite|best|which|what.*(use|using)|anyone use|app|apps|tool|tools|podcast|channel|youtube|book|website|brand|gear|trainer|expert)\b/i;
+async function enrichCorpusWithComments(corpus, topN = 22) {
     if (!corpus || !corpus.length) return corpus;
+    const resourceScore = p => (_RESOURCE_SIGNAL.test(`${p.title || ''} ${p.body || ''}`) ? 100000 : 0) + (p.comments || 0);
     const targets = corpus
         .filter(p => p.id && (p.comments || 0) > 0 && !p.commentsText)
-        .sort((a, b) => (b.comments || 0) - (a.comments || 0)) // purely discussion density
+        .sort((a, b) => resourceScore(b) - resourceScore(a)) // resource threads first, then density
         .slice(0, topN);
     await Promise.all(targets.map(async p => {
         try {
@@ -2178,7 +2182,7 @@ async function enrichCorpusWithComments(corpus, topN = 8) {
             if (bodies.length) p.commentsText = pruneText(bodies.join(' ')).slice(0, 4000);
         } catch (e) { console.warn(`[Comments] failed for ${p.id}`, e && e.message); }
     }));
-    console.log(`[Comments] enriched ${targets.filter(p => p.commentsText).length}/${targets.length} top posts (deep)`);
+    console.log(`[Comments] enriched ${targets.filter(p => p.commentsText).length}/${targets.length} threads (resource-first)`);
     return corpus;
 }
 
@@ -2514,7 +2518,11 @@ async function generateAndRenderAllWherePanels(corpus, audience) {
     const titlesList = corpus.slice(0, 100)
         .map((p, i) => `[Post ${i} Title] ${p.title} (r/${p.subreddit || ''})`)
         .join('\n');
-    const sample = corpus.slice(0, 30)
+    // Put the comment-ENRICHED threads first — that's where creators/podcasts/events get named — then
+    // fill with the densest remaining posts, so the model actually reads the resource discussions.
+    const enriched = corpus.filter(p => p.commentsText);
+    const rest = corpus.filter(p => !p.commentsText);
+    const sample = [...enriched, ...rest].slice(0, 30)
         .map((p, i) => `[Post ${i} Body] ${(p.body || '').slice(0, 500)}\nDiscussions: ${(p.commentsText || '').slice(0, 1500)}`)
         .join('\n---\n');
 

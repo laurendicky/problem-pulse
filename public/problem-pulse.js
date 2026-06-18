@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 68 — corpus cache schema v2 (auto-rebuilds stale corpora, no manual Firestore deletes) + deeper cached comment text', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 69 — Where panels: signal-strength labels + audience-context insight, "Audience Match" label, grid filled to 6 (honest shock-absorber)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -2481,9 +2481,19 @@ function fuzzyGroundNameCount(name, allTextLow) {
     return 0; // unverifiable → falls back to a "Suggested" badge with count 0
 }
 
-// Label for AI-added (non-grounded) entries. "AI Choice" reads as a curated highlight rather than a
-// "the tool failed to find data" disclaimer. Swap to 'Recommended' / 'Audience Match' if preferred.
-const SUGGESTED_LABEL = 'AI Choice';
+// Label for AI-added (non-grounded) entries — frames them as a curated match for the niche rather
+// than a "tool failed to find data" disclaimer. The per-panel signal label keeps it honest.
+const SUGGESTED_LABEL = 'Audience Match';
+
+// Per-panel signal strength from the real (grounded) mentions, so a thin panel reads as honest
+// audience intelligence ("this community rarely names X") rather than a broken/empty panel.
+function _whereSignal(items) {
+    const real = items.filter(it => !it.suggested);
+    const mentions = real.reduce((s, it) => s + (it.count || 0), 0);
+    if (real.length >= 3 || mentions >= 8) return { t: 'Strong signal', c: '#16a34a', bg: 'rgba(22,163,74,0.12)', strong: true };
+    if (real.length >= 1) return { t: 'Moderate signal', c: '#d97706', bg: 'rgba(217,119,6,0.12)', strong: false };
+    return { t: 'Low signal', c: '#64748b', bg: 'rgba(100,116,139,0.12)', strong: false };
+}
 
 // Shared self-contained renderer for the experts / tools / events / waterholes panels.
 function renderWherePanelUI(elId, items, cfg) {
@@ -2494,9 +2504,13 @@ function renderWherePanelUI(elId, items, cfg) {
         return;
     }
     const radius = cfg.round ? '50%' : '8px';
+    const sig = _whereSignal(items);
     const sBadge = `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:#94a3b8; background:rgba(100,116,139,0.12); padding:2px 8px; border-radius:999px;">${SUGGESTED_LABEL}</span>`;
     el.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:12px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
+        <div style="display:flex; justify-content:flex-end;">
+          <span style="font-size:0.6rem; font-weight:800; letter-spacing:0.05em; text-transform:uppercase; color:${sig.c}; background:${sig.bg}; padding:3px 9px; border-radius:999px;">${sig.t}</span>
+        </div>
         ${items.map(it => `
           <div style="display:flex; align-items:center; gap:12px;">
             <span style="flex:0 0 34px; height:34px; border-radius:${radius}; background:${cfg.accentBg}; color:${cfg.accent}; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:0.82rem;">${(it.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2) || '?').toUpperCase()}</span>
@@ -2506,7 +2520,7 @@ function renderWherePanelUI(elId, items, cfg) {
             </div>
             ${it.suggested ? sBadge : `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:#6b7280; background:rgba(0,0,0,0.06); padding:2px 8px; border-radius:999px;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>`}
           </div>`).join('')}
-        ${items.some(it => it.suggested) ? `<p style="margin:8px 0 0; font-size:0.72rem; color:#9ca3af;">“${SUGGESTED_LABEL}” entries are popular picks for this audience, added where fewer explicit mentions were found.</p>` : ''}
+        ${!sig.strong && cfg.context ? `<p style="margin:8px 0 0; font-size:0.72rem; color:#9ca3af; font-style:italic;">${cfg.context}</p>` : ''}
       </div>`;
 }
 
@@ -2599,24 +2613,25 @@ ${sample}`;
             });
             const real = mapped.filter(x => !x.suggested).sort((a, b) => b.count - a.count);
             const sugg = mapped.filter(x => x.suggested);
-            // Show up to 6 real; only if fewer than 3 real, top up with suggestions to a max of 4 total
-            // — so a panel is never a wall of guesses (protects the "data-backed" credibility).
+            // Keep the grid FULL (the "shock absorber"): real mentions first, then top up with matches
+            // to ~6. Honesty comes from the per-item badge + the panel's signal label/context, not from
+            // leaving it sparse.
             const out = real.slice(0, 6);
-            if (out.length < 3) out.push(...sugg.slice(0, 4 - out.length));
+            if (out.length < 6) out.push(...sugg.slice(0, 6 - out.length));
             return out;
         };
 
         const experts = build(parsed.experts, x => x.role);
-        renderWherePanelUI('thought-leaders', experts, { round: true, accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)', empty: 'No experts or creators were identified.' });
+        renderWherePanelUI('thought-leaders', experts, { round: true, accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)', empty: 'No experts or creators were identified.', context: 'This community rarely names specific creators in discussion — these are the most relevant figures for the niche.' });
 
         const tools = build(parsed.tools, x => x.use);
-        renderWherePanelUI('tools-apps', tools, { round: false, accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)', empty: 'No tools or apps were identified.' });
+        renderWherePanelUI('tools-apps', tools, { round: false, accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)', empty: 'No tools or apps were identified.', context: 'Physical-first communities discuss software and apps less than digital-first ones — these are their most common digital touchpoints.' });
 
         const events = build(parsed.events, x => x.what);
-        renderWherePanelUI('events-places', events, { round: false, accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)', empty: 'No physical events or places were identified.' });
+        renderWherePanelUI('events-places', events, { round: false, accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)', empty: 'No physical events or places were identified.', context: 'Borderless, digital-first communities rarely name physical venues — these are the most relevant real-world events for the niche.' });
 
         const waterholes = build(parsed.waterholes, x => `Platform: ${x.platform || 'Community'}`);
-        renderWherePanelUI('watering-holes', waterholes, { round: false, accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)', empty: 'No off-Reddit community watering holes were identified.' });
+        renderWherePanelUI('watering-holes', waterholes, { round: false, accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)', empty: 'No off-Reddit community watering holes were identified.', context: 'This audience rarely names off-Reddit communities directly — these are common gathering spots for the niche.' });
 
         const media = build(parsed.media, x => { const mt = x.type === 'youtube' ? 'YouTube' : (x.type === 'show' ? 'Show' : 'Podcast'); return `${mt}${x.focus ? ' | ' + x.focus : ''}`; });
         renderWherePodcasts(media);

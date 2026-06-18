@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 60 — Tab 5 "How they shop": brands & products lists + demand-signals constellation (corpus-only, comment-enriched); switched to gpt-5.4-mini', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 61 — reverted AI_MODEL to gpt-4o-mini (gpt-5.4-mini 502s); Tab 5 "How they shop" live', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -28,7 +28,7 @@ const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Desi
 // 'gpt-5.4-mini' (recommended) or 'gpt-5.4-nano'. The request params are auto-adjusted below for
 // reasoning models (minimal reasoning so they stay fast, and temperature dropped since they reject
 // a custom one), so flipping this constant is all you need. Revert to 'gpt-4o-mini' anytime.
-const AI_MODEL = 'gpt-5.4-mini';
+const AI_MODEL = 'gpt-4o-mini';
 
 // Normalise a payload for whichever model is selected. Reasoning models (gpt-5.x / o-series) must
 // not "think" for our extraction tasks (that's slow and burns the token budget), and they reject a

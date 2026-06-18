@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 55 — Tab 4 "Where they are": social split + location + active hours (instant) + waterholes/media/experts/tools/events (AI, corpus-only, parallel, pre-fetched)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 57 — corpus comment-enrichment (top 20 posts, background + Firestore-cached) feeding the Where charts for accurate platform/location/media readings', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -28,7 +28,7 @@ const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Desi
 // + polarity), and bursting them all at once overloads the single Netlify function — the slow ones
 // then time out and come back WITHOUT the CORS header, which the browser reports as a CORS error.
 // Capping concurrency + retrying transient failures makes that self-heal.
-const OPENAI_MAX_CONCURRENT = 4;
+const OPENAI_MAX_CONCURRENT = 3;
 let _openaiInFlight = 0;
 const _openaiQueue = [];
 function _acquireOpenAISlot() {
@@ -69,8 +69,9 @@ async function callOpenAI(payload, { timeoutMs = 45000, retries = 2 } = {}) {
             } catch (e) {
                 lastErr = e;
                 if (attempt < retries) {
-                    // brief backoff (400ms, 900ms) — handles intermittent timeouts / header-less errors
-                    await new Promise(r => setTimeout(r, 400 + attempt * 500));
+                    // exponential backoff with jitter (≈0.8s, 1.6s) — lets a transient 504/429 clear
+                    // and lands the retry AFTER the initial burst has drained, instead of piling on.
+                    await new Promise(r => setTimeout(r, 800 * Math.pow(2, attempt) + Math.random() * 400));
                 }
             }
         }
@@ -441,6 +442,7 @@ async function setCachedCorpus(audience, posts) {
         const lean = posts.slice(0, 220).map(p => ({
             id: p.id, subreddit: p.subreddit, title: p.title,
             body: (p.body || '').slice(0, 600),
+            commentsText: (p.commentsText || '').slice(0, 1500), // top-comment text (Where-tab signal)
             score: p.score, comments: p.comments, created: p.created, permalink: p.permalink
         }));
         await db.collection('corpora').doc(_audienceSlug(audience)).set({ audience, posts: lean, updatedAt: Date.now() });
@@ -608,9 +610,17 @@ async function runProblemFinder() {
         } else {
             corpus = await buildCorpus(subreddits, audience);
             if (isCustomised) console.log('[Analysis] customised selection — corpus NOT cached');
-            else setCachedCorpus(audience, corpus); // fire-and-forget save for the next searcher
         }
         window._corpus = corpus;
+        // BACKGROUND comment enrichment for the Where tab (doesn't block Tab 1). Only fetches when the
+        // corpus lacks comment text (fresh build, or an older cache from before this feature). We write
+        // the cache AFTER enrichment so the stored corpus is the rich one (skipped for customised sets).
+        const _needsComments = corpus.some(p => !p.commentsText);
+        window._corpusEnrichedPromise = (async () => {
+            if (!_needsComments) return;
+            try { await enrichCorpusWithComments(corpus); } catch (e) { console.warn('[Comments] enrichment failed', e); }
+            if (!isCustomised) setCachedCorpus(audience, corpus); // fire-and-forget save for the next searcher
+        })();
         window._analysisSubreddits = subreddits;
         // New search → clear everything tab-related so it regenerates for this audience.
         window._tabLoaded = {};
@@ -618,6 +628,7 @@ async function runProblemFinder() {
         window._findingPosts = null; window._findingPostsFull = null; window._polarityPromise = null;
         window._talkPromise = null; // Tab 3 regenerates for the new audience
         window._wherePromise = null; window._platformPanelsRendered = false; // Tab 4 regenerates too
+        window._corpusEnrichedPromise = null; // re-enrich comments for the new audience
         if (window._polarityChart && window._polarityChart.destroy) { window._polarityChart.destroy(); window._polarityChart = null; }
         console.log(`[Analysis] corpus ready: ${corpus.length} posts`);
         if (!corpus.length) {
@@ -640,7 +651,12 @@ async function runProblemFinder() {
         // Pre-warm Tab 2 (findings + post assignment) and the polarity map in the background while
         // the user reads Tab 1, so switching to those tabs is near-instant. No Reddit here, so it's
         // safe to run quietly. A small delay lets Tab 1's render settle first.
-        setTimeout(() => { try { loadTabHurts(); loadPolarityMap(); loadTabTalk(); loadTabWhere(); } catch (e) { /* non-fatal */ } }, 400);
+        // STAGGERED pre-fetch: firing all four tabs at once bursts ~12 OpenAI calls at the proxy and
+        // the slow ones 504. We spread them out — findings + polarity first (the primary insights),
+        // then talk, then where — so the proxy/OpenAI never sees the whole herd at once.
+        setTimeout(() => { try { loadTabHurts(); loadPolarityMap(); } catch (e) { /* non-fatal */ } }, 400);
+        setTimeout(() => { try { loadTabTalk(); } catch (e) { /* non-fatal */ } }, 2500);
+        setTimeout(() => { try { loadTabWhere(); } catch (e) { /* non-fatal */ } }, 5000);
     } catch (error) {
         console.error('[Analysis] failed to build corpus:', error);
         showMessage('Something went wrong gathering discussions. Please try again.');
@@ -2097,7 +2113,44 @@ function openTabTalk() {
 // =============================================================================
 
 const _whereStop = ['the', 'and', 'for', 'with', 'your', 'that', 'this', 'from', 'have', 'about', 'into', 'what', 'when', 'how', 'are', 'you', 'they', 'their'];
-const _whereTextOf = p => `${p.title || ''} ${p.body || ''}`;
+const _whereTextOf = p => `${p.title || ''} ${p.body || ''} ${p.commentsText || ''}`;
+
+// Comment enrichment — the Where-tab charts (platforms, locations, tools, podcasts, places) are
+// thin on posts alone because the corpus is problem-focused; comments are where this stuff actually
+// gets named. We pull comment threads for the top posts ONCE, store them on p.commentsText (fed only
+// into _whereTextOf so the other tabs are untouched), and the enriched corpus is cached in Firestore
+// so this cost is paid once per audience, not per user.
+const _commentCache = new Map();
+async function fetchPostComments(postId) {
+    if (!postId) return [];
+    if (_commentCache.has(postId)) return _commentCache.get(postId);
+    let bodies = [];
+    try {
+        const data = await callReddit({ type: 'comments', postId });
+        if (Array.isArray(data) && data[1] && data[1].data && Array.isArray(data[1].data.children)) {
+            bodies = data[1].data.children
+                .filter(c => c.kind === 't1' && c.data && c.data.body)
+                .map(c => c.data.body)
+                .filter(b => b && b !== '[deleted]' && b !== '[removed]');
+        }
+    } catch (e) { /* best-effort: a missing thread shouldn't fail the tab */ }
+    _commentCache.set(postId, bodies);
+    return bodies;
+}
+
+async function enrichCorpusWithComments(corpus, topN = 20) {
+    if (!corpus || !corpus.length) return corpus;
+    const targets = corpus
+        .filter(p => p.id && (p.comments || 0) > 0 && !p.commentsText)
+        .sort((a, b) => ((b.score || 0) + (b.comments || 0)) - ((a.score || 0) + (a.comments || 0)))
+        .slice(0, topN);
+    await Promise.all(targets.map(async p => {
+        const bodies = await fetchPostComments(p.id);
+        if (bodies.length) p.commentsText = pruneText(bodies.join(' ')).slice(0, 1500);
+    }));
+    console.log(`[Comments] enriched ${targets.filter(p => p.commentsText).length}/${targets.length} top posts`);
+    return corpus;
+}
 
 // Count real mentions of a name in the joined corpus text; falls back to its most
 // distinctive token so "Huberman Lab" still grounds via "huberman".
@@ -2661,17 +2714,23 @@ function loadTabWhere() {
     if (!window._corpus || !window._corpus.length) return Promise.resolve();
     window._tabLoaded.where = true;
     setTabLoading('tab-where', true);
-    const corpus = window._corpus, audience = window.originalGroupName || '';
-    try { renderSocialSplitChart(corpus); } catch (e) { console.warn('[Where/Social] failed', e); }
-    try { renderLocationChart(corpus); } catch (e) { console.warn('[Where/Location] failed', e); }
-    try { renderActiveHours(corpus); } catch (e) { console.warn('[Where/Hours] failed', e); }
-    window._wherePromise = Promise.all([
-        generateAndRenderWaterholes(corpus, audience),
-        generateAndRenderMedia(corpus, audience),
-        generateAndRenderExperts(corpus, audience),
-        generateAndRenderTools(corpus, audience),
-        generateAndRenderEvents(corpus, audience)
-    ]).catch(e => { console.warn('[Where] failed', e); window._tabLoaded.where = false; })
+    const audience = window.originalGroupName || '';
+    window._wherePromise = (async () => {
+        // Wait for the background comment enrichment so the charts count over posts + comments (far
+        // more accurate). The shimmer covers this wait; enrichment is usually already done by now.
+        try { await (window._corpusEnrichedPromise || Promise.resolve()); } catch (e) { /* enrich is best-effort */ }
+        const corpus = window._corpus;
+        try { renderSocialSplitChart(corpus); } catch (e) { console.warn('[Where/Social] failed', e); }
+        try { renderLocationChart(corpus); } catch (e) { console.warn('[Where/Location] failed', e); }
+        try { renderActiveHours(corpus); } catch (e) { console.warn('[Where/Hours] failed', e); }
+        await Promise.all([
+            generateAndRenderWaterholes(corpus, audience),
+            generateAndRenderMedia(corpus, audience),
+            generateAndRenderExperts(corpus, audience),
+            generateAndRenderTools(corpus, audience),
+            generateAndRenderEvents(corpus, audience)
+        ]);
+    })().catch(e => { console.warn('[Where] failed', e); window._tabLoaded.where = false; })
         .finally(() => setTabLoading('tab-where', false));
     return window._wherePromise;
 }

@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 69 — Where panels: signal-strength labels + audience-context insight, "Audience Match" label, grid filled to 6 (honest shock-absorber)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 70 — terser descriptions (max 4 words) + client truncation of names/descriptions so cards stay compact', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -2495,6 +2495,9 @@ function _whereSignal(items) {
     return { t: 'Low signal', c: '#64748b', bg: 'rgba(100,116,139,0.12)', strong: false };
 }
 
+// Trim to a hard cap so titles/descriptions stay compact and never wrap or overflow.
+function _trunc(s, n) { s = String(s || '').trim(); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; }
+
 // Shared self-contained renderer for the experts / tools / events / waterholes panels.
 function renderWherePanelUI(elId, items, cfg) {
     const el = document.getElementById(elId);
@@ -2515,8 +2518,8 @@ function renderWherePanelUI(elId, items, cfg) {
           <div style="display:flex; align-items:center; gap:12px;">
             <span style="flex:0 0 34px; height:34px; border-radius:${radius}; background:${cfg.accentBg}; color:${cfg.accent}; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:0.82rem;">${(it.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2) || '?').toUpperCase()}</span>
             <div style="flex:1; min-width:0;">
-              <div style="font-size:0.98rem; font-weight:700; color:#1f2937;">${_escapeHtml(it.name)}</div>
-              ${it.sub ? `<div style="font-size:0.8rem; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${_escapeHtml(it.sub)}</div>` : ''}
+              <div style="font-size:0.98rem; font-weight:700; color:#1f2937; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${_escapeHtml(_trunc(it.name, 26))}</div>
+              ${it.sub ? `<div style="font-size:0.8rem; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${_escapeHtml(_trunc(it.sub, 30))}</div>` : ''}
             </div>
             ${it.suggested ? sBadge : `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:#6b7280; background:rgba(0,0,0,0.06); padding:2px 8px; border-radius:999px;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>`}
           </div>`).join('')}
@@ -2554,6 +2557,7 @@ CRITICAL EXTRACTION RULES (DO NOT VIOLATE):
   * WRONG (Generic): "design software", "sneaker apps", "parenting groups", "running shoe brands", "dog training apps", "dog parks".
   * RIGHT (Proper Nouns): "Figma", "StockX", "Peanut App", "Nike SNKRS", "Puppr", "Redwood Dog Park".
 - Do NOT return the audience's own anonymous Reddit usernames.
+- Keep every "role"/"use"/"what"/"focus" description to a MAXIMUM of 4 words — terse, no filler (e.g. "ML library", "Sleep-tracking app", "Annual design conf", "Dog trainer").
 - If no specific brand or proper noun is named, return an empty list or use your curated "suggested": true fallback to suggest actual brands.
 
 Extract these five categories:
@@ -2570,11 +2574,11 @@ Extract these five categories:
 
 Respond ONLY with a valid JSON object matching this schema:
 {
-  "experts": [{"name": "Specific Person Name", "role": "short description", "suggested": false}],
-  "tools": [{"name": "Specific App/Site Brand", "use": "short description", "suggested": false}],
-  "events": [{"name": "Specific Venue/Event Name", "what": "short description", "suggested": false}],
+  "experts": [{"name": "Specific Person Name", "role": "max 4 words", "suggested": false}],
+  "tools": [{"name": "Specific App/Site Brand", "use": "max 4 words", "suggested": false}],
+  "events": [{"name": "Specific Venue/Event Name", "what": "max 4 words", "suggested": false}],
   "waterholes": [{"name": "Specific Group Name", "platform": "e.g. Discord/Facebook/Forum", "suggested": false}],
-  "media": [{"name": "Specific Show/Channel Name", "type": "podcast/youtube/show", "focus": "short description", "suggested": false}]
+  "media": [{"name": "Specific Show/Channel Name", "type": "podcast/youtube/show", "focus": "max 4 words", "suggested": false}]
 }
 
 [READING INSTRUCTIONS]
@@ -2665,8 +2669,8 @@ function renderWherePodcasts(items) {
     items.forEach(it => {
         const node = blueprint.cloneNode(true); node.style.display = '';
         const set = (sel, val) => { const e = node.querySelector(sel); if (e) e.innerText = val; };
-        set('.podcast-name', it.name);
-        set('.podcast-focus', it.sub || '');
+        set('.podcast-name', _trunc(it.name, 34));
+        set('.podcast-focus', _trunc(it.sub || '', 38));
         set('.media-type', (it.sub || '').split(' | ')[0] || 'Podcast');
         set('.podcast-meta', '');
         const tier = it.suggested ? SUGGESTED_LABEL : mentionTier(it.count);

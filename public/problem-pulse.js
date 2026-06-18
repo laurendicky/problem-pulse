@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 65 — Tab 4 accuracy: phrase-grounding (kills generic over-count), strict no-generic + domain-agnostic prompt, capped suggestions', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 66 — Tab 4 multi-tier sampling (top 100 titles + 30 bodies/comments), grounding-driven labels, softer "AI Choice" badge — fewer suggested, more real mentions', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -2473,6 +2473,10 @@ function fuzzyGroundNameCount(name, allTextLow) {
     return 0; // unverifiable → falls back to a "Suggested" badge with count 0
 }
 
+// Label for AI-added (non-grounded) entries. "AI Choice" reads as a curated highlight rather than a
+// "the tool failed to find data" disclaimer. Swap to 'Recommended' / 'Audience Match' if preferred.
+const SUGGESTED_LABEL = 'AI Choice';
+
 // Shared self-contained renderer for the experts / tools / events / waterholes panels.
 function renderWherePanelUI(elId, items, cfg) {
     const el = document.getElementById(elId);
@@ -2482,7 +2486,7 @@ function renderWherePanelUI(elId, items, cfg) {
         return;
     }
     const radius = cfg.round ? '50%' : '8px';
-    const sBadge = `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:${cfg.accent}; background:${cfg.accentBg}; padding:2px 8px; border-radius:999px;">Suggested</span>`;
+    const sBadge = `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:#94a3b8; background:rgba(100,116,139,0.12); padding:2px 8px; border-radius:999px;">${SUGGESTED_LABEL}</span>`;
     el.innerHTML = `
       <div style="display:flex; flex-direction:column; gap:12px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
         ${items.map(it => `
@@ -2494,7 +2498,7 @@ function renderWherePanelUI(elId, items, cfg) {
             </div>
             ${it.suggested ? sBadge : `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:#6b7280; background:rgba(0,0,0,0.06); padding:2px 8px; border-radius:999px;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>`}
           </div>`).join('')}
-        ${items.some(it => it.suggested) ? `<p style="margin:8px 0 0; font-size:0.72rem; color:#9ca3af;">“Suggested” entries are common for this audience, added by AI where fewer explicit mentions were found.</p>` : ''}
+        ${items.some(it => it.suggested) ? `<p style="margin:8px 0 0; font-size:0.72rem; color:#9ca3af;">“${SUGGESTED_LABEL}” entries are popular picks for this audience, added where fewer explicit mentions were found.</p>` : ''}
       </div>`;
 }
 
@@ -2503,9 +2507,15 @@ async function generateAndRenderAllWherePanels(corpus, audience) {
     const panels = ['thought-leaders', 'tools-apps', 'events-places', 'watering-holes', 'podcasts'];
     panels.forEach(id => setItemLoading(id, true));
 
-    // Rich sample: top 40 posts, each carrying its deep comment text (the 8 enriched threads).
-    const sample = corpus.slice(0, 40)
-        .map((p, i) => `[Post ${i}] Title: ${p.title}\nContent: ${(p.body || '').slice(0, 400)}\nDiscussions: ${(p.commentsText || '').slice(0, 800)}`)
+    // MULTI-TIER sample (0 extra network cost): a DENSE list of the top 100 post TITLES (people put
+    // resource names right in titles — "Has anyone used Rover?") + the top 30 bodies with their deep
+    // comments. This gives the model a far wider net to catch organic mentions, so fewer items fall
+    // back to "suggested".
+    const titlesList = corpus.slice(0, 100)
+        .map((p, i) => `[Post ${i} Title] ${p.title} (r/${p.subreddit || ''})`)
+        .join('\n');
+    const sample = corpus.slice(0, 30)
+        .map((p, i) => `[Post ${i} Body] ${(p.body || '').slice(0, 500)}\nDiscussions: ${(p.commentsText || '').slice(0, 1500)}`)
         .join('\n---\n');
 
     const prompt = `You are an expert market researcher building a "Where they are" report for a "${audience}" audience.
@@ -2540,7 +2550,15 @@ Respond ONLY with a valid JSON object matching this schema:
   "waterholes": [{"name": "Specific Group Name", "platform": "e.g. Discord/Facebook/Forum", "suggested": false}],
   "media": [{"name": "Specific Show/Channel Name", "type": "podcast/youtube/show", "focus": "short description", "suggested": false}]
 }
-Discussions:
+
+[READING INSTRUCTIONS]
+First, scan the "Dense Post Titles List" to identify specific proper nouns frequently mentioned in thread titles.
+Second, cross-reference with the "Full Post Bodies & Discussions" to find deeper context and verify mentions.
+
+Dense Post Titles List:
+${titlesList}
+
+Full Post Bodies & Discussions:
 ${sample}`;
 
     try {
@@ -2562,8 +2580,10 @@ ${sample}`;
         const build = (raw, subFn) => {
             const mapped = (raw || []).filter(x => x && x.name).map(x => {
                 const count = fuzzyGroundNameCount(x.name, allTextLow);
-                // Suggested if the AI flagged it OR it isn't grounded in the corpus.
-                return { name: x.name, sub: subFn(x), count, suggested: !!x.suggested || count === 0 };
+                // Grounding is the source of truth: if the name is actually in the corpus it's a REAL
+                // mention (even if the AI flagged it suggested), otherwise it's an AI pick. The wider
+                // multi-tier sample means far more names now ground → fewer "suggested" badges.
+                return { name: x.name, sub: subFn(x), count, suggested: count === 0 };
             });
             const real = mapped.filter(x => !x.suggested).sort((a, b) => b.count - a.count);
             const sugg = mapped.filter(x => x.suggested);
@@ -2622,7 +2642,7 @@ function renderWherePodcasts(items) {
         set('.podcast-focus', it.sub || '');
         set('.media-type', (it.sub || '').split(' | ')[0] || 'Podcast');
         set('.podcast-meta', '');
-        const tier = it.suggested ? 'Suggested' : mentionTier(it.count);
+        const tier = it.suggested ? SUGGESTED_LABEL : mentionTier(it.count);
         set('.prevalence-tag', tier); set('.prevelance-tag', tier);
         const img = node.querySelector('.podcast-image'); if (img) img.style.display = 'none';
         const link = node.querySelector('.podcast-link');

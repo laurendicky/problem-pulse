@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 63 — Tab 4 unified: 5 panels in ONE OpenAI call + built-in seeding, comment-enrich top 8 (deep 4k), fuzzy grounding (10 calls → 1)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 64 — resource-discovery query lane + grounding-only "suggested" + suggestions capped so real data dominates Tab 4/5', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -279,6 +279,10 @@ function buildSubredditQuery(subreddits) {
 
 // Consolidate the given terms into as few Reddit queries as possible (caps keep the request count
 // low): single words in OR groups of 4 (max 8 words → 2 queries), plus up to 4 quoted phrases.
+// One extra "resource discovery" lane pulls the casual recommend/tool/podcast threads that the
+// problem-signal lanes filter out — this is what feeds real (not AI-guessed) data into Tabs 4 & 5.
+const DISCOVERY_TERMS = ['recommend', 'tool', 'app', 'podcast', 'website', 'book', 'favorite', 'best'];
+
 function buildProblemQueries(terms) {
     const single = (terms || []).filter(t => t && !/\s/.test(t)).slice(0, 8);
     const phrases = (terms || []).filter(t => t && /\s/.test(t)).slice(0, 4);
@@ -288,6 +292,7 @@ function buildProblemQueries(terms) {
         queries.push(group.length > 1 ? '(' + group.join(' OR ') + ')' : group[0]);
     }
     phrases.forEach(p => queries.push(`"${p}"`));
+    queries.push(`(${DISCOVERY_TERMS.join(' OR ')})`); // resource-sharing lane
     return queries.length ? queries : ['(problem OR struggle OR advice)'];
 }
 
@@ -2526,38 +2531,34 @@ ${sample}`;
         });
 
         const allTextLow = corpus.map(_whereTextOf).join(' ').toLowerCase();
-        // Real (grounded) mentions sort to the top; suggestions fill the rest. Cap at 6 each.
-        const rank = (a, b) => ((a.suggested ? 1 : 0) - (b.suggested ? 1 : 0)) || (b.count - a.count);
+        // "Suggested" is defined ONLY by grounding: if the name is actually found in the corpus it's
+        // REAL, otherwise it's an AI suggestion (we ignore the model's self-reported flag — the corpus
+        // is the source of truth). Real items always show; suggestions only top up a THIN panel and
+        // never dominate: if we have ≥3 real, show up to 6 real and NO suggestions; otherwise show the
+        // real ones plus a few suggestions, capped at 4 total. Keeps the "data-backed" promise honest.
+        const build = (raw, subFn) => {
+            const mapped = (raw || []).filter(x => x && x.name).map(x => {
+                const count = fuzzyGroundNameCount(x.name, allTextLow);
+                return { name: x.name, sub: subFn(x), count, suggested: count === 0 };
+            });
+            const real = mapped.filter(x => !x.suggested).sort((a, b) => b.count - a.count);
+            const sugg = mapped.filter(x => x.suggested);
+            return real.length >= 3 ? real.slice(0, 6) : real.concat(sugg).slice(0, 4);
+        };
 
-        const experts = (parsed.experts || []).map(e => {
-            const count = fuzzyGroundNameCount(e.name, allTextLow);
-            return { name: e.name, sub: e.role, count, suggested: !!e.suggested || count === 0 };
-        }).filter(x => x.name).sort(rank).slice(0, 6);
+        const experts = build(parsed.experts, x => x.role);
         renderWherePanelUI('thought-leaders', experts, { round: true, accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)', empty: 'No experts or creators were identified.' });
 
-        const tools = (parsed.tools || []).map(t => {
-            const count = fuzzyGroundNameCount(t.name, allTextLow);
-            return { name: t.name, sub: t.use, count, suggested: !!t.suggested || count === 0 };
-        }).filter(x => x.name).sort(rank).slice(0, 6);
+        const tools = build(parsed.tools, x => x.use);
         renderWherePanelUI('tools-apps', tools, { round: false, accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)', empty: 'No tools or apps were identified.' });
 
-        const events = (parsed.events || []).map(e => {
-            const count = fuzzyGroundNameCount(e.name, allTextLow);
-            return { name: e.name, sub: e.what, count, suggested: !!e.suggested || count === 0 };
-        }).filter(x => x.name).sort(rank).slice(0, 6);
+        const events = build(parsed.events, x => x.what);
         renderWherePanelUI('events-places', events, { round: false, accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)', empty: 'No physical events or places were identified.' });
 
-        const waterholes = (parsed.waterholes || []).map(w => {
-            const count = fuzzyGroundNameCount(w.name, allTextLow);
-            return { name: w.name, sub: `Platform: ${w.platform || 'Community'}`, count, suggested: !!w.suggested || count === 0 };
-        }).filter(x => x.name).sort(rank).slice(0, 6);
+        const waterholes = build(parsed.waterholes, x => `Platform: ${x.platform || 'Community'}`);
         renderWherePanelUI('watering-holes', waterholes, { round: false, accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)', empty: 'No off-Reddit community watering holes were identified.' });
 
-        const media = (parsed.media || []).map(m => {
-            const count = fuzzyGroundNameCount(m.name, allTextLow);
-            const mediaType = m.type === 'youtube' ? 'YouTube' : (m.type === 'show' ? 'Show' : 'Podcast');
-            return { name: m.name, sub: `${mediaType}${m.focus ? ' | ' + m.focus : ''}`, count, suggested: !!m.suggested || count === 0 };
-        }).filter(x => x.name).sort(rank).slice(0, 6);
+        const media = build(parsed.media, x => { const mt = x.type === 'youtube' ? 'YouTube' : (x.type === 'show' ? 'Show' : 'Podcast'); return `${mt}${x.focus ? ' | ' + x.focus : ''}`; });
         renderWherePodcasts(media);
 
         console.log(`[Where] unified harvest: experts=${experts.length} tools=${tools.length} events=${events.length} waterholes=${waterholes.length} media=${media.length}`);

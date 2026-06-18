@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 62 — Media panel: diagnostic log + clearly-labelled "Suggested" fallback so it isn\'t blank when few shows are named', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 63 — Tab 4 unified: 5 panels in ONE OpenAI call + built-in seeding, comment-enrich top 8 (deep 4k), fuzzy grounding (10 calls → 1)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -2159,17 +2159,21 @@ async function fetchPostComments(postId) {
     return bodies;
 }
 
-async function enrichCorpusWithComments(corpus, topN = 30) {
+// Deeper comments from FEWER posts: fetch only the top 8 most-discussed threads (cuts Reddit calls
+// ~73% vs 30) but keep up to 4000 chars each — denser entity signal, far less rate-limit risk.
+async function enrichCorpusWithComments(corpus, topN = 8) {
     if (!corpus || !corpus.length) return corpus;
     const targets = corpus
         .filter(p => p.id && (p.comments || 0) > 0 && !p.commentsText)
-        .sort((a, b) => ((b.score || 0) + (b.comments || 0)) - ((a.score || 0) + (a.comments || 0)))
+        .sort((a, b) => (b.comments || 0) - (a.comments || 0)) // purely discussion density
         .slice(0, topN);
     await Promise.all(targets.map(async p => {
-        const bodies = await fetchPostComments(p.id);
-        if (bodies.length) p.commentsText = pruneText(bodies.join(' ')).slice(0, 1500);
+        try {
+            const bodies = await fetchPostComments(p.id);
+            if (bodies.length) p.commentsText = pruneText(bodies.join(' ')).slice(0, 4000);
+        } catch (e) { console.warn(`[Comments] failed for ${p.id}`, e && e.message); }
     }));
-    console.log(`[Comments] enriched ${targets.filter(p => p.commentsText).length}/${targets.length} top posts`);
+    console.log(`[Comments] enriched ${targets.filter(p => p.commentsText).length}/${targets.length} top posts (deep)`);
     return corpus;
 }
 
@@ -2433,218 +2437,139 @@ function renderActiveHours(posts) {
       </div>`;
 }
 
-// --- Shared engine for the named-entity panels (experts / tools / events) ----
-// All three: filter corpus by signal → sample → AI extract → ground against the
-// corpus → top up with labelled AI suggestions if thin → render self-contained HTML.
-async function _renderWhereEntityPanel(corpus, audience, cfg) {
-    const el = document.getElementById(cfg.elId);
+// --- UNIFIED "Where they are" system -----------------------------------------
+// One OpenAI call extracts all 5 panels (experts/tools/events/waterholes/media) WITH built-in
+// "suggested" seeding, instead of 5+5 separate calls. Client-side FUZZY grounding keeps real
+// mentions even when the AI's name differs slightly from the corpus wording.
+
+// Flexible grounding: exact phrase first, else fall back to the most distinctive token, so
+// "Andrew Huberman" still grounds via "huberman" instead of being discarded.
+function fuzzyGroundNameCount(name, allTextLow) {
+    const key = String(name).trim().toLowerCase();
+    if (key.length < 3) return 0;
+    const esc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const exact = allTextLow.match(new RegExp(`\\b${esc}\\b`, 'g'));
+    if (exact && exact.length) return exact.length;
+    const tokens = key.split(/\s+/).filter(t => t.length > 3 && !_whereStop.includes(t));
+    if (!tokens.length) return 0;
+    const longest = tokens.sort((a, b) => b.length - a.length)[0];
+    const escTok = longest.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const tok = allTextLow.match(new RegExp(`\\b${escTok}\\b`, 'g'));
+    return tok ? tok.length : 0;
+}
+
+// Shared self-contained renderer for the experts / tools / events / waterholes panels.
+function renderWherePanelUI(elId, items, cfg) {
+    const el = document.getElementById(elId);
     if (!el) return;
-    if ((corpus || []).length < 5) return;
-    el.innerHTML = `<p class="loading-text" style="text-align:center; color:#9ca3af; padding:1rem;">${cfg.loading}</p>`;
-    let pool = corpus.filter(p => cfg.signal.test(_whereTextOf(p)));
-    if (pool.length < 15) pool = corpus.slice();
-    const stableId = p => String(p.id || '');
-    const sample = pool.sort((a, b) => ((b.score || 0) - (a.score || 0)) || (stableId(a) < stableId(b) ? -1 : 1))
-        .slice(0, 70).map((p, i) => `[${i}] ${_whereTextOf(p).replace(/\s+/g, ' ').slice(0, 450)}`).join('\n');
-    let parsed = [];
-    try {
-        const data = await callOpenAI({
-            model: AI_MODEL,
-            messages: [{ role: 'system', content: cfg.system }, { role: 'user', content: cfg.prompt(audience, sample) }],
-            temperature: 0.1, max_completion_tokens: 700, response_format: { type: 'json_object' }
-        });
-        parsed = data[cfg.key] || [];
-    } catch (e) { console.warn(`[Where/${cfg.elId}] extraction failed:`, e && e.message); }
-    const segments = corpus.map(p => _whereTextOf(p).toLowerCase());
-    const audienceTokens = new Set(String(audience || '').toLowerCase().split(/\s+/).filter(Boolean));
-    const seen = new Set(); const items = [];
-    (parsed || []).forEach(w => {
-        if (!w || !w.name) return;
-        const name = String(w.name).trim(); const key = name.toLowerCase();
-        const minLen = cfg.minLen || 3;
-        if (seen.has(key) || key.length < minLen) return;
-        const tokens = key.split(/\s+/).filter(Boolean);
-        if (minLen >= 4 && tokens.length === 1 && key.length < 5) return;
-        if (tokens.every(t => audienceTokens.has(t))) return;
-        const { total, contextHits } = countNameInContext(key, segments, cfg.context);
-        if (total === 0) return;
-        if (contextHits === 0 && total < 2) return;
-        seen.add(key);
-        items.push({ name, sub: (w[cfg.subKey] || '').trim(), count: total, strong: contextHits });
-    });
-    items.sort((a, b) => (b.strong - a.strong) || (b.count - a.count));
-    let top = items.slice(0, 8).map(it => ({ ...it, suggested: false }));
-    if (top.length < 4) {
-        const have = new Set(top.map(it => it.name.toLowerCase()));
-        const suggestions = await aiSuggestEntities(audience, cfg.suggest, [...have], 6 - top.length);
-        suggestions.forEach(s => {
-            if (!s || !s.name) return;
-            const nm = String(s.name).trim();
-            if (!nm || have.has(nm.toLowerCase())) return;
-            have.add(nm.toLowerCase());
-            top.push({ name: nm, sub: (s.note || '').trim(), count: 0, strong: 0, suggested: true });
-        });
+    if (!items || !items.length) {
+        el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">${cfg.empty}</p>`;
+        return;
     }
-    if (!top.length) { el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">${cfg.empty}</p>`; return; }
-    const radius = cfg.round ? '50%' : '9px';
+    const radius = cfg.round ? '50%' : '8px';
     const sBadge = `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:${cfg.accent}; background:${cfg.accentBg}; padding:2px 8px; border-radius:999px;">Suggested</span>`;
     el.innerHTML = `
-      <div style="display:flex; flex-direction:column; gap:10px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
-        ${top.map(it => `
+      <div style="display:flex; flex-direction:column; gap:12px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
+        ${items.map(it => `
           <div style="display:flex; align-items:center; gap:12px;">
             <span style="flex:0 0 34px; height:34px; border-radius:${radius}; background:${cfg.accentBg}; color:${cfg.accent}; font-weight:800; display:flex; align-items:center; justify-content:center; font-size:0.82rem;">${(it.name.replace(/[^a-zA-Z0-9]/g, '').slice(0, 2) || '?').toUpperCase()}</span>
             <div style="flex:1; min-width:0;">
               <div style="font-size:0.98rem; font-weight:700; color:#1f2937;">${_escapeHtml(it.name)}</div>
-              ${it.sub ? `<div style="font-size:0.8rem; color:#6b7280;">${_escapeHtml(it.sub)}</div>` : ''}
+              ${it.sub ? `<div style="font-size:0.8rem; color:#6b7280; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${_escapeHtml(it.sub)}</div>` : ''}
             </div>
             ${it.suggested ? sBadge : `<span style="flex:0 0 auto; font-size:0.68rem; font-weight:700; color:#6b7280; background:rgba(0,0,0,0.06); padding:2px 8px; border-radius:999px;">Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}</span>`}
           </div>`).join('')}
-        ${top.some(it => it.suggested) ? `<p style="margin:8px 0 0; font-size:0.72rem; color:#9ca3af;">“Suggested” entries are common for this audience, added by AI because few were explicitly named — not verified mentions.</p>` : ''}
+        ${items.some(it => it.suggested) ? `<p style="margin:8px 0 0; font-size:0.72rem; color:#9ca3af;">“Suggested” entries are common for this audience, added by AI where fewer explicit mentions were found.</p>` : ''}
       </div>`;
 }
 
-// --- 4) EXPERTS / influencers (#thought-leaders) ----------------------------
-function generateAndRenderExperts(corpus, audience) {
-    return _renderWhereEntityPanel(corpus, audience, {
-        elId: 'thought-leaders', key: 'people', subKey: 'role', minLen: 4, round: true,
-        accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)',
-        loading: 'Finding the people they follow…',
-        empty: 'No influencers, creators or channels were clearly named in these discussions.',
-        signal: /\b(recommend|recommends|recommended|follow|following|read|reading|author|wrote|writes|expert|guru|coach|mentor|trainer|trainers|vet|vets|behaviou?rist|breeder|listen|listening|interview|influencer|creator|podcast|channel|youtube|video|videos|account|method|book|books)\b/i,
-        context: /\b(recommend|recommends|recommended|follow|following|watch|watching|subscribe|subscribed|guru|coach|mentor|expert|trainer|trainers|vet|vets|behaviou?rist|breeder|advice|teaches|taught|course|method|channel|video|videos|account|page|insta|instagram|tiktok|youtube|podcast|interview|influencer|creator|author|wrote)\b/i,
-        system: 'You extract only explicitly-named people, content creators, channels and social accounts that an audience follows or references. You never invent names or roles, and you output only valid JSON.',
-        prompt: (a, s) => `From these "${a}" discussions, extract the INFLUENCERS and PEOPLE this audience follows, watches, recommends, or cites — including content creators, YouTubers, TikTokers, Instagram accounts, podcast hosts, named channels, coaches, authors, experts and well-known figures in this space.
-For each return:
-- "name": the real name, channel name, or @handle exactly as commonly written. Never a description or a generic role.
-- "role": a SHORT phrase for who they are / their platform, ONLY if clear from context; otherwise "".
-RULES: Only real, clearly-named people, creators or channels actually referenced by this audience. NEVER invent names or roles. Do not return the audience's own anonymous usernames, generic role words, or product/company brands that aren't a creator or personality. If none are clearly named, return an empty list.
-Discussions:
-${s}
-Respond ONLY with JSON: {"people":[{"name":"...","role":"..."}]}`,
-        suggest: { what: 'influencers, content creators and channels (YouTubers, TikTok / Instagram creators, well-known coaches or experts)', verb: 'follows, watches or learns from', examples: 'Give actual names or @handles people in this space would recognise.' }
-    });
-}
+// Single, high-efficiency call that harvests all 5 entity lists at once (with seeding built in).
+async function generateAndRenderAllWherePanels(corpus, audience) {
+    const panels = ['thought-leaders', 'tools-apps', 'events-places', 'watering-holes', 'podcasts'];
+    panels.forEach(id => setItemLoading(id, true));
 
-// --- 5) TOOLS & apps (#tools-apps) ------------------------------------------
-function generateAndRenderTools(corpus, audience) {
-    return _renderWhereEntityPanel(corpus, audience, {
-        elId: 'tools-apps', key: 'tools', subKey: 'use', minLen: 3, round: false,
-        accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)',
-        loading: 'Finding the apps & tools they use…',
-        empty: 'No specific apps, tools or websites were clearly named in these discussions.',
-        signal: /\b(app|apps|website|websites|site|online|tool|tools|software|platform|use|using|used|tried|subscription|subscribe|account|sign up|signed up|download|downloaded|login|log in|switched)\b|\.(com|io|app|net|org)\b/i,
-        context: /\b(use|using|used|app|website|site|online|tool|software|platform|switch|switched|tried|recommend|subscription|subscribe|download|downloaded|account|sign up|signed up|login|log in|workflow|setup|set up|plugin|integration|dashboard)\b/i,
-        system: 'You extract only explicitly-named apps, websites, online services, software and digital tools that an audience uses. You never invent names, never return physical products/gear/food/clothing or generic categories, and you output only valid JSON.',
-        prompt: (a, s) => `From these "${a}" discussions, extract the real APPS, WEBSITES, online SERVICES, SOFTWARE and digital TOOLS this audience actually uses (e.g. an app like Rover, software like Notion, a website like Chewy, a platform like YouTube).
-For each return:
-- "name": the real app / website / tool name exactly as commonly written. A real proper name — never a generic category, an activity, or a description.
-- "use": a SHORT phrase for what it is / what they use it for, ONLY if clear from context; otherwise "".
-RULES: Only real, clearly-named apps, websites, online services or software actually referenced by this audience. NEVER invent names. Do NOT return PHYSICAL products, gear, food, supplements or clothing, nor generic categories or personal names. If none are clearly named, return an empty list.
-Discussions:
-${s}
-Respond ONLY with JSON: {"tools":[{"name":"...","use":"..."}]}`,
-        suggest: { what: 'apps, websites, online services and digital tools', verb: 'uses', examples: 'Real app / website / software names only (no physical products).' }
-    });
-}
+    // Rich sample: top 40 posts, each carrying its deep comment text (the 8 enriched threads).
+    const sample = corpus.slice(0, 40)
+        .map((p, i) => `[Post ${i}] Title: ${p.title}\nContent: ${(p.body || '').slice(0, 400)}\nDiscussions: ${(p.commentsText || '').slice(0, 800)}`)
+        .join('\n---\n');
 
-// --- 6) EVENTS & places (#events-places) ------------------------------------
-function generateAndRenderEvents(corpus, audience) {
-    return _renderWhereEntityPanel(corpus, audience, {
-        elId: 'events-places', key: 'events', subKey: 'what', minLen: 3, round: false,
-        accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)',
-        loading: 'Finding where they go in the real world…',
-        empty: 'No specific events or places were clearly named in these discussions.',
-        signal: /\b(attend|attended|attending|went|going|visit|visited|store|stores|shop|shops|park|parks|trail|trails|club|clubs|facility|center|centre|clinic|vet|daycare|kennel|conference|convention|expo|meetup|meet up|show|shows|festival|workshop|class|classes|competition|trial|trials|seminar|event|events|fair|venue|near me|local|location)\b/i,
-        context: /\b(attend|attended|attending|went|going|visit|visited|go|take|took|drove|near|nearby|local|store|shop|shopping|bought|buy|park|parks|trail|club|facility|center|centre|clinic|vet|daycare|kennel|conference|convention|expo|meetup|show|shows|festival|workshop|class|classes|competition|trial|trials|venue|booth|ticket|tickets|hosted|held|located|at the)\b/i,
-        system: 'You extract only explicitly-named real-world places and events an audience physically visits or attends — stores, shops, parks, clubs, venues, vet clinics, shows, expos, competitions. You never invent names, never return generic categories or online-only platforms, and you output only valid JSON.',
-        prompt: (a, s) => `From these "${a}" discussions, extract the real-world PLACES and EVENTS this audience physically goes to — named stores/shops, parks, trails, clubs, training facilities, vet clinics, daycares, venues, AND named shows, expos, meetups, competitions, classes, conferences or festivals.
-For each return:
-- "name": the real place or event name exactly as commonly written. A real proper name — never a generic category, an activity, or a description.
-- "what": a SHORT phrase for what it is, ONLY if clear from context; otherwise "".
-RULES: Only real, clearly-named places or events actually referenced by this audience. NEVER invent names. Do NOT return generic categories, online-only websites/apps, personal names, or vague descriptions. If none are clearly named, return an empty list.
-Discussions:
-${s}
-Respond ONLY with JSON: {"events":[{"name":"...","what":"..."}]}`,
-        suggest: { what: 'real-world events, conferences, expos, meetups, shows, competitions or notable places/venues', verb: 'attends or visits in person', examples: 'Real, named events or places only — no online-only platforms.' }
-    });
-}
+    const prompt = `You are a market researcher building a "Where they are" report for a "${audience}" audience.
+Analyse the discussions below and extract five distinct lists of resources they discuss, use, or follow.
+For each list, retrieve up to 8 of the most prominent, real names. If there are fewer than 6 explicit mentions in the text, you MUST append well-known, highly relevant suggestions that are real and popular for this target audience, setting "suggested": true for those.
 
-// --- 7) WATERHOLES (#watering-holes, blueprint .watering-holes-list-item) -----
-async function generateAndRenderWaterholes(corpus, audience) {
-    const container = document.getElementById('watering-holes');
-    if (!container) return;
-    if (!window._waterholeBlueprint) {
-        const bp = container.querySelector('.watering-holes-list-item');
-        if (bp) window._waterholeBlueprint = bp.cloneNode(true);
-    }
-    const blueprint = window._waterholeBlueprint;
-    if (!blueprint) { console.warn('[Where/Waterholes] no .watering-holes-list-item template'); return; }
-    if ((corpus || []).length < 5) return;
-    const sampleText = corpus.slice(0, 60).map((p, i) => `[${i}] ${_whereTextOf(p).replace(/\s+/g, ' ').slice(0, 500)}`).join('\n');
-    const prompt = `From these "${audience}" discussions, find WHERE THIS AUDIENCE ACTUALLY HANGS OUT outside of Reddit - their "watering holes". Look across EVERY kind of gathering place they mention, not just chat apps:
-- Chat groups: Discord servers, Slack workspaces, Telegram groups/channels.
-- Social groups: Facebook Groups, WhatsApp groups, Instagram pages/hashtags, YouTube channels/communities, TikTok, X/Twitter communities.
-- Sites & apps: dedicated forums, niche websites, blogs, or apps where they congregate.
-- Real life: recurring in-person meetups, clubs, events, conventions, or local groups.
-For each place return:
-- "platform": the kind of place, e.g. "Discord", "Slack", "Telegram", "Facebook", "Instagram", "YouTube", "TikTok", "Forum", "Website", "App", "In-person", or "Other".
-- "name": the place's name exactly as it appears (verbatim).
-- "context": a SHORT phrase for what it is about, ONLY if clearly stated; otherwise "".
-RULES: Only include places actually NAMED in the text. NEVER invent names, member counts or descriptions. Reddit and subreddits do NOT count. If they genuinely name no off-Reddit places, return an empty list.
+Extract these five categories:
+1. "experts": Real people, creators, YouTubers, authors, or leaders they follow or learn from.
+2. "tools": Digital tools, apps, software, or websites they actually use or visit.
+3. "events": Physical real-world places, events, stores, expos, meetups, or venues they physically visit.
+4. "waterholes": Non-Reddit communities where they gather (e.g. Slack workspaces, Discord servers, Facebook groups, independent forums).
+5. "media": Podcasts, YouTube channels, newsletters, or video shows they recommend or watch.
+
+Respond ONLY with a valid JSON object matching this schema:
+{
+  "experts": [{"name": "...", "role": "short description", "suggested": false}],
+  "tools": [{"name": "...", "use": "short description", "suggested": false}],
+  "events": [{"name": "...", "what": "short description", "suggested": false}],
+  "waterholes": [{"name": "...", "platform": "e.g. Discord/Facebook/Forum", "suggested": false}],
+  "media": [{"name": "...", "type": "podcast/youtube/show", "focus": "short description", "suggested": false}]
+}
 Discussions:
-${sampleText}
-Respond ONLY with JSON: {"waterholes":[{"platform":"Facebook","name":"...","context":"..."}]}`;
-    let parsed = [];
+${sample}`;
+
     try {
-        const data = await callOpenAI({
+        const parsed = await callOpenAI({
             model: AI_MODEL,
             messages: [
-                { role: 'system', content: 'You find where an audience gathers OFF Reddit - any named community, group, forum, site, app, social account, or in-person meetup - across every platform, not just chat apps. You never invent names, numbers or descriptions, and you output only valid JSON.' },
+                { role: 'system', content: 'You are an advanced entities extraction engine for audience research. You output only valid JSON.' },
                 { role: 'user', content: prompt }
             ],
-            temperature: 0.1, max_completion_tokens: 800, response_format: { type: 'json_object' }
+            temperature: 0.1, max_completion_tokens: 1500, response_format: { type: 'json_object' }
         });
-        parsed = data.waterholes || [];
-    } catch (e) { console.warn('[Where/Waterholes] extraction failed:', e && e.message); }
-    const allText = corpus.map(p => _whereTextOf(p)).join(' [SEP] ').toLowerCase();
-    const seen = new Set(); const items = [];
-    (parsed || []).forEach(w => {
-        if (!w || !w.name) return;
-        const name = String(w.name).trim(); const key = name.toLowerCase();
-        if (key.length < 2 || seen.has(key)) return;
-        const count = groundNameCount(key, allText);
-        if (count === 0) return;
-        seen.add(key);
-        items.push({ platform: (w.platform && String(w.platform).trim()) || 'Other', name, context: (w.context || '').trim(), count });
-    });
-    items.sort((a, b) => b.count - a.count);
-    renderWhereWaterholes(container, blueprint, items.slice(0, 8));
-}
 
-function renderWhereWaterholes(container, blueprint, items) {
-    container.querySelectorAll('.watering-holes-list-item').forEach(el => el.remove());
-    if (!items || !items.length) {
-        const empty = blueprint.cloneNode(true); empty.style.display = '';
-        const set = (sel, val) => { const e = empty.querySelector(sel); if (e) e.innerText = val; };
-        set('.waterhole-platform', ''); set('.waterhole-meta', '');
-        const nameEl = empty.querySelector('.waterhole-name'); if (nameEl) nameEl.innerText = 'No non-Reddit communities were named in these discussions.';
-        container.appendChild(empty); return;
+        const allTextLow = corpus.map(_whereTextOf).join(' ').toLowerCase();
+        // Real (grounded) mentions sort to the top; suggestions fill the rest. Cap at 6 each.
+        const rank = (a, b) => ((a.suggested ? 1 : 0) - (b.suggested ? 1 : 0)) || (b.count - a.count);
+
+        const experts = (parsed.experts || []).map(e => {
+            const count = fuzzyGroundNameCount(e.name, allTextLow);
+            return { name: e.name, sub: e.role, count, suggested: !!e.suggested || count === 0 };
+        }).filter(x => x.name).sort(rank).slice(0, 6);
+        renderWherePanelUI('thought-leaders', experts, { round: true, accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)', empty: 'No experts or creators were identified.' });
+
+        const tools = (parsed.tools || []).map(t => {
+            const count = fuzzyGroundNameCount(t.name, allTextLow);
+            return { name: t.name, sub: t.use, count, suggested: !!t.suggested || count === 0 };
+        }).filter(x => x.name).sort(rank).slice(0, 6);
+        renderWherePanelUI('tools-apps', tools, { round: false, accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)', empty: 'No tools or apps were identified.' });
+
+        const events = (parsed.events || []).map(e => {
+            const count = fuzzyGroundNameCount(e.name, allTextLow);
+            return { name: e.name, sub: e.what, count, suggested: !!e.suggested || count === 0 };
+        }).filter(x => x.name).sort(rank).slice(0, 6);
+        renderWherePanelUI('events-places', events, { round: false, accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)', empty: 'No physical events or places were identified.' });
+
+        const waterholes = (parsed.waterholes || []).map(w => {
+            const count = fuzzyGroundNameCount(w.name, allTextLow);
+            return { name: w.name, sub: `Platform: ${w.platform || 'Community'}`, count, suggested: !!w.suggested || count === 0 };
+        }).filter(x => x.name).sort(rank).slice(0, 6);
+        renderWherePanelUI('watering-holes', waterholes, { round: false, accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)', empty: 'No off-Reddit community watering holes were identified.' });
+
+        const media = (parsed.media || []).map(m => {
+            const count = fuzzyGroundNameCount(m.name, allTextLow);
+            const mediaType = m.type === 'youtube' ? 'YouTube' : (m.type === 'show' ? 'Show' : 'Podcast');
+            return { name: m.name, sub: `${mediaType}${m.focus ? ' | ' + m.focus : ''}`, count, suggested: !!m.suggested || count === 0 };
+        }).filter(x => x.name).sort(rank).slice(0, 6);
+        renderWherePodcasts(media);
+
+        console.log(`[Where] unified harvest: experts=${experts.length} tools=${tools.length} events=${events.length} waterholes=${waterholes.length} media=${media.length}`);
+    } catch (e) {
+        console.error('[Where] unified panel rendering failed:', e);
+    } finally {
+        panels.forEach(id => setItemLoading(id, false));
     }
-    items.forEach(it => {
-        const node = blueprint.cloneNode(true); node.style.display = '';
-        node.setAttribute('data-platform', it.platform.toLowerCase());
-        const set = (sel, val) => { const e = node.querySelector(sel); if (e) e.innerText = val; };
-        set('.waterhole-platform', it.platform);
-        set('.waterhole-name', it.name);
-        set('.waterhole-meta', it.context || `Mentioned ${it.count} ${it.count === 1 ? 'time' : 'times'}`);
-        container.appendChild(node);
-    });
 }
 
-// --- 8) MEDIA: podcasts / channels (#podcasts, blueprint .podcasts-list-item) -
-// Corpus-only: dropped the dedicated Reddit media search + per-podcast iTunes lookups
-// for speed. Grounds names in the corpus and links to a search; no cover art.
-async function generateAndRenderMedia(corpus, audience) {
+// Media cards (keeps the Webflow .podcasts-list-item blueprint). Takes the unified data shape.
+function renderWherePodcasts(items) {
     const container = document.getElementById('podcasts');
     if (!container) return;
     if (!window._podcastBlueprint) {
@@ -2652,102 +2577,32 @@ async function generateAndRenderMedia(corpus, audience) {
         if (bp) window._podcastBlueprint = bp.cloneNode(true);
     }
     const blueprint = window._podcastBlueprint;
-    if (!blueprint) { console.warn('[Where/Media] no .podcasts-list-item template'); return; }
-    if ((corpus || []).length < 5) return;
-    const mediaMatch = /\b(podcast|podcasts|episode|episodes|youtube|yt|channel|channels|video|videos|watch|series|show|shows)\b/i;
-    let pool = corpus.filter(p => mediaMatch.test(_whereTextOf(p)));
-    if (!pool.length) { renderWherePodcasts(container, blueprint, []); return; }
-    const STRONG_MEDIA = /\b(podcast|podcasts|episode|episodes|youtube|channel|channels|substack|newsletter|spotify)\b/i;
-    pool.sort((a, b) => (STRONG_MEDIA.test(_whereTextOf(b)) ? 1 : 0) - (STRONG_MEDIA.test(_whereTextOf(a)) ? 1 : 0));
-    const sampleText = pool.slice(0, 40).map((p, i) => `[${i}] ${_whereTextOf(p).replace(/\s+/g, ' ').slice(0, 450)}`).join('\n');
-    const prompt = `From these "${audience}" discussions, extract the SHOWS & CHANNELS this audience follows: PODCASTS, YOUTUBE channels, and audio/video shows they mention watching, listening to, or recommending.
-For each, return:
-- "type": "podcast", "youtube", or "show".
-- "name": the actual TITLE / channel name exactly as mentioned - a real proper name, NEVER a descriptive phrase or sentence fragment.
-- "focus": a SHORT phrase for what it is about, ONLY if clearly stated; otherwise "".
-RULES: Only return real, clearly-named shows or channels. NEVER invent names or numbers, and never return generic phrases or fragments. If none are clearly named, return an empty list.
-Discussions:
-${sampleText}
-Respond ONLY with JSON: {"media":[{"type":"youtube","name":"...","focus":"..."}]}`;
-    let parsed = [];
-    try {
-        const data = await callOpenAI({
-            model: AI_MODEL,
-            messages: [
-                { role: 'system', content: 'You extract only explicitly-named podcasts, YouTube channels and shows from text. You never invent names, numbers or descriptions, and you output only valid JSON.' },
-                { role: 'user', content: prompt }
-            ],
-            temperature: 0.1, max_completion_tokens: 800, response_format: { type: 'json_object' }
-        });
-        parsed = data.media || [];
-    } catch (e) { console.warn('[Where/Media] extraction failed:', e && e.message); }
-    const allText = pool.map(p => _whereTextOf(p)).join(' [SEP] ').toLowerCase();
-    const seen = new Set(); const items = [];
-    (parsed || []).forEach(w => {
-        if (!w || !w.name) return;
-        const name = String(w.name).trim(); const key = name.toLowerCase();
-        if (key.length < 3 || seen.has(key)) return;
-        const count = groundNameCount(key, allText);
-        if (count === 0) return;
-        seen.add(key);
-        const type = ['podcast', 'youtube', 'show'].includes(String(w.type || '').toLowerCase()) ? String(w.type).toLowerCase() : 'show';
-        items.push({ type, name, focus: (w.focus || '').trim(), count });
-    });
-    items.sort((a, b) => b.count - a.count);
-    let top = items.slice(0, 8).map(it => ({ ...it, suggested: false }));
-    // Thin-results fallback (same pattern as experts/tools/events): top up with clearly-labelled
-    // AI suggestions for this audience so the panel stays useful instead of blank.
-    if (top.length < 4) {
-        const have = new Set(top.map(it => it.name.toLowerCase()));
-        const suggestions = await aiSuggestEntities(audience, {
-            what: 'podcasts, YouTube channels and audio/video shows',
-            verb: 'listens to or watches',
-            examples: 'Real, well-known show or channel names only.'
-        }, [...have], 6 - top.length);
-        suggestions.forEach(s => {
-            if (!s || !s.name) return;
-            const nm = String(s.name).trim();
-            if (!nm || have.has(nm.toLowerCase())) return;
-            have.add(nm.toLowerCase());
-            top.push({ type: 'show', name: nm, focus: (s.note || '').trim(), count: 0, suggested: true });
-        });
-    }
-    console.log(`[Where/Media] pool=${pool.length} ai=${(parsed || []).length} grounded=${items.length} shown=${top.length}`);
-    renderWherePodcasts(container, blueprint, top);
-}
-
-function renderWherePodcasts(container, blueprint, items) {
+    if (!blueprint) return;
     container.querySelectorAll('.podcasts-list-item').forEach(el => el.remove());
     if (!items || !items.length) {
         const empty = blueprint.cloneNode(true); empty.style.display = '';
-        const n = empty.querySelector('.podcast-name'); if (n) n.innerText = 'No podcasts or channels were named in these discussions.';
+        const n = empty.querySelector('.podcast-name'); if (n) n.innerText = 'No podcasts or channels were named.';
         ['.podcast-focus', '.podcast-meta', '.media-type', '.prevalence-tag', '.prevelance-tag'].forEach(sel => { const e = empty.querySelector(sel); if (e) e.innerText = ''; });
         const img = empty.querySelector('.podcast-image'); if (img) img.style.display = 'none';
         container.appendChild(empty); return;
     }
     items.forEach(it => {
         const node = blueprint.cloneNode(true); node.style.display = '';
-        node.setAttribute('data-media-type', it.type || 'podcast');
         const set = (sel, val) => { const e = node.querySelector(sel); if (e) e.innerText = val; };
         set('.podcast-name', it.name);
-        set('.podcast-focus', it.focus ? `Focus: ${it.focus}` : '');
-        set('.media-type', it.type === 'youtube' ? 'YouTube' : (it.type === 'show' ? 'Show' : 'Podcast'));
+        set('.podcast-focus', it.sub || '');
+        set('.media-type', (it.sub || '').split(' | ')[0] || 'Podcast');
         set('.podcast-meta', '');
-        const tier = it.suggested ? 'Suggested' : mentionTier(it.count); set('.prevalence-tag', tier); set('.prevelance-tag', tier);
-        const img = node.querySelector('.podcast-image'); if (img) img.style.display = 'none'; // corpus-only: no cover art
+        const tier = it.suggested ? 'Suggested' : mentionTier(it.count);
+        set('.prevalence-tag', tier); set('.prevelance-tag', tier);
+        const img = node.querySelector('.podcast-image'); if (img) img.style.display = 'none';
         const link = node.querySelector('.podcast-link');
-        if (link) {
-            const url = it.type === 'podcast'
-                ? `https://www.google.com/search?q=${encodeURIComponent(it.name + ' podcast')}`
-                : `https://www.youtube.com/results?search_query=${encodeURIComponent(it.name)}`;
-            link.setAttribute('href', url); link.setAttribute('target', '_blank');
-        }
+        if (link) { link.setAttribute('href', `https://www.google.com/search?q=${encodeURIComponent(it.name)}`); link.setAttribute('target', '_blank'); }
         container.appendChild(node);
     });
 }
 
-// Lazy-load Tab 4 once, cached. Instant charts render synchronously; the 5 AI panels
-// run in parallel (corpus-only). The tab label shimmers until all panels resolve.
+// Lazy loader: instant charts render immediately; the single unified harvester runs behind them.
 function loadTabWhere() {
     if (!window._tabLoaded) window._tabLoaded = {};
     if (window._tabLoaded.where) return window._wherePromise || Promise.resolve();
@@ -2756,21 +2611,13 @@ function loadTabWhere() {
     setTabLoading('tab-where', true);
     const audience = window.originalGroupName || '';
     window._wherePromise = (async () => {
-        // Wait for the background comment enrichment so the charts count over posts + comments (far
-        // more accurate). The shimmer covers this wait; enrichment is usually already done by now.
-        try { await (window._corpusEnrichedPromise || Promise.resolve()); } catch (e) { /* enrich is best-effort */ }
+        try { await (window._corpusEnrichedPromise || Promise.resolve()); } catch (e) { /* enrich best-effort */ }
         const corpus = window._corpus;
         try { renderSocialSplitChart(corpus); } catch (e) { console.warn('[Where/Social] failed', e); }
         try { renderLocationChart(corpus); } catch (e) { console.warn('[Where/Location] failed', e); }
         try { renderActiveHours(corpus); } catch (e) { console.warn('[Where/Hours] failed', e); }
-        await Promise.all([
-            generateAndRenderWaterholes(corpus, audience),
-            generateAndRenderMedia(corpus, audience),
-            generateAndRenderExperts(corpus, audience),
-            generateAndRenderTools(corpus, audience),
-            generateAndRenderEvents(corpus, audience)
-        ]);
-    })().catch(e => { console.warn('[Where] failed', e); window._tabLoaded.where = false; })
+        await generateAndRenderAllWherePanels(corpus, audience);
+    })().catch(e => { console.warn('[Where] loader failed', e); window._tabLoaded.where = false; })
         .finally(() => setTabLoading('tab-where', false));
     return window._wherePromise;
 }
@@ -2780,6 +2627,7 @@ function openTabWhere() {
     if (!window._corpus || !window._corpus.length) return;
     loadTabWhere();
 }
+
 
 // =============================================================================
 // PART 7 — Tab 5 "How they shop" (#tab-shop). Lazy on click, corpus-only.

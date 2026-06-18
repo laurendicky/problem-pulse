@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 59 — centralized AI_MODEL with reasoning-model param normalization (one-line switch to gpt-5.4-mini); bigger corpus + concurrency 2', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 60 — Tab 5 "How they shop": brands & products lists + demand-signals constellation (corpus-only, comment-enriched); switched to gpt-5.4-mini', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -28,7 +28,7 @@ const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Desi
 // 'gpt-5.4-mini' (recommended) or 'gpt-5.4-nano'. The request params are auto-adjusted below for
 // reasoning models (minimal reasoning so they stay fast, and temperature dropped since they reject
 // a custom one), so flipping this constant is all you need. Revert to 'gpt-4o-mini' anytime.
-const AI_MODEL = 'gpt-4o-mini';
+const AI_MODEL = 'gpt-5.4-mini';
 
 // Normalise a payload for whichever model is selected. Reasoning models (gpt-5.x / o-series) must
 // not "think" for our extraction tasks (that's slow and burns the token budget), and they reject a
@@ -648,6 +648,7 @@ async function runProblemFinder() {
         window._findingPosts = null; window._findingPostsFull = null; window._polarityPromise = null;
         window._talkPromise = null; // Tab 3 regenerates for the new audience
         window._wherePromise = null; window._platformPanelsRendered = false; // Tab 4 regenerates too
+        window._shopPromise = null; window._entityData = null; // Tab 5 regenerates too
         window._corpusEnrichedPromise = null; // re-enrich comments for the new audience
         if (window._polarityChart && window._polarityChart.destroy) { window._polarityChart.destroy(); window._polarityChart = null; }
         console.log(`[Analysis] corpus ready: ${corpus.length} posts`);
@@ -2761,6 +2762,265 @@ function openTabWhere() {
     loadTabWhere();
 }
 
+// =============================================================================
+// PART 7 — Tab 5 "How they shop" (#tab-shop). Lazy on click, corpus-only.
+//  • Brands & Products → #top-brands-container / #top-products-container (.discovery-list-item)
+//  • Demand-signals constellation → #constellation-map-container (+ #bubble-content side panel)
+// Ported from the original, optimised: one AI call per panel over the comment-enriched corpus
+// (was a separate Reddit shopping search + 4 batched calls).
+// =============================================================================
+
+const _shopTextOf = p => `${p.title || ''} ${p.body || ''} ${p.commentsText || ''}`;
+const _SHOP_SKIP = new Set(['the', 'this', 'that', 'these', 'those', 'here', 'there', 'what', 'when', 'where', 'why', 'how', 'who', 'and', 'but', 'for', 'nor', 'yet', 'our', 'your', 'his', 'her', 'its', 'their', 'they', 'them', 'you', 'she', 'it', 'we', 'my', 'me', 'just', 'also', 'then', 'than', 'some', 'any', 'all', 'one', 'two', 'reddit', 'edit', 'update', 'tldr', 'imo', 'imho', 'with', 'have', 'from', 'about', 'would', 'could', 'should', 'really', 'been', 'were', 'will', 'dont', 'cant', 'wont']);
+const _NON_PRODUCT_TERMS = new Set(['depression', 'anxiety', 'adhd', 'add', 'autism', 'asd', 'ocd', 'ptsd', 'bipolar', 'bpd', 'stress', 'burnout', 'insomnia', 'fatigue', 'brain fog', 'executive dysfunction', 'dopamine', 'serotonin', 'motivation', 'focus', 'productivity', 'procrastination', 'overwhelm', 'guilt', 'shame', 'anger', 'sadness', 'loneliness', 'mood', 'energy', 'health', 'wellness', 'life', 'time', 'money', 'sleep', 'pain', 'weight', 'symptoms', 'symptom', 'diagnosis', 'disorder', 'condition', 'therapy', 'treatment', 'medication', 'meds']);
+
+// Render a ranked discovery list into a Webflow blueprint (.discovery-list-item → .rank/.name/.count).
+// Clones the last slot if there are more items than designed slots, so nothing gets capped.
+function renderDiscoveryList(containerId, data, type) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    let slots = container.querySelectorAll('.discovery-list-item');
+    if (slots.length && data && data.length > slots.length) {
+        const template = slots[slots.length - 1];
+        for (let k = slots.length; k < data.length; k++) template.parentNode.appendChild(template.cloneNode(true));
+        slots = container.querySelectorAll('.discovery-list-item');
+    }
+    slots.forEach(slot => { slot.style.display = 'none'; slot.style.opacity = '0'; });
+    if (!data || !data.length) return;
+    data.forEach(([name, details], index) => {
+        const slot = slots[index];
+        if (!slot) return;
+        const display = (details && details.originalName) || name;
+        const rankEl = slot.querySelector('.rank'); if (rankEl) rankEl.textContent = `${index + 1}.`;
+        const nameEl = slot.querySelector('.name'); if (nameEl) nameEl.textContent = display;
+        const countEl = slot.querySelector('.count'); if (countEl) countEl.textContent = `${details.count} mention${details.count === 1 ? '' : 's'}`;
+        slot.setAttribute('data-word', display);
+        slot.setAttribute('data-type', type);
+        slot.style.display = 'flex';
+        setTimeout(() => { slot.style.opacity = '1'; }, index * 50);
+    });
+}
+
+// Brands & Products: surface frequent proper-noun candidates from the corpus, let the model split
+// them into real commercial brands vs generic buyable products, then GROUND each by real mention count.
+async function generateAndRenderShopEntities(corpus, audience) {
+    const brandsC = document.getElementById('top-brands-container');
+    const productsC = document.getElementById('top-products-container');
+    if (!brandsC && !productsC) { console.warn('[Shop] no brand/product containers'); return; }
+    if ((corpus || []).length < 5) return;
+    const caseText = corpus.map(_shopTextOf).join(' ');
+    const audWords = new Set(String(audience || '').toLowerCase().replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean));
+    const skip = w => w.length < 3 || _SHOP_SKIP.has(w) || audWords.has(w);
+    const capFreq = {};
+    (caseText.match(/\b[A-Z][A-Za-z0-9'&-]{2,}\b/g) || []).forEach(tok => { const low = tok.toLowerCase(); if (skip(low)) return; capFreq[low] = (capFreq[low] || 0) + 1; });
+    const lowFreq = {};
+    (caseText.toLowerCase().match(/\b[a-z][a-z'&-]{2,}\b/g) || []).forEach(w => { if (skip(w)) return; lowFreq[w] = (lowFreq[w] || 0) + 1; });
+    const topCap = Object.entries(capFreq).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).slice(0, 40).map(([k]) => k);
+    const topLow = Object.entries(lowFreq).filter(([, c]) => c >= 5).sort((a, b) => b[1] - a[1]).slice(0, 45).map(([k]) => k);
+    const candidateList = [...new Set([...topCap, ...topLow])].slice(0, 75).map(k => `${k} (${lowFreq[k] || capFreq[k] || 0})`).join(', ');
+    const sampleText = corpus.slice(0, 80).map(p => `Title: ${p.title || ''}\nBody: ${(p.body || '').substring(0, 500)}`).join('\n---\n');
+    const prompt = `You are a shopping-behaviour analyst studying what the "${audience}" audience BUYS, for a "How They Shop" report. Separate real commercial BRANDS from generic buyable PRODUCT categories.
+A BRAND is a specific company, retailer, app, marketplace, medication or trademarked product line (e.g. Nike, Chewy, Kong, Purina, Notion, Amazon). Include niche/unfamiliar brands this audience mentions. A capitalised proper-noun product name is almost always a brand.
+A PRODUCT is a generic buyable item or gear category with no specific maker (e.g. dog treats, chew toys, running shoes, weighted blanket, supplements).
+STRICT EXCLUSIONS (put in NEITHER list): medical conditions/symptoms (depression, anxiety, ADHD, insomnia, burnout), emotions/abstract states (motivation, focus, productivity), generic life concepts (health, sleep, money), diets/methods (keto, fasting), generic activities (running, walking), personal names. If something cannot be bought, used or shopped for, exclude it.
+Extract up to 20 BRANDS and up to 20 PRODUCTS, most relevant first. Return ONLY JSON: {"brands":["..."],"products":["..."]}.
+FREQUENT TERMS across the discussions (name (count)) — classify each real brand into "brands" and each generic buyable item into "products"; ignore the rest (e.g. Kong is a dog-toy brand even though it's a common word):
+${candidateList || '(none detected)'}
+Text to analyse:
+${sampleText}`;
+    let parsed = { brands: [], products: [] };
+    try {
+        const data = await callOpenAI({
+            model: AI_MODEL,
+            messages: [
+                { role: 'system', content: "You are a shopping-data extractor for a 'How They Shop' report. Every brand or product you return must be something the audience can actually buy, use or shop for. You surface every specific named brand present, including niche ones, and NEVER return medical conditions, symptoms, emotions, abstract states, diets, methods, activities or personal names." },
+                { role: 'user', content: prompt }
+            ],
+            temperature: 0, max_completion_tokens: 700, response_format: { type: 'json_object' }
+        });
+        parsed = { brands: data.brands || [], products: data.products || [] };
+    } catch (e) { console.warn('[Shop] entity extraction failed:', e && e.message); }
+    const allText = caseText.toLowerCase();
+    const tally = (names) => {
+        const out = {};
+        (names || []).forEach(name => {
+            const key = String(name).toLowerCase().trim();
+            if (key.length < 3 || _NON_PRODUCT_TERMS.has(key) || out[key]) return;
+            const esc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const m = allText.match(new RegExp(`\\b${esc}(s|es|'s)?\\b`, 'gi'));
+            const count = m ? m.length : 0;
+            if (count > 0) out[key] = { originalName: name, count };
+        });
+        return Object.entries(out).sort((a, b) => b[1].count - a[1].count).slice(0, 8);
+    };
+    renderDiscoveryList('top-brands-container', tally(parsed.brands), 'brands');
+    renderDiscoveryList('top-products-container', tally(parsed.products), 'products');
+    console.log(`[Shop] brands/products rendered`);
+}
+
+// --- Demand-signals constellation ------------------------------------------
+const _SHOP_CATEGORIES = ['WillingnessToPay', 'PriceSensitivity', 'BrandLoyalty', 'ResearchHabits', 'Substitutes', 'Dealbreakers'];
+const _SHOP_CAT_COLORS = {
+    'willingness to pay': '#4FB0F5', 'substitutes': '#2BD4E8', 'price sensitivity': '#FB923C',
+    'brand loyalty': '#F15FA6', 'research habits': '#34D17A', 'dealbreakers': '#00a5ce'
+};
+
+// Webflow state panel (#bubble-content): .bubble-loader / .bubble-empty / .bubble-prompt / .bubble-detail
+// (with .bubble-detail-title/-quote/-meta/-source). Returns false if none exist (caller falls back).
+function setConstellationPanelState(state, data) {
+    const panel = document.getElementById('bubble-content');
+    if (!panel) return false;
+    const loader = panel.querySelector('.bubble-loader'), empty = panel.querySelector('.bubble-empty');
+    const prompt = panel.querySelector('.bubble-prompt'), detail = panel.querySelector('.bubble-detail');
+    if (!loader && !empty && !prompt && !detail) return false;
+    const show = (el, on) => { if (el) el.style.display = on ? '' : 'none'; };
+    show(loader, state === 'loading'); show(empty, state === 'empty'); show(prompt, state === 'prompt'); show(detail, state === 'detail');
+    if (state === 'detail' && detail && data) {
+        const set = (sel, val) => { const e = detail.querySelector(sel); if (e) e.innerText = val; };
+        set('.bubble-detail-title', data.name || '');
+        set('.bubble-detail-quote', `“${data.quote || ''}”`);
+        const src = data.source || {};
+        set('.bubble-detail-meta', src.subreddit ? `r/${src.subreddit} | 👍 ${(src.ups || 0).toLocaleString()}` : '');
+        const link = detail.querySelector('.bubble-detail-source');
+        if (link && src.url) link.setAttribute('href', src.url);
+    }
+    return true;
+}
+
+function renderConstellation(signals) {
+    const container = document.getElementById('constellation-map-container');
+    if (!container || typeof Highcharts === 'undefined') { console.warn('[Shop] constellation container/Highcharts missing'); return; }
+    if (!signals || !signals.length) {
+        setConstellationPanelState('empty');
+        Highcharts.chart(container, { chart: { type: 'packedbubble', backgroundColor: 'transparent' }, title: { text: '' }, credits: { enabled: false }, series: [] });
+        return;
+    }
+    const agg = {};
+    signals.forEach(s => {
+        if (!s.problem_theme || !s.source || !s.category) return;
+        const theme = s.problem_theme.trim();
+        if (!agg[theme]) agg[theme] = { ...s, frequency: 0 };
+        agg[theme].frequency++;
+    });
+    const byCat = new Map();
+    Object.values(agg).forEach(d => {
+        const category = d.category.replace(/([A-Z])/g, ' $1').trim();
+        if (!byCat.has(category)) byCat.set(category, []);
+        byCat.get(category).push({ name: d.problem_theme, value: d.frequency, quote: d.quote, source: d.source });
+    });
+    const series = Array.from(byCat, ([name, data]) => {
+        const s = { name, data };
+        const c = _SHOP_CAT_COLORS[String(name).toLowerCase().trim()];
+        if (c) s.color = c;
+        return s;
+    });
+    Highcharts.chart(container, {
+        chart: { type: 'packedbubble', backgroundColor: 'transparent' },
+        title: { text: null }, credits: { enabled: false },
+        tooltip: {
+            useHTML: true, outside: true, backgroundColor: '#FFFFFF', borderColor: '#E0E0E0', borderWidth: 1,
+            style: { color: '#333', fontFamily: "'Plus Jakarta Sans', sans-serif" },
+            formatter: function () {
+                const src = this.point.options && this.point.options.source;
+                if (this.point.isParentNode || !src) return false;
+                return `<div style="font-weight:bold;font-size:1rem;margin-bottom:8px;border-bottom:1px solid #E0E0E0;padding-bottom:6px;">${this.point.name}</div>
+                    <div style="font-size:0.9rem;margin-bottom:8px;max-width:300px;white-space:normal;">“${this.point.options.quote || ''}”</div>
+                    <a href="${src.url || '#'}" target="_blank" rel="noopener" style="font-size:0.8rem;color:#555;text-decoration:none;">r/${src.subreddit || ''} | 👍 ${(src.ups || 0).toLocaleString()}</a>`;
+            }
+        },
+        plotOptions: {
+            packedbubble: {
+                minSize: '35%', maxSize: '140%', zMin: 0, zMax: 1000,
+                layoutAlgorithm: { splitSeries: true, gravitationalConstant: 0.05, seriesInteraction: false, dragBetweenSeries: true, parentNodeLimit: true, parentNodeOptions: { bubblePadding: 3 } },
+                dataLabels: {
+                    enabled: true, useHTML: true,
+                    style: { color: 'black', textOutline: 'none', fontWeight: 'normal', fontFamily: "'Plus Jakarta Sans', sans-serif", textAlign: 'center' },
+                    formatter: function () {
+                        const radius = this.point.marker.radius;
+                        if (this.point.name.length * 6 > radius * 1.8) return null;
+                        return `<div style="font-size:${Math.max(8, radius / 3.5)}px;">${this.point.name}</div>`;
+                    }
+                },
+                point: {
+                    events: {
+                        click: function () {
+                            if (!this.isParentNode) {
+                                const { name, quote, source } = this.options;
+                                setConstellationPanelState('detail', { name, quote, source });
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        series
+    });
+    setConstellationPanelState('prompt');
+}
+
+async function generateAndRenderDemandSignals(corpus, audience) {
+    const container = document.getElementById('constellation-map-container');
+    if (!container) { console.warn('[Shop] #constellation-map-container not found'); return; }
+    if ((corpus || []).length < 5) { renderConstellation([]); return; }
+    setConstellationPanelState('loading');
+    const top = [...corpus].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 60);
+    const listForAI = top.map((p, i) => `[${i}] ${`${p.title || ''}. ${(p.body || '').substring(0, 280)} ${(p.commentsText || '').substring(0, 280)}`.replace(/\s+/g, ' ')}`).join('\n');
+    const prompt = `You are a shopper-behaviour analyst studying how the "${audience}" audience spends money: what they buy, what they pay for, and how they choose between products and brands.
+From the numbered posts below, extract every quote that reveals a SHOPPING or product decision — an actual purchase, a price/cost/budget mention, a named product or brand, paying/subscribing, choosing between options, recommending or warning against a product, asking what to buy, comparing options, or what made them switch or stick. Be generous but never invent.
+REJECT pure lifestyle/diet/habit choices where nothing is bought (e.g. "I cut out bread", "I do CICO").
+For each signal return: "post_index" (the [N]), "category" (EXACTLY one of: ${_SHOP_CATEGORIES.join(', ')}), "problem_theme" (2-4 word label), "quote" (a short verbatim snippet from that post).
+Return ONLY JSON: {"signals":[{"post_index":0,"category":"PriceSensitivity","problem_theme":"...","quote":"..."}]} — up to 25 signals.
+Posts:
+${listForAI}`;
+    let signals = [];
+    try {
+        const data = await callOpenAI({
+            model: AI_MODEL,
+            messages: [
+                { role: 'system', content: 'You extract real shopping/purchase-decision signals from discussions and output only valid JSON. You never invent quotes.' },
+                { role: 'user', content: prompt }
+            ],
+            temperature: 0.1, max_completion_tokens: 1400, response_format: { type: 'json_object' }
+        });
+        const raw = Array.isArray(data.signals) ? data.signals : [];
+        const lookup = {}; _SHOP_CATEGORIES.forEach(c => { lookup[c.toLowerCase().replace(/[^a-z]/g, '')] = c; });
+        signals = raw.map(s => {
+            const post = top[parseInt(s.post_index, 10)];
+            const cat = lookup[String(s.category || '').toLowerCase().replace(/[^a-z]/g, '')];
+            if (!post || !cat || !s.problem_theme || !s.quote) return null;
+            return { category: cat, problem_theme: String(s.problem_theme).trim(), quote: String(s.quote).trim(), source: { subreddit: post.subreddit || '', ups: post.score || 0, url: post.permalink || '' } };
+        }).filter(Boolean);
+    } catch (e) { console.warn('[Shop] demand signals failed:', e && e.message); }
+    console.log(`[Shop] ${signals.length} demand signals`);
+    renderConstellation(signals);
+}
+
+// Lazy-load Tab 5 on first open (not pre-fetched — it's the last tab, keeps background load low).
+function loadTabShop() {
+    if (!window._tabLoaded) window._tabLoaded = {};
+    if (window._tabLoaded.shop) return window._shopPromise || Promise.resolve();
+    if (!window._corpus || !window._corpus.length) return Promise.resolve();
+    window._tabLoaded.shop = true;
+    setTabLoading('tab-shop', true);
+    const audience = window.originalGroupName || '';
+    window._shopPromise = (async () => {
+        try { await (window._corpusEnrichedPromise || Promise.resolve()); } catch (e) { /* enrich best-effort */ }
+        const corpus = window._corpus;
+        await Promise.all([
+            generateAndRenderShopEntities(corpus, audience),
+            generateAndRenderDemandSignals(corpus, audience)
+        ]);
+    })().catch(e => { console.warn('[Shop] failed', e); window._tabLoaded.shop = false; })
+        .finally(() => setTabLoading('tab-shop', false));
+    return window._shopPromise;
+}
+
+function openTabShop() {
+    if (window._tabLoaded && window._tabLoaded.shop) return;
+    if (!window._corpus || !window._corpus.length) return;
+    loadTabShop();
+}
+
 // Reveal the main results container (hidden until the first analysis is ready). display:flex is set
 // with !important to beat any Webflow inline/none, then we fade in and scroll to it.
 function revealResults() {
@@ -2934,6 +3194,13 @@ function initEntryFlow() {
         whereTab.addEventListener('click', openTabWhere);
     }
 
+    // #tab-shop → lazy-load Tab 5 (How they shop) on first open.
+    const shopTab = document.getElementById('tab-shop');
+    if (shopTab && !shopTab.dataset.ppWired) {
+        shopTab.dataset.ppWired = '1';
+        shopTab.addEventListener('click', openTabShop);
+    }
+
     console.log('[Entry] wired ✓ — #find-communities-btn is live');
 }
 
@@ -2952,6 +3219,8 @@ document.addEventListener('click', (e) => {
     if (talkTab && !talkTab.dataset.ppWired) { openTabTalk(); return; }
     const whereTab = e.target.closest('#tab-where');
     if (whereTab && !whereTab.dataset.ppWired) { openTabWhere(); return; }
+    const shopTab = e.target.closest('#tab-shop');
+    if (shopTab && !shopTab.dataset.ppWired) { openTabShop(); return; }
 
     // .see-more on a finding card → open that finding's modal with its sample posts.
     const seeMore = e.target.closest('.see-more, .see-more-btn');

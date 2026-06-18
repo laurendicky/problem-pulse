@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 64 — resource-discovery query lane + grounding-only "suggested" + suggestions capped so real data dominates Tab 4/5', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 65 — Tab 4 accuracy: phrase-grounding (kills generic over-count), strict no-generic + domain-agnostic prompt, capped suggestions', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -2447,20 +2447,30 @@ function renderActiveHours(posts) {
 // "suggested" seeding, instead of 5+5 separate calls. Client-side FUZZY grounding keeps real
 // mentions even when the AI's name differs slightly from the corpus wording.
 
-// Flexible grounding: exact phrase first, else fall back to the most distinctive token, so
-// "Andrew Huberman" still grounds via "huberman" instead of being discarded.
+// Strict, high-fidelity grounding. Multi-word names must match as a COHESIVE phrase (or two
+// principal tokens in tight proximity) — never by a single generic token. This is what stops a
+// category like "Dog Training Apps" grounding off every occurrence of "training" (the 735-count bug).
 function fuzzyGroundNameCount(name, allTextLow) {
     const key = String(name).trim().toLowerCase();
     if (key.length < 3) return 0;
     const esc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const exact = allTextLow.match(new RegExp(`\\b${esc}\\b`, 'g'));
-    if (exact && exact.length) return exact.length;
+    // 1. Single word (e.g. "Chewy") → clean boundary match with light plural tolerance.
+    if (!/\s/.test(key)) {
+        const m = allTextLow.match(new RegExp(`\\b${esc}(s|es|'s)?\\b`, 'g'));
+        return m ? m.length : 0;
+    }
+    // 2. Multi-word → match the whole phrase first.
+    const phrase = allTextLow.match(new RegExp(`\\b${esc}(s|es)?\\b`, 'g'));
+    if (phrase && phrase.length) return phrase.length;
+    // 3. Proximity fallback: the two principal tokens within a 3-word window (handles "Huberman, Andrew").
     const tokens = key.split(/\s+/).filter(t => t.length > 3 && !_whereStop.includes(t));
-    if (!tokens.length) return 0;
-    const longest = tokens.sort((a, b) => b.length - a.length)[0];
-    const escTok = longest.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const tok = allTextLow.match(new RegExp(`\\b${escTok}\\b`, 'g'));
-    return tok ? tok.length : 0;
+    if (tokens.length >= 2) {
+        const t1 = tokens[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const t2 = tokens[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const prox = allTextLow.match(new RegExp(`\\b(${t1}\\s+(?:\\w+\\s+){0,2}${t2}|${t2}\\s+(?:\\w+\\s+){0,2}${t1})\\b`, 'gi'));
+        return prox ? prox.length : 0;
+    }
+    return 0; // unverifiable → falls back to a "Suggested" badge with count 0
 }
 
 // Shared self-contained renderer for the experts / tools / events / waterholes panels.
@@ -2498,24 +2508,37 @@ async function generateAndRenderAllWherePanels(corpus, audience) {
         .map((p, i) => `[Post ${i}] Title: ${p.title}\nContent: ${(p.body || '').slice(0, 400)}\nDiscussions: ${(p.commentsText || '').slice(0, 800)}`)
         .join('\n---\n');
 
-    const prompt = `You are a market researcher building a "Where they are" report for a "${audience}" audience.
+    const prompt = `You are an expert market researcher building a "Where they are" report for a "${audience}" audience.
 Analyse the discussions below and extract five distinct lists of resources they discuss, use, or follow.
 For each list, retrieve up to 8 of the most prominent, real names. If there are fewer than 6 explicit mentions in the text, you MUST append well-known, highly relevant suggestions that are real and popular for this target audience, setting "suggested": true for those.
 
+CRITICAL EXTRACTION RULES (DO NOT VIOLATE):
+- Every entry MUST be a specific, trademarked BRAND, PROPER NOUN, or named entity.
+- NEVER extract generic category plural nouns, descriptions, or activities.
+  * WRONG (Generic): "design software", "sneaker apps", "parenting groups", "running shoe brands", "dog training apps", "dog parks".
+  * RIGHT (Proper Nouns): "Figma", "StockX", "Peanut App", "Nike SNKRS", "Puppr", "Redwood Dog Park".
+- Do NOT return the audience's own anonymous Reddit usernames.
+- If no specific brand or proper noun is named, return an empty list or use your curated "suggested": true fallback to suggest actual brands.
+
 Extract these five categories:
 1. "experts": Real people, creators, YouTubers, authors, or leaders they follow or learn from.
-2. "tools": Digital tools, apps, software, or websites they actually use or visit.
+   * Examples: Emily Oster (Parenthood), Jacques Slade (Sneakers), Tobias van Schneider (Design), Karen Pryor (Dogs).
+2. "tools": Digital tools, apps, software, or websites they actually use or visit. (No physical products).
+   * Examples: Huckleberry (Parenthood), GOAT (Sneakers), Spline (Design), Rover (Dogs).
 3. "events": Physical real-world places, events, stores, expos, meetups, or venues they physically visit.
+   * Examples: Stroller Strides (Parenthood), Sneaker Con (Sneakers), Config (Design), Crufts (Dogs).
 4. "waterholes": Non-Reddit communities where they gather (e.g. Slack workspaces, Discord servers, Facebook groups, independent forums).
+   * Examples: SoleSavy Discord (Sneakers), Designer Hangout Slack (Design), Peanut App Groups (Parenthood).
 5. "media": Podcasts, YouTube channels, newsletters, or video shows they recommend or watch.
+   * Examples: Taking Cara Babies YouTube (Parenthood), Full Size Run (Sneakers), The Futur (Design).
 
 Respond ONLY with a valid JSON object matching this schema:
 {
-  "experts": [{"name": "...", "role": "short description", "suggested": false}],
-  "tools": [{"name": "...", "use": "short description", "suggested": false}],
-  "events": [{"name": "...", "what": "short description", "suggested": false}],
-  "waterholes": [{"name": "...", "platform": "e.g. Discord/Facebook/Forum", "suggested": false}],
-  "media": [{"name": "...", "type": "podcast/youtube/show", "focus": "short description", "suggested": false}]
+  "experts": [{"name": "Specific Person Name", "role": "short description", "suggested": false}],
+  "tools": [{"name": "Specific App/Site Brand", "use": "short description", "suggested": false}],
+  "events": [{"name": "Specific Venue/Event Name", "what": "short description", "suggested": false}],
+  "waterholes": [{"name": "Specific Group Name", "platform": "e.g. Discord/Facebook/Forum", "suggested": false}],
+  "media": [{"name": "Specific Show/Channel Name", "type": "podcast/youtube/show", "focus": "short description", "suggested": false}]
 }
 Discussions:
 ${sample}`;
@@ -2539,11 +2562,16 @@ ${sample}`;
         const build = (raw, subFn) => {
             const mapped = (raw || []).filter(x => x && x.name).map(x => {
                 const count = fuzzyGroundNameCount(x.name, allTextLow);
-                return { name: x.name, sub: subFn(x), count, suggested: count === 0 };
+                // Suggested if the AI flagged it OR it isn't grounded in the corpus.
+                return { name: x.name, sub: subFn(x), count, suggested: !!x.suggested || count === 0 };
             });
             const real = mapped.filter(x => !x.suggested).sort((a, b) => b.count - a.count);
             const sugg = mapped.filter(x => x.suggested);
-            return real.length >= 3 ? real.slice(0, 6) : real.concat(sugg).slice(0, 4);
+            // Show up to 6 real; only if fewer than 3 real, top up with suggestions to a max of 4 total
+            // — so a panel is never a wall of guesses (protects the "data-backed" credibility).
+            const out = real.slice(0, 6);
+            if (out.length < 3) out.push(...sugg.slice(0, 4 - out.length));
+            return out;
         };
 
         const experts = build(parsed.experts, x => x.role);

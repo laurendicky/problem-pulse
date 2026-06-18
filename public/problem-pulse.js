@@ -19,16 +19,34 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 57 — corpus comment-enrichment (top 20 posts, background + Firestore-cached) feeding the Where charts for accurate platform/location/media readings', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 59 — centralized AI_MODEL with reasoning-model param normalization (one-line switch to gpt-5.4-mini); bigger corpus + concurrency 2', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
 // --- proxy helpers ----------------------------------------------------------
+// ONE place to choose the model. To try the faster/cheaper reasoning model, set this to
+// 'gpt-5.4-mini' (recommended) or 'gpt-5.4-nano'. The request params are auto-adjusted below for
+// reasoning models (minimal reasoning so they stay fast, and temperature dropped since they reject
+// a custom one), so flipping this constant is all you need. Revert to 'gpt-4o-mini' anytime.
+const AI_MODEL = 'gpt-4o-mini';
+
+// Normalise a payload for whichever model is selected. Reasoning models (gpt-5.x / o-series) must
+// not "think" for our extraction tasks (that's slow and burns the token budget), and they reject a
+// custom temperature — so we strip it and force minimal reasoning.
+function _normalizeAIPayload(payload) {
+    const model = payload.model || AI_MODEL;
+    const p = { ...payload, model };
+    if (/^(gpt-5|o\d)/.test(model)) {
+        delete p.temperature;
+        if (p.reasoning_effort == null) p.reasoning_effort = 'minimal';
+    }
+    return p;
+}
 // Shared OpenAI concurrency gate. We fire a LOT of AI calls (findings + 5 talk panels + sub-problems
 // + polarity), and bursting them all at once overloads the single Netlify function — the slow ones
 // then time out and come back WITHOUT the CORS header, which the browser reports as a CORS error.
 // Capping concurrency + retrying transient failures makes that self-heal.
-const OPENAI_MAX_CONCURRENT = 3;
+const OPENAI_MAX_CONCURRENT = 2;
 let _openaiInFlight = 0;
 const _openaiQueue = [];
 function _acquireOpenAISlot() {
@@ -60,12 +78,13 @@ async function _callOpenAIOnce(payload, timeoutMs) {
 }
 
 async function callOpenAI(payload, { timeoutMs = 45000, retries = 2 } = {}) {
+    const normalized = _normalizeAIPayload(payload);
     await _acquireOpenAISlot();
     try {
         let lastErr;
         for (let attempt = 0; attempt <= retries; attempt++) {
             try {
-                return await _callOpenAIOnce(payload, timeoutMs);
+                return await _callOpenAIOnce(normalized, timeoutMs);
             } catch (e) {
                 lastErr = e;
                 if (attempt < retries) {
@@ -118,7 +137,7 @@ async function callReddit(payload, { timeoutMs = 12000 } = {}) {
 // --- find communities -------------------------------------------------------
 async function getRelatedSearchTermsAI(audience) {
     const payload = {
-        model: 'gpt-4o-mini',
+        model: AI_MODEL,
         messages: [
             { role: 'system', content: 'You are a creative brainstorming assistant that outputs only JSON.' },
             { role: 'user', content: `Given the target audience "${audience}", generate up to 5 related but distinct search terms or concepts that would help find communities for them. Think about activities, problems, life stages, and related interests. Respond ONLY with a valid JSON object with a single key "terms", which is an array of strings.` }
@@ -141,7 +160,7 @@ async function findSubredditsForGroup(groupName) {
     window._audienceTopics = relatedTerms;
     const allTerms = [groupName, ...relatedTerms];
     const payload = {
-        model: 'gpt-4o-mini',
+        model: AI_MODEL,
         messages: [
             { role: 'system', content: 'You are an expert Reddit community finder providing answers in strict JSON format.' },
             { role: 'user', content: `Based on the following audience and related keywords: [${allTerms.join(', ')}], suggest up to 20 relevant and active Reddit subreddits. Prioritize a variety of communities, including both large general ones and smaller niche ones. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").` }
@@ -249,7 +268,8 @@ const PROBLEM_TERMS_SINGLE = ['problem', 'struggle', 'frustrating', 'annoying', 
 const PROBLEM_TERMS_PHRASE = ['how do i', 'wish i could', 'any tips', 'looking for'];
 
 // Corpus sizing — deliberately modest. AI analyses sample ~40 posts, so a few hundred is plenty.
-const CORPUS_PER_QUERY = 60;      // posts requested per query (Reddit max page is 100)
+const CORPUS_PER_QUERY = 100;     // posts requested per query (Reddit max page) — more raw signal,
+                                  // same number of queries, so it's a near-free corpus bump
 const CORPUS_TIME_FILTER = 'year'; // recent + enough volume; 'all' would be broader but staler
 const CORPUS_MIN_SCORE = 1;        // drop 0-score noise
 
@@ -278,7 +298,7 @@ async function getDomainFrustrationTerms(audience) {
     if (!audience) return fallback;
     try {
         const parsed = await callOpenAI({
-            model: 'gpt-4o-mini',
+            model: AI_MODEL,
             messages: [
                 { role: 'system', content: 'You output only JSON.' },
                 { role: 'user', content: `For the audience "${audience}", list 8-10 words or short phrases this group actually uses when describing PROBLEMS, frustrations or struggles — the specific vocabulary of their complaints. Examples — Home Bakers: ["dense","gummy","didn't rise","flat","overproofed"]; Runners: ["shin splints","hit the wall","DNF","IT band"]. Mix single words and short phrases. Respond ONLY with JSON: {"terms":["...","..."]}.` }
@@ -439,7 +459,7 @@ async function setCachedCorpus(audience, posts) {
     if (!db || !posts || !posts.length) return;
     try {
         // Trim bodies so the document stays well under Firestore's 1MB limit.
-        const lean = posts.slice(0, 220).map(p => ({
+        const lean = posts.slice(0, 300).map(p => ({
             id: p.id, subreddit: p.subreddit, title: p.title,
             body: (p.body || '').slice(0, 600),
             commentsText: (p.commentsText || '').slice(0, 1500), // top-comment text (Where-tab signal)
@@ -722,7 +742,7 @@ async function generateAndRenderWho(corpus, audience) {
         .join('\n---\n');
 
     const payload = {
-        model: 'gpt-4o-mini',
+        model: AI_MODEL,
         messages: [
             { role: 'system', content: 'You are a precise demographic estimator.' },
             { role: 'user', content: `Estimate the demographics of the audience "${audience}" using BOTH the audience name and the language/slang/life-experiences in these Reddit posts. CRITICAL: if the audience name itself explicitly implies a gender, age, or life stage, let that strongly anchor the estimate — e.g. "Women in Business" or "New Moms" → ~90-100% female; "New Dads" → ~90-100% male; "Retirees" → mostly 45+; "Teen ..." → mostly 18-24. Only deviate from an explicit cue if the posts clearly contradict it. You MUST provide numerical percentages. Respond ONLY with a valid JSON object: "male_pct" (integer), "female_pct" (integer), "age_18_24" (integer), "age_25_45" (integer), "age_45_plus" (integer), "top_life_stage" (a 3-4 word string, e.g. "Young Professionals"). Text: ${sample}` }
@@ -803,7 +823,7 @@ async function generateAndRenderArchetype(corpus, audience) {
         .join('\n---\n');
 
     const payload = {
-        model: 'gpt-4o-mini',
+        model: AI_MODEL,
         messages: [
             { role: 'system', content: 'You are a sharp cultural observer who writes psychologically specific field notes about online communities. You output only valid JSON and never sound like a marketing deck.' },
             { role: 'user', content: `You have spent months lurking inside the "${audience}" community on Reddit. Below are real discussions. Respond ONLY with a valid JSON object with these keys: "archetype" (a short, 2-3 word evocative name for this audience, e.g. "The Practical Innovators") and "summary" (EXACTLY 2 short sentences, 40 words maximum — a sharp character study built around one instinct or contradiction, landing one memorable phrase; do NOT use "this audience is driven by", "they value", or "they appreciate"). Posts:\n${sample}` }
@@ -885,7 +905,7 @@ async function generateAndRenderProfile(corpus, audience) {
         .join('\n---\n');
 
     const payload = {
-        model: 'gpt-4o-mini',
+        model: AI_MODEL,
         messages: [
             { role: 'system', content: 'You are a perceptive observer of human motivation who writes honest, specific, non-corporate insight about online communities. Output only valid JSON.' },
             { role: 'user', content: `You have spent months inside the "${audience}" community reading how they really talk. Below are real discussions. Respond ONLY with a valid JSON object with these four keys, each an array of EXACTLY 3 short strings in a plain human voice — easy to grasp instantly, no waffle, ~12 words or fewer, never corporate or strategy-deck language:
@@ -1044,7 +1064,7 @@ async function generateAndRenderFindings(corpus, audience) {
         .join('\n---\n');
 
     const payload = {
-        model: 'gpt-4o-mini',
+        model: AI_MODEL,
         messages: [
             { role: 'system', content: 'You distil community discussions into a few core problems with authentic quotes. Output only valid JSON.' },
             { role: 'user', content: `Analyse these discussions about "${audience}" and identify 4 to 6 of the most common, clearly recurring, DISTINCT PROBLEMS — genuine pain points, frustrations, struggles, worries, or unmet needs. Make them genuinely different from each other (no near-duplicate or overlapping problems). IMPORTANT: include ONLY real problems/difficulties. Do NOT include positive or heart-warming themes, things they love or enjoy, or ways their dog helps them — e.g. "emotional support from dogs" is NOT a problem and must be excluded. Respond ONLY with a JSON object: {"findings":[{"title","summary","quotes","keywords","intensity"}]}. Rules — "title": 3-6 words naming a problem, plain and specific. "summary": ONE short, punchy, human-sounding sentence (about 18 words, 25 max), intriguing, NO waffle. Describe the problem directly — do NOT name the audience ("${audience}") in the summary. "quotes": exactly 3 short authentic-sounding strings that express the PROBLEM (a complaint or struggle, not praise), each ≤ 80 characters. "keywords": 3-6 lowercase words for matching related posts. "intensity": an integer 0-100 rating how emotionally severe/painful this problem is for ${audience}, judged INDEPENDENTLY of how often it comes up. Prioritise the most common recurring problems; avoid one-off complaints. Posts:\n${sample}` }
@@ -1375,7 +1395,7 @@ async function assignPostsToFindings(findings, corpus) {
         const postList = candidates.map((p, i) => `${i + 1}: "${(p.title || '').slice(0, 120)}" — ${(p.body || '').replace(/\s+/g, ' ').slice(0, 160)}`).join('\n');
         const prompt = `You are matching Reddit posts to the problem each one is genuinely about.\n\nProblems:\n${problemList}\n\nPosts:\n${postList}\n\nFor each post, give the number of the SINGLE problem the AUTHOR is actually describing, experiencing, or asking for help with. Use 0 (none) if it does not clearly belong to any problem — this INCLUDES positive or heart-warming stories, rescue/adoption pleas, "help me name my dog", breed-identification requests, photo/picture posts, and anything off-topic. Be STRICT: when in doubt, use 0. Respond ONLY with JSON: {"assignments":[{"post":1,"problem":2}]}.`;
         const parsed = await callOpenAI({
-            model: 'gpt-4o-mini',
+            model: AI_MODEL,
             messages: [
                 { role: 'system', content: 'You are a precise categorisation engine that outputs only JSON. You err on the side of 0 (none) rather than forcing a weak match.' },
                 { role: 'user', content: prompt }
@@ -1416,7 +1436,7 @@ async function generateSubProblems(finding, posts, audience) {
     const corpusText = (posts || []).slice(0, 40).map(p => `${p.title} ${(p.body || '').substring(0, 300)}`.trim()).join('\n---\n');
 
     const payload = {
-        model: 'gpt-4o-mini',
+        model: AI_MODEL,
         messages: [
             { role: 'system', content: 'You break a problem category into concrete recurring sub-problems and output only valid JSON.' },
             { role: 'user', content: `You are analysing the "${audience}" audience. The broad problem is "${finding.title}": ${finding.summary || ''}. From the real discussions below, identify 6 to 8 specific recurring sub-problems WITHIN this category. Each must be a concrete issue people actually raise, not a restatement. For each return a short 2-4 word "label", 2-4 "keywords" (single words/short phrases in the audience's own language to detect mentions), and an "icon" chosen VERBATIM from this list: [${SUBPROBLEM_ICONS.join(', ')}] (use "circle-dot" if none fit). Respond ONLY with JSON: {"sub_problems":[{"label","keywords","icon"}]}. Discussions:\n${corpusText}` }
@@ -1579,7 +1599,7 @@ async function generatePolarityData(findings, corpus, audience) {
     const sample = (corpus || []).slice(0, 30).map(p => `${p.title} ${p.body}`.substring(0, 220)).join('\n---\n');
     try {
         const parsed = await callOpenAI({
-            model: 'gpt-4o-mini',
+            model: AI_MODEL,
             messages: [
                 { role: 'system', content: 'You output only valid JSON.' },
                 { role: 'user', content: `For "${audience}", the main problems are:\n${main}\n\nUsing these and the discussions below, produce 12-16 specific problems this audience faces. They MUST be facets/sub-problems OF the main problems above — do not invent unrelated ones. For each: "label" (2-5 words), "parent" (the number of the main problem it belongs to), "frequency" (integer 1-100 = how often it comes up), "intensity" (integer 1-100 = how painful/severe). Respond ONLY with JSON: {"points":[{"label","parent","frequency","intensity"}]}. Discussions:\n${sample}` }
@@ -1694,7 +1714,7 @@ async function generateAndRenderVoiceProfile(corpus, audience) {
     const sample = corpus.slice(0, 40).map(p => `Title: ${p.title}\nBody: ${(p.body || '').substring(0, 400)}`).join('\n---\n');
     try {
         const parsed = await callOpenAI({
-            model: 'gpt-4o-mini',
+            model: AI_MODEL,
             messages: [
                 { role: 'system', content: 'You are a brand strategist who outputs only valid JSON.' },
                 { role: 'user', content: `You are a sharp cultural observer studying how the "${audience}" community actually talks. Write an observational, psychologically sharp, slightly editorial tone-of-voice read (avoid marketing cliches). Respond ONLY as valid JSON with two keys: "tone_description" — an array of EXACTLY 5 one-sentence strings in this order: (1) their emotional state, (2) how they communicate, (3) how they relate to each other, (4) what they're really seeking, (5) what messaging lands with them; and "voice_adjectives" — an array of exactly 6 evocative adjectives. Posts: ${sample}` }
@@ -1740,7 +1760,7 @@ async function generateAndRenderToneMap(corpus, audience) {
     const sample = corpus.slice(0, 40).map(p => `Topic: ${p.title} - ${(p.body || '').substring(0, 200)}`).join('\n---\n');
     try {
         const parsed = await callOpenAI({
-            model: 'gpt-4o-mini',
+            model: AI_MODEL,
             messages: [
                 { role: 'system', content: 'You are a brand psychologist who outputs only valid JSON.' },
                 { role: 'user', content: `Analyse the "${audience}" community. Identify 4 distinct conversation topics. For each: "topic" (short title), "traits" (array of 4 objects, each {"name": adjective, "score": integer 10-100 intensity}), "insights" (array of EXACTLY 3 standalone sentences, each under 15 words, one observation each), "level" (LOW, MEDIUM, or HIGH). Respond ONLY as valid JSON where the value of key "tone_analysis" is a JSON ARRAY of exactly 4 such objects (not an object). Posts: ${sample}` }
@@ -1801,7 +1821,7 @@ async function generateAndRenderLanguageToAvoid(corpus, audience) {
     const sample = corpus.slice(0, 40).map(p => `Title: ${p.title}\nBody: ${(p.body || '').substring(0, 400)}`).join('\n---\n');
     try {
         const parsed = await callOpenAI({
-            model: 'gpt-4o-mini',
+            model: AI_MODEL,
             messages: [
                 { role: 'system', content: 'You are a brand linguist who outputs only valid JSON.' },
                 { role: 'user', content: `You are a brand linguist analysing the "${audience}" community. Identify 8-10 language pairs: terms outsiders/marketers use that insiders find inauthentic, paired with the authentic alternative insiders actually use. For each: "avoid", "avoid_reason" (max 12 words), "use", "use_reason" (max 12 words). Respond ONLY as valid JSON with key "pairs" (array of objects). Posts: ${sample}` }
@@ -1853,7 +1873,7 @@ async function generateAndRenderHookPatterns(corpus, audience) {
     const listForAI = topPosts.map((p, i) => `ID: ${i} | UPS: ${p.score} | COMMENTS: ${p.comments || 0} | TITLE: ${p.title}`).join('\n');
     try {
         const parsed = await callOpenAI({
-            model: 'gpt-4o-mini',
+            model: AI_MODEL,
             messages: [
                 { role: 'system', content: 'You are a content strategist. You are brief and punchy. Output only valid JSON.' },
                 { role: 'user', content: `Analyse these top posts for "${audience}". Identify 4-6 modern hook patterns. Respond ONLY as valid JSON with key "patterns", each object: "category" (hook name), "short_summary" (≤10 words), "strategy" (≤20 words on why it works), "example_ids" (array of 3 post IDs from the list), "emotion_type" (a SHORT 2-3 word emotional driver, unique to this pattern; use "&" instead of "and"), "impact_level" (exactly one of "Very High Impact","High Impact","Medium Impact"), "emotional_intensity" (integer 0-100), "viral_potential" (integer 0-100), "community_impact" (one of "Very High","High","Medium","Low"). Posts:\n${listForAI}` }
@@ -1985,7 +2005,7 @@ async function generateAndRenderSentiment(corpus, audience) {
     const sample = corpus.slice(0, 50).map(p => `${p.title}. ${(p.body || '').substring(0, 300)}`).join('\n---\n');
     try {
         const parsed = await callOpenAI({
-            model: 'gpt-4o-mini',
+            model: AI_MODEL,
             messages: [
                 { role: 'system', content: 'You are a market-research sentiment analyst. Output only valid JSON.' },
                 { role: 'user', content: `From these "${audience}" discussions, extract the language that carries clear sentiment. Respond ONLY as valid JSON: {"positive":[{"term":"...","weight":1-10}], "negative":[{"term":"...","weight":1-10}], "positive_pct": <integer 0-100, the overall share of positive vs negative sentiment>}. Give 15-22 items each for positive and negative — use the audience's ACTUAL words and short phrases (2-4 words), not generic labels; weight = how common/strong it is. Posts:\n${sample}` }
@@ -2138,7 +2158,7 @@ async function fetchPostComments(postId) {
     return bodies;
 }
 
-async function enrichCorpusWithComments(corpus, topN = 20) {
+async function enrichCorpusWithComments(corpus, topN = 30) {
     if (!corpus || !corpus.length) return corpus;
     const targets = corpus
         .filter(p => p.id && (p.comments || 0) > 0 && !p.commentsText)
@@ -2195,7 +2215,7 @@ Return only REAL, well-known names — never invented ones — and avoid generic
 Respond ONLY with JSON: {"items":[{"name":"...","note":"<= 6 word description, or empty"}]}`;
     try {
         const parsed = await callOpenAI({
-            model: 'gpt-4o-mini',
+            model: AI_MODEL,
             messages: [
                 { role: 'system', content: 'You suggest only real, well-known names relevant to a given audience. You never invent names, and you output only valid JSON.' },
                 { role: 'user', content: prompt }
@@ -2428,7 +2448,7 @@ async function _renderWhereEntityPanel(corpus, audience, cfg) {
     let parsed = [];
     try {
         const data = await callOpenAI({
-            model: 'gpt-4o-mini',
+            model: AI_MODEL,
             messages: [{ role: 'system', content: cfg.system }, { role: 'user', content: cfg.prompt(audience, sample) }],
             temperature: 0.1, max_completion_tokens: 700, response_format: { type: 'json_object' }
         });
@@ -2576,7 +2596,7 @@ Respond ONLY with JSON: {"waterholes":[{"platform":"Facebook","name":"...","cont
     let parsed = [];
     try {
         const data = await callOpenAI({
-            model: 'gpt-4o-mini',
+            model: AI_MODEL,
             messages: [
                 { role: 'system', content: 'You find where an audience gathers OFF Reddit - any named community, group, forum, site, app, social account, or in-person meetup - across every platform, not just chat apps. You never invent names, numbers or descriptions, and you output only valid JSON.' },
                 { role: 'user', content: prompt }
@@ -2651,7 +2671,7 @@ Respond ONLY with JSON: {"media":[{"type":"youtube","name":"...","focus":"..."}]
     let parsed = [];
     try {
         const data = await callOpenAI({
-            model: 'gpt-4o-mini',
+            model: AI_MODEL,
             messages: [
                 { role: 'system', content: 'You extract only explicitly-named podcasts, YouTube channels and shows from text. You never invent names, numbers or descriptions, and you output only valid JSON.' },
                 { role: 'user', content: prompt }

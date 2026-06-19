@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 70 — terser descriptions (max 4 words) + client truncation of names/descriptions so cards stay compact', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 71 — media icons by type (mic/youtube) + experts grounded by surname (fixes always-thin Key Influencers)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -2458,7 +2458,7 @@ function renderActiveHours(posts) {
 // Strict, high-fidelity grounding. Multi-word names must match as a COHESIVE phrase (or two
 // principal tokens in tight proximity) — never by a single generic token. This is what stops a
 // category like "Dog Training Apps" grounding off every occurrence of "training" (the 735-count bug).
-function fuzzyGroundNameCount(name, allTextLow) {
+function fuzzyGroundNameCount(name, allTextLow, isPerson) {
     const key = String(name).trim().toLowerCase();
     if (key.length < 3) return 0;
     const esc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -2467,23 +2467,38 @@ function fuzzyGroundNameCount(name, allTextLow) {
         const m = allTextLow.match(new RegExp(`\\b${esc}(s|es|'s)?\\b`, 'g'));
         return m ? m.length : 0;
     }
-    // 2. Multi-word → match the whole phrase first.
+    // 2. Multi-word → count the whole phrase.
     const phrase = allTextLow.match(new RegExp(`\\b${esc}(s|es)?\\b`, 'g'));
-    if (phrase && phrase.length) return phrase.length;
-    // 3. Proximity fallback: the two principal tokens within a 3-word window (handles "Huberman, Andrew").
+    const phraseCount = phrase ? phrase.length : 0;
     const tokens = key.split(/\s+/).filter(t => t.length > 3 && !_whereStop.includes(t));
+    // 3. PEOPLE are usually referenced by SURNAME alone ("Karpathy", "Pryor") — the LAST token. For the
+    // experts panel, also count standalone surname mentions and take the higher of phrase/surname. We
+    // DON'T do this for brands/places — matching a single token there caused the "training" over-count.
+    if (isPerson) {
+        const surname = tokens[tokens.length - 1];
+        if (surname && surname.length >= 4) {
+            const m = allTextLow.match(new RegExp(`\\b${surname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'g'));
+            return Math.max(phraseCount, m ? m.length : 0);
+        }
+        return phraseCount;
+    }
+    if (phraseCount) return phraseCount;
+    // 4. Proximity fallback (non-person): the two principal tokens within a 3-word window.
     if (tokens.length >= 2) {
         const t1 = tokens[0].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const t2 = tokens[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const prox = allTextLow.match(new RegExp(`\\b(${t1}\\s+(?:\\w+\\s+){0,2}${t2}|${t2}\\s+(?:\\w+\\s+){0,2}${t1})\\b`, 'gi'));
         return prox ? prox.length : 0;
     }
-    return 0; // unverifiable → falls back to a "Suggested" badge with count 0
+    return 0; // unverifiable → falls back to an "Audience Match" badge with count 0
 }
 
 // Label for AI-added (non-grounded) entries — frames them as a curated match for the niche rather
 // than a "tool failed to find data" disclaimer. The per-panel signal label keeps it honest.
 const SUGGESTED_LABEL = 'Audience Match';
+// Media-type icons (Webflow-hosted): microphone for podcasts/shows, YouTube glyph for channels.
+const MEDIA_ICON_PODCAST = 'https://cdn.prod.website-files.com/685a77786ed6701cb1f51c9f/6a29910c7ee904f1b1846c2a_microphone%20(1).svg';
+const MEDIA_ICON_YOUTUBE = 'https://cdn.prod.website-files.com/685a77786ed6701cb1f51c9f/6a29904e3a7a8a6d15eab767_youtube.svg';
 
 // Per-panel signal strength from the real (grounded) mentions, so a thin panel reads as honest
 // audience intelligence ("this community rarely names X") rather than a broken/empty panel.
@@ -2607,9 +2622,9 @@ ${sample}`;
         // is the source of truth). Real items always show; suggestions only top up a THIN panel and
         // never dominate: if we have ≥3 real, show up to 6 real and NO suggestions; otherwise show the
         // real ones plus a few suggestions, capped at 4 total. Keeps the "data-backed" promise honest.
-        const build = (raw, subFn) => {
+        const build = (raw, subFn, isPerson) => {
             const mapped = (raw || []).filter(x => x && x.name).map(x => {
-                const count = fuzzyGroundNameCount(x.name, allTextLow);
+                const count = fuzzyGroundNameCount(x.name, allTextLow, isPerson);
                 // Grounding is the source of truth: if the name is actually in the corpus it's a REAL
                 // mention (even if the AI flagged it suggested), otherwise it's an AI pick. The wider
                 // multi-tier sample means far more names now ground → fewer "suggested" badges.
@@ -2625,7 +2640,7 @@ ${sample}`;
             return out;
         };
 
-        const experts = build(parsed.experts, x => x.role);
+        const experts = build(parsed.experts, x => x.role, true); // person mode → surname grounding
         renderWherePanelUI('thought-leaders', experts, { round: true, accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)', empty: 'No experts or creators were identified.', context: 'This community rarely names specific creators in discussion — these are the most relevant figures for the niche.' });
 
         const tools = build(parsed.tools, x => x.use);
@@ -2672,6 +2687,14 @@ function renderWherePodcasts(items) {
         set('.podcast-name', _trunc(it.name, 34));
         set('.podcast-focus', _trunc(it.sub || '', 38));
         set('.media-type', (it.sub || '').split(' | ')[0] || 'Podcast');
+        // Swap the media icon: microphone for podcasts/shows, YouTube glyph for channels.
+        const isYouTube = /^youtube/i.test(it.sub || '');
+        const mi = node.querySelector('.media-icon');
+        if (mi) {
+            const url = isYouTube ? MEDIA_ICON_YOUTUBE : MEDIA_ICON_PODCAST;
+            if (mi.tagName === 'IMG') mi.src = url; else mi.style.backgroundImage = `url("${url}")`;
+            mi.style.display = '';
+        }
         set('.podcast-meta', '');
         const tier = it.suggested ? SUGGESTED_LABEL : mentionTier(it.count);
         set('.prevalence-tag', tier); set('.prevelance-tag', tier);

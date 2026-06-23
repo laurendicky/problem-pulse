@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 71 — media icons by type (mic/youtube) + experts grounded by surname (fixes always-thin Key Influencers)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 72 — slimmed the unified Where call (70 titles/18 posts, 1100 tok) to stop the 504; failure now retries on reopen instead of going blank', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -2551,20 +2551,23 @@ async function generateAndRenderAllWherePanels(corpus, audience) {
     // resource names right in titles — "Has anyone used Rover?") + the top 30 bodies with their deep
     // comments. This gives the model a far wider net to catch organic mentions, so fewer items fall
     // back to "suggested".
-    const titlesList = corpus.slice(0, 100)
+    // Kept lean so this single call reliably finishes inside the 26s function window (was timing out
+    // at ~17k input tokens). Grounding still runs over the FULL corpus, so accuracy is unaffected —
+    // the model just gets a tighter brief, and any name it names is verified against everything.
+    const titlesList = corpus.slice(0, 70)
         .map((p, i) => `[Post ${i} Title] ${p.title} (r/${p.subreddit || ''})`)
         .join('\n');
-    // Put the comment-ENRICHED threads first — that's where creators/podcasts/events get named — then
-    // fill with the densest remaining posts, so the model actually reads the resource discussions.
+    // Comment-ENRICHED threads first (that's where creators/podcasts/events get named), then the
+    // densest remaining posts.
     const enriched = corpus.filter(p => p.commentsText);
     const rest = corpus.filter(p => !p.commentsText);
-    const sample = [...enriched, ...rest].slice(0, 30)
-        .map((p, i) => `[Post ${i} Body] ${(p.body || '').slice(0, 500)}\nDiscussions: ${(p.commentsText || '').slice(0, 1500)}`)
+    const sample = [...enriched, ...rest].slice(0, 18)
+        .map((p, i) => `[Post ${i} Body] ${(p.body || '').slice(0, 350)}\nDiscussions: ${(p.commentsText || '').slice(0, 900)}`)
         .join('\n---\n');
 
     const prompt = `You are an expert market researcher building a "Where they are" report for a "${audience}" audience.
 Analyse the discussions below and extract five distinct lists of resources they discuss, use, or follow.
-For each list, retrieve up to 8 of the most prominent, real names. If there are fewer than 6 explicit mentions in the text, you MUST append well-known, highly relevant suggestions that are real and popular for this target audience, setting "suggested": true for those.
+For each list, retrieve up to 6 of the most prominent, real names. If there are fewer than 6 explicit mentions in the text, you MUST append well-known, highly relevant suggestions that are real and popular for this target audience, setting "suggested": true for those.
 
 CRITICAL EXTRACTION RULES (DO NOT VIOLATE):
 - Every entry MUST be a specific, trademarked BRAND, PROPER NOUN, or named entity.
@@ -2613,7 +2616,7 @@ ${sample}`;
                 { role: 'system', content: 'You are an advanced entities extraction engine for audience research. You output only valid JSON.' },
                 { role: 'user', content: prompt }
             ],
-            temperature: 0.1, max_completion_tokens: 1500, response_format: { type: 'json_object' }
+            temperature: 0.1, max_completion_tokens: 1100, response_format: { type: 'json_object' }
         });
 
         const allTextLow = corpus.map(_whereTextOf).join(' ').toLowerCase();
@@ -2658,6 +2661,13 @@ ${sample}`;
         console.log(`[Where] unified harvest: experts=${experts.length} tools=${tools.length} events=${events.length} waterholes=${waterholes.length} media=${media.length}`);
     } catch (e) {
         console.error('[Where] unified panel rendering failed:', e);
+        // Allow a retry on the next tab open instead of leaving the tab stuck blank, and show a
+        // recoverable message in any panel that never rendered.
+        if (window._tabLoaded) window._tabLoaded.where = false;
+        ['thought-leaders', 'tools-apps', 'events-places', 'watering-holes'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el && !el.querySelector('div')) el.innerHTML = '<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">Took too long to load — reopen this tab to try again.</p>';
+        });
     } finally {
         panels.forEach(id => setItemLoading(id, false));
     }

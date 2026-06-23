@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 78 — brand/product BRIEF panel restored (AI deep-dive + typewriter + corpus-only momentum chart, no extra Reddit); entity posts tracked', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 79 — Shop tab now pre-fetched like the others (was click-only, never firing); brand brief + constellation intact', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -691,6 +691,7 @@ async function runProblemFinder() {
         setTimeout(() => { try { loadTabHurts(); loadPolarityMap(); } catch (e) { /* non-fatal */ } }, 400);
         setTimeout(() => { try { loadTabTalk(); } catch (e) { /* non-fatal */ } }, 2500);
         setTimeout(() => { try { loadTabWhere(); } catch (e) { /* non-fatal */ } }, 5000);
+        setTimeout(() => { try { loadTabShop(); } catch (e) { /* non-fatal */ } }, 7500);
     } catch (error) {
         console.error('[Analysis] failed to build corpus:', error);
         showMessage('Something went wrong gathering discussions. Please try again.');

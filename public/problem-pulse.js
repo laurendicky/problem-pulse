@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 76 — serial calls + trimmed Where (800) & assignment (800/45) outputs for more headroom under slow OpenAI latency', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 78 — brand/product BRIEF panel restored (AI deep-dive + typewriter + corpus-only momentum chart, no extra Reddit); entity posts tracked', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -661,6 +661,7 @@ async function runProblemFinder() {
         window._talkPromise = null; // Tab 3 regenerates for the new audience
         window._wherePromise = null; window._platformPanelsRendered = false; // Tab 4 regenerates too
         window._shopPromise = null; window._entityData = null; // Tab 5 regenerates too
+        try { briefCache.clear(); } catch (e) { } // drop cached brand/product briefs for the new audience
         window._corpusEnrichedPromise = null; // re-enrich comments for the new audience
         if (window._polarityChart && window._polarityChart.destroy) { window._polarityChart.destroy(); window._polarityChart = null; }
         console.log(`[Analysis] corpus ready: ${corpus.length} posts`);
@@ -2832,22 +2833,230 @@ ${sampleText}`;
         parsed = { brands: data.brands || [], products: data.products || [] };
     } catch (e) { console.warn('[Shop] entity extraction failed:', e && e.message); }
     const allText = caseText.toLowerCase();
-    const tally = (names) => {
-        const out = {};
+    // Reset + populate the entity store. We also collect the corpus posts that mention each entity
+    // (client-side regex over text we already have — zero network) so the brand-brief can analyse them
+    // and chart momentum WITHOUT any extra Reddit calls.
+    window._entityData = { brands: {}, products: {} };
+    const tally = (names, type) => {
+        const out = window._entityData[type];
         (names || []).forEach(name => {
             const key = String(name).toLowerCase().trim();
             if (key.length < 3 || _NON_PRODUCT_TERMS.has(key) || out[key]) return;
             const esc = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            const m = allText.match(new RegExp(`\\b${esc}(s|es|'s)?\\b`, 'gi'));
-            const count = m ? m.length : 0;
-            if (count > 0) out[key] = { originalName: name, count };
+            const count = (allText.match(new RegExp(`\\b${esc}(s|es|'s)?\\b`, 'gi')) || []).length;
+            if (count > 0) {
+                const testRe = new RegExp(`\\b${esc}(s|es|'s)?\\b`, 'i');
+                const posts = corpus.filter(p => testRe.test(`${p.title || ''} ${p.body || ''} ${p.commentsText || ''}`));
+                out[key] = { originalName: name, count, posts };
+            }
         });
         return Object.entries(out).sort((a, b) => b[1].count - a[1].count).slice(0, 8);
     };
-    renderDiscoveryList('top-brands-container', tally(parsed.brands), 'brands');
-    renderDiscoveryList('top-products-container', tally(parsed.products), 'products');
+    renderDiscoveryList('top-brands-container', tally(parsed.brands, 'brands'), 'brands');
+    renderDiscoveryList('top-products-container', tally(parsed.products, 'products'), 'products');
     console.log(`[Shop] brands/products rendered`);
 }
+
+// =============================================================================
+// Brand / Product BRIEF — click a discovery row → AI deep-dive in the side panel.
+// Lazy (on click), cached, and corpus-only: the analysis reads the entity's own corpus posts, and the
+// momentum chart is derived from those posts' timestamps + local sentiment (NO extra Reddit search,
+// unlike the original — that's the scale/speed win). Styling/typewriter ported from the original.
+// =============================================================================
+const briefCache = new Map();
+function ensureTypewriterStyle() {
+    if (typeof document === 'undefined' || document.getElementById('tw-style')) return;
+    const st = document.createElement('style');
+    st.id = 'tw-style';
+    st.textContent = '.tw-caret{border-right:2px solid currentColor; padding-right:1px; animation:twblink 1s steps(1) infinite;} @keyframes twblink{50%{border-color:transparent;}}';
+    document.head.appendChild(st);
+}
+function typeInto(el, text, speed = 14) {
+    return new Promise(resolve => {
+        if (!el) { resolve(); return; }
+        const full = String(text == null ? '' : text);
+        el.textContent = '';
+        el.classList.add('tw-caret');
+        let i = 0;
+        const step = Math.max(1, Math.round(full.length / 90));
+        const tick = () => {
+            i += step;
+            el.textContent = full.slice(0, i);
+            if (i < full.length) { setTimeout(tick, speed); }
+            else { el.classList.remove('tw-caret'); resolve(); }
+        };
+        tick();
+    });
+}
+async function typeListItems(ul, items, speed = 14) {
+    if (!ul) return;
+    ul.innerHTML = '';
+    for (const it of (items || [])) { const li = document.createElement('li'); ul.appendChild(li); await typeInto(li, it, speed); }
+}
+function escBriefText(s) { return String(s == null ? '' : s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c])); }
+
+function buildBrandBriefHtml(itemName, parsed, trend) {
+    const e = escBriefText;
+    return `
+        <div class="brief-content">
+            <h3 class="brief-header">${e(itemName)}</h3>
+            <div class="brief-section"><h4 class="brief-section-title">What It Is</h4><p class="brief-text">${e(parsed.what_it_is)}</p></div>
+            <div class="brief-section">
+                <h4 class="brief-section-title">Momentum Trend</h4>
+                <div id="brand-momentum-chart" style="height:200px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.03); border-radius:8px; font-size:12px; color:#888;"><span class="loader-dots">Crunching historical mentions...</span></div>
+            </div>
+            <div class="brief-section"><h4>Use Case</h4><p class="brief-text">${e(parsed.use_case)}</p></div>
+            <div class="brief-section"><h4>Strengths</h4><ul class="brief-list">${(parsed.loves || []).map(i => `<li>${e(i)}</li>`).join('')}</ul></div>
+            <div class="brief-section"><h4>Pain Points</h4><ul class="brief-list">${(parsed.hates || []).map(i => `<li>${e(i)}</li>`).join('')}</ul></div>
+            <div class="brief-verdict" style="background:rgba(0,165,206,0.1); padding:15px; border-radius:8px;"><p><strong>Verdict:</strong> ${e(parsed.verdict)}</p></div>
+            ${trend ? `<script id="brand-momentum-chart-data" type="application/json">${JSON.stringify(trend)}</script>` : ''}
+        </div>`;
+}
+
+// Momentum from the corpus only: bucket the entity's posts by recency, score each with the local
+// sentiment word lists (same as the Talk historical chart). No Reddit calls.
+function _entityMomentum(posts) {
+    const nowSec = Date.now() / 1000, DAY = 86400;
+    const periods = [{ label: 'Past 6 Mo', days: 182 }, { label: 'Past 3 Mo', days: 91 }, { label: 'Past Month', days: 30 }, { label: 'Past Week', days: 7 }];
+    const trend = [];
+    periods.forEach(per => {
+        const inWin = (posts || []).filter(p => (p.created || 0) >= nowSec - per.days * DAY);
+        if (!inWin.length) return;
+        const { positive, negative } = countSentimentLocal(inWin);
+        const total = positive + negative;
+        trend.push({ period: per.label, positivePercentage: total ? Math.round((positive / total) * 100) : 50, context: { verdict: `${inWin.length} mention${inWin.length === 1 ? '' : 's'} in this window` } });
+    });
+    return trend.length >= 2 ? trend : null;
+}
+
+function renderBrandMomentumChart(data) {
+    if (typeof Highcharts === 'undefined' || !data || !data.length) {
+        const c = document.getElementById('brand-momentum-chart');
+        if (c) c.innerHTML = '<span>Not enough historical data to chart.</span>';
+        return;
+    }
+    Highcharts.chart('brand-momentum-chart', {
+        chart: { type: 'line', backgroundColor: 'transparent' },
+        title: { text: null }, credits: { enabled: false },
+        xAxis: { categories: data.map(d => d.period), labels: { style: { color: '#888' } } },
+        yAxis: { title: { text: null }, min: 0, max: 100, labels: { style: { color: '#888' } } },
+        legend: { enabled: false },
+        series: [{ name: '% Positive', data: data.map(d => ({ y: d.positivePercentage, context: d.context })), color: '#00a5ce' }],
+        tooltip: {
+            useHTML: true, outside: true, backgroundColor: '#FFFFFF', borderColor: '#E0E0E0', borderWidth: 1, padding: 16, borderRadius: 10, shadow: true,
+            style: { fontSize: '14px', zIndex: 9999 },
+            formatter: function () {
+                const context = this.point.options.context;
+                let html = `<div style="min-width:220px; max-width:280px; white-space:normal; line-height:1.4;"><b>${this.key}</b><br/><span style="color:${this.series.color}">●</span> Positive: <b>${this.y}%</b>`;
+                if (context) {
+                    html += `<hr style="margin:8px 0; border:0; border-top:1px solid #eee;">`;
+                    if (context.positive_theme) html += `<div style="margin-bottom:4px"><span style="color:#28a745">🟢</span> ${context.positive_theme}</div>`;
+                    if (context.negative_theme) html += `<div style="margin-bottom:8px"><span style="color:#dc3545">🔴</span> ${context.negative_theme}</div>`;
+                    if (context.verdict) html += `<div style="font-size:12px; font-style:italic; color:#666;">${context.verdict}</div>`;
+                }
+                return html + `</div>`;
+            }
+        }
+    });
+}
+
+async function generateAndRenderBrandBrief(itemName, itemType) {
+    const isBrand = itemType === 'brands';
+    const targetPanel = document.getElementById(isBrand ? 'brand-detail-panel' : 'product-detail-panel');
+    if (!targetPanel) return;
+    ensureTypewriterStyle();
+    targetPanel.innerHTML = '<div class="brief-content"><p class="loading-text">Building brief… <span class="loader-dots"></span></p></div>';
+
+    if (briefCache.has(itemName)) {
+        targetPanel.innerHTML = briefCache.get(itemName);
+        if (isBrand) {
+            const dataEl = targetPanel.querySelector('#brand-momentum-chart-data');
+            if (dataEl) { try { const t = JSON.parse(dataEl.textContent); if (t) renderBrandMomentumChart(t); } catch (e) {} }
+            else { const c = document.getElementById('brand-momentum-chart'); if (c) c.innerHTML = '<span>Not enough historical data to chart.</span>'; }
+        }
+        return;
+    }
+
+    const entity = window._entityData?.[itemType]?.[String(itemName).toLowerCase()];
+    const topPosts = (entity?.posts || []).slice(0, 20);
+    const topPostsText = topPosts.map(p => `"${p.title || ''} - ${(p.body || '').substring(0, 300)}"`).join('\n');
+
+    try {
+        const prompt = isBrand
+            ? `Analyze "${itemName}" based on: ${topPostsText}. Return JSON with: what_it_is, use_case, loves (array), hates (array), verdict.`
+            : `Analyze category "${itemName}" based on: ${topPostsText}. Return JSON with: what_it_is, job_to_be_done, table_stakes (array), disruption_opportunities (array).`;
+        const parsed = await callOpenAI({
+            model: AI_MODEL,
+            messages: [{ role: 'system', content: 'You are a fast market analyst. Output JSON.' }, { role: 'user', content: prompt }],
+            temperature: 0.1, max_completion_tokens: 800, response_format: { type: 'json_object' }
+        });
+        const e = escBriefText;
+
+        if (isBrand) {
+            targetPanel.innerHTML = `
+                <div class="brief-content">
+                    <h3 class="brief-header">${e(itemName)}</h3>
+                    <div class="brief-section"><h4 class="brief-section-title">What It Is</h4><p class="brief-text" id="tw-what"></p></div>
+                    <div class="brief-section">
+                        <h4 class="brief-section-title">Momentum Trend</h4>
+                        <div id="brand-momentum-chart" style="height:200px; display:flex; align-items:center; justify-content:center; background:rgba(255,255,255,0.03); border-radius:8px; font-size:12px; color:#888;"><span class="loader-dots">Crunching historical mentions...</span></div>
+                    </div>
+                    <div class="brief-section"><h4>Use Case</h4><p class="brief-text" id="tw-use"></p></div>
+                    <div class="brief-section"><h4>Strengths</h4><ul class="brief-list" id="tw-loves"></ul></div>
+                    <div class="brief-section"><h4>Pain Points</h4><ul class="brief-list" id="tw-hates"></ul></div>
+                    <div class="brief-verdict" style="background:rgba(0,165,206,0.1); padding:15px; border-radius:8px;"><p><strong>Verdict:</strong> <span id="tw-verdict"></span></p></div>
+                </div>`;
+            const trend = _entityMomentum(entity?.posts || []);
+            if (trend) renderBrandMomentumChart(trend);
+            else { const c = document.getElementById('brand-momentum-chart'); if (c) c.innerHTML = '<span>Not enough historical data to chart.</span>'; }
+            await typeInto(document.getElementById('tw-what'), parsed.what_it_is);
+            await typeInto(document.getElementById('tw-use'), parsed.use_case);
+            await typeListItems(document.getElementById('tw-loves'), parsed.loves);
+            await typeListItems(document.getElementById('tw-hates'), parsed.hates);
+            await typeInto(document.getElementById('tw-verdict'), parsed.verdict);
+            briefCache.set(itemName, buildBrandBriefHtml(itemName, parsed, trend));
+        } else {
+            targetPanel.innerHTML = `
+                <div class="brief-content">
+                    <h3 class="brief-header">${e(itemName)}</h3>
+                    <div class="brief-section"><h4>Category Info</h4><p class="brief-text" id="tw-what"></p></div>
+                    <div class="brief-section"><h4>Job to be Done</h4><p class="brief-text" id="tw-job"></p></div>
+                    <div class="brief-section"><h4>Table Stakes</h4><ul id="tw-stakes"></ul></div>
+                </div>`;
+            await typeInto(document.getElementById('tw-what'), parsed.what_it_is);
+            await typeInto(document.getElementById('tw-job'), parsed.job_to_be_done);
+            await typeListItems(document.getElementById('tw-stakes'), parsed.table_stakes);
+            briefCache.set(itemName, `
+                <div class="brief-content">
+                    <h3 class="brief-header">${e(itemName)}</h3>
+                    <div class="brief-section"><h4>Category Info</h4><p>${e(parsed.what_it_is)}</p></div>
+                    <div class="brief-section"><h4>Job to be Done</h4><p>${e(parsed.job_to_be_done)}</p></div>
+                    <div class="brief-section"><h4>Table Stakes</h4><ul>${(parsed.table_stakes || []).map(i => `<li>${e(i)}</li>`).join('')}</ul></div>
+                </div>`);
+        }
+    } catch (error) {
+        console.warn('[Brief] failed:', error && error.message);
+        targetPanel.innerHTML = `<div class="brief-content"><p>Error loading content.</p></div>`;
+    }
+}
+
+// Click a .brief-button (on a discovery row) → open the detail panel + run the brief; .brief-back-btn closes.
+document.addEventListener('click', (e) => {
+    const briefBtn = e.target.closest('.brief-button');
+    if (briefBtn) {
+        const item = briefBtn.closest('.discovery-list-item') || briefBtn;
+        const itemName = item.getAttribute('data-word') || briefBtn.getAttribute('data-word');
+        const itemType = item.getAttribute('data-type') || briefBtn.getAttribute('data-type');
+        if (itemName && itemType) {
+            const panel = document.getElementById(itemType === 'brands' ? 'brand-detail-panel' : 'product-detail-panel');
+            if (panel) panel.classList.add('visible');
+            generateAndRenderBrandBrief(itemName, itemType);
+        }
+        return;
+    }
+    const backBtn = e.target.closest('.brief-back-btn');
+    if (backBtn) document.querySelectorAll('#brand-detail-panel, #product-detail-panel').forEach(p => p.classList.remove('visible'));
+});
 
 // --- Demand-signals constellation ------------------------------------------
 const _SHOP_CATEGORIES = ['WillingnessToPay', 'PriceSensitivity', 'BrandLoyalty', 'ResearchHabits', 'Substitutes', 'Dealbreakers'];
@@ -2910,7 +3119,8 @@ function renderConstellation(signals) {
         title: { text: null }, credits: { enabled: false },
         tooltip: {
             useHTML: true, outside: true, backgroundColor: '#FFFFFF', borderColor: '#E0E0E0', borderWidth: 1,
-            style: { color: '#333', fontFamily: "'Plus Jakarta Sans', sans-serif" },
+            shadow: { color: 'rgba(0, 0, 0, 0.15)', offsetX: 0, offsetY: 3, opacity: 1, width: 10 },
+            style: { color: '#333333', fontFamily: "'Plus Jakarta Sans', sans-serif" },
             formatter: function () {
                 const src = this.point.options && this.point.options.source;
                 if (this.point.isParentNode || !src) return false;

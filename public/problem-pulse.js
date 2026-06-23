@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 80 — trimmed demand-signals call (35 posts, 18 signals, 700 tok) to fit the 26s window; Shop fully wired', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 81 — demand-signals prompt now category-aware (spreads real signals across all 6 buckets), labels name the product/brand not the life event', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -3167,10 +3167,16 @@ async function generateAndRenderDemandSignals(corpus, audience) {
     setConstellationPanelState('loading');
     const top = [...corpus].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 35);
     const listForAI = top.map((p, i) => `[${i}] ${`${p.title || ''}. ${(p.body || '').substring(0, 200)} ${(p.commentsText || '').substring(0, 200)}`.replace(/\s+/g, ' ')}`).join('\n');
-    const prompt = `You are a shopper-behaviour analyst studying how the "${audience}" audience spends money: what they buy, what they pay for, and how they choose between products and brands.
-From the numbered posts below, extract every quote that reveals a SHOPPING or product decision — an actual purchase, a price/cost/budget mention, a named product or brand, paying/subscribing, choosing between options, recommending or warning against a product, asking what to buy, comparing options, or what made them switch or stick. Be generous but never invent.
-REJECT pure lifestyle/diet/habit choices where nothing is bought (e.g. "I cut out bread", "I do CICO").
-For each signal return: "post_index" (the [N]), "category" (EXACTLY one of: ${_SHOP_CATEGORIES.join(', ')}), "problem_theme" (2-4 word label), "quote" (a short verbatim snippet from that post).
+    const prompt = `You are a shopper-behaviour analyst studying how the "${audience}" audience spends money.
+From the numbered posts, extract concrete SHOPPING / product-decision signals and sort each into ONE of these six categories. COVER AS MANY of the six categories as the discussions support — aim for 2-4 signals per category where the material exists; do NOT pile everything into one or two.
+- WillingnessToPay: happy to pay more, premium picks, "worth every penny", splurges.
+- PriceSensitivity: budgeting, too expensive, cheaper alternative, deal-hunting, "overpriced".
+- BrandLoyalty: always buys X, go-to brand, switched to/from a brand, sticks with one.
+- ResearchHabits: how they decide — comparing options, reading reviews, asking for recommendations.
+- Substitutes: alternatives, DIY-vs-buy, switching between product types (e.g. cloth vs disposable).
+- Dealbreakers: returns, warnings, "never again", a flaw that kills the purchase.
+For each signal: "post_index" (the [N]), "category" (EXACTLY one of the six above), "problem_theme" (2-4 words naming the PRODUCT, BRAND or decision — e.g. "Off-White sneakers", "Millie Moon diapers", "premium stroller" — NOT a life event or generic worry), "quote" (a short verbatim snippet).
+Only real shopping signals — never invent. Reject pure lifestyle/diet/habit talk where nothing is bought.
 Return ONLY JSON: {"signals":[{"post_index":0,"category":"PriceSensitivity","problem_theme":"...","quote":"..."}]} — up to 18 signals.
 Posts:
 ${listForAI}`;

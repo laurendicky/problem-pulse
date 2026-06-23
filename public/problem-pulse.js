@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 79 — Shop tab now pre-fetched like the others (was click-only, never firing); brand brief + constellation intact', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 80 — trimmed demand-signals call (35 posts, 18 signals, 700 tok) to fit the 26s window; Shop fully wired', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -3165,13 +3165,13 @@ async function generateAndRenderDemandSignals(corpus, audience) {
     if (!container) { console.warn('[Shop] #constellation-map-container not found'); return; }
     if ((corpus || []).length < 5) { renderConstellation([]); return; }
     setConstellationPanelState('loading');
-    const top = [...corpus].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 60);
-    const listForAI = top.map((p, i) => `[${i}] ${`${p.title || ''}. ${(p.body || '').substring(0, 280)} ${(p.commentsText || '').substring(0, 280)}`.replace(/\s+/g, ' ')}`).join('\n');
+    const top = [...corpus].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 35);
+    const listForAI = top.map((p, i) => `[${i}] ${`${p.title || ''}. ${(p.body || '').substring(0, 200)} ${(p.commentsText || '').substring(0, 200)}`.replace(/\s+/g, ' ')}`).join('\n');
     const prompt = `You are a shopper-behaviour analyst studying how the "${audience}" audience spends money: what they buy, what they pay for, and how they choose between products and brands.
 From the numbered posts below, extract every quote that reveals a SHOPPING or product decision — an actual purchase, a price/cost/budget mention, a named product or brand, paying/subscribing, choosing between options, recommending or warning against a product, asking what to buy, comparing options, or what made them switch or stick. Be generous but never invent.
 REJECT pure lifestyle/diet/habit choices where nothing is bought (e.g. "I cut out bread", "I do CICO").
 For each signal return: "post_index" (the [N]), "category" (EXACTLY one of: ${_SHOP_CATEGORIES.join(', ')}), "problem_theme" (2-4 word label), "quote" (a short verbatim snippet from that post).
-Return ONLY JSON: {"signals":[{"post_index":0,"category":"PriceSensitivity","problem_theme":"...","quote":"..."}]} — up to 25 signals.
+Return ONLY JSON: {"signals":[{"post_index":0,"category":"PriceSensitivity","problem_theme":"...","quote":"..."}]} — up to 18 signals.
 Posts:
 ${listForAI}`;
     let signals = [];
@@ -3182,7 +3182,7 @@ ${listForAI}`;
                 { role: 'system', content: 'You extract real shopping/purchase-decision signals from discussions and output only valid JSON. You never invent quotes.' },
                 { role: 'user', content: prompt }
             ],
-            temperature: 0.1, max_completion_tokens: 1000, response_format: { type: 'json_object' }
+            temperature: 0.1, max_completion_tokens: 700, response_format: { type: 'json_object' }
         });
         const raw = Array.isArray(data.signals) ? data.signals : [];
         const lookup = {}; _SHOP_CATEGORIES.forEach(c => { lookup[c.toLowerCase().replace(/[^a-z]/g, '')] = c; });

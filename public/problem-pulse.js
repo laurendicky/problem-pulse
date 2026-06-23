@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 75 — OpenAI calls now SERIAL (concurrency 1): the 504s were two heavy calls starving each other; alone each finishes in 7-12s', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 76 — serial calls + trimmed Where (800) & assignment (800/45) outputs for more headroom under slow OpenAI latency', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -1401,7 +1401,7 @@ async function assignPostsToFindings(findings, corpus) {
     // problem can gather lots of posts (this pool drives both the modal posts AND prevalence).
     const candidates = dedupeByTitle(corpus)
         .filter(p => ((p.title || '').length + (p.body || '').length) >= 80)
-        .slice(0, 60); // smaller batch so the assignment JSON fits inside the 26s proxy window
+        .slice(0, 45); // smaller batch so the assignment JSON fits the output cap + 26s window
     const buckets = findings.map(() => []);
     try {
         const problemList = findings.map((f, i) => `${i + 1}: ${f.title} — ${f.summary || ''}`).join('\n');
@@ -1413,7 +1413,7 @@ async function assignPostsToFindings(findings, corpus) {
                 { role: 'system', content: 'You are a precise categorisation engine that outputs only JSON. You err on the side of 0 (none) rather than forcing a weak match.' },
                 { role: 'user', content: prompt }
             ],
-            temperature: 0, max_completion_tokens: 1200, response_format: { type: 'json_object' }
+            temperature: 0, max_completion_tokens: 800, response_format: { type: 'json_object' }
         });
         const assignments = Array.isArray(parsed.assignments) ? parsed.assignments : [];
         assignments.forEach(a => {
@@ -2627,7 +2627,7 @@ ${sample}`;
                 { role: 'system', content: 'You are an advanced entities extraction engine for audience research. You output only valid JSON.' },
                 { role: 'user', content: prompt }
             ],
-            temperature: 0.1, max_completion_tokens: 1100, response_format: { type: 'json_object' }
+            temperature: 0.1, max_completion_tokens: 800, response_format: { type: 'json_object' }
         });
 
         const allTextLow = corpus.map(_whereTextOf).join(' ').toLowerCase();

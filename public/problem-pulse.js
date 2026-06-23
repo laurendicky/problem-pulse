@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 73 — trimmed all heavy AI calls (findings/tone/hooks/sentiment/assign/demand) to fit the 26s window with the bigger 600-post corpus', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 75 — OpenAI calls now SERIAL (concurrency 1): the 504s were two heavy calls starving each other; alone each finishes in 7-12s', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -46,7 +46,10 @@ function _normalizeAIPayload(payload) {
 // + polarity), and bursting them all at once overloads the single Netlify function — the slow ones
 // then time out and come back WITHOUT the CORS header, which the browser reports as a CORS error.
 // Capping concurrency + retrying transient failures makes that self-heal.
-const OPENAI_MAX_CONCURRENT = 2;
+// Serial (1 at a time). The proxy logs proved that two heavy calls running concurrently starve each
+// other — one finishes in ~11s while the other runs to the 24s abort and 504s. Run alone, every call
+// completes in 7–12s, well inside the window. Slightly slower wall-clock, but reliable.
+const OPENAI_MAX_CONCURRENT = 1;
 let _openaiInFlight = 0;
 const _openaiQueue = [];
 function _acquireOpenAISlot() {
@@ -1938,7 +1941,15 @@ const POSITIVE_CLOUD_COLORS = ['#006d85', '#0090b5', '#00a5ce', '#00c0e6', '#7bd
 const NEGATIVE_CLOUD_COLORS = ['#d6539d', '#ff4fa3', '#fd80c7', '#f472b6', '#ff99d6', '#fbb6ce'];
 
 function renderSentimentCloud(container, items, colors) {
-    const list = (items || []).filter(it => it && it.term);
+    // Keep only SHORT terms — a word cloud is for words/phrases, not sentences. Drop anything with
+    // more than 3 words, over 24 chars, or that reads like a clause ("i …", contains "but/because…").
+    const _badPhrase = /^(i|we|they|he|she|it|you)\b|\b(but|because|so that|ended up|turned out|even though)\b/i;
+    const list = (items || []).filter(it => {
+        if (!it || !it.term) return false;
+        const t = String(it.term).trim();
+        const words = t.split(/\s+/).length;
+        return words <= 3 && t.length <= 24 && !_badPhrase.test(t);
+    });
     if (list.length < 3) { container.innerHTML = '<p class="chart-placeholder-text">Not enough distinct terms found.</p>'; return; }
     const weights = list.map(it => Number(it.weight) || 1);
     const max = Math.max(...weights), min = Math.min(...weights);
@@ -2018,7 +2029,7 @@ async function generateAndRenderSentiment(corpus, audience) {
             model: AI_MODEL,
             messages: [
                 { role: 'system', content: 'You are a market-research sentiment analyst. Output only valid JSON.' },
-                { role: 'user', content: `From these "${audience}" discussions, extract the language that carries clear sentiment. Respond ONLY as valid JSON: {"positive":[{"term":"...","weight":1-10}], "negative":[{"term":"...","weight":1-10}], "positive_pct": <integer 0-100, the overall share of positive vs negative sentiment>}. Give 15-22 items each for positive and negative — use the audience's ACTUAL words and short phrases (2-4 words), not generic labels; weight = how common/strong it is. Posts:\n${sample}` }
+                { role: 'user', content: `From these "${audience}" discussions, extract the language that carries clear sentiment. Respond ONLY as valid JSON: {"positive":[{"term":"...","weight":1-10}], "negative":[{"term":"...","weight":1-10}], "positive_pct": <integer 0-100, the overall share of positive vs negative sentiment>}. Give 15-22 items each for positive and negative. Each "term" MUST be a SHORT word or phrase of 1-3 words MAX (e.g. "finally fixed", "so frustrating", "love it") — NEVER a full sentence, clause, or quote. Use the audience's actual words; weight = how common/strong it is. Posts:\n${sample}` }
             ],
             temperature: 0.2, max_completion_tokens: 850, response_format: { type: 'json_object' }
         });

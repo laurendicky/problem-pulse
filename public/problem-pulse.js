@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 72 — slimmed the unified Where call (70 titles/18 posts, 1100 tok) to stop the 504; failure now retries on reopen instead of going blank', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 73 — trimmed all heavy AI calls (findings/tone/hooks/sentiment/assign/demand) to fit the 26s window with the bigger 600-post corpus', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -1080,7 +1080,7 @@ async function generateAndRenderFindings(corpus, audience) {
             { role: 'user', content: `Analyse these discussions about "${audience}" and identify 4 to 6 of the most common, clearly recurring, DISTINCT PROBLEMS — genuine pain points, frustrations, struggles, worries, or unmet needs. Make them genuinely different from each other (no near-duplicate or overlapping problems). IMPORTANT: include ONLY real problems/difficulties. Do NOT include positive or heart-warming themes, things they love or enjoy, or ways their dog helps them — e.g. "emotional support from dogs" is NOT a problem and must be excluded. Respond ONLY with a JSON object: {"findings":[{"title","summary","quotes","keywords","intensity"}]}. Rules — "title": 3-6 words naming a problem, plain and specific. "summary": ONE short, punchy, human-sounding sentence (about 18 words, 25 max), intriguing, NO waffle. Describe the problem directly — do NOT name the audience ("${audience}") in the summary. "quotes": exactly 3 short authentic-sounding strings that express the PROBLEM (a complaint or struggle, not praise), each ≤ 80 characters. "keywords": 3-6 lowercase words for matching related posts. "intensity": an integer 0-100 rating how emotionally severe/painful this problem is for ${audience}, judged INDEPENDENTLY of how often it comes up. Prioritise the most common recurring problems; avoid one-off complaints. Posts:\n${sample}` }
         ],
         temperature: 0.2,
-        max_completion_tokens: 1400, // room for up to 6 findings
+        max_completion_tokens: 1000, // fits 6 findings; trimmed to beat the 26s proxy timeout
         seed: 11,
         response_format: { type: 'json_object' }
     };
@@ -1398,7 +1398,7 @@ async function assignPostsToFindings(findings, corpus) {
     // problem can gather lots of posts (this pool drives both the modal posts AND prevalence).
     const candidates = dedupeByTitle(corpus)
         .filter(p => ((p.title || '').length + (p.body || '').length) >= 80)
-        .slice(0, 120);
+        .slice(0, 60); // smaller batch so the assignment JSON fits inside the 26s proxy window
     const buckets = findings.map(() => []);
     try {
         const problemList = findings.map((f, i) => `${i + 1}: ${f.title} — ${f.summary || ''}`).join('\n');
@@ -1410,7 +1410,7 @@ async function assignPostsToFindings(findings, corpus) {
                 { role: 'system', content: 'You are a precise categorisation engine that outputs only JSON. You err on the side of 0 (none) rather than forcing a weak match.' },
                 { role: 'user', content: prompt }
             ],
-            temperature: 0, max_completion_tokens: 2500, response_format: { type: 'json_object' }
+            temperature: 0, max_completion_tokens: 1200, response_format: { type: 'json_object' }
         });
         const assignments = Array.isArray(parsed.assignments) ? parsed.assignments : [];
         assignments.forEach(a => {
@@ -1775,7 +1775,7 @@ async function generateAndRenderToneMap(corpus, audience) {
                 { role: 'system', content: 'You are a brand psychologist who outputs only valid JSON.' },
                 { role: 'user', content: `Analyse the "${audience}" community. Identify 4 distinct conversation topics. For each: "topic" (short title), "traits" (array of 4 objects, each {"name": adjective, "score": integer 10-100 intensity}), "insights" (array of EXACTLY 3 standalone sentences, each under 15 words, one observation each), "level" (LOW, MEDIUM, or HIGH). Respond ONLY as valid JSON where the value of key "tone_analysis" is a JSON ARRAY of exactly 4 such objects (not an object). Posts: ${sample}` }
             ],
-            temperature: 0.2, max_completion_tokens: 1200, response_format: { type: 'json_object' }
+            temperature: 0.2, max_completion_tokens: 900, response_format: { type: 'json_object' }
         });
         container.innerHTML = '';
         // The model sometimes returns tone_analysis as an object (keyed by topic) instead of an array,
@@ -1888,7 +1888,7 @@ async function generateAndRenderHookPatterns(corpus, audience) {
                 { role: 'system', content: 'You are a content strategist. You are brief and punchy. Output only valid JSON.' },
                 { role: 'user', content: `Analyse these top posts for "${audience}". Identify 4-6 modern hook patterns. Respond ONLY as valid JSON with key "patterns", each object: "category" (hook name), "short_summary" (≤10 words), "strategy" (≤20 words on why it works), "example_ids" (array of 3 post IDs from the list), "emotion_type" (a SHORT 2-3 word emotional driver, unique to this pattern; use "&" instead of "and"), "impact_level" (exactly one of "Very High Impact","High Impact","Medium Impact"), "emotional_intensity" (integer 0-100), "viral_potential" (integer 0-100), "community_impact" (one of "Very High","High","Medium","Low"). Posts:\n${listForAI}` }
             ],
-            temperature: 0.1, max_completion_tokens: 1200, response_format: { type: 'json_object' }
+            temperature: 0.1, max_completion_tokens: 950, response_format: { type: 'json_object' }
         });
         wrapper.innerHTML = '';
         (parsed.patterns || []).forEach(pattern => {
@@ -2020,7 +2020,7 @@ async function generateAndRenderSentiment(corpus, audience) {
                 { role: 'system', content: 'You are a market-research sentiment analyst. Output only valid JSON.' },
                 { role: 'user', content: `From these "${audience}" discussions, extract the language that carries clear sentiment. Respond ONLY as valid JSON: {"positive":[{"term":"...","weight":1-10}], "negative":[{"term":"...","weight":1-10}], "positive_pct": <integer 0-100, the overall share of positive vs negative sentiment>}. Give 15-22 items each for positive and negative — use the audience's ACTUAL words and short phrases (2-4 words), not generic labels; weight = how common/strong it is. Posts:\n${sample}` }
             ],
-            temperature: 0.2, max_completion_tokens: 1100, response_format: { type: 'json_object' }
+            temperature: 0.2, max_completion_tokens: 850, response_format: { type: 'json_object' }
         });
         // Balance the two clouds so neither side dominates: sort each by weight (strongest first) and
         // trim both to the SAME count (the smaller of the two, capped at 16).
@@ -2960,7 +2960,7 @@ ${listForAI}`;
                 { role: 'system', content: 'You extract real shopping/purchase-decision signals from discussions and output only valid JSON. You never invent quotes.' },
                 { role: 'user', content: prompt }
             ],
-            temperature: 0.1, max_completion_tokens: 1400, response_format: { type: 'json_object' }
+            temperature: 0.1, max_completion_tokens: 1000, response_format: { type: 'json_object' }
         });
         const raw = Array.isArray(data.signals) ? data.signals : [];
         const lookup = {}; _SHOP_CATEGORIES.forEach(c => { lookup[c.toLowerCase().replace(/[^a-z]/g, '')] = c; });

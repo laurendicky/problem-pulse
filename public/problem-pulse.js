@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 81 — demand-signals prompt now category-aware (spreads real signals across all 6 buckets), labels name the product/brand not the life event', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 84 — #demand-signals-tab label shimmers on load; loading tab labels dim to 0.5 opacity so ready tabs stand out', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -285,6 +285,9 @@ function buildSubredditQuery(subreddits) {
 // One extra "resource discovery" lane pulls the casual recommend/tool/podcast threads that the
 // problem-signal lanes filter out — this is what feeds real (not AI-guessed) data into Tabs 4 & 5.
 const DISCOVERY_TERMS = ['recommend', 'tool', 'app', 'podcast', 'website', 'book', 'favorite', 'best'];
+// Purchase-intent phrases — these pull the actual "I bought / don't buy / switched from" threads
+// straight into the corpus, which is the gold for the How-They-Shop tab (demand signals + brands).
+const DEMAND_PHRASES = ['"i bought"', '"just bought"', '"would recommend"', '"worth the money"', '"switched from"', '"stopped buying"', '"regret buying"', '"highly recommend"'];
 
 function buildProblemQueries(terms) {
     const single = (terms || []).filter(t => t && !/\s/.test(t)).slice(0, 8);
@@ -296,6 +299,7 @@ function buildProblemQueries(terms) {
     }
     phrases.forEach(p => queries.push(`"${p}"`));
     queries.push(`(${DISCOVERY_TERMS.join(' OR ')})`); // resource-sharing lane
+    queries.push(`(${DEMAND_PHRASES.join(' OR ')})`);  // purchase-intent lane (feeds How They Shop)
     return queries.length ? queries : ['(problem OR struggle OR advice)'];
 }
 
@@ -438,7 +442,7 @@ async function buildCorpus(subreddits, audience) {
 const CORPUS_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;   // posts: re-fetch if >14 days old (content goes stale)
 // Bump this whenever the corpus pipeline changes (discovery lane, deeper comments, etc.) so every
 // older cached corpus is treated as stale and rebuilt automatically — no manual Firestore deletes.
-const CORPUS_SCHEMA_VERSION = 2;
+const CORPUS_SCHEMA_VERSION = 3;
 const SUBREDDIT_CACHE_TTL_MS = Infinity;                // communities: never expire — the mapping is stable,
                                                         // and this lets pre-launch seeding persist. Delete a
                                                         // doc in Firebase to force a refresh for one audience.
@@ -1162,6 +1166,8 @@ function setTabLoading(tabId, loading) {
     // so match either; fall back to the tab link itself if neither is found.
     const textEl = el.querySelector('.main-tab-text, .tab-text-2') || el;
     textEl.classList.toggle('pp-tab-loading', !!loading); // shimmer only; tabs stay clickable
+    // Dim the label while it shimmers so the already-loaded tabs stand out as "ready".
+    textEl.style.opacity = loading ? '0.5' : '';
 }
 
 // Per-ITEM loading shimmer (separate from the tab-label shimmer). Toggles the Webflow `.is-loading`
@@ -3165,8 +3171,22 @@ async function generateAndRenderDemandSignals(corpus, audience) {
     if (!container) { console.warn('[Shop] #constellation-map-container not found'); return; }
     if ((corpus || []).length < 5) { renderConstellation([]); return; }
     setConstellationPanelState('loading');
-    const top = [...corpus].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 35);
-    const listForAI = top.map((p, i) => `[${i}] ${`${p.title || ''}. ${(p.body || '').substring(0, 200)} ${(p.commentsText || '').substring(0, 200)}`.replace(/\s+/g, ' ')}`).join('\n');
+    // Select by SHOPPING INTENT, not upvotes (upvotes favour stories, not purchases). Score each post
+    // on commercial keywords + a big bonus for comment-enriched threads (recommendations live in
+    // comments), take the top 22, and read DEEPER (the buying talk is rarely in the first 200 chars).
+    const shopWords = ['buy', 'bought', 'purchase', 'pay', 'price', 'cost', 'worth', 'brand', 'recommend', 'choose', 'spent', 'subscription', 'upgrade', 'cheap', 'expensive', 'ordered', 'shopping', 'store', 'gear'];
+    const scored = corpus.map(p => {
+        const text = `${p.title || ''} ${p.body || ''} ${p.commentsText || ''}`.toLowerCase();
+        let intentScore = 0;
+        shopWords.forEach(w => { if (text.includes(w)) intentScore += 2; });
+        if (p.commentsText) intentScore += 5;
+        return { post: p, intentScore };
+    });
+    const targeted = scored.filter(x => x.intentScore > 0)
+        .sort((a, b) => b.intentScore - a.intentScore || ((b.post.score || 0) - (a.post.score || 0)))
+        .map(x => x.post).slice(0, 22);
+    const finalSelection = targeted.length ? targeted : [...corpus].sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, 22);
+    const listForAI = finalSelection.map((p, i) => `[${i}] ${`${p.title || ''}. ${(p.body || '').substring(0, 500)} ${(p.commentsText || '').substring(0, 800)}`.replace(/\s+/g, ' ')}`).join('\n');
     const prompt = `You are a shopper-behaviour analyst studying how the "${audience}" audience spends money.
 From the numbered posts, extract concrete SHOPPING / product-decision signals and sort each into ONE of these six categories. COVER AS MANY of the six categories as the discussions support — aim for 2-4 signals per category where the material exists; do NOT pile everything into one or two.
 - WillingnessToPay: happy to pay more, premium picks, "worth every penny", splurges.
@@ -3193,7 +3213,7 @@ ${listForAI}`;
         const raw = Array.isArray(data.signals) ? data.signals : [];
         const lookup = {}; _SHOP_CATEGORIES.forEach(c => { lookup[c.toLowerCase().replace(/[^a-z]/g, '')] = c; });
         signals = raw.map(s => {
-            const post = top[parseInt(s.post_index, 10)];
+            const post = finalSelection[parseInt(s.post_index, 10)];
             const cat = lookup[String(s.category || '').toLowerCase().replace(/[^a-z]/g, '')];
             if (!post || !cat || !s.problem_theme || !s.quote) return null;
             return { category: cat, problem_theme: String(s.problem_theme).trim(), quote: String(s.quote).trim(), source: { subreddit: post.subreddit || '', ups: post.score || 0, url: post.permalink || '' } };
@@ -3209,6 +3229,9 @@ function loadTabShop() {
     if (window._tabLoaded.shop) return window._shopPromise || Promise.resolve();
     if (!window._corpus || !window._corpus.length) return Promise.resolve();
     window._tabLoaded.shop = true;
+    // Shimmer the shop tab label(s) — #demand-signals-tab is the actual Webflow tab; #tab-shop kept as
+    // a fallback. setTabLoading no-ops on whichever isn't present.
+    setTabLoading('demand-signals-tab', true);
     setTabLoading('tab-shop', true);
     const audience = window.originalGroupName || '';
     window._shopPromise = (async () => {
@@ -3219,7 +3242,7 @@ function loadTabShop() {
             generateAndRenderDemandSignals(corpus, audience)
         ]);
     })().catch(e => { console.warn('[Shop] failed', e); window._tabLoaded.shop = false; })
-        .finally(() => setTabLoading('tab-shop', false));
+        .finally(() => { setTabLoading('demand-signals-tab', false); setTabLoading('tab-shop', false); });
     return window._shopPromise;
 }
 

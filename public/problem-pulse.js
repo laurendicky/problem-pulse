@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 84 — #demand-signals-tab label shimmers on load; loading tab labels dim to 0.5 opacity so ready tabs stand out', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 85 — demand signals: shorter quotes (≤15 words) + 14 max + 850 tok so the JSON never truncates (was 0 signals from a cut-off array)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -3195,9 +3195,9 @@ From the numbered posts, extract concrete SHOPPING / product-decision signals an
 - ResearchHabits: how they decide — comparing options, reading reviews, asking for recommendations.
 - Substitutes: alternatives, DIY-vs-buy, switching between product types (e.g. cloth vs disposable).
 - Dealbreakers: returns, warnings, "never again", a flaw that kills the purchase.
-For each signal: "post_index" (the [N]), "category" (EXACTLY one of the six above), "problem_theme" (2-4 words naming the PRODUCT, BRAND or decision — e.g. "Off-White sneakers", "Millie Moon diapers", "premium stroller" — NOT a life event or generic worry), "quote" (a short verbatim snippet).
+For each signal: "post_index" (the [N]), "category" (EXACTLY one of the six above), "problem_theme" (2-4 words naming the PRODUCT, BRAND or decision — e.g. "Off-White sneakers", "Millie Moon diapers", "premium stroller" — NOT a life event or generic worry), "quote" (a SHORT verbatim snippet, MAX 15 words).
 Only real shopping signals — never invent. Reject pure lifestyle/diet/habit talk where nothing is bought.
-Return ONLY JSON: {"signals":[{"post_index":0,"category":"PriceSensitivity","problem_theme":"...","quote":"..."}]} — up to 18 signals.
+Return ONLY JSON: {"signals":[{"post_index":0,"category":"PriceSensitivity","problem_theme":"...","quote":"..."}]} — up to 14 signals.
 Posts:
 ${listForAI}`;
     let signals = [];
@@ -3205,10 +3205,10 @@ ${listForAI}`;
         const data = await callOpenAI({
             model: AI_MODEL,
             messages: [
-                { role: 'system', content: 'You extract real shopping/purchase-decision signals from discussions and output only valid JSON. You never invent quotes.' },
+                { role: 'system', content: 'You extract real shopping/purchase-decision signals from discussions and output only valid JSON. You never invent quotes. Keep quotes short so the JSON is always complete.' },
                 { role: 'user', content: prompt }
             ],
-            temperature: 0.1, max_completion_tokens: 700, response_format: { type: 'json_object' }
+            temperature: 0.1, max_completion_tokens: 850, response_format: { type: 'json_object' }
         });
         const raw = Array.isArray(data.signals) ? data.signals : [];
         const lookup = {}; _SHOP_CATEGORIES.forEach(c => { lookup[c.toLowerCase().replace(/[^a-z]/g, '')] = c; });

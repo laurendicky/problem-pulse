@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 91 — location footnote now accurate: "residency signals (I\'m based in phrase or location flair)" instead of mislabelling flair as I\'m-based-in phrases', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 93 — more residency phrases for location ("here in", "we have a problem in", "moved to", "grew up in", "raising … in", "anyone from"…)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -2408,7 +2408,17 @@ function renderLocationChart(posts) {
     const fullText = texts.join(' \n ');
     const esc = (k) => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+');
     const countKeys = (keys) => { const pat = keys.map(esc).join('|'); const m = fullText.match(new RegExp('\\b(' + pat + ')\\b', 'gi')); return m ? m.length : 0; };
-    const LOC_INTENT = "(?:i'?m|i am|we'?re|we are)\\s+(?:from|in|living\\s+in|based\\s+in|located\\s+in)|live\\s+in|living\\s+in|based\\s+in|located\\s+in|here\\s+in|from";
+    // Residency / local-presence phrases. Each only counts when an actual country name follows (the
+    // regex anchors on a country), so broad ones like "problem in" can't false-positive.
+    const LOC_INTENT = [
+        "(?:i'?m|i am|we'?re|we are)\\s+(?:from|in|living\\s+in|based\\s+in|located\\s+in)",
+        "live\\s+in", "living\\s+in", "based\\s+in", "located\\s+in", "here\\s+in",
+        "moved\\s+to", "moving\\s+to", "relocat(?:ed|ing)\\s+to",
+        "grew\\s+up\\s+in", "raised\\s+in", "raising\\s+(?:my\\s+)?\\w+\\s+in",
+        "(?:we|i)\\s+have\\s+(?:a\\s+|an\\s+)?(?:problem|issue|situation)\\s+(?:here\\s+)?in",
+        "anyone\\s+(?:else\\s+)?(?:from|in)",
+        "from"
+    ].join('|');
     const countStrong = (keys) => { const pat = keys.map(esc).join('|'); const m = fullText.match(new RegExp('\\b(?:' + LOC_INTENT + ')\\s+(?:the\\s+)?(' + pat + ')\\b', 'gi')); return m ? m.length : 0; };
     // User/post FLAIR ("UK", "Texas", "🇦🇺") is a strong real residency signal the poster set themselves
     // — count it like an explicit "I'm based in…" (weight ×4) and fold it into the totals.
@@ -2434,8 +2444,8 @@ function renderLocationChart(posts) {
     const max = data[0].score || 1;
     data.forEach(d => { d.pct = Math.round((d.score / total) * 100); });
     const footnote = strongTotal > 0
-        ? `Weighted toward stated location — ${strongTotal} clear residency signal${strongTotal === 1 ? '' : 's'} (an "I'm based in…" phrase or location flair) among ${grandTotal} country mentions, counted more heavily.`
-        : `Based on ${grandTotal} country/region mentions. No clear residency signals were found, so this reflects countries discussed rather than confirmed residence.`;
+        ? `Weighted toward stated location — where people explicitly say they're based (an "I'm based in…" phrase or location flair) counts more heavily than a passing country mention.`
+        : `Reflects countries discussed rather than confirmed residence — few people stated where they're actually based.`;
     el.innerHTML = `
       <div class="location-chart" style="display:flex; flex-direction:column; gap:11px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
         ${data.map(d => `

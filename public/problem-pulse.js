@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 85 — demand signals: shorter quotes (≤15 words) + 14 max + 850 tok so the JSON never truncates (was 0 signals from a cut-off array)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 88 — MORE REAL signal (no AI): count link-domains for social + flair for location, new Where/Who search lane, comments 22→35, cache schema v4', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -288,6 +288,9 @@ const DISCOVERY_TERMS = ['recommend', 'tool', 'app', 'podcast', 'website', 'book
 // Purchase-intent phrases — these pull the actual "I bought / don't buy / switched from" threads
 // straight into the corpus, which is the gold for the How-They-Shop tab (demand signals + brands).
 const DEMAND_PHRASES = ['"i bought"', '"just bought"', '"would recommend"', '"worth the money"', '"switched from"', '"stopped buying"', '"regret buying"', '"highly recommend"'];
+// Demographic / platform discovery — pulls threads where people declare where they live, where they
+// meet up, and which channels they follow. This is what feeds the thin Where-tab charts with REAL data.
+const WHERE_PHRASES = ['"based in"', '"living in"', '"anyone from"', '"discord"', '"facebook group"', '"youtube"', '"podcast"', '"instagram"'];
 
 function buildProblemQueries(terms) {
     const single = (terms || []).filter(t => t && !/\s/.test(t)).slice(0, 8);
@@ -300,6 +303,7 @@ function buildProblemQueries(terms) {
     phrases.forEach(p => queries.push(`"${p}"`));
     queries.push(`(${DISCOVERY_TERMS.join(' OR ')})`); // resource-sharing lane
     queries.push(`(${DEMAND_PHRASES.join(' OR ')})`);  // purchase-intent lane (feeds How They Shop)
+    queries.push(`(${WHERE_PHRASES.join(' OR ')})`);   // demographic/platform lane (feeds Where They Are)
     return queries.length ? queries : ['(problem OR struggle OR advice)'];
 }
 
@@ -384,7 +388,12 @@ function normalizeCorpus(children) {
             score: d.ups || 0,
             comments: d.num_comments || 0,
             created: d.created_utc || 0,
-            permalink: d.permalink ? `https://reddit.com${d.permalink}` : ''
+            permalink: d.permalink ? `https://reddit.com${d.permalink}` : '',
+            // Real signals we used to discard: the link's domain (a youtube.com/instagram.com link is
+            // hard evidence of platform use) and user/post flair (often encodes location). Free — both
+            // already arrive in the search response. Feed the social-split + location charts.
+            domain: (d.domain || '').toLowerCase(),
+            flair: `${d.author_flair_text || ''} ${d.link_flair_text || ''}`.trim().toLowerCase()
         }));
 }
 
@@ -442,7 +451,7 @@ async function buildCorpus(subreddits, audience) {
 const CORPUS_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000;   // posts: re-fetch if >14 days old (content goes stale)
 // Bump this whenever the corpus pipeline changes (discovery lane, deeper comments, etc.) so every
 // older cached corpus is treated as stale and rebuilt automatically — no manual Firestore deletes.
-const CORPUS_SCHEMA_VERSION = 3;
+const CORPUS_SCHEMA_VERSION = 4;
 const SUBREDDIT_CACHE_TTL_MS = Infinity;                // communities: never expire — the mapping is stable,
                                                         // and this lets pre-launch seeding persist. Delete a
                                                         // doc in Firebase to force a refresh for one audience.
@@ -479,7 +488,8 @@ async function setCachedCorpus(audience, posts) {
             id: p.id, subreddit: p.subreddit, title: p.title,
             body: (p.body || '').slice(0, 600),
             commentsText: (p.commentsText || '').slice(0, 4000), // deep comment text (Where/Shop signal)
-            score: p.score, comments: p.comments, created: p.created, permalink: p.permalink
+            score: p.score, comments: p.comments, created: p.created, permalink: p.permalink,
+            domain: p.domain || '', flair: (p.flair || '').slice(0, 80) // platform/location signal
         }));
         await db.collection('corpora').doc(_audienceSlug(audience)).set({ audience, posts: lean, updatedAt: Date.now(), schema: CORPUS_SCHEMA_VERSION });
         console.log(`[Cache] corpus SAVED for "${audience}" (${lean.length} posts)`);
@@ -2192,7 +2202,7 @@ async function fetchPostComments(postId) {
 // threads (gated + cached, so scale stays fine), PRIORITISING resource/recommendation threads where
 // people actually list names, then the most-discussed. Up to 4000 chars of comment text each.
 const _RESOURCE_SIGNAL = /\b(recommend|recommendation|favou?rite|best|which|what.*(use|using)|anyone use|app|apps|tool|tools|podcast|channel|youtube|book|website|brand|gear|trainer|expert)\b/i;
-async function enrichCorpusWithComments(corpus, topN = 22) {
+async function enrichCorpusWithComments(corpus, topN = 35) {
     if (!corpus || !corpus.length) return corpus;
     const resourceScore = p => (_RESOURCE_SIGNAL.test(`${p.title || ''} ${p.body || ''}`) ? 100000 : 0) + (p.comments || 0);
     const targets = corpus
@@ -2277,17 +2287,17 @@ function renderSocialSplitChart(posts) {
     const texts = (posts || []).map(p => _whereTextOf(p).toLowerCase());
     if (!texts.length) return;
     const PLATFORMS = [
-        { name: 'Instagram', color: '#FF6FB5', keys: ['instagram', 'insta', 'reels'] },
-        { name: 'TikTok', color: '#36E0D0', keys: ['tiktok', 'tik tok'] },
-        { name: 'YouTube', color: '#FF8C66', keys: ['youtube'] },
-        { name: 'Facebook', color: '#6C8CFF', keys: ['facebook', 'fb group', 'fb groups'] },
-        { name: 'X / Twitter', color: '#7CC7FF', keys: ['twitter', 'tweet', 'x.com'] },
-        { name: 'Discord', color: '#8B7CFF', keys: ['discord'] },
-        { name: 'Telegram', color: '#5ED1D8', keys: ['telegram'] },
-        { name: 'WhatsApp', color: '#57D9A3', keys: ['whatsapp', 'whats app'] },
-        { name: 'Snapchat', color: '#FFD56B', keys: ['snapchat'] },
-        { name: 'Pinterest', color: '#FF8FA3', keys: ['pinterest'] },
-        { name: 'LinkedIn', color: '#5B9BD5', keys: ['linkedin'] }
+        { name: 'Instagram', color: '#FF6FB5', keys: ['instagram', 'insta', 'reels'], domains: ['instagram.com'] },
+        { name: 'TikTok', color: '#36E0D0', keys: ['tiktok', 'tik tok'], domains: ['tiktok.com'] },
+        { name: 'YouTube', color: '#FF8C66', keys: ['youtube'], domains: ['youtube.com', 'youtu.be'] },
+        { name: 'Facebook', color: '#6C8CFF', keys: ['facebook', 'fb group', 'fb groups'], domains: ['facebook.com', 'fb.com', 'fb.watch'] },
+        { name: 'X / Twitter', color: '#7CC7FF', keys: ['twitter', 'tweet', 'x.com'], domains: ['twitter.com', 'x.com', 't.co'] },
+        { name: 'Discord', color: '#8B7CFF', keys: ['discord'], domains: ['discord.gg', 'discord.com'] },
+        { name: 'Telegram', color: '#5ED1D8', keys: ['telegram'], domains: ['t.me', 'telegram.me'] },
+        { name: 'WhatsApp', color: '#57D9A3', keys: ['whatsapp', 'whats app'], domains: ['whatsapp.com', 'wa.me', 'chat.whatsapp.com'] },
+        { name: 'Snapchat', color: '#FFD56B', keys: ['snapchat'], domains: ['snapchat.com'] },
+        { name: 'Pinterest', color: '#FF8FA3', keys: ['pinterest'], domains: ['pinterest.com', 'pin.it'] },
+        { name: 'LinkedIn', color: '#5B9BD5', keys: ['linkedin'], domains: ['linkedin.com'] }
     ];
     const fullText = texts.join(' \n ');
     const countKeys = (keys) => {
@@ -2295,7 +2305,10 @@ function renderSocialSplitChart(posts) {
         const m = fullText.match(new RegExp('\\b(' + pat + ')\\b', 'gi'));
         return m ? m.length : 0;
     };
-    let data = PLATFORMS.map(pl => ({ name: pl.name, color: pl.color, count: countKeys(pl.keys) }))
+    // A POSTED link to a platform is hard evidence (stronger than a passing text mention) → weight ×3.
+    const postDomains = (posts || []).map(p => (p.domain || '').toLowerCase()).filter(Boolean);
+    const countDomains = (doms) => postDomains.filter(d => doms.some(pd => d === pd || d.endsWith('.' + pd))).length * 3;
+    let data = PLATFORMS.map(pl => ({ name: pl.name, color: pl.color, count: countKeys(pl.keys) + countDomains(pl.domains) }))
         .filter(d => d.count > 0).sort((a, b) => b.count - a.count);
     const grandTotal = data.reduce((n, d) => n + d.count, 0);
     if (data.length === 0 || grandTotal < 12) {
@@ -2377,8 +2390,13 @@ function renderLocationChart(posts) {
     const countKeys = (keys) => { const pat = keys.map(esc).join('|'); const m = fullText.match(new RegExp('\\b(' + pat + ')\\b', 'gi')); return m ? m.length : 0; };
     const LOC_INTENT = "(?:i'?m|i am|we'?re|we are)\\s+(?:from|in|living\\s+in|based\\s+in|located\\s+in)|live\\s+in|living\\s+in|based\\s+in|located\\s+in|here\\s+in|from";
     const countStrong = (keys) => { const pat = keys.map(esc).join('|'); const m = fullText.match(new RegExp('\\b(?:' + LOC_INTENT + ')\\s+(?:the\\s+)?(' + pat + ')\\b', 'gi')); return m ? m.length : 0; };
+    // User/post FLAIR ("UK", "Texas", "🇦🇺") is a strong real residency signal the poster set themselves
+    // — count it like an explicit "I'm based in…" (weight ×4) and fold it into the totals.
+    const flairs = (posts || []).map(p => (p.flair || '').toLowerCase()).filter(Boolean);
+    const countFlair = (keys) => flairs.filter(f => keys.some(k => new RegExp('\\b' + esc(k) + '\\b').test(f))).length;
     let data = COUNTRIES.map(c => {
-        const mentions = countKeys(c.keys), strong = countStrong(c.keys);
+        const flair = countFlair(c.keys);
+        const mentions = countKeys(c.keys) + flair, strong = countStrong(c.keys) + flair;
         return { name: c.name, color: c.color, mentions, strong, score: strong * 4 + Math.max(0, mentions - strong) };
     }).filter(d => d.mentions > 0).sort((a, b) => b.score - a.score);
     const grandTotal = data.reduce((n, d) => n + d.mentions, 0);
@@ -2729,8 +2747,44 @@ function renderWherePodcasts(items) {
         set('.prevalence-tag', tier); set('.prevelance-tag', tier);
         const img = node.querySelector('.podcast-image'); if (img) img.style.display = 'none';
         const link = node.querySelector('.podcast-link');
-        if (link) { link.setAttribute('href', `https://www.google.com/search?q=${encodeURIComponent(it.name)}`); link.setAttribute('target', '_blank'); }
+        if (link) link.setAttribute('target', '_blank');
+        if (isYouTube) {
+            // YouTube: a results search lands on the channel (no API key needed).
+            if (link) link.setAttribute('href', `https://www.youtube.com/results?search_query=${encodeURIComponent(it.name)}`);
+        } else if (link) {
+            // Podcast/show: start with an Apple Podcasts search, then resolve the REAL show page (+
+            // cover art + network/episodes/latest meta) via the JSONP iTunes lookup when it returns.
+            link.setAttribute('href', `https://podcasts.apple.com/search?term=${encodeURIComponent(it.name)}`);
+            itunesPodcastLookup(it.name).then(r => {
+                if (!r) return;
+                const a = it.name.toLowerCase(), b = (r.collectionName || '').toLowerCase();
+                if (!b || !(b.includes(a) || a.includes(b))) return; // not a confident match — keep the search
+                if (r.collectionViewUrl) link.setAttribute('href', r.collectionViewUrl);
+                const art = r.artworkUrl600 || r.artworkUrl100;
+                if (img && art) { if (img.tagName === 'IMG') img.src = art; else img.style.backgroundImage = `url("${art}")`; img.style.display = ''; }
+                const bits = [];
+                if (r.artistName) bits.push(r.artistName);
+                if (r.trackCount) bits.push(`${r.trackCount} episode${r.trackCount === 1 ? '' : 's'}`);
+                if (r.releaseDate) { const d = new Date(r.releaseDate); if (!isNaN(d)) bits.push(`latest ${d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`); }
+                if (bits.length) set('.podcast-meta', bits.join(' · '));
+            }).catch(() => { });
+        }
         container.appendChild(node);
+    });
+}
+
+// JSONP lookup against the iTunes Search API (no key, bypasses CORS) → real podcast page + art + meta.
+function itunesPodcastLookup(name) {
+    return new Promise((resolve) => {
+        const cb = '_itunes_cb_' + Math.random().toString(36).slice(2);
+        let script;
+        const cleanup = () => { try { delete window[cb]; } catch (e) { } if (script && script.parentNode) script.parentNode.removeChild(script); };
+        const timer = setTimeout(() => { cleanup(); resolve(null); }, 6000);
+        window[cb] = (data) => { clearTimeout(timer); cleanup(); resolve((data && data.results && data.results[0]) || null); };
+        script = document.createElement('script');
+        script.src = `https://itunes.apple.com/search?term=${encodeURIComponent(name)}&entity=podcast&limit=1&callback=${cb}`;
+        script.onerror = () => { clearTimeout(timer); cleanup(); resolve(null); };
+        document.head.appendChild(script);
     });
 }
 
@@ -3125,15 +3179,18 @@ function renderConstellation(signals) {
         chart: { type: 'packedbubble', backgroundColor: 'transparent' },
         title: { text: null }, credits: { enabled: false },
         tooltip: {
-            useHTML: true, outside: true, backgroundColor: '#FFFFFF', borderColor: '#E0E0E0', borderWidth: 1,
-            shadow: { color: 'rgba(0, 0, 0, 0.15)', offsetX: 0, offsetY: 3, opacity: 1, width: 10 },
-            style: { color: '#333333', fontFamily: "'Plus Jakarta Sans', sans-serif" },
+            // The HTML wrapper IS the visible box (fixed width + word-wrap), and Highcharts' own
+            // background is turned off — this stops the useHTML text overflowing the drawn box.
+            useHTML: true, outside: true, backgroundColor: 'transparent', borderWidth: 0, shadow: false,
+            style: { fontFamily: "'Plus Jakarta Sans', sans-serif" },
             formatter: function () {
                 const src = this.point.options && this.point.options.source;
                 if (this.point.isParentNode || !src) return false;
-                return `<div style="font-weight:bold;font-size:1rem;margin-bottom:8px;border-bottom:1px solid #E0E0E0;padding-bottom:6px;">${this.point.name}</div>
-                    <div style="font-size:0.9rem;margin-bottom:8px;max-width:300px;white-space:normal;">“${this.point.options.quote || ''}”</div>
-                    <a href="${src.url || '#'}" target="_blank" rel="noopener" style="font-size:0.8rem;color:#555;text-decoration:none;">r/${src.subreddit || ''} | 👍 ${(src.ups || 0).toLocaleString()}</a>`;
+                return `<div style="width:240px; box-sizing:border-box; background:#FFFFFF; border:1px solid #E0E0E0; border-radius:10px; box-shadow:0 3px 12px rgba(0,0,0,0.15); padding:12px 14px; color:#333333; white-space:normal; overflow-wrap:break-word; word-break:break-word;">
+                    <div style="font-weight:bold; font-size:1rem; margin-bottom:8px; border-bottom:1px solid #E0E0E0; padding-bottom:6px;">${this.point.name}</div>
+                    <div style="font-size:0.9rem; line-height:1.4; margin-bottom:8px;">“${this.point.options.quote || ''}”</div>
+                    <a href="${src.url || '#'}" target="_blank" rel="noopener" style="font-size:0.8rem; color:#555; text-decoration:none;">r/${src.subreddit || ''} | 👍 ${(src.ups || 0).toLocaleString()}</a>
+                </div>`;
             }
         },
         plotOptions: {

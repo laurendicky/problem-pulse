@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 98 — Saved Searches: per-member history (Memberstack member-JSON + browser fallback), #tab-saved list, reopen re-runs from cache (instant). Needs Webflow #tab-saved + #saved-searches-list', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 100 — robust synonym/spacing/spelling keying: _canonKey strips case/space/hyphen (salespeople=sales people=sales-people); AI canonical merges affinity phrasings (dog lovers/owners→Dog Owners) but keeps roles/species distinct (owners≠breeders, dog≠cat)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -179,7 +179,10 @@ async function findSubredditsForGroup(groupName) {
             { role: 'system', content: 'You are an expert Reddit community finder providing answers in strict JSON format.' },
             { role: 'user', content: `Based on the following audience and related keywords: [${allTerms.join(', ')}], do two things:
 1. Suggest up to 20 relevant and active Reddit subreddits. Prioritize a variety of communities, including both large general ones and smaller niche ones (names without "r/").
-2. Provide a "canonical_audience": one clean, correctly-spelled, standardized name for this audience — fix typos and casing and use the most common phrasing (e.g. "dog onwers" → "Dog Owners", "ai entusiasts" → "AI Enthusiasts").
+2. Provide a "canonical_audience": ONE clean, standardized Title Case name used to group equivalent searches. Rules:
+   - Fix spelling and casing (e.g. "dog onwers" → "Dog Owners", "ai entusiasts" → "AI Enthusiasts").
+   - Treat interchangeable enthusiast/affinity phrasings as the SAME audience and map them to one standard label: "dog lovers" / "dog owners" / "dog people" / "dog fans" → "Dog Owners"; "SEO people" / "SEO professionals" / "SEO experts" → "SEO Professionals".
+   - But KEEP genuinely different roles, professions, segments or species SEPARATE — do NOT collapse these: "Dog Owners" ≠ "Dog Breeders" ≠ "Dog Trainers" ≠ "Dog Groomers"; "Dog Owners" ≠ "Cat Owners".
 Respond ONLY as a JSON object: {"subreddits": ["name", ...], "canonical_audience": "..."}.` }
         ],
         temperature: 0.2,
@@ -494,6 +497,12 @@ function _firestore() {
 }
 function _audienceSlug(audience) {
     return String(audience || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
+}
+// Deterministic identity for KEYING the community list: strips case, spaces, hyphens and punctuation
+// so "Sales People", "sales-people" and "salespeople" all collapse to one key ("salespeople"). The
+// AI canonical label (typos + synonyms) layers on top of this for the find-communities lookup.
+function _canonKey(s) {
+    return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '') || 'unknown';
 }
 
 // --- CANONICAL AUDIENCE KEY (Part B) -----------------------------------------
@@ -3718,18 +3727,32 @@ function initEntryFlow() {
         findBtn.disabled = true;
         choices.innerHTML = '<p class="loading-text">Finding communities…</p>';
         try {
-            // CACHE: reuse a recent ranked-communities list for this audience (skips ~20 Reddit
-            // lookups + 2 OpenAI calls). Falls through to live discovery (and saves it) on a miss.
+            // CACHE (two-level): the community list is the thing the user sees and selects, so we make
+            // it CONSISTENT across phrasings of the same audience. 1) Fast path: exact phrase typed
+            // before → instant. 2) Otherwise find communities (which also returns the canonical label),
+            // then reuse the CANONICAL audience's list so "SEO people" & "SEO professionals" show the
+            // SAME correct subreddits → same selection → same corpus key → real cache sharing downstream.
             // (getCachedSubreddits also restores window._canonicalAudience on a hit.)
-            let ranked = await getCachedSubreddits(groupName);
+            const phraseKey = _canonKey(groupName); // deterministic: merges case/space/hyphen variants
+            let ranked = await getCachedSubreddits(phraseKey); // 1) fast path (spacing/case-insensitive)
             if (ranked && ranked.length) {
-                console.log(`[Cache] communities HIT for "${groupName}" — skipped AI + Reddit`);
+                console.log(`[Cache] communities HIT for "${groupName}" (key:${phraseKey}) — skipped AI + Reddit`);
             } else {
                 const { names, canonical } = await findSubredditsForGroup(groupName);
-                window._canonicalAudience = canonical || groupName; // clean, AI-normalized label
-                console.log('[Entry] candidate subreddits:', names, '| canonical:', window._canonicalAudience);
-                ranked = await fetchAndRankSubreddits(names);
-                setCachedSubreddits(groupName, ranked, window._canonicalAudience); // fire-and-forget save
+                window._canonicalAudience = canonical || groupName; // clean, AI-normalized label (typos+synonyms)
+                const canonKey = _canonKey(window._canonicalAudience);
+                console.log('[Entry] candidate subreddits:', names, '| canonical:', window._canonicalAudience, '| key:', canonKey);
+                // 2) Canonical-level sharing: do other phrasings of this audience already have a list?
+                let canonRanked = (canonKey !== phraseKey) ? await getCachedSubreddits(canonKey) : null;
+                if (canonRanked && canonRanked.length) {
+                    ranked = canonRanked;
+                    console.log(`[Cache] communities HIT (canonical "${window._canonicalAudience}") — shared across phrasings, skipped Reddit ranking`);
+                } else {
+                    ranked = await fetchAndRankSubreddits(names);
+                    setCachedSubreddits(canonKey, ranked, window._canonicalAudience); // store under canonical identity
+                }
+                // Also store under the exact phrase key so re-typing this phrasing is instant next time.
+                if (canonKey !== phraseKey) setCachedSubreddits(phraseKey, ranked, window._canonicalAudience);
             }
             console.log('[Entry] ranked subreddits:', ranked.length);
             renderSubredditChoices(ranked);

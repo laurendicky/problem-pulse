@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 95 — canonical-keying (community-signature audienceKey) + Firestore analysis-results cache (analyses/{key}/calls) → cached audiences make ZERO OpenAI calls (instant, no 504s)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 96 — Part C: background progressive deepening (quick corpus deepens toward deep level once, re-cached for the next viewer) + cache-hit no longer re-enriches/clobbers', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -560,7 +560,7 @@ async function getCachedCorpus(audience, deep) {
     } catch (e) { console.warn('[Cache] read failed (continuing live):', e && e.message); return null; }
 }
 
-async function setCachedCorpus(audience, posts, deep) {
+async function setCachedCorpus(audience, posts, deep, deepened, keyOverride) {
     const db = _firestore();
     if (!db || !posts || !posts.length) return;
     try {
@@ -573,9 +573,49 @@ async function setCachedCorpus(audience, posts, deep) {
             score: p.score, comments: p.comments, created: p.created, permalink: p.permalink,
             domain: p.domain || '', flair: (p.flair || '').slice(0, 80) // platform/location signal
         }));
-        await db.collection('corpora').doc(window._audienceKey || (_audienceSlug(audience) + (deep ? '-deep' : ''))).set({ audience, posts: lean, updatedAt: Date.now(), schema: CORPUS_SCHEMA_VERSION });
-        console.log(`[Cache] corpus SAVED for "${audience}"${deep ? ' (DEEP)' : ''} (${lean.length} posts)`);
+        // `deepened`: this quick corpus has had a background deepening pass — flag it so the deepener
+        // never runs again on it (keeps the dataset, and therefore the AI-results cache, stable).
+        await db.collection('corpora').doc(keyOverride || window._audienceKey || (_audienceSlug(audience) + (deep ? '-deep' : ''))).set({ audience, posts: lean, updatedAt: Date.now(), schema: CORPUS_SCHEMA_VERSION, deepened: !!deepened });
+        console.log(`[Cache] corpus SAVED for "${audience}"${deep ? ' (DEEP)' : ''}${deepened ? ' [deepened]' : ''} (${lean.length} posts)`);
     } catch (e) { console.warn('[Cache] write failed (ignored):', e && e.message); }
+}
+
+// --- BACKGROUND PROGRESSIVE DEEPENING (Part C) -------------------------------
+// After the tabs are on screen, a quiet background pass deepens a QUICK corpus toward deep level —
+// more posts (2-page rebuild, merged + deduped) and more enriched comment threads — then re-caches it
+// flagged `deepened`. The NEXT viewer of this audience gets the richer dataset instantly; the live
+// experience is never slowed. Runs ONCE per audience (the flag stops re-runs, which keeps both the
+// corpus and the AI-results cache stable). Fully fail-soft: any error just leaves the thin corpus.
+async function deepenCorpusInBackground(audienceKey, subreddits, audience, opts) {
+    opts = opts || {};
+    if (opts.deep || opts.isCustomised) return;          // deep already pulls 2 pages; custom subsets aren't the canonical dataset
+    const db = _firestore();
+    if (!db || !audienceKey || !subreddits || !subreddits.length) return;
+    // Skip if this corpus has already been deepened (don't churn the dataset / AI cache).
+    try {
+        const doc = await db.collection('corpora').doc(audienceKey).get();
+        if (doc.exists && doc.data() && doc.data().deepened) { console.log('[Deepen] corpus already deepened — skip'); return; }
+    } catch (e) { /* best-effort; continue */ }
+
+    console.log('[Deepen] background pass starting (this is invisible to the user)…');
+    // Snapshot THIS run's corpus now — if the user starts another search mid-pass, we still merge and
+    // cache against the right audience (and we write to the captured key, never the live one).
+    const baseCorpus = (window._corpus || []).slice();
+    try {
+        // 1) MORE POSTS — rebuild pulling 2 pages/query, then merge + dedupe into the snapshot.
+        //    (getDomainFrustrationTerms inside is already AI-cached for this audience → no extra spend.)
+        const richer = await buildCorpus(subreddits, audience, true);
+        const byId = new Map();
+        baseCorpus.concat(richer || []).forEach(p => { if (p && p.id && !byId.has(p.id)) byId.set(p.id, p); });
+        const merged = Array.from(byId.values());
+        if (merged.length <= baseCorpus.length) { console.log('[Deepen] no new posts found — leaving corpus as-is'); return; }
+        rankByDensity(merged);
+        // 2) MORE COMMENTS — enrich a deeper slice of threads (skips ones already enriched).
+        try { await enrichCorpusWithComments(merged, 70); } catch (e) { console.warn('[Deepen] comment enrich failed (non-fatal)', e); }
+        // 3) RE-CACHE the deepened corpus under the CAPTURED key, flagged so it's never re-deepened.
+        await setCachedCorpus(audience, merged, true, true, audienceKey);
+        console.log(`[Deepen] done — next viewer of "${audience}" gets ${merged.length} posts (was ${baseCorpus.length}).`);
+    } catch (e) { console.warn('[Deepen] background pass failed (non-fatal):', e && e.message); }
 }
 
 // Cache the ranked communities per audience, so a repeat audience skips the ~20 Reddit subreddit
@@ -742,17 +782,18 @@ async function runProblemFinder() {
         // Quick and Deep are cached under separate docs (deep is a bigger corpus), so switching depth
         // rebuilds rather than serving the thinner one.
         let corpus = isCustomised ? null : await getCachedCorpus(audience, deep);
-        if (corpus && corpus.length) {
+        const servedFromCache = !!(corpus && corpus.length);
+        if (servedFromCache) {
             console.log(`[Analysis] cache HIT — using ${corpus.length} cached posts, skipped Reddit`);
         } else {
             corpus = await buildCorpus(subreddits, audience, deep);
             if (isCustomised) console.log('[Analysis] customised selection — corpus NOT cached');
         }
         window._corpus = corpus;
-        // BACKGROUND comment enrichment for the Where tab (doesn't block Tab 1). Only fetches when the
-        // corpus lacks comment text (fresh build, or an older cache from before this feature). We write
-        // the cache AFTER enrichment so the stored corpus is the rich one (skipped for customised sets).
-        const _needsComments = corpus.some(p => !p.commentsText);
+        // BACKGROUND comment enrichment for the Where tab (doesn't block Tab 1). Only on a FRESH build —
+        // a cached corpus is already enriched (schema v4 guarantees it), so re-enriching would waste
+        // Reddit calls AND a re-save would clobber a background-deepened doc (truncating it back down).
+        const _needsComments = !servedFromCache && corpus.some(p => !p.commentsText);
         window._corpusEnrichedPromise = (async () => {
             if (!_needsComments) return;
             try { await enrichCorpusWithComments(corpus, deep ? 60 : 35); } catch (e) { console.warn('[Comments] enrichment failed', e); }
@@ -797,6 +838,11 @@ async function runProblemFinder() {
         setTimeout(() => { try { loadTabTalk(); } catch (e) { /* non-fatal */ } }, 2500);
         setTimeout(() => { try { loadTabWhere(); } catch (e) { /* non-fatal */ } }, 5000);
         setTimeout(() => { try { loadTabShop(); } catch (e) { /* non-fatal */ } }, 7500);
+        // PART C — once everything's pre-warmed, quietly deepen this audience's corpus for the NEXT
+        // viewer (more posts + comments, re-cached). Captures the key so a later search can't misroute
+        // the write. Skipped automatically for deep/customised/already-deepened. Pure background.
+        const _deepenKey = window._audienceKey, _deepenSubs = subreddits.slice();
+        setTimeout(() => { try { deepenCorpusInBackground(_deepenKey, _deepenSubs, audience, { deep, isCustomised }); } catch (e) { /* non-fatal */ } }, 14000);
     } catch (error) {
         console.error('[Analysis] failed to build corpus:', error);
         showMessage('Something went wrong gathering discussions. Please try again.');

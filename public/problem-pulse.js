@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 88 — MORE REAL signal (no AI): count link-domains for social + flair for location, new Where/Who search lane, comments 22→35, cache schema v4', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 89 — Deep mode wired to the .pf-radio-group toggle: 2 pages/query (~2× corpus) + 60 comment threads, cached separately from Quick', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -280,6 +280,18 @@ function buildSubredditQuery(subreddits) {
     return subreddits.map(s => `subreddit:${s}`).join(' OR ');
 }
 
+// Read the Webflow search-depth toggle (.pf-radio-group, quick/deep) inside #subreddit-selection-container.
+// Deep = bigger corpus (2 pages/query) + more comments. Defaults to quick if nothing is selected.
+function _isDeepMode() {
+    const scope = document.getElementById('subreddit-selection-container') || document;
+    const checked = scope.querySelector('.pf-search-depth-options input[type="radio"]:checked, .pf-radio-group input[type="radio"]:checked');
+    if (checked) return /deep/i.test(`${checked.value || ''} ${(checked.closest('label') || {}).textContent || ''}`);
+    // Webflow custom radios: the selected one carries .w--redirected-checked.
+    const sel = scope.querySelector('.pf-search-depth-options .w--redirected-checked, .pf-radio-group .w--redirected-checked');
+    if (sel) { const label = sel.closest('label') || sel.parentElement; return /deep/i.test((label && label.textContent) || ''); }
+    return false;
+}
+
 // Consolidate the given terms into as few Reddit queries as possible (caps keep the request count
 // low): single words in OR groups of 4 (max 8 words → 2 queries), plus up to 4 quoted phrases.
 // One extra "resource discovery" lane pulls the casual recommend/tool/podcast threads that the
@@ -330,24 +342,26 @@ async function getDomainFrustrationTerms(audience) {
     }
 }
 
-// One Reddit search → array of post children. Fails soft to [].
-async function fetchPostsForQuery(subredditQuery, searchTerm) {
-    try {
-        // Search calls are heavier than about-lookups (big OR query across many subreddits), so
-        // give them more headroom than callReddit's 12s default — the proxy can take ~8s on Reddit
-        // alone, and these were the calls aborting at 12s.
-        const data = await callReddit({
-            searchTerm,
-            niche: subredditQuery,
-            limit: CORPUS_PER_QUERY,
-            timeFilter: CORPUS_TIME_FILTER,
-            after: null
-        }, { timeoutMs: 20000 });
-        return (data && data.data && Array.isArray(data.data.children)) ? data.data.children : [];
-    } catch (error) {
-        console.warn(`[Corpus] query failed (${searchTerm}):`, error && error.message);
-        return [];
+// One Reddit search → array of post children. Fails soft to []. `pages` follows Reddit's `after`
+// cursor to pull additional pages (Deep mode uses 2 → ~2× the corpus). Search calls are heavier than
+// about-lookups, so they get extra timeout headroom.
+async function fetchPostsForQuery(subredditQuery, searchTerm, pages = 1) {
+    let after = null; const all = [];
+    for (let i = 0; i < pages; i++) {
+        try {
+            const data = await callReddit({
+                searchTerm, niche: subredditQuery, limit: CORPUS_PER_QUERY, timeFilter: CORPUS_TIME_FILTER, after
+            }, { timeoutMs: 20000 });
+            const children = (data && data.data && Array.isArray(data.data.children)) ? data.data.children : [];
+            all.push(...children);
+            after = data && data.data && data.data.after;
+            if (!after || !children.length) break;
+        } catch (error) {
+            console.warn(`[Corpus] query failed (${searchTerm} p${i + 1}):`, error && error.message);
+            break;
+        }
     }
+    return all;
 }
 
 function dedupePosts(children) {
@@ -414,17 +428,18 @@ function rankByDensity(corpus) {
 
 // Build the corpus: audience-specific terms → consolidated queries (gate-throttled) → dedupe →
 // normalize (clean text) → rank by density (problem discussions first). One fetch, reused.
-async function buildCorpus(subreddits, audience) {
+async function buildCorpus(subreddits, audience, deep) {
     // Cap the subreddit OR-query: Reddit search silently returns NOTHING when there are too many
     // "subreddit:" filters (this is why 19-subreddit audiences came back with 0 posts). The top ~12
     // by membership cover the bulk of the discussion.
     const searchSubs = subreddits.slice(0, 12);
     const subredditQuery = buildSubredditQuery(searchSubs);
     const terms = await getDomainFrustrationTerms(audience);
-    console.log('[Corpus] frustration terms:', terms, `| searching ${searchSubs.length}/${subreddits.length} subreddits`);
+    const pages = deep ? 2 : 1; // Deep mode pulls a second page per query → ~2× the corpus
+    console.log('[Corpus] frustration terms:', terms, `| searching ${searchSubs.length}/${subreddits.length} subreddits | pages/query: ${pages}`);
 
     const queries = buildProblemQueries(terms);
-    let batches = await Promise.all(queries.map(q => fetchPostsForQuery(subredditQuery, q)));
+    let batches = await Promise.all(queries.map(q => fetchPostsForQuery(subredditQuery, q, pages)));
     let corpus = normalizeCorpus(dedupePosts(batches.flat()));
 
     // Safety net: if the query came back empty (over-narrow phrases, or still-too-long), retry
@@ -464,11 +479,11 @@ function _audienceSlug(audience) {
     return String(audience || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
 }
 
-async function getCachedCorpus(audience) {
+async function getCachedCorpus(audience, deep) {
     const db = _firestore();
     if (!db) return null; // Firebase not configured — behave exactly as before
     try {
-        const doc = await db.collection('corpora').doc(_audienceSlug(audience)).get();
+        const doc = await db.collection('corpora').doc(_audienceSlug(audience) + (deep ? '-deep' : '')).get();
         if (!doc.exists) return null;
         const data = doc.data() || {};
         if (!Array.isArray(data.posts) || !data.posts.length) return null;
@@ -479,20 +494,21 @@ async function getCachedCorpus(audience) {
     } catch (e) { console.warn('[Cache] read failed (continuing live):', e && e.message); return null; }
 }
 
-async function setCachedCorpus(audience, posts) {
+async function setCachedCorpus(audience, posts, deep) {
     const db = _firestore();
     if (!db || !posts || !posts.length) return;
     try {
-        // Trim bodies so the document stays well under Firestore's 1MB limit.
-        const lean = posts.slice(0, 300).map(p => ({
+        // Trim bodies so the document stays well under Firestore's 1MB limit. Deep keeps more posts
+        // (500 still fits ~1MB with trimmed bodies + the ~60 comment threads).
+        const lean = posts.slice(0, deep ? 500 : 300).map(p => ({
             id: p.id, subreddit: p.subreddit, title: p.title,
             body: (p.body || '').slice(0, 600),
             commentsText: (p.commentsText || '').slice(0, 4000), // deep comment text (Where/Shop signal)
             score: p.score, comments: p.comments, created: p.created, permalink: p.permalink,
             domain: p.domain || '', flair: (p.flair || '').slice(0, 80) // platform/location signal
         }));
-        await db.collection('corpora').doc(_audienceSlug(audience)).set({ audience, posts: lean, updatedAt: Date.now(), schema: CORPUS_SCHEMA_VERSION });
-        console.log(`[Cache] corpus SAVED for "${audience}" (${lean.length} posts)`);
+        await db.collection('corpora').doc(_audienceSlug(audience) + (deep ? '-deep' : '')).set({ audience, posts: lean, updatedAt: Date.now(), schema: CORPUS_SCHEMA_VERSION });
+        console.log(`[Cache] corpus SAVED for "${audience}"${deep ? ' (DEEP)' : ''} (${lean.length} posts)`);
     } catch (e) { console.warn('[Cache] write failed (ignored):', e && e.message); }
 }
 
@@ -644,17 +660,21 @@ async function runProblemFinder() {
     showLoader('Gathering discussions…');
     try {
         const audience = window.originalGroupName || '';
+        const deep = _isDeepMode(); // .pf-radio-group quick/deep toggle
+        console.log(`[Analysis] ${deep ? 'DEEP' : 'quick'} mode`);
         // Did the user customise the selection (uncheck some communities)? If so, the corpus is a
         // bespoke subset — DON'T serve the cached full-audience corpus, and DON'T save this one
         // (it isn't the canonical mapping). Only the default full selection uses/writes the cache.
         const fullSet = window._allRankedSubredditNames || [];
         const isCustomised = fullSet.length > 0 && subreddits.length < fullSet.length;
 
-        let corpus = isCustomised ? null : await getCachedCorpus(audience);
+        // Quick and Deep are cached under separate docs (deep is a bigger corpus), so switching depth
+        // rebuilds rather than serving the thinner one.
+        let corpus = isCustomised ? null : await getCachedCorpus(audience, deep);
         if (corpus && corpus.length) {
             console.log(`[Analysis] cache HIT — using ${corpus.length} cached posts, skipped Reddit`);
         } else {
-            corpus = await buildCorpus(subreddits, audience);
+            corpus = await buildCorpus(subreddits, audience, deep);
             if (isCustomised) console.log('[Analysis] customised selection — corpus NOT cached');
         }
         window._corpus = corpus;
@@ -664,8 +684,8 @@ async function runProblemFinder() {
         const _needsComments = corpus.some(p => !p.commentsText);
         window._corpusEnrichedPromise = (async () => {
             if (!_needsComments) return;
-            try { await enrichCorpusWithComments(corpus); } catch (e) { console.warn('[Comments] enrichment failed', e); }
-            if (!isCustomised) setCachedCorpus(audience, corpus); // fire-and-forget save for the next searcher
+            try { await enrichCorpusWithComments(corpus, deep ? 60 : 35); } catch (e) { console.warn('[Comments] enrichment failed', e); }
+            if (!isCustomised) setCachedCorpus(audience, corpus, deep); // fire-and-forget save for the next searcher
         })();
         window._analysisSubreddits = subreddits;
         // New search → clear everything tab-related so it regenerates for this audience.

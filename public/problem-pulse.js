@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 93 — more residency phrases for location ("here in", "we have a problem in", "moved to", "grew up in", "raising … in", "anyone from"…)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 95 — canonical-keying (community-signature audienceKey) + Firestore analysis-results cache (analyses/{key}/calls) → cached audiences make ZERO OpenAI calls (instant, no 504s)', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -80,14 +80,25 @@ async function _callOpenAIOnce(payload, timeoutMs) {
     }
 }
 
-async function callOpenAI(payload, { timeoutMs = 45000, retries = 2 } = {}) {
+async function callOpenAI(payload, { timeoutMs = 45000, retries = 2, cache = true } = {}) {
     const normalized = _normalizeAIPayload(payload);
+    // RESULTS CACHE (Part A): once an audience is keyed, serve any previously-computed AI result from
+    // Firestore instead of calling OpenAI. find-communities runs BEFORE _audienceKey is set, so those
+    // calls skip the cache naturally. Pass {cache:false} to force a live call (e.g. on-demand briefs).
+    const cacheRef = (cache && typeof window !== 'undefined' && window._audienceKey)
+        ? _aiCacheRef(window._audienceKey, normalized) : null;
+    if (cacheRef) {
+        const hit = await _readAICache(cacheRef);
+        if (hit !== undefined) { console.log('[AICache] HIT', cacheRef.id); return hit; }
+    }
     await _acquireOpenAISlot();
     try {
         let lastErr;
         for (let attempt = 0; attempt <= retries; attempt++) {
             try {
-                return await _callOpenAIOnce(normalized, timeoutMs);
+                const result = await _callOpenAIOnce(normalized, timeoutMs);
+                if (cacheRef) _writeAICache(cacheRef, result); // fire-and-forget save for the next viewer
+                return result;
             } catch (e) {
                 lastErr = e;
                 if (attempt < retries) {
@@ -479,11 +490,66 @@ function _audienceSlug(audience) {
     return String(audience || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'unknown';
 }
 
+// --- CANONICAL AUDIENCE KEY (Part B) -----------------------------------------
+// The audience's identity = the COMMUNITY SET it's analysed on, not the phrase typed. So we key the
+// corpus AND the analysis-results cache off a stable signature of the SELECTED subreddits (+ depth).
+// Two phrasings ("ai fans" / "ai users") that resolve to the same communities therefore share one
+// dataset; a customised subset gets its own correct key. Order-independent (sorted) so the same set
+// always hashes the same. The readable prefix aids debugging; the hash guarantees uniqueness.
+function _stableHash(str) {
+    let h = 5381;
+    for (let i = 0; i < str.length; i++) h = ((h << 5) + h + str.charCodeAt(i)) | 0;
+    return (h >>> 0).toString(36);
+}
+function _sigKey(subNames, deep) {
+    const names = (subNames || []).map(s => String(s).toLowerCase().trim()).filter(Boolean).sort();
+    if (!names.length) return null;
+    const prefix = names.slice(0, 4).join('-').replace(/[^a-z0-9-]+/g, '-').replace(/-+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60);
+    return `${prefix || 'sig'}-${_stableHash(names.join('+'))}${deep ? '-deep' : ''}`;
+}
+
+// --- ANALYSIS-RESULTS CACHE (Part A) -----------------------------------------
+// Memoises every audience-phase OpenAI call in Firestore under analyses/{audienceKey}/calls/{hash}.
+// A warmed/seeded audience then makes ZERO OpenAI calls — instant load, no 504s, near-zero spend.
+// Keyed by a hash of (model + messages), so identical inputs reuse one result and any prompt change
+// auto-misses (acts like a built-in schema bump). ANALYSIS_SCHEMA_VERSION force-invalidates all.
+const ANALYSIS_SCHEMA_VERSION = 1;
+const ANALYSIS_CACHE_TTL_MS = 14 * 24 * 60 * 60 * 1000; // 14 days — discussions go stale
+
+function _aiCacheId(payload) {
+    try {
+        const msgs = (payload.messages || []).map(m => `${m.role}:${m.content}`).join('\n');
+        return 'c' + _stableHash((payload.model || '') + '|' + msgs);
+    } catch (e) { return null; }
+}
+function _aiCacheRef(key, payload) {
+    const db = _firestore();
+    if (!db || !key) return null;
+    const id = _aiCacheId(payload);
+    if (!id) return null;
+    try { return db.collection('analyses').doc(key).collection('calls').doc(id); }
+    catch (e) { return null; }
+}
+async function _readAICache(ref) {
+    try {
+        const doc = await ref.get();
+        if (!doc.exists) return undefined;
+        const d = doc.data() || {};
+        if (d.schema !== ANALYSIS_SCHEMA_VERSION) return undefined;
+        if (d.ttl !== 'inf' && Date.now() - (d.updatedAt || 0) > ANALYSIS_CACHE_TTL_MS) return undefined;
+        return JSON.parse(d.responseJson); // stored as a string → bypasses Firestore type limits
+    } catch (e) { return undefined; }
+}
+function _writeAICache(ref, response) {
+    try { ref.set({ responseJson: JSON.stringify(response), schema: ANALYSIS_SCHEMA_VERSION, updatedAt: Date.now() }); }
+    catch (e) { /* fire-and-forget */ }
+}
+
 async function getCachedCorpus(audience, deep) {
     const db = _firestore();
     if (!db) return null; // Firebase not configured — behave exactly as before
     try {
-        const doc = await db.collection('corpora').doc(_audienceSlug(audience) + (deep ? '-deep' : '')).get();
+        const doc = await db.collection('corpora').doc(window._audienceKey || (_audienceSlug(audience) + (deep ? '-deep' : ''))).get();
         if (!doc.exists) return null;
         const data = doc.data() || {};
         if (!Array.isArray(data.posts) || !data.posts.length) return null;
@@ -507,7 +573,7 @@ async function setCachedCorpus(audience, posts, deep) {
             score: p.score, comments: p.comments, created: p.created, permalink: p.permalink,
             domain: p.domain || '', flair: (p.flair || '').slice(0, 80) // platform/location signal
         }));
-        await db.collection('corpora').doc(_audienceSlug(audience) + (deep ? '-deep' : '')).set({ audience, posts: lean, updatedAt: Date.now(), schema: CORPUS_SCHEMA_VERSION });
+        await db.collection('corpora').doc(window._audienceKey || (_audienceSlug(audience) + (deep ? '-deep' : ''))).set({ audience, posts: lean, updatedAt: Date.now(), schema: CORPUS_SCHEMA_VERSION });
         console.log(`[Cache] corpus SAVED for "${audience}"${deep ? ' (DEEP)' : ''} (${lean.length} posts)`);
     } catch (e) { console.warn('[Cache] write failed (ignored):', e && e.message); }
 }
@@ -662,6 +728,11 @@ async function runProblemFinder() {
         const audience = window.originalGroupName || '';
         const deep = _isDeepMode(); // .pf-radio-group quick/deep toggle
         console.log(`[Analysis] ${deep ? 'DEEP' : 'quick'} mode`);
+        // Canonical key: signature of the SELECTED communities (+ depth). Everything for this run —
+        // corpus cache AND the per-call analysis-results cache — keys off this, so synonymous phrasings
+        // that pick the same communities share one cached dataset and zero AI re-runs.
+        window._audienceKey = _sigKey(subreddits, deep);
+        console.log('[Analysis] audienceKey =', window._audienceKey);
         // Did the user customise the selection (uncheck some communities)? If so, the corpus is a
         // bespoke subset — DON'T serve the cached full-audience corpus, and DON'T save this one
         // (it isn't the canonical mapping). Only the default full selection uses/writes the cache.
@@ -1939,7 +2010,7 @@ async function generateAndRenderHookPatterns(corpus, audience) {
             set('.hook-category', pattern.category || '');
             set('.hook-why', pattern.short_summary || '');
             set('.why-reason', pattern.strategy || '');
-            set('.emotion-hook', (pattern.emotion_type || '').replace(/\s+and\s+/gi, ' & ')); // enforce "&"
+            set('.emotion-hook', _trunc((pattern.emotion_type || '').replace(/\s+and\s+/gi, ' & '), 20)); // "&", ≤20 chars
             set('.impact-label', pattern.impact_level || '');
             set('.emotional-intensity-p', pattern.emotional_intensity != null ? `${pattern.emotional_intensity}%` : '');
             set('.viral-potential-p', pattern.viral_potential != null ? `${pattern.viral_potential}%` : '');
@@ -2572,8 +2643,11 @@ const MEDIA_ICON_YOUTUBE = 'https://cdn.prod.website-files.com/685a77786ed6701cb
 function _whereSignal(items) {
     const real = items.filter(it => !it.suggested);
     const mentions = real.reduce((s, it) => s + (it.count || 0), 0);
-    if (real.length >= 3 || mentions >= 8) return { t: 'Strong signal', c: '#16a34a', bg: 'rgba(22,163,74,0.12)', strong: true };
-    if (real.length >= 1) return { t: 'Moderate signal', c: '#d97706', bg: 'rgba(217,119,6,0.12)', strong: false };
+    const top = real.reduce((m, it) => Math.max(m, it.count || 0), 0);
+    // Strong = genuinely well-evidenced: several grounded names AND real volume (or one heavily-cited
+    // name). A handful of 1-2 mention items is Moderate at best.
+    if (real.length >= 4 && (mentions >= 15 || top >= 8)) return { t: 'Strong signal', c: '#16a34a', bg: 'rgba(22,163,74,0.12)', strong: true };
+    if (real.length >= 2 && mentions >= 5) return { t: 'Moderate signal', c: '#d97706', bg: 'rgba(217,119,6,0.12)', strong: false };
     return { t: 'Low signal', c: '#64748b', bg: 'rgba(100,116,139,0.12)', strong: false };
 }
 
@@ -2648,10 +2722,11 @@ CRITICAL EXTRACTION RULES (DO NOT VIOLATE):
 Extract these five categories:
 1. "experts": Real people, creators, YouTubers, authors, or leaders they follow or learn from.
    * Examples: Emily Oster (Parenthood), Jacques Slade (Sneakers), Tobias van Schneider (Design), Karen Pryor (Dogs).
-2. "tools": Digital tools, apps, software, or websites they actually use or visit. (No physical products).
-   * Examples: Huckleberry (Parenthood), GOAT (Sneakers), Spline (Design), Rover (Dogs).
-3. "events": Physical real-world places, events, stores, expos, meetups, or venues they physically visit.
-   * Examples: Stroller Strides (Parenthood), Sneaker Con (Sneakers), Config (Design), Crufts (Dogs).
+2. "tools": ONLY digital things used online — apps, software, websites, or online platforms. NOT physical retail stores, NOT physical products.
+   * WRONG here: "Home Depot", "Lowe's", "IKEA" (those are STORES → put in events); "Citristrip", "Kong toy" (physical products → leave out entirely).
+   * RIGHT: Huckleberry (Parenthood), GOAT app (Sneakers), Spline (Design), Rover app (Dogs), Canva, Notion, Pinterest.
+3. "events": Physical real-world places they go — retail STORES (e.g. Home Depot, Lowe's, IKEA), expos, meetups, parks, clubs, classes, venues.
+   * Examples: Home Depot (DIY), Sneaker Con (Sneakers), Config (Design), Crufts (Dogs), a named local park or store.
 4. "waterholes": Non-Reddit communities where they gather (e.g. Slack workspaces, Discord servers, Facebook groups, independent forums).
    * Examples: SoleSavy Discord (Sneakers), Designer Hangout Slack (Design), Peanut App Groups (Parenthood).
 5. "media": Podcasts, YouTube channels, newsletters, or video shows they recommend or watch.
@@ -3411,6 +3486,7 @@ function transitionToStep1() {
 
     // Wipe analysis state (corpus, findings, tabs, polarity) so the next search regenerates fresh.
     window._corpus = null; window._analysisSubreddits = null; window._allRankedSubredditNames = null;
+    window._audienceKey = null;
     window._findings = null; window._findingsPromise = null; window._assignmentPromise = null;
     window._findingPosts = null; window._findingPostsFull = null;
     window._polarityPromise = null; window._subProblemCache = {}; window._tabLoaded = {};

@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 96 — Part C: background progressive deepening (quick corpus deepens toward deep level once, re-cached for the next viewer) + cache-hit no longer re-enriches/clobbers', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 98 — Saved Searches: per-member history (Memberstack member-JSON + browser fallback), #tab-saved list, reopen re-runs from cache (instant). Needs Webflow #tab-saved + #saved-searches-list', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -177,7 +177,10 @@ async function findSubredditsForGroup(groupName) {
         model: AI_MODEL,
         messages: [
             { role: 'system', content: 'You are an expert Reddit community finder providing answers in strict JSON format.' },
-            { role: 'user', content: `Based on the following audience and related keywords: [${allTerms.join(', ')}], suggest up to 20 relevant and active Reddit subreddits. Prioritize a variety of communities, including both large general ones and smaller niche ones. Provide your response ONLY as a JSON object with a single key "subreddits" which contains an array of subreddit names (without "r/").` }
+            { role: 'user', content: `Based on the following audience and related keywords: [${allTerms.join(', ')}], do two things:
+1. Suggest up to 20 relevant and active Reddit subreddits. Prioritize a variety of communities, including both large general ones and smaller niche ones (names without "r/").
+2. Provide a "canonical_audience": one clean, correctly-spelled, standardized name for this audience — fix typos and casing and use the most common phrasing (e.g. "dog onwers" → "Dog Owners", "ai entusiasts" → "AI Enthusiasts").
+Respond ONLY as a JSON object: {"subreddits": ["name", ...], "canonical_audience": "..."}.` }
         ],
         temperature: 0.2,
         max_completion_tokens: 300,
@@ -185,10 +188,13 @@ async function findSubredditsForGroup(groupName) {
     };
     try {
         const parsed = await callOpenAI(payload);
-        return Array.isArray(parsed.subreddits) ? parsed.subreddits : [];
+        const names = Array.isArray(parsed.subreddits) ? parsed.subreddits : [];
+        const canonical = (typeof parsed.canonical_audience === 'string' && parsed.canonical_audience.trim())
+            ? parsed.canonical_audience.trim() : groupName;
+        return { names, canonical };
     } catch (error) {
         console.error('[Find Subreddits] failed:', error && error.message);
-        return [];
+        return { names: [], canonical: groupName };
     }
 }
 
@@ -629,15 +635,18 @@ async function getCachedSubreddits(audience) {
         const data = doc.data() || {};
         if (!Array.isArray(data.ranked) || !data.ranked.length) return null;
         if (Date.now() - (data.updatedAt || 0) > SUBREDDIT_CACHE_TTL_MS) return null; // indefinite by default
+        // Side-effect: surface the cached canonical label (clean, AI-normalized audience name) so a
+        // cache hit still gets a tidy display/history name without re-running find-communities.
+        if (data.canonical) window._canonicalAudience = data.canonical;
         return data.ranked;
     } catch (e) { console.warn('[Cache] subreddits read failed (continuing live):', e && e.message); return null; }
 }
-async function setCachedSubreddits(audience, ranked) {
+async function setCachedSubreddits(audience, ranked, canonical) {
     const db = _firestore();
     if (!db || !ranked || !ranked.length) return;
     try {
-        await db.collection('subreddits').doc(_audienceSlug(audience)).set({ audience, ranked: ranked.slice(0, 40), updatedAt: Date.now() });
-        console.log(`[Cache] communities SAVED for "${audience}" (${ranked.length})`);
+        await db.collection('subreddits').doc(_audienceSlug(audience)).set({ audience, canonical: canonical || audience, ranked: ranked.slice(0, 40), updatedAt: Date.now() });
+        console.log(`[Cache] communities SAVED for "${audience}"${canonical && canonical !== audience ? ` (canonical: "${canonical}")` : ''} (${ranked.length})`);
     } catch (e) { console.warn('[Cache] subreddits write failed (ignored):', e && e.message); }
 }
 
@@ -741,16 +750,24 @@ function populateAudienceSnapshot(audience) {
     }
 }
 
-async function runProblemFinder() {
+async function runProblemFinder(preset) {
     if (_analysisRunning) {
         console.warn('[Analysis] already running — ignoring duplicate trigger.');
         return;
     }
-    const subreddits = getSelectedSubreddits();
+    // REOPEN (Saved Searches): a preset re-runs a past audience straight from its saved community set,
+    // skipping the type→find→select steps. Everything's keyed by audienceKey, so it lands on cache.
+    if (preset && preset.subreddits && preset.subreddits.length) {
+        window.originalGroupName = preset.term || preset.canonical || window.originalGroupName;
+        window._canonicalAudience = preset.canonical || preset.term || window._canonicalAudience;
+        window._allRankedSubredditNames = preset.subreddits.slice(); // mark this as the full set (not customised)
+    }
+    const subreddits = (preset && preset.subreddits && preset.subreddits.length) ? preset.subreddits.slice() : getSelectedSubreddits();
     if (!subreddits.length) { showMessage('Select at least one community to analyse.'); return; }
 
     // Thin-data warning: a single small community rarely has enough discussion for rich insights.
-    if (subreddits.length === 1) {
+    // (Skipped on reopen — the user already ran this audience once.)
+    if (!preset && subreddits.length === 1) {
         const one = (window._allRankedSubreddits || []).find(r => r.name === subreddits[0]);
         if (one && (one.members || 0) < 100000) {
             const ok = await showMessage(`Heads up: you've selected just one small community (r/${one.name}, ${formatMemberCount(one.members)} members). The results may be thin — selecting a few more communities gives much richer insights. Continue anyway?`, { confirm: true });
@@ -766,7 +783,7 @@ async function runProblemFinder() {
     showLoader('Gathering discussions…');
     try {
         const audience = window.originalGroupName || '';
-        const deep = _isDeepMode(); // .pf-radio-group quick/deep toggle
+        const deep = preset ? !!preset.deep : _isDeepMode(); // .pf-radio-group quick/deep toggle (forced on reopen)
         console.log(`[Analysis] ${deep ? 'DEEP' : 'quick'} mode`);
         // Canonical key: signature of the SELECTED communities (+ depth). Everything for this run —
         // corpus cache AND the per-call analysis-results cache — keys off this, so synonymous phrasings
@@ -828,6 +845,16 @@ async function runProblemFinder() {
             generateAndRenderProfile(corpus, audience)
         ]);
         revealResults();
+        // SAVED SEARCHES — record this analysis in the user's history (Memberstack, fire-and-forget).
+        try {
+            saveSearchToHistory({
+                term: window.originalGroupName || audience,
+                canonical: window._canonicalAudience || window.originalGroupName || audience,
+                audienceKey: window._audienceKey,
+                subreddits: subreddits.slice(0, 40),
+                deep: deep
+            });
+        } catch (e) { console.warn('[SavedSearch] save failed (non-fatal)', e); }
         // Pre-warm Tab 2 (findings + post assignment) and the polarity map in the background while
         // the user reads Tab 1, so switching to those tabs is near-instant. No Reddit here, so it's
         // safe to run quietly. A small delay lets Tab 1's render settle first.
@@ -3532,13 +3559,121 @@ function transitionToStep1() {
 
     // Wipe analysis state (corpus, findings, tabs, polarity) so the next search regenerates fresh.
     window._corpus = null; window._analysisSubreddits = null; window._allRankedSubredditNames = null;
-    window._audienceKey = null;
+    window._audienceKey = null; window._canonicalAudience = null;
     window._findings = null; window._findingsPromise = null; window._assignmentPromise = null;
     window._findingPosts = null; window._findingPostsFull = null;
     window._polarityPromise = null; window._subProblemCache = {}; window._tabLoaded = {};
     if (window._polarityChart && window._polarityChart.destroy) { window._polarityChart.destroy(); window._polarityChart = null; }
     console.log('[Reset] back to start — ready for a new search');
 }
+
+// =============================================================================
+// SAVED SEARCHES — per-member history. Stored in the Memberstack member-JSON
+// store when a member is logged in (cross-device, per-account), with a browser
+// fallback for logged-out visitors. Each completed analysis is recorded; the
+// "Saved" tab lists them newest-first and a click RE-RUNS that audience — which
+// lands on the corpus + AI-results cache, so it's near-instant and free.
+//
+// WEBFLOW SETUP (add these once):
+//   • A new (last) tab link with id="tab-saved" in the same tab menu as the others.
+//   • Inside that tab's pane, an empty container with id="saved-searches-list".
+// Nothing else — the list, styling, clicks and reopen are all handled here.
+// =============================================================================
+const SAVED_SEARCH_LIMIT = 50;
+
+function _memberstack() {
+    try { return (typeof window !== 'undefined' && window.$memberstackDom) ? window.$memberstackDom : null; }
+    catch (e) { return null; }
+}
+// getMemberJSON returns { data: <json|null> }; normalise to a plain object either way so we never
+// lose a member's other stored JSON when we write savedSearches back (updateMemberJSON REPLACES).
+function _extractJSON(res) {
+    if (!res || typeof res !== 'object') return {};
+    if ('data' in res) return (res.data && typeof res.data === 'object') ? res.data : {};
+    return res;
+}
+async function _loadHistory() {
+    const ms = _memberstack();
+    if (ms) {
+        try {
+            const json = _extractJSON(await ms.getMemberJSON());
+            return Array.isArray(json.savedSearches) ? json.savedSearches : []; // logged in
+        } catch (e) { /* not logged in / unavailable → browser fallback */ }
+    }
+    try { return JSON.parse(localStorage.getItem('pp_saved_searches') || '[]'); }
+    catch (e) { return []; }
+}
+async function _saveHistory(list) {
+    const ms = _memberstack();
+    if (ms) {
+        try {
+            const json = _extractJSON(await ms.getMemberJSON());
+            json.savedSearches = list;       // preserve any other member-JSON keys
+            await ms.updateMemberJSON({ json });
+            return true;
+        } catch (e) { /* not logged in → browser fallback */ }
+    }
+    try { localStorage.setItem('pp_saved_searches', JSON.stringify(list)); } catch (e) { }
+    return false;
+}
+
+// Record a completed analysis (de-duped by audienceKey, newest first).
+async function saveSearchToHistory(entry) {
+    if (!entry || !entry.audienceKey) return;
+    const list = await _loadHistory();
+    const filtered = list.filter(e => e && e.audienceKey !== entry.audienceKey);
+    filtered.unshift({
+        term: entry.term || '',
+        canonical: entry.canonical || entry.term || '',
+        audienceKey: entry.audienceKey,
+        subreddits: Array.isArray(entry.subreddits) ? entry.subreddits.slice(0, 40) : [],
+        deep: !!entry.deep,
+        date: Date.now()
+    });
+    await _saveHistory(filtered.slice(0, SAVED_SEARCH_LIMIT));
+    console.log(`[SavedSearch] saved "${entry.canonical || entry.term}" (${entry.audienceKey})`);
+}
+
+function _timeAgo(ts) {
+    const s = Math.max(0, Math.floor((Date.now() - (ts || 0)) / 1000));
+    if (s < 60) return 'just now';
+    const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`;
+    const d = Math.floor(h / 24); if (d < 7) return `${d}d ago`;
+    try { return new Date(ts).toLocaleDateString(); } catch (e) { return ''; }
+}
+
+async function renderSavedSearches() {
+    const el = document.getElementById('saved-searches-list');
+    if (!el) { console.warn('[SavedSearch] #saved-searches-list not found — add it in Webflow'); return; }
+    el.innerHTML = `<p style="text-align:center; color:#9ca3af; padding:1rem; font-family:'Plus Jakarta Sans',system-ui,sans-serif;">Loading…</p>`;
+    const list = await _loadHistory();
+    if (!list.length) {
+        el.innerHTML = `<p style="text-align:center; color:#9ca3af; padding:1.5rem; font-family:'Plus Jakarta Sans',system-ui,sans-serif;">No saved searches yet. Run an analysis and it'll show up here.</p>`;
+        return;
+    }
+    el.innerHTML = `<div style="display:flex; flex-direction:column; gap:10px; font-family:'Plus Jakarta Sans',system-ui,sans-serif;">
+      ${list.map(e => `
+        <div class="pp-saved-item" data-key="${_escapeHtml(e.audienceKey)}" role="button" tabindex="0"
+             style="display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 16px; border:1px solid #e5e7eb; border-radius:12px; cursor:pointer; background:#fff;">
+          <div style="min-width:0;">
+            <div style="font-size:1rem; font-weight:700; color:#1f2937; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${_escapeHtml(e.canonical || e.term || 'Untitled')}</div>
+            <div style="font-size:0.8rem; color:#6b7280;">${(e.subreddits || []).length} communities${e.deep ? ' · deep' : ''} · ${_timeAgo(e.date)}</div>
+          </div>
+          <span style="flex:0 0 auto; font-size:0.78rem; font-weight:700; color:#00a5ce; background:rgba(0,165,206,0.12); padding:6px 12px; border-radius:999px;">Reopen →</span>
+        </div>`).join('')}
+    </div>`;
+}
+
+async function reopenSavedSearch(audienceKey) {
+    const list = await _loadHistory();
+    const entry = list.find(e => e && e.audienceKey === audienceKey);
+    if (!entry) { console.warn('[SavedSearch] entry not found', audienceKey); return; }
+    console.log(`[SavedSearch] reopening "${entry.canonical || entry.term}"`);
+    runProblemFinder({ term: entry.term, canonical: entry.canonical, subreddits: entry.subreddits, deep: entry.deep });
+}
+
+function openTabSaved() { renderSavedSearches(); }
 
 // --- wire the buttons -------------------------------------------------------
 function initEntryFlow() {
@@ -3578,20 +3713,23 @@ function initEntryFlow() {
         if (!choices) { console.error('[Entry] #subreddit-choices not found — nowhere to show results.'); return; }
 
         window.originalGroupName = groupName;
+        window._canonicalAudience = groupName; // fallback until the AI (or cache) gives us a clean label
         transitionToStep2(groupName); // reveal the step-2 panel so the results are actually visible
         findBtn.disabled = true;
         choices.innerHTML = '<p class="loading-text">Finding communities…</p>';
         try {
             // CACHE: reuse a recent ranked-communities list for this audience (skips ~20 Reddit
             // lookups + 2 OpenAI calls). Falls through to live discovery (and saves it) on a miss.
+            // (getCachedSubreddits also restores window._canonicalAudience on a hit.)
             let ranked = await getCachedSubreddits(groupName);
             if (ranked && ranked.length) {
                 console.log(`[Cache] communities HIT for "${groupName}" — skipped AI + Reddit`);
             } else {
-                const names = await findSubredditsForGroup(groupName);
-                console.log('[Entry] candidate subreddits:', names);
+                const { names, canonical } = await findSubredditsForGroup(groupName);
+                window._canonicalAudience = canonical || groupName; // clean, AI-normalized label
+                console.log('[Entry] candidate subreddits:', names, '| canonical:', window._canonicalAudience);
                 ranked = await fetchAndRankSubreddits(names);
-                setCachedSubreddits(groupName, ranked); // fire-and-forget save
+                setCachedSubreddits(groupName, ranked, window._canonicalAudience); // fire-and-forget save
             }
             console.log('[Entry] ranked subreddits:', ranked.length);
             renderSubredditChoices(ranked);
@@ -3653,6 +3791,13 @@ function initEntryFlow() {
         shopTab.addEventListener('click', openTabShop);
     }
 
+    // #tab-saved → render the user's saved-search history on open.
+    const savedTab = document.getElementById('tab-saved');
+    if (savedTab && !savedTab.dataset.ppWired) {
+        savedTab.dataset.ppWired = '1';
+        savedTab.addEventListener('click', openTabSaved);
+    }
+
     console.log('[Entry] wired ✓ — #find-communities-btn is live');
 }
 
@@ -3673,6 +3818,12 @@ document.addEventListener('click', (e) => {
     if (whereTab && !whereTab.dataset.ppWired) { openTabWhere(); return; }
     const shopTab = e.target.closest('#tab-shop');
     if (shopTab && !shopTab.dataset.ppWired) { openTabShop(); return; }
+    const savedTab = e.target.closest('#tab-saved');
+    if (savedTab && !savedTab.dataset.ppWired) { openTabSaved(); return; }
+
+    // A saved-search row → reopen that audience (re-runs from cache).
+    const savedItem = e.target.closest('.pp-saved-item');
+    if (savedItem) { e.preventDefault(); reopenSavedSearch(savedItem.getAttribute('data-key')); return; }
 
     // .see-more on a finding card → open that finding's modal with its sample posts.
     const seeMore = e.target.closest('.see-more, .see-more-btn');

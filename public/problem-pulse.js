@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 89 — Deep mode wired to the .pf-radio-group toggle: 2 pages/query (~2× corpus) + 60 comment threads, cached separately from Quick', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 91 — location footnote now accurate: "residency signals (I\'m based in phrase or location flair)" instead of mislabelling flair as I\'m-based-in phrases', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -2434,8 +2434,8 @@ function renderLocationChart(posts) {
     const max = data[0].score || 1;
     data.forEach(d => { d.pct = Math.round((d.score / total) * 100); });
     const footnote = strongTotal > 0
-        ? `Weighted toward stated location — ${strongTotal} explicit "I'm based in…" phrase${strongTotal === 1 ? '' : 's'} found among ${grandTotal} country mentions, and counted more heavily.`
-        : `Based on ${grandTotal} country/region mentions. No explicit "I'm based in…" phrases were found, so this reflects countries discussed rather than confirmed residence.`;
+        ? `Weighted toward stated location — ${strongTotal} clear residency signal${strongTotal === 1 ? '' : 's'} (an "I'm based in…" phrase or location flair) among ${grandTotal} country mentions, counted more heavily.`
+        : `Based on ${grandTotal} country/region mentions. No clear residency signals were found, so this reflects countries discussed rather than confirmed residence.`;
     el.innerHTML = `
       <div class="location-chart" style="display:flex; flex-direction:column; gap:11px; font-family:'Plus Jakarta Sans', system-ui, sans-serif;">
         ${data.map(d => `
@@ -2891,7 +2891,19 @@ async function generateAndRenderShopEntities(corpus, audience) {
     const topCap = Object.entries(capFreq).filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1]).slice(0, 40).map(([k]) => k);
     const topLow = Object.entries(lowFreq).filter(([, c]) => c >= 5).sort((a, b) => b[1] - a[1]).slice(0, 45).map(([k]) => k);
     const candidateList = [...new Set([...topCap, ...topLow])].slice(0, 75).map(k => `${k} (${lowFreq[k] || capFreq[k] || 0})`).join(', ');
-    const sampleText = corpus.slice(0, 80).map(p => `Title: ${p.title || ''}\nBody: ${(p.body || '').substring(0, 500)}`).join('\n---\n');
+    // Sample by SHOPPING INTENT + comments (where brands actually get named), not density — otherwise a
+    // bigger (Deep) corpus just crowds the sample with problem-posts and FEWER brands surface. Scaling
+    // with the corpus this way means Deep mode genuinely yields more brands than Quick.
+    const _shopW = ['buy', 'bought', 'purchase', 'price', 'cost', 'worth', 'brand', 'recommend', 'favourite', 'favorite', 'best', 'use', 'using', 'tried', 'app', 'product', 'gear', 'switched', 'love'];
+    const shopScored = corpus.map(p => {
+        const t = `${p.title || ''} ${p.body || ''} ${p.commentsText || ''}`.toLowerCase();
+        let s = 0; _shopW.forEach(w => { if (t.includes(w)) s += 2; });
+        if (p.commentsText) s += 5;
+        return { p, s };
+    });
+    const brandRich = shopScored.filter(x => x.s > 0).sort((a, b) => b.s - a.s || ((b.p.score || 0) - (a.p.score || 0))).map(x => x.p);
+    const sampleText = (brandRich.length ? brandRich : corpus).slice(0, 60)
+        .map(p => `Title: ${p.title || ''}\nBody: ${(p.body || '').substring(0, 400)}\nDiscussions: ${(p.commentsText || '').substring(0, 500)}`).join('\n---\n');
     const prompt = `You are a shopping-behaviour analyst studying what the "${audience}" audience BUYS, for a "How They Shop" report. Separate real commercial BRANDS from generic buyable PRODUCT categories.
 A BRAND is a specific company, retailer, app, marketplace, medication or trademarked product line (e.g. Nike, Chewy, Kong, Purina, Notion, Amazon). Include niche/unfamiliar brands this audience mentions. A capitalised proper-noun product name is almost always a brand.
 A PRODUCT is a generic buyable item or gear category with no specific maker (e.g. dog treats, chew toys, running shoes, weighted blanket, supplements).

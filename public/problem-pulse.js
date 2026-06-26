@@ -20,7 +20,7 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 const EMBEDDINGS_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/embeddings-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 103 — embeddings WIDE SCAN engine (Phase 1, console-only): embed posts+comments → cosine k-means clusters → 1 GPT label call → measured theme %s. Run `await runWideScan()` after an analysis. No UI yet.', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 104 — #export-findings-btn → CSV export of the whole analysis (meta + findings + wide-scan + brands/products + rendered tab text), each row tagged with the search term. Auto-runs wide-scan if needed.', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -3706,7 +3706,7 @@ async function runWideScan(opts) {
     opts = opts || {};
     const corpus = window._corpus, key = window._audienceKey, audience = window.originalGroupName || '';
     if (!corpus || !corpus.length) { console.warn('[WideScan] no corpus — run an analysis first'); return null; }
-    if (!opts.fresh) { const cached = await getCachedWideScan(key); if (cached) { console.log('[WideScan] cached result (pass {fresh:true} to recompute):'); console.table((cached.themes || []).map(t => ({ theme: t.name, category: t.category, '%': t.pct, size: t.size }))); return cached; } }
+    if (!opts.fresh) { const cached = await getCachedWideScan(key); if (cached) { window._wideScan = cached; console.log('[WideScan] cached result (pass {fresh:true} to recompute):'); console.table((cached.themes || []).map(t => ({ theme: t.name, category: t.category, '%': t.pct, size: t.size }))); return cached; } }
 
     const units = buildWideScanUnits(corpus);
     if (units.length < 20) { console.warn('[WideScan] too few units to cluster:', units.length); return null; }
@@ -3739,10 +3739,109 @@ async function runWideScan(opts) {
     console.log(`[WideScan] DONE — ${total} units analysed, ${themes.length} themes:`);
     console.table(themes.map(t => ({ theme: t.name, category: t.category, '%': t.pct, size: t.size })));
     const payload = { audience, units: total, themes };
+    window._wideScan = payload;
     setCachedWideScan(key, payload);
     return payload;
 }
 if (typeof window !== 'undefined') window.runWideScan = runWideScan;
+
+// =============================================================================
+// EXPORT — #export-findings-btn dumps the whole analysis (every audience field
+// shown to the user) to a CSV so it can be assessed offline. Pulls structured
+// data from memory (findings, wide-scan, brands/products) and scrapes the
+// rendered text of the other tab panels. If the wide-scan hasn't been run yet,
+// it runs it first so the export is complete. Every row carries the search term.
+// =============================================================================
+function _csvCell(v) { return `"${String(v == null ? '' : v).replace(/"/g, '""')}"`; }
+function _pushRow(rows, section, item, field, value) {
+    if (value == null || value === '') return;
+    rows.push({ section, item, field, value: String(value).replace(/\s*\n\s*/g, ' / ').replace(/\s{2,}/g, ' ').trim() });
+}
+function collectAnalysisRows() {
+    const rows = [];
+    const push = (s, i, f, v) => _pushRow(rows, s, i, f, v);
+    // meta
+    push('meta', '-', 'search_term', window.originalGroupName || '');
+    push('meta', '-', 'canonical', window._canonicalAudience || '');
+    push('meta', '-', 'audience_key', window._audienceKey || '');
+    push('meta', '-', 'posts_in_corpus', (window._corpus || []).length);
+    push('meta', '-', 'subreddits', (window._analysisSubreddits || []).join(', '));
+    // findings (structured)
+    (window._findings || []).forEach((f, i) => {
+        push('findings', i + 1, 'title', f.title);
+        push('findings', i + 1, 'prevalence_%', f.prevalence);
+        push('findings', i + 1, 'summary', f.summary || f.body);
+        push('findings', i + 1, 'quotes', (f.quotes || []).join(' | '));
+        push('findings', i + 1, 'keywords', (f.keywords || []).join(', '));
+    });
+    // wide scan (structured)
+    if (window._wideScan) push('wide_scan', '-', 'units_analysed', window._wideScan.units);
+    ((window._wideScan && window._wideScan.themes) || []).forEach((t, i) => {
+        push('wide_scan', i + 1, 'theme', t.name);
+        push('wide_scan', i + 1, 'category', t.category);
+        push('wide_scan', i + 1, 'percent', t.pct);
+        push('wide_scan', i + 1, 'size', t.size);
+        push('wide_scan', i + 1, 'quote', t.quote);
+    });
+    // brands / products (structured)
+    ['brands', 'products'].forEach(type => {
+        const obj = (window._entityData && window._entityData[type]) || {};
+        Object.values(obj).forEach((e, i) => { push('shop_' + type, i + 1, 'name', e.originalName || ''); push('shop_' + type, i + 1, 'mentions', e.count); });
+    });
+    // displayed text of the rendered panels (faithful "what the user sees")
+    const dom = [
+        ['who', 'archetype', '#archetype-heading, .archetype-heading, #architype-heading'],
+        ['who', 'archetype_desc', '#archetype-d, .archetype-d'],
+        ['who', 'profile', '#profile-d, .profile-d, #overview-div'],
+        ['talk', 'voice', '#voice-p-wrap'],
+        ['talk', 'sentiment', '#sentiment-wrap'],
+        ['talk', 'hooks', '#hook-wrap'],
+        ['talk', 'insider_language', '#insider-language'],
+        ['talk', 'language_avoid', '#nega-wrap'],
+        ['talk', 'language_use', '#positive-wrap'],
+        ['where', 'thought_leaders', '#thought-leaders'],
+        ['where', 'tools_apps', '#tools-apps'],
+        ['where', 'events_places', '#events-places'],
+        ['where', 'watering_holes', '#watering-holes'],
+        ['where', 'media', '#podcasts'],
+        ['shop', 'demand_signals', '#demand-signals, #demand-signals-wrap, .demand-signal-list']
+    ];
+    dom.forEach(([s, i, sel]) => {
+        try { const el = document.querySelector(sel); if (el) { const t = (el.innerText || '').trim(); if (t) push(s, i, 'displayed_text', t.slice(0, 4000)); } } catch (e) { }
+    });
+    return rows;
+}
+function rowsToCSV(rows) {
+    const term = window.originalGroupName || '', canon = window._canonicalAudience || '';
+    const head = ['search_term', 'canonical', 'section', 'item', 'field', 'value'];
+    const lines = [head.join(',')];
+    rows.forEach(r => lines.push([term, canon, r.section, r.item, r.field, r.value].map(_csvCell).join(',')));
+    return lines.join('\r\n');
+}
+async function exportFindings() {
+    const btn = document.getElementById('export-findings-btn');
+    const orig = btn ? btn.textContent : '';
+    if (btn) { btn.textContent = 'Exporting…'; btn.disabled = true; }
+    try {
+        // Make sure the wide-scan is included (run it once if it hasn't been).
+        if (!window._wideScan && window._corpus && window._corpus.length) {
+            console.log('[Export] running wide scan first so it is included…');
+            try { await runWideScan(); } catch (e) { console.warn('[Export] wide scan failed (continuing)', e); }
+        }
+        const rows = collectAnalysisRows();
+        if (!rows.length) { console.warn('[Export] nothing to export — run an analysis first'); showMessage('Run an analysis first, then export.'); return; }
+        const csv = rowsToCSV(rows);
+        const name = `problempop-${_canonKey(window._canonicalAudience || window.originalGroupName || 'export')}-${new Date().toISOString().slice(0, 10)}.csv`;
+        const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        console.log(`[Export] ${rows.length} rows → ${name}`);
+    } finally {
+        if (btn) { btn.textContent = orig || 'Export findings'; btn.disabled = false; }
+    }
+}
+if (typeof window !== 'undefined') window.exportFindings = exportFindings;
 
 // =============================================================================
 // SAVED SEARCHES — per-member history. Stored in the Memberstack member-JSON
@@ -4000,6 +4099,13 @@ function initEntryFlow() {
         savedTab.addEventListener('click', openTabSaved);
     }
 
+    // #export-findings-btn → export the whole analysis (incl. wide-scan) to CSV.
+    const exportBtn = document.getElementById('export-findings-btn');
+    if (exportBtn && !exportBtn.dataset.ppWired) {
+        exportBtn.dataset.ppWired = '1';
+        exportBtn.addEventListener('click', (e) => { e.preventDefault(); exportFindings(); });
+    }
+
     console.log('[Entry] wired ✓ — #find-communities-btn is live');
 }
 
@@ -4022,6 +4128,8 @@ document.addEventListener('click', (e) => {
     if (shopTab && !shopTab.dataset.ppWired) { openTabShop(); return; }
     const savedTab = e.target.closest('#tab-saved');
     if (savedTab && !savedTab.dataset.ppWired) { openTabSaved(); return; }
+    const exportBtn = e.target.closest('#export-findings-btn');
+    if (exportBtn && !exportBtn.dataset.ppWired) { e.preventDefault(); exportFindings(); return; }
 
     // A saved-search row → reopen that audience (re-runs from cache).
     const savedItem = e.target.closest('.pp-saved-item');

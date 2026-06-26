@@ -20,7 +20,7 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 const EMBEDDINGS_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/embeddings-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 104 — #export-findings-btn → CSV export of the whole analysis (meta + findings + wide-scan + brands/products + rendered tab text), each row tagged with the search term. Auto-runs wide-scan if needed.', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 106 — export now includes the displayed Reddit posts per finding, the polarity map (frequency×intensity), and sub-problems; export auto-generates any missing section first', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -257,6 +257,7 @@ async function fetchAndRankSubreddits(names) {
             description: d.public_description || '',
             activityLabel: getActivityLabel(d.active_user_count, d.subscribers)
         }))
+        .filter(s => s.members >= 100) // drop dead/private/tiny communities — never show <100 members
         .sort((a, b) => b.members - a.members);
 }
 
@@ -269,13 +270,16 @@ function renderSubredditChoices(subs) {
         return;
     }
     // Dedupe by name (case-insensitive) so the same community can't appear twice — duplicates were
-    // causing colliding checkbox ids (clicking one toggled the one beside it).
+    // causing colliding checkbox ids (clicking one toggled the one beside it). Also hide any
+    // community under 100 members (covers older cached lists built before that filter existed).
     const seen = new Set();
     subs = subs.filter(s => {
         const k = (s.name || '').toLowerCase();
         if (!k || seen.has(k)) return false;
+        if ((s.members || 0) < 100) return false;
         seen.add(k); return true;
     });
+    if (!subs.length) { container.innerHTML = '<p class="placeholder-text">No communities found. Try another audience.</p>'; return; }
 
     // Index-based ids guarantee each checkbox/label pair is unique regardless of the name.
     container.innerHTML = subs.map((sub, i) => `
@@ -846,7 +850,7 @@ async function runProblemFinder(preset) {
         // New search → clear everything tab-related so it regenerates for this audience.
         window._tabLoaded = {};
         window._findings = null; window._findingsPromise = null; window._assignmentPromise = null;
-        window._findingPosts = null; window._findingPostsFull = null; window._polarityPromise = null;
+        window._findingPosts = null; window._findingPostsFull = null; window._polarityPromise = null; window._polarityPoints = null;
         window._talkPromise = null; // Tab 3 regenerates for the new audience
         window._wherePromise = null; window._platformPanelsRendered = false; // Tab 4 regenerates too
         window._shopPromise = null; window._entityData = null; // Tab 5 regenerates too
@@ -1906,6 +1910,7 @@ function loadPolarityMap() {
             points = (findings || []).filter(f => typeof f.intensity === 'number')
                 .map((f, i) => ({ label: f.title, parent: i + 1, x: Math.round(f.prevalence || 0), y: Math.round(f.intensity || 0) }));
         }
+        window._polarityPoints = points; // stash for the CSV export
         renderPolarityMap(points);
         renderBubbleGuide(findings); // legend below the map
     })()
@@ -3638,16 +3643,23 @@ async function embedAll(texts) {
     return out.flat();
 }
 
+// AutoModerator / sticky / rules / welcome boilerplate that pollutes clusters (e.g. "Welcome to
+// r/dogs!", "will be removed", "read our rules"). Dropping it removes the junk themes and sharpens
+// the real signal — also useful anywhere we feed corpus text to the model.
+const _BOILERPLATE_RE = /(welcome to r\/|community (rules|guidelines)|read (our|the) (rules|sidebar|wiki|faq)|\bbe removed\b|please (read|review|make sure you read)|discussion-based subreddit|this (post|comment) (has been|was) removed|\bautomoderator\b|i am a bot|performed automatically|message the mod|contact the mod|\brule \d|mega ?thread|weekly (thread|discussion|question)|your (post|submission) (has|was) removed|posted automatically|^\s*\[?removed\]?\s*$|^\s*\[?deleted\]?\s*$)/i;
+function _isBoilerplate(t) { return _BOILERPLATE_RE.test(t || ''); }
+
 // Build embedding units: each post (title+body) + a few comment-text chunks → easily thousands.
+// Mod/rules/welcome boilerplate is filtered out so it can't form its own (useless) cluster.
 function buildWideScanUnits(corpus) {
     const units = [];
     (corpus || []).forEach(p => {
         const head = `${p.title || ''}. ${(p.body || '').slice(0, 300)}`.replace(/\s+/g, ' ').trim();
-        if (head.length > 15) units.push({ text: head.slice(0, 500), permalink: p.permalink || '', kind: 'post' });
+        if (head.length > 15 && !_isBoilerplate(head)) units.push({ text: head.slice(0, 500), permalink: p.permalink || '', kind: 'post' });
         const c = (p.commentsText || '').replace(/\s+/g, ' ').trim();
         for (let i = 0, n = 0; i < c.length && n < 4; i += 600, n++) {
             const chunk = c.slice(i, i + 600);
-            if (chunk.length > 40) units.push({ text: chunk, permalink: p.permalink || '', kind: 'comment' });
+            if (chunk.length > 40 && !_isBoilerplate(chunk)) units.push({ text: chunk, permalink: p.permalink || '', kind: 'comment' });
         }
     });
     return units.length > WIDE_SCAN_MAX_UNITS ? units.slice(0, WIDE_SCAN_MAX_UNITS) : units;
@@ -3684,7 +3696,7 @@ function kmeansCosine(vectors, k, iters) {
 // Label all clusters in ONE GPT call (name / category / summary / representative quote).
 async function labelWideScanClusters(clusters, audience) {
     const desc = clusters.map((cl, i) => `Cluster ${i} — ${cl.size} items:\n${cl.exemplars.map(e => `• ${e.slice(0, 180)}`).join('\n')}`).join('\n\n');
-    const prompt = `You are analysing recurring themes in real discussions from a "${audience}" audience. Each cluster below is a group of semantically similar posts/comments. For EACH cluster return: a short "name" (3-5 words), a "category" (one of: pain, desire, hook, emotion, topic), a one-line "summary", and the single most representative verbatim "quote" from its items. Respond ONLY as JSON: {"clusters":[{"index":0,"name":"...","category":"...","summary":"...","quote":"..."}]}\n\n${desc}`;
+    const prompt = `You are analysing recurring themes in real discussions from a "${audience}" audience. Each cluster below is a group of semantically similar posts/comments. For EACH cluster return: a short "name" (3-5 words), a "category" (one of: pain, desire, hook, emotion, topic), a one-line "summary", and a verbatim "quote" — pick the item that BEST exemplifies the theme (a genuine user statement; never a moderator notice, rule, or "welcome" message). The quote must clearly match the theme name. Respond ONLY as JSON: {"clusters":[{"index":0,"name":"...","category":"...","summary":"...","quote":"..."}]}\n\n${desc}`;
     const parsed = await callOpenAI({
         model: AI_MODEL,
         messages: [{ role: 'system', content: 'You label thematic clusters for audience research. Output only valid JSON.' }, { role: 'user', content: prompt }],
@@ -3774,6 +3786,35 @@ function collectAnalysisRows() {
         push('findings', i + 1, 'quotes', (f.quotes || []).join(' | '));
         push('findings', i + 1, 'keywords', (f.keywords || []).join(', '));
     });
+    // reddit posts shown to the user per finding (the modal sample posts)
+    (window._findingPostsFull || []).forEach((posts, fi) => {
+        (posts || []).slice(0, 10).forEach((p, pi) => {
+            const it = `F${fi + 1}.P${pi + 1}`;
+            push('finding_posts', it, 'parent_finding', (window._findings && window._findings[fi] && window._findings[fi].title) || '');
+            push('finding_posts', it, 'subreddit', p.subreddit);
+            push('finding_posts', it, 'title', p.title);
+            push('finding_posts', it, 'score', p.score);
+            push('finding_posts', it, 'comments', p.comments);
+            push('finding_posts', it, 'permalink', p.permalink);
+            push('finding_posts', it, 'body', (p.body || '').slice(0, 500));
+        });
+    });
+    // polarity map (frequency × intensity per problem)
+    (window._polarityPoints || []).forEach((pt, i) => {
+        push('polarity', i + 1, 'problem', pt.label);
+        push('polarity', i + 1, 'frequency_0_100', pt.x);
+        push('polarity', i + 1, 'intensity_0_100', pt.y);
+        push('polarity', i + 1, 'parent_finding_index', pt.parent);
+    });
+    // sub-problems per finding
+    (window._findings || []).forEach((f, fi) => {
+        const subs = (window._subProblemCache || {})[f.title] || [];
+        subs.forEach((sp, si) => {
+            push('subproblems', `${fi + 1}.${si + 1}`, 'parent_finding', f.title);
+            push('subproblems', `${fi + 1}.${si + 1}`, 'sub_problem', sp.label);
+            push('subproblems', `${fi + 1}.${si + 1}`, 'pct', sp.pct);
+        });
+    });
     // wide scan (structured)
     if (window._wideScan) push('wide_scan', '-', 'units_analysed', window._wideScan.units);
     ((window._wideScan && window._wideScan.themes) || []).forEach((t, i) => {
@@ -3818,14 +3859,35 @@ function rowsToCSV(rows) {
     rows.forEach(r => lines.push([term, canon, r.section, r.item, r.field, r.value].map(_csvCell).join(',')));
     return lines.join('\r\n');
 }
+// Make sure findings, polarity map, and sub-problems are generated so the export is complete even
+// if the user never opened those tabs / expanded a finding.
+async function ensureFullExportData() {
+    if (!window._corpus || !window._corpus.length) return;
+    try { if (typeof ensureFindings === 'function') await ensureFindings(); } catch (e) { }
+    try { await loadPolarityMap(); } catch (e) { }   // computes + stashes window._polarityPoints
+    const findings = window._findings || [];
+    window._subProblemCache = window._subProblemCache || {};
+    for (let i = 0; i < findings.length; i++) {
+        const f = findings[i];
+        if (window._subProblemCache[f.title]) continue;
+        try {
+            const assigned = window._findingPostsFull && window._findingPostsFull[i];
+            const posts = (assigned && assigned.length >= 5) ? assigned : matchPostsForFinding(f, window._corpus || [], 40);
+            await generateSubProblems(f, posts, window.originalGroupName || '');
+        } catch (e) { console.warn('[Export] sub-problems failed for', f.title, e && e.message); }
+    }
+}
 async function exportFindings() {
+    console.log('[Export] clicked — preparing full CSV…');
     const btn = document.getElementById('export-findings-btn');
-    const orig = btn ? btn.textContent : '';
-    if (btn) { btn.textContent = 'Exporting…'; btn.disabled = true; }
+    // Visible feedback: building the full export (wide-scan + sub-problems) can take ~30–60s.
+    try { showLoader('Building full export (analysing themes & sub-problems)…'); } catch (e) { }
+    if (btn && !btn.children.length) { btn.disabled = true; } // only safe to disable if it's a plain button
     try {
-        // Make sure the wide-scan is included (run it once if it hasn't been).
+        // Ensure every section exists: findings, posts, polarity, sub-problems, then the wide-scan.
+        try { await ensureFullExportData(); } catch (e) { console.warn('[Export] ensure data failed (continuing)', e); }
         if (!window._wideScan && window._corpus && window._corpus.length) {
-            console.log('[Export] running wide scan first so it is included…');
+            console.log('[Export] running wide scan so it is included…');
             try { await runWideScan(); } catch (e) { console.warn('[Export] wide scan failed (continuing)', e); }
         }
         const rows = collectAnalysisRows();
@@ -3838,7 +3900,8 @@ async function exportFindings() {
         setTimeout(() => URL.revokeObjectURL(url), 1000);
         console.log(`[Export] ${rows.length} rows → ${name}`);
     } finally {
-        if (btn) { btn.textContent = orig || 'Export findings'; btn.disabled = false; }
+        try { hideLoader(); } catch (e) { }
+        if (btn) { btn.disabled = false; }
     }
 }
 if (typeof window !== 'undefined') window.exportFindings = exportFindings;

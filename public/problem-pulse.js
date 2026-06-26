@@ -1,4 +1,3 @@
-
 // =============================================================================
 // problem-pulse-v2.js — clean rebuild, piece by piece.
 //
@@ -19,8 +18,9 @@
 
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
+const EMBEDDINGS_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/embeddings-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 102 — honest headline metric: big number = posts + comments mined (relabel Webflow ".count-insights" to "posts & comments analysed"); 429 retries from BUILD 101 retained', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 103 — embeddings WIDE SCAN engine (Phase 1, console-only): embed posts+comments → cosine k-means clusters → 1 GPT label call → measured theme %s. Run `await runWideScan()` after an analysis. No UI yet.', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -3597,6 +3597,152 @@ function transitionToStep1() {
     if (window._polarityChart && window._polarityChart.destroy) { window._polarityChart.destroy(); window._polarityChart = null; }
     console.log('[Reset] back to start — ready for a new search');
 }
+
+// =============================================================================
+// EMBEDDINGS "WIDE SCAN"  (Phase 1 — console-validated engine, NO UI yet)
+// Embed every post + comment chunk → cluster by meaning (k-means/cosine) → label clusters with ONE
+// GPT call. Gives measured theme prevalence across thousands of units, cheaply. After running an
+// analysis, validate from the console:  await runWideScan()  (add {fresh:true} to bypass cache).
+// Results cache under analyses/{audienceKey}/tabs/wideScan. Nothing here touches the live UI.
+// =============================================================================
+const WIDE_SCAN_SCHEMA_VERSION = 1;
+const WIDE_SCAN_MAX_UNITS = 2800;   // cap for browser memory/compute
+const WIDE_SCAN_K = 20;             // target number of themes
+const EMBED_MODEL = 'text-embedding-3-small';
+const EMBED_DIMS = 512;             // shorter vectors → ~3× less memory/compute, still plenty to cluster
+
+// embeddings client — batched, modest concurrency (separate proxy from openai-proxy)
+let _embedInFlight = 0; const _embedQueue = [];
+function _acquireEmbedSlot() { if (_embedInFlight < 4) { _embedInFlight++; return Promise.resolve(); } return new Promise(r => _embedQueue.push(r)); }
+function _releaseEmbedSlot() { if (_embedQueue.length) _embedQueue.shift()(); else _embedInFlight = Math.max(0, _embedInFlight - 1); }
+async function _embedBatch(inputs) {
+    await _acquireEmbedSlot();
+    const ctrl = new AbortController(); const timer = setTimeout(() => ctrl.abort(), 28000);
+    try {
+        const res = await fetch(EMBEDDINGS_PROXY_URL, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ embeddingPayload: { model: EMBED_MODEL, input: inputs, dimensions: EMBED_DIMS } }),
+            signal: ctrl.signal
+        });
+        if (!res.ok) throw new Error('embeddings proxy ' + res.status);
+        const data = await res.json();
+        if (!data || data.error || !data.embeddingResponse) throw new Error((data && data.message) || 'embeddings error');
+        return data.embeddingResponse.data.map(d => d.embedding);
+    } finally { clearTimeout(timer); _releaseEmbedSlot(); }
+}
+async function embedAll(texts) {
+    const B = 150, batches = [];
+    for (let i = 0; i < texts.length; i += B) batches.push(texts.slice(i, i + B));
+    const out = new Array(batches.length);
+    await Promise.all(batches.map(async (b, idx) => { out[idx] = await _embedBatch(b); }));
+    return out.flat();
+}
+
+// Build embedding units: each post (title+body) + a few comment-text chunks → easily thousands.
+function buildWideScanUnits(corpus) {
+    const units = [];
+    (corpus || []).forEach(p => {
+        const head = `${p.title || ''}. ${(p.body || '').slice(0, 300)}`.replace(/\s+/g, ' ').trim();
+        if (head.length > 15) units.push({ text: head.slice(0, 500), permalink: p.permalink || '', kind: 'post' });
+        const c = (p.commentsText || '').replace(/\s+/g, ' ').trim();
+        for (let i = 0, n = 0; i < c.length && n < 4; i += 600, n++) {
+            const chunk = c.slice(i, i + 600);
+            if (chunk.length > 40) units.push({ text: chunk, permalink: p.permalink || '', kind: 'comment' });
+        }
+    });
+    return units.length > WIDE_SCAN_MAX_UNITS ? units.slice(0, WIDE_SCAN_MAX_UNITS) : units;
+}
+
+// vector math + cosine k-means (vectors are pre-normalised, so cosine == dot product)
+function _normVec(v) { let s = 0; for (let i = 0; i < v.length; i++) s += v[i] * v[i]; s = Math.sqrt(s) || 1; const o = new Array(v.length); for (let i = 0; i < v.length; i++) o[i] = v[i] / s; return o; }
+function _dot(a, b) { let s = 0; for (let i = 0; i < a.length; i++) s += a[i] * b[i]; return s; }
+function kmeansCosine(vectors, k, iters) {
+    const n = vectors.length; if (!n) return { assign: [], centroids: [] };
+    k = Math.min(k, n);
+    // k-means++-lite seeding: each new centroid = the point LEAST similar to all chosen so far (spreads them out)
+    const centroids = []; const used = new Set();
+    let first = Math.floor(Math.random() * n); centroids.push(vectors[first].slice()); used.add(first);
+    while (centroids.length < k) {
+        let pick = -1, worst = Infinity;
+        for (let i = 0; i < n; i++) {
+            if (used.has(i)) continue;
+            let maxSim = -Infinity; for (const c of centroids) { const s = _dot(vectors[i], c); if (s > maxSim) maxSim = s; }
+            if (maxSim < worst) { worst = maxSim; pick = i; }
+        }
+        if (pick < 0) break; centroids.push(vectors[pick].slice()); used.add(pick);
+    }
+    const assign = new Array(n).fill(0); const dim = vectors[0].length;
+    for (let it = 0; it < iters; it++) {
+        for (let i = 0; i < n; i++) { let best = 0, bs = -Infinity; for (let c = 0; c < centroids.length; c++) { const s = _dot(vectors[i], centroids[c]); if (s > bs) { bs = s; best = c; } } assign[i] = best; }
+        const sums = centroids.map(() => new Array(dim).fill(0)); const counts = new Array(centroids.length).fill(0);
+        for (let i = 0; i < n; i++) { const a = assign[i]; counts[a]++; const v = vectors[i], su = sums[a]; for (let d = 0; d < dim; d++) su[d] += v[d]; }
+        for (let c = 0; c < centroids.length; c++) { if (!counts[c]) continue; const su = sums[c]; for (let d = 0; d < dim; d++) su[d] /= counts[c]; centroids[c] = _normVec(su); }
+    }
+    return { assign, centroids };
+}
+
+// Label all clusters in ONE GPT call (name / category / summary / representative quote).
+async function labelWideScanClusters(clusters, audience) {
+    const desc = clusters.map((cl, i) => `Cluster ${i} — ${cl.size} items:\n${cl.exemplars.map(e => `• ${e.slice(0, 180)}`).join('\n')}`).join('\n\n');
+    const prompt = `You are analysing recurring themes in real discussions from a "${audience}" audience. Each cluster below is a group of semantically similar posts/comments. For EACH cluster return: a short "name" (3-5 words), a "category" (one of: pain, desire, hook, emotion, topic), a one-line "summary", and the single most representative verbatim "quote" from its items. Respond ONLY as JSON: {"clusters":[{"index":0,"name":"...","category":"...","summary":"...","quote":"..."}]}\n\n${desc}`;
+    const parsed = await callOpenAI({
+        model: AI_MODEL,
+        messages: [{ role: 'system', content: 'You label thematic clusters for audience research. Output only valid JSON.' }, { role: 'user', content: prompt }],
+        temperature: 0.2, max_completion_tokens: 1500, response_format: { type: 'json_object' }
+    });
+    return Array.isArray(parsed.clusters) ? parsed.clusters : [];
+}
+
+// cache (analyses/{key}/tabs/wideScan)
+async function getCachedWideScan(key) {
+    const db = _firestore(); if (!db || !key) return null;
+    try { const doc = await db.collection('analyses').doc(key).collection('tabs').doc('wideScan').get(); if (!doc.exists) return null; const d = doc.data() || {}; return d.schema === WIDE_SCAN_SCHEMA_VERSION ? d : null; }
+    catch (e) { return null; }
+}
+function setCachedWideScan(key, payload) { const db = _firestore(); if (!db || !key) return; try { db.collection('analyses').doc(key).collection('tabs').doc('wideScan').set({ ...payload, schema: WIDE_SCAN_SCHEMA_VERSION, updatedAt: Date.now() }); } catch (e) { } }
+
+// Orchestrator — run from console: await runWideScan()  ·  await runWideScan({fresh:true})
+async function runWideScan(opts) {
+    opts = opts || {};
+    const corpus = window._corpus, key = window._audienceKey, audience = window.originalGroupName || '';
+    if (!corpus || !corpus.length) { console.warn('[WideScan] no corpus — run an analysis first'); return null; }
+    if (!opts.fresh) { const cached = await getCachedWideScan(key); if (cached) { console.log('[WideScan] cached result (pass {fresh:true} to recompute):'); console.table((cached.themes || []).map(t => ({ theme: t.name, category: t.category, '%': t.pct, size: t.size }))); return cached; } }
+
+    const units = buildWideScanUnits(corpus);
+    if (units.length < 20) { console.warn('[WideScan] too few units to cluster:', units.length); return null; }
+    console.log(`[WideScan] ${units.length} units (posts + comments) — embedding…`);
+    const t0 = Date.now();
+    let vectors;
+    try { vectors = (await embedAll(units.map(u => u.text))).map(_normVec); }
+    catch (e) { console.error('[WideScan] embedding failed:', e && e.message); return null; }
+    console.log(`[WideScan] embedded ${vectors.length} in ${((Date.now() - t0) / 1000).toFixed(1)}s — clustering…`);
+
+    const { assign } = kmeansCosine(vectors, WIDE_SCAN_K, 8);
+    const groups = {}; assign.forEach((a, i) => { (groups[a] = groups[a] || []).push(i); });
+    const minSize = Math.max(5, Math.round(units.length * 0.01)); // drop noise clusters
+    let clusters = Object.values(groups).filter(g => g.length >= minSize).map(idxs => {
+        const dim = vectors[0].length, mean = new Array(dim).fill(0);
+        idxs.forEach(i => { const v = vectors[i]; for (let d = 0; d < dim; d++) mean[d] += v[d]; });
+        for (let d = 0; d < dim; d++) mean[d] /= idxs.length;
+        const m = _normVec(mean);
+        const ranked = idxs.map(i => ({ i, s: _dot(vectors[i], m) })).sort((a, b) => b.s - a.s);
+        return { size: idxs.length, exemplars: ranked.slice(0, 4).map(r => units[r.i].text), permalinks: [...new Set(ranked.slice(0, 6).map(r => units[r.i].permalink).filter(Boolean))] };
+    }).sort((a, b) => b.size - a.size);
+
+    console.log(`[WideScan] ${clusters.length} themes — labelling (1 GPT call)…`);
+    let labels = []; try { labels = await labelWideScanClusters(clusters, audience); } catch (e) { console.warn('[WideScan] labelling failed (showing raw sizes)', e); }
+    const total = units.length;
+    const themes = clusters.map((cl, i) => {
+        const lb = labels.find(l => l && l.index === i) || labels[i] || {};
+        return { name: lb.name || `Theme ${i + 1}`, category: lb.category || 'topic', pct: +((cl.size / total) * 100).toFixed(1), size: cl.size, quote: lb.quote || cl.exemplars[0] || '', permalinks: cl.permalinks };
+    });
+    console.log(`[WideScan] DONE — ${total} units analysed, ${themes.length} themes:`);
+    console.table(themes.map(t => ({ theme: t.name, category: t.category, '%': t.pct, size: t.size })));
+    const payload = { audience, units: total, themes };
+    setCachedWideScan(key, payload);
+    return payload;
+}
+if (typeof window !== 'undefined') window.runWideScan = runWideScan;
 
 // =============================================================================
 // SAVED SEARCHES — per-member history. Stored in the Memberstack member-JSON

@@ -20,7 +20,7 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 const EMBEDDINGS_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/embeddings-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 111 — #results-wrapper-b hidden on load via injected CSS (keep it flex in Webflow for easy designing); revealed when results are ready', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 113 — demographics need ≥30 self-IDs to show "measured" (else honest audience-baseline estimate); structured who-data (demographics/archetype/profile) in export; post-assignment prompt rejects tutorials/success/wrong-perspective posts (fixes keyword hijacking)', 'color:#00a5ce;font-weight:bold');
 
 // Hide the results panel on page load so the page never flashes an empty results section before a
 // search. You can keep #results-wrapper-b set to `display:flex` in Webflow (easier to design) — this
@@ -868,6 +868,7 @@ async function runProblemFinder(preset) {
         window._wherePromise = null; window._platformPanelsRendered = false; // Tab 4 regenerates too
         window._shopPromise = null; window._entityData = null; // Tab 5 regenerates too
         window._wideScan = null; // wide-scan recomputes for the new audience (no stale leak into export)
+        window._demographics = null; window._archetype = null; window._profile = null; // who-data per audience
         try { briefCache.clear(); } catch (e) { } // drop cached brand/product briefs for the new audience
         window._corpusEnrichedPromise = null; // re-enrich comments for the new audience
         if (window._polarityChart && window._polarityChart.destroy) { window._polarityChart.destroy(); window._polarityChart = null; }
@@ -942,6 +943,7 @@ function measureDemographics(corpus) {
     const reTag2 = /\b([mf])\s*\/?\s*(\d{2})\b/gi;   // F34, M/29
     const reAge1 = /\bi(?:'?m| am)\s+(\d{1,2})\b/gi;  // I'm 34 / I am 34
     const reAge2 = /\b(\d{1,2})\s*(?:years old|yrs old|yo|y\/o)\b/gi;
+    const reAge3 = /\b(?:age|aged|turning|i'?m turning)\s*:?\s*(\d{1,2})\b/gi; // age 34 / turning 30
     const reFemale = /\bas a (?:mom|mum|mother|woman|girl|wife|lady|gal)\b|\bi'?m (?:a )?(?:woman|female|girl|mom|mum|mother)\b|\bmy husband\b/gi;
     const reMale = /\bas a (?:dad|father|man|guy|husband|bloke|boy|fella)\b|\bi'?m (?:a )?(?:man|male|guy|dad|father)\b|\bmy wife\b/gi;
     (corpus || []).forEach(p => {
@@ -951,6 +953,7 @@ function measureDemographics(corpus) {
         reTag2.lastIndex = 0; while ((m = reTag2.exec(text))) { const age = +m[2]; if (age >= 16 && age <= 85) { (m[1] === 'f' ? female++ : male++); bucket(age); } }
         reAge1.lastIndex = 0; while ((m = reAge1.exec(text))) { const age = +m[1]; if (age >= 16 && age <= 85) bucket(age); }
         reAge2.lastIndex = 0; while ((m = reAge2.exec(text))) { const age = +m[1]; if (age >= 16 && age <= 85) bucket(age); }
+        reAge3.lastIndex = 0; while ((m = reAge3.exec(text))) { const age = +m[1]; if (age >= 16 && age <= 85) bucket(age); }
         female += (text.match(reFemale) || []).length;
         male += (text.match(reMale) || []).length;
     });
@@ -1026,9 +1029,12 @@ async function generateAndRenderWho(corpus, audience) {
     };
 
     try {
-        const parsed = await callOpenAI(payload);                 // AI estimate (also gives life stage)
+        const parsed = await callOpenAI(payload);                 // AI estimate (anchored on the audience name = industry baseline)
         const measured = measureDemographics(corpus);             // real self-reports from the corpus
-        const GENDER_MIN = 8, AGE_MIN = 8;                        // need enough self-IDs to trust the split
+        // Need a STATISTICALLY MEANINGFUL self-report sample before we show "measured" — a handful of
+        // bios (9, 12, 13…) is misleading on the first tab a user sees. Below this, fall back to the
+        // audience-baseline estimate (clearly labelled), per the accuracy review.
+        const GENDER_MIN = 30, AGE_MIN = 30;
         const d = { top_life_stage: parsed.top_life_stage };
         // Gender: use measured split when we have enough self-identifications, else fall back to estimate.
         if (measured.genderN >= GENDER_MIN) {
@@ -1047,6 +1053,7 @@ async function generateAndRenderWho(corpus, audience) {
         } else {
             d.age_18_24 = parsed.age_18_24; d.age_25_45 = parsed.age_25_45; d.age_45_plus = parsed.age_45_plus; d.age_source = 'estimated';
         }
+        window._demographics = d; // stash for the CSV export
         container.innerHTML = renderDemographicsHTML(d);
         console.log(`[Who] demographics — gender:${d.gender_source}(${measured.genderN}) age:${d.age_source}(${measured.ageN})`, d);
     } catch (error) {
@@ -1132,6 +1139,7 @@ async function generateAndRenderArchetype(corpus, audience) {
         const parsed = await callOpenAI(payload);
         if (headingEl) headingEl.textContent = parsed.archetype || '';
         if (descEl) descEl.textContent = parsed.summary || '';
+        window._archetype = { name: parsed.archetype || '', summary: parsed.summary || '' }; // for export
         console.log('[Archetype] rendered:', parsed.archetype);
     } catch (error) {
         console.error('[Archetype] failed:', error);
@@ -1217,6 +1225,7 @@ Ground every line in the posts. Posts:\n${sample}` }
 
     try {
         const parsed = await callOpenAI(payload);
+        window._profile = { goals: parsed.goals || [], fears: parsed.fears || [], characteristics: parsed.characteristics || [], rejects: parsed.rejects || [] }; // for export
         if (goalsC && window._bp.goals) populatePillars(goalsC, window._bp.goals, parsed.goals, { textSelector: '.pillar-item-text' });
         if (fearsC && window._bp.fears) populatePillars(fearsC, window._bp.fears, parsed.fears, { textSelector: '.pillar-item-fear', addClass: 'pillar-item-fear' });
         if (charsC && window._bp.chars) populateMindset(charsC, window._bp.chars, parsed.characteristics);
@@ -1688,9 +1697,10 @@ async function assignPostsToFindings(findings, corpus) {
         .slice(0, 45); // smaller batch so the assignment JSON fits the output cap + 26s window
     const buckets = findings.map(() => []);
     try {
+        const audience = window._canonicalAudience || window.originalGroupName || 'this audience';
         const problemList = findings.map((f, i) => `${i + 1}: ${f.title} — ${f.summary || ''}`).join('\n');
         const postList = candidates.map((p, i) => `${i + 1}: "${(p.title || '').slice(0, 120)}" — ${(p.body || '').replace(/\s+/g, ' ').slice(0, 160)}`).join('\n');
-        const prompt = `You are matching Reddit posts to the problem each one is genuinely about.\n\nProblems:\n${problemList}\n\nPosts:\n${postList}\n\nFor each post, give the number of the SINGLE problem the AUTHOR is actually describing, experiencing, or asking for help with. Use 0 (none) if it does not clearly belong to any problem — this INCLUDES positive or heart-warming stories, rescue/adoption pleas, "help me name my dog", breed-identification requests, photo/picture posts, and anything off-topic. Be STRICT: when in doubt, use 0. Respond ONLY with JSON: {"assignments":[{"post":1,"problem":2}]}.`;
+        const prompt = `You are matching Reddit posts to the problem each one is genuinely about, for a "${audience}" audience.\n\nProblems:\n${problemList}\n\nPosts:\n${postList}\n\nFor each post return the number of the SINGLE problem the AUTHOR is personally experiencing, venting about, or asking for help with. Use 0 (none) GENEROUSLY. Apply ALL of these rules — when in doubt, use 0:\n- REJECT posts that are guides, tutorials, "how I did X", success stories, results/case-studies, book or tool recommendations, self-promotion, or news/data articles — even if they contain matching keywords. We only want genuine struggles, questions and venting, not wins or teaching.\n- REJECT posts whose author is NOT a "${audience}" member hitting the problem first-hand — e.g. a hiring manager rather than a job-seeker, a professional groomer/trainer rather than a pet owner, an outside observer, or someone in a different field who merely shares a word.\n- REJECT off-topic posts that only share a keyword (e.g. a global-economics article matching "progress"/"slowed"), plus positive/heart-warming stories, rescue/adoption pleas, "help me name my pet", breed-ID, and photo posts.\nMatch a post ONLY when the author clearly belongs to the audience AND is describing that specific problem as their own unresolved struggle. Respond ONLY with JSON: {"assignments":[{"post":1,"problem":2}]}.`;
         const parsed = await callOpenAI({
             model: AI_MODEL,
             messages: [
@@ -1729,9 +1739,7 @@ async function generateSubProblems(finding, posts, audience) {
     const key = finding.title;
     if (window._subProblemCache[key]) return window._subProblemCache[key];
 
-    // Stabilise the prevalence denominator. A low-support finding may only have a handful of assigned
-    // posts, which makes EVERY sub-problem round to ~100%. Top up with on-topic corpus matches so the
-    // percentage is computed over a meaningful sample (≥25 posts where the corpus allows).
+    // The AI identifies the sub-problems from this finding's posts (topped up if few)…
     let analysisPosts = (posts || []).slice();
     if (analysisPosts.length < 25) {
         const seen = new Set(analysisPosts.map(p => p && p.id).filter(Boolean));
@@ -1739,9 +1747,13 @@ async function generateSubProblems(finding, posts, audience) {
             if (p && p.id && !seen.has(p.id)) { analysisPosts.push(p); seen.add(p.id); }
         });
     }
-
-    const texts = analysisPosts.map(p => `${p.title} ${p.body}`.toLowerCase());
     const corpusText = analysisPosts.slice(0, 40).map(p => `${p.title} ${(p.body || '').substring(0, 300)}`.trim()).join('\n---\n');
+
+    // …but prevalence is MEASURED across the WHOLE corpus. On a small/topically-homogeneous finding
+    // subset, every facet keyword matches every post → all 100%. Over the full corpus each facet gets
+    // its true, discriminating share and can never be all-100%.
+    const measureTexts = (window._corpus && window._corpus.length ? window._corpus : analysisPosts)
+        .map(p => `${p.title || ''} ${p.body || ''} ${p.commentsText || ''}`.toLowerCase());
 
     const payload = {
         model: AI_MODEL,
@@ -1757,10 +1769,10 @@ async function generateSubProblems(finding, posts, audience) {
     try { const parsed = await callOpenAI(payload); raw = Array.isArray(parsed.sub_problems) ? parsed.sub_problems : []; }
     catch (e) { console.error('[Subproblems] failed:', e); return []; }
 
-    const size = texts.length || 1;
+    const size = measureTexts.length || 1;
     const countMentions = (keywords) => {
         let n = 0;
-        for (const t of texts) {
+        for (const t of measureTexts) {
             const hit = (keywords || []).some(kw => {
                 const words = String(kw).toLowerCase().split(/\s+/).filter(w => w.length > 2);
                 if (!words.length) return false;
@@ -2008,9 +2020,14 @@ function loadPolarityMap() {
     window._polarityPromise = (async () => {
         const findings = await ensureFindings();
         let points = await generatePolarityData(findings, window._corpus || [], window.originalGroupName || '');
-        if (!points) { // fallback to the findings themselves
-            points = (findings || []).filter(f => typeof f.intensity === 'number')
-                .map((f, i) => ({ label: f.title, parent: i + 1, x: Math.round(f.prevalence || 0), y: Math.round(f.intensity || 0) }));
+        if (!points) { // fallback to the findings themselves — but MEASURE intensity (no AI round numbers)
+            const raw = (findings || []).map((f, i) => {
+                const fposts = (window._findingPostsFull && window._findingPostsFull[i]) || matchPostsForFinding(f, window._corpus || [], 40);
+                const intens = fposts.length ? fposts.reduce((s, p) => s + _intensityScore(`${p.title || ''} ${p.body || ''} ${p.commentsText || ''}`), 0) / fposts.length : 0;
+                return { label: f.title, parent: i + 1, x: Math.round(f.prevalence || 0), intensRaw: intens };
+            });
+            const maxI = Math.max(1, ...raw.map(r => r.intensRaw));
+            points = raw.map(r => ({ label: r.label, parent: r.parent, x: Math.max(5, r.x), y: Math.max(5, Math.round((r.intensRaw / maxI) * 100)) }));
         }
         window._polarityPoints = points; // stash for the CSV export
         renderPolarityMap(points);
@@ -3880,6 +3897,31 @@ function collectAnalysisRows() {
     push('meta', '-', 'audience_key', window._audienceKey || '');
     push('meta', '-', 'posts_in_corpus', (window._corpus || []).length);
     push('meta', '-', 'subreddits', (window._analysisSubreddits || []).join(', '));
+    // WHO — demographics (structured, with source + sample size so accuracy is auditable)
+    const dem = window._demographics;
+    if (dem) {
+        push('who_demographics', '-', 'male_pct', dem.male_pct);
+        push('who_demographics', '-', 'female_pct', dem.female_pct);
+        push('who_demographics', '-', 'gender_source', dem.gender_source);
+        push('who_demographics', '-', 'gender_sample_n', dem.gender_n || 0);
+        push('who_demographics', '-', 'age_18_24_pct', dem.age_18_24);
+        push('who_demographics', '-', 'age_25_45_pct', dem.age_25_45);
+        push('who_demographics', '-', 'age_45_plus_pct', dem.age_45_plus);
+        push('who_demographics', '-', 'age_source', dem.age_source);
+        push('who_demographics', '-', 'age_sample_n', dem.age_n || 0);
+        push('who_demographics', '-', 'top_life_stage', dem.top_life_stage);
+    }
+    // WHO — archetype
+    if (window._archetype) {
+        push('who_archetype', '-', 'name', window._archetype.name);
+        push('who_archetype', '-', 'summary', window._archetype.summary);
+    }
+    // WHO — profile (goals / fears / characteristics / rejects)
+    if (window._profile) {
+        ['goals', 'fears', 'characteristics', 'rejects'].forEach(k => {
+            (window._profile[k] || []).forEach((item, i) => push('who_profile', `${k}.${i + 1}`, k.replace(/s$/, ''), typeof item === 'string' ? item : (item && (item.text || item.label || JSON.stringify(item)))));
+        });
+    }
     // findings (structured)
     (window._findings || []).forEach((f, i) => {
         push('findings', i + 1, 'title', f.title);
@@ -3933,9 +3975,6 @@ function collectAnalysisRows() {
     });
     // displayed text of the rendered panels (faithful "what the user sees")
     const dom = [
-        ['who', 'archetype', '#archetype-heading, .archetype-heading, #architype-heading'],
-        ['who', 'archetype_desc', '#archetype-d, .archetype-d'],
-        ['who', 'profile', '#profile-d, .profile-d, #overview-div'],
         ['talk', 'voice', '#voice-p-wrap'],
         ['talk', 'sentiment', '#sentiment-wrap'],
         ['talk', 'hooks', '#hook-wrap'],
@@ -3987,10 +4026,23 @@ function _exportToast(msg) {
     if (!t) {
         t = document.createElement('div');
         t.id = 'pp-export-toast';
-        t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:2147483647;background:#0b1437;color:#fff;padding:13px 20px;border-radius:10px;font-family:system-ui,sans-serif;font-size:14px;font-weight:600;box-shadow:0 8px 28px rgba(0,0,0,0.35);max-width:320px;';
+        t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:2147483647;background:#0b1437;color:#fff;padding:14px 40px 14px 18px;border-radius:10px;font-family:system-ui,sans-serif;font-size:14px;font-weight:600;box-shadow:0 8px 28px rgba(0,0,0,0.35);max-width:320px;';
+        const span = document.createElement('span');
+        span.className = 'pp-toast-msg';
+        t.appendChild(span);
+        // Tiny white close ✕, top-right inside the dark box.
+        const close = document.createElement('span');
+        close.textContent = '×';
+        close.setAttribute('aria-label', 'Close');
+        close.style.cssText = 'position:absolute;top:7px;right:11px;cursor:pointer;font-size:17px;line-height:1;color:#fff;opacity:0.65;font-weight:700;';
+        close.addEventListener('mouseenter', () => { close.style.opacity = '1'; });
+        close.addEventListener('mouseleave', () => { close.style.opacity = '0.65'; });
+        close.addEventListener('click', () => { const el = document.getElementById('pp-export-toast'); if (el) el.remove(); });
+        t.appendChild(close);
         document.body.appendChild(t);
     }
-    t.textContent = msg;
+    const msgEl = t.querySelector('.pp-toast-msg');
+    if (msgEl) msgEl.textContent = msg; else t.textContent = msg;
 }
 async function exportFindings() {
     if (window._exporting) { console.log('[Export] already running — ignoring extra click'); return; }

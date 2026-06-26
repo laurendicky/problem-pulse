@@ -20,7 +20,7 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 const EMBEDDINGS_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/embeddings-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 106 — export now includes the displayed Reddit posts per finding, the polarity map (frequency×intensity), and sub-problems; export auto-generates any missing section first', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 107 — wide-scan cache v2 (old boilerplate themes auto-expire → export recomputes fresh, no console needed); window._wideScan cleared per audience; export includes posts + polarity + sub-problems', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -854,6 +854,7 @@ async function runProblemFinder(preset) {
         window._talkPromise = null; // Tab 3 regenerates for the new audience
         window._wherePromise = null; window._platformPanelsRendered = false; // Tab 4 regenerates too
         window._shopPromise = null; window._entityData = null; // Tab 5 regenerates too
+        window._wideScan = null; // wide-scan recomputes for the new audience (no stale leak into export)
         try { briefCache.clear(); } catch (e) { } // drop cached brand/product briefs for the new audience
         window._corpusEnrichedPromise = null; // re-enrich comments for the new audience
         if (window._polarityChart && window._polarityChart.destroy) { window._polarityChart.destroy(); window._polarityChart = null; }
@@ -3610,7 +3611,7 @@ function transitionToStep1() {
 // analysis, validate from the console:  await runWideScan()  (add {fresh:true} to bypass cache).
 // Results cache under analyses/{audienceKey}/tabs/wideScan. Nothing here touches the live UI.
 // =============================================================================
-const WIDE_SCAN_SCHEMA_VERSION = 1;
+const WIDE_SCAN_SCHEMA_VERSION = 2;   // bump → old cached wide-scans (with boilerplate themes) auto-expire & recompute
 const WIDE_SCAN_MAX_UNITS = 2800;   // cap for browser memory/compute
 const WIDE_SCAN_K = 20;             // target number of themes
 const EMBED_MODEL = 'text-embedding-3-small';

@@ -19,7 +19,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 100 — robust synonym/spacing/spelling keying: _canonKey strips case/space/hyphen (salespeople=sales people=sales-people); AI canonical merges affinity phrasings (dog lovers/owners→Dog Owners) but keeps roles/species distinct (owners≠breeders, dog≠cat)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 101 — Reddit 429 resilience: callReddit retries transient 429/5xx with backoff; find-communities shows a clear "Reddit is busy (rate limit)" message instead of "no communities found"', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -129,21 +129,37 @@ function _releaseRedditSlot() {
     else _redditInFlight = Math.max(0, _redditInFlight - 1);
 }
 
-async function callReddit(payload, { timeoutMs = 12000 } = {}) {
+async function callReddit(payload, { timeoutMs = 12000, retries = 2 } = {}) {
     await _acquireRedditSlot();
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
-        const res = await fetch(REDDIT_PROXY_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload),
-            signal: ctrl.signal
-        });
-        if (!res.ok) throw new Error('Reddit proxy status ' + res.status);
-        return await res.json();
+        let lastErr;
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+            try {
+                const res = await fetch(REDDIT_PROXY_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                    signal: ctrl.signal
+                });
+                // 429 (Reddit rate limit) and 5xx (proxy timeout/error) are transient — back off and
+                // retry so a short burst self-heals instead of surfacing as a hard failure. The backoff
+                // (held inside the concurrency slot) also naturally throttles us back under the limit.
+                if (res.status === 429 || res.status >= 500) throw new Error('Reddit proxy status ' + res.status);
+                if (!res.ok) throw new Error('Reddit proxy status ' + res.status);
+                return await res.json();
+            } catch (e) {
+                lastErr = e;
+                if (attempt < retries) {
+                    await new Promise(r => setTimeout(r, 1500 * Math.pow(2, attempt) + Math.random() * 500));
+                }
+            } finally {
+                clearTimeout(timer);
+            }
+        }
+        throw lastErr;
     } finally {
-        clearTimeout(timer);
         _releaseRedditSlot();
     }
 }
@@ -3734,11 +3750,13 @@ function initEntryFlow() {
             // SAME correct subreddits → same selection → same corpus key → real cache sharing downstream.
             // (getCachedSubreddits also restores window._canonicalAudience on a hit.)
             const phraseKey = _canonKey(groupName); // deterministic: merges case/space/hyphen variants
+            let hadCandidates = false; // did the AI propose communities? (distinguishes rate-limit from genuinely empty)
             let ranked = await getCachedSubreddits(phraseKey); // 1) fast path (spacing/case-insensitive)
             if (ranked && ranked.length) {
                 console.log(`[Cache] communities HIT for "${groupName}" (key:${phraseKey}) — skipped AI + Reddit`);
             } else {
                 const { names, canonical } = await findSubredditsForGroup(groupName);
+                hadCandidates = names.length > 0;
                 window._canonicalAudience = canonical || groupName; // clean, AI-normalized label (typos+synonyms)
                 const canonKey = _canonKey(window._canonicalAudience);
                 console.log('[Entry] candidate subreddits:', names, '| canonical:', window._canonicalAudience, '| key:', canonKey);
@@ -3755,10 +3773,19 @@ function initEntryFlow() {
                 if (canonKey !== phraseKey) setCachedSubreddits(phraseKey, ranked, window._canonicalAudience);
             }
             console.log('[Entry] ranked subreddits:', ranked.length);
-            renderSubredditChoices(ranked);
+            // If the AI proposed communities but NONE could be looked up, that's almost always Reddit
+            // rate-limiting (429) the lookups — say so, instead of the misleading "no communities found".
+            if (!ranked.length && hadCandidates) {
+                choices.innerHTML = '<p class="error-message">Reddit is busy right now (rate limit). Please wait ~30 seconds and try again.</p>';
+            } else {
+                renderSubredditChoices(ranked);
+            }
         } catch (error) {
             console.error('[Entry] find communities failed:', error);
-            choices.innerHTML = '<p class="error-message">Could not load communities. Please try again.</p>';
+            const rateLimited = /\b(429|5\d\d)\b/.test(String(error && error.message));
+            choices.innerHTML = rateLimited
+                ? '<p class="error-message">Reddit is busy right now (rate limit). Please wait ~30 seconds and try again.</p>'
+                : '<p class="error-message">Could not load communities. Please try again.</p>';
         } finally {
             findBtn.disabled = false;
         }

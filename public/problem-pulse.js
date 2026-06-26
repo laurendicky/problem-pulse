@@ -20,7 +20,20 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 const EMBEDDINGS_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/embeddings-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 107 — wide-scan cache v2 (old boilerplate themes auto-expire → export recomputes fresh, no console needed); window._wideScan cleared per audience; export includes posts + polarity + sub-problems', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 111 — #results-wrapper-b hidden on load via injected CSS (keep it flex in Webflow for easy designing); revealed when results are ready', 'color:#00a5ce;font-weight:bold');
+
+// Hide the results panel on page load so the page never flashes an empty results section before a
+// search. You can keep #results-wrapper-b set to `display:flex` in Webflow (easier to design) — this
+// rule hides it on the live site, and revealResults() sets an inline `display:flex !important` to
+// show it (inline !important overrides this stylesheet rule). transitionToStep1 hides it again.
+(function () {
+    try {
+        var s = document.createElement('style');
+        s.id = 'pp-initial-hide';
+        s.textContent = '#results-wrapper-b{display:none !important;}';
+        (document.head || document.documentElement).appendChild(s);
+    } catch (e) { /* non-fatal */ }
+})();
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -918,6 +931,32 @@ async function runProblemFinder(preset) {
 // PART 3 — "Who they are": audience demographics, read straight from the corpus
 // =============================================================================
 
+// MEASURE demographics from real self-reports in the corpus (age-gender tags like "34F"/"29M",
+// "I'm 34", "as a mom/dad", explicit ages). Returns counts; the caller uses these when there's
+// enough signal and falls back to the AI estimate otherwise. This is a biased subsample (only people
+// who self-identify), which is why the UI shows the sample size and labels estimates honestly.
+function measureDemographics(corpus) {
+    let male = 0, female = 0, a1 = 0, a2 = 0, a3 = 0; // a1:18-24  a2:25-45  a3:45+
+    const bucket = (age) => { if (age >= 18 && age <= 24) a1++; else if (age >= 25 && age <= 45) a2++; else if (age > 45 && age <= 85) a3++; };
+    const reTag1 = /\b(\d{2})\s*\/?\s*([mf])\b/gi;   // 34F, 29 m, 31/F
+    const reTag2 = /\b([mf])\s*\/?\s*(\d{2})\b/gi;   // F34, M/29
+    const reAge1 = /\bi(?:'?m| am)\s+(\d{1,2})\b/gi;  // I'm 34 / I am 34
+    const reAge2 = /\b(\d{1,2})\s*(?:years old|yrs old|yo|y\/o)\b/gi;
+    const reFemale = /\bas a (?:mom|mum|mother|woman|girl|wife|lady|gal)\b|\bi'?m (?:a )?(?:woman|female|girl|mom|mum|mother)\b|\bmy husband\b/gi;
+    const reMale = /\bas a (?:dad|father|man|guy|husband|bloke|boy|fella)\b|\bi'?m (?:a )?(?:man|male|guy|dad|father)\b|\bmy wife\b/gi;
+    (corpus || []).forEach(p => {
+        const text = `${p.title || ''} ${p.body || ''} ${p.commentsText || ''} ${p.flair || ''}`.toLowerCase();
+        let m;
+        reTag1.lastIndex = 0; while ((m = reTag1.exec(text))) { const age = +m[1]; if (age >= 16 && age <= 85) { (m[2] === 'f' ? female++ : male++); bucket(age); } }
+        reTag2.lastIndex = 0; while ((m = reTag2.exec(text))) { const age = +m[2]; if (age >= 16 && age <= 85) { (m[1] === 'f' ? female++ : male++); bucket(age); } }
+        reAge1.lastIndex = 0; while ((m = reAge1.exec(text))) { const age = +m[1]; if (age >= 16 && age <= 85) bucket(age); }
+        reAge2.lastIndex = 0; while ((m = reAge2.exec(text))) { const age = +m[1]; if (age >= 16 && age <= 85) bucket(age); }
+        female += (text.match(reFemale) || []).length;
+        male += (text.match(reMale) || []).length;
+    });
+    return { male, female, genderN: male + female, a1, a2, a3, ageN: a1 + a2 + a3 };
+}
+
 // Self-contained, inline-styled block (matches the original dashboard look so it renders the same
 // regardless of Webflow CSS). All values are guarded so a missing field can't break the layout.
 function renderDemographicsHTML(d) {
@@ -925,6 +964,11 @@ function renderDemographicsHTML(d) {
     const male = n(d.male_pct), female = n(d.female_pct);
     const a1 = n(d.age_18_24), a2 = n(d.age_25_45), a3 = n(d.age_45_plus);
     const lifeStage = (d.top_life_stage || '—').toString();
+    const note = (src, count, kind) => src === 'measured'
+        ? `Measured from ${count} self-identified ${kind}`
+        : `Estimated from discussion language & audience name`;
+    const genderNote = note(d.gender_source, d.gender_n, 'users');
+    const ageNote = note(d.age_source, d.age_n, 'ages');
     return `
         <div style="background: transparent; padding: 24px; border-radius: 12px; border: 1px solid #333; color: white; font-family: sans-serif;">
             <h3 style="margin: 0 0 20px 0; font-size: 18px; color: #00a5ce;">Audience Demographics</h3>
@@ -937,8 +981,9 @@ function renderDemographicsHTML(d) {
                     <div style="width: ${male}%; background: #00a5ce; height: 100%;"></div>
                     <div style="width: ${female}%; background: #fd80c7; height: 100%;"></div>
                 </div>
+                <div style="font-size: 11px; color: #888; margin-top: 6px;">${genderNote}</div>
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 20px; text-align: center;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 8px; text-align: center;">
                 <div style="padding: 10px; border-radius: 8px;">
                     <div style="font-size: 11px; color: #888; text-transform: uppercase;">18-24</div>
                     <div style="font-size: 18px; font-weight: bold;">${a1}%</div>
@@ -952,6 +997,7 @@ function renderDemographicsHTML(d) {
                     <div style="font-size: 18px; font-weight: bold;">${a3}%</div>
                 </div>
             </div>
+            <div style="font-size: 11px; color: #888; margin-bottom: 20px;">${ageNote}</div>
             <div style="border-top: 1px solid #333; padding-top: 15px; font-size: 14px;">
                 <span style="color: #888;">Primary Life Stage:</span>
                 <span style="margin-left: 5px; color: #00a5ce; font-weight: 500;">${lifeStage}</span>
@@ -980,9 +1026,29 @@ async function generateAndRenderWho(corpus, audience) {
     };
 
     try {
-        const parsed = await callOpenAI(payload);
-        container.innerHTML = renderDemographicsHTML(parsed);
-        console.log('[Who] demographics rendered:', parsed);
+        const parsed = await callOpenAI(payload);                 // AI estimate (also gives life stage)
+        const measured = measureDemographics(corpus);             // real self-reports from the corpus
+        const GENDER_MIN = 8, AGE_MIN = 8;                        // need enough self-IDs to trust the split
+        const d = { top_life_stage: parsed.top_life_stage };
+        // Gender: use measured split when we have enough self-identifications, else fall back to estimate.
+        if (measured.genderN >= GENDER_MIN) {
+            d.female_pct = Math.round((measured.female / measured.genderN) * 100);
+            d.male_pct = 100 - d.female_pct;
+            d.gender_source = 'measured'; d.gender_n = measured.genderN;
+        } else {
+            d.male_pct = parsed.male_pct; d.female_pct = parsed.female_pct; d.gender_source = 'estimated';
+        }
+        // Age: same logic.
+        if (measured.ageN >= AGE_MIN) {
+            d.age_18_24 = Math.round((measured.a1 / measured.ageN) * 100);
+            d.age_25_45 = Math.round((measured.a2 / measured.ageN) * 100);
+            d.age_45_plus = Math.max(0, 100 - d.age_18_24 - d.age_25_45);
+            d.age_source = 'measured'; d.age_n = measured.ageN;
+        } else {
+            d.age_18_24 = parsed.age_18_24; d.age_25_45 = parsed.age_25_45; d.age_45_plus = parsed.age_45_plus; d.age_source = 'estimated';
+        }
+        container.innerHTML = renderDemographicsHTML(d);
+        console.log(`[Who] demographics — gender:${d.gender_source}(${measured.genderN}) age:${d.age_source}(${measured.ageN})`, d);
     } catch (error) {
         console.error('[Who] demographics failed:', error);
         container.innerHTML = '<p class="error-message">Could not analyse demographics. Please try again.</p>';
@@ -1663,8 +1729,19 @@ async function generateSubProblems(finding, posts, audience) {
     const key = finding.title;
     if (window._subProblemCache[key]) return window._subProblemCache[key];
 
-    const texts = (posts || []).map(p => `${p.title} ${p.body}`.toLowerCase());
-    const corpusText = (posts || []).slice(0, 40).map(p => `${p.title} ${(p.body || '').substring(0, 300)}`.trim()).join('\n---\n');
+    // Stabilise the prevalence denominator. A low-support finding may only have a handful of assigned
+    // posts, which makes EVERY sub-problem round to ~100%. Top up with on-topic corpus matches so the
+    // percentage is computed over a meaningful sample (≥25 posts where the corpus allows).
+    let analysisPosts = (posts || []).slice();
+    if (analysisPosts.length < 25) {
+        const seen = new Set(analysisPosts.map(p => p && p.id).filter(Boolean));
+        matchPostsForFinding(finding, window._corpus || [], 40).forEach(p => {
+            if (p && p.id && !seen.has(p.id)) { analysisPosts.push(p); seen.add(p.id); }
+        });
+    }
+
+    const texts = analysisPosts.map(p => `${p.title} ${p.body}`.toLowerCase());
+    const corpusText = analysisPosts.slice(0, 40).map(p => `${p.title} ${(p.body || '').substring(0, 300)}`.trim()).join('\n---\n');
 
     const payload = {
         model: AI_MODEL,
@@ -1825,6 +1902,20 @@ function renderBubbleGuide(findings) {
 // Richer map WITHOUT contradicting the cards: one call breaks the SAME findings into their concrete
 // sub-problems (frequency × intensity, both 1-100), so every point is a facet of a card's problem —
 // honest and consistent, just finer-grained. Falls back to the findings themselves if it fails.
+// Emotional-intensity lexicon — used to MEASURE the polarity Y-axis from real text (no AI guessing).
+const _INTENSITY_WORDS = ['desperate', 'exhaust', 'overwhelm', 'hate', 'terrible', 'awful', 'nightmare', 'crying', 'cried', 'scared', 'afraid', 'anxious', 'anxiety', 'panic', 'worst', 'horrible', 'miserable', 'depress', 'furious', 'frustrat', 'angry', 'rage', 'breakdown', 'hopeless', 'struggl', 'painful', 'unbearable', 'give up', 'wit\'s end', 'end of my rope', 'losing my mind', "can't take", 'cant take', 'so hard', 'breaking point', 'burnt out', 'burned out'];
+function _intensityScore(text) { const t = (text || '').toLowerCase(); let n = 0; for (const w of _INTENSITY_WORDS) if (t.includes(w)) n++; return n; }
+function _matchesKeywords(text, kws) {
+    return (kws || []).some(k => {
+        const words = String(k).toLowerCase().split(/\s+/).filter(w => w.length > 2);
+        if (!words.length) return false;
+        let m = 0; for (const w of words) if (text.includes(w)) m++;
+        return m / words.length >= 0.5;
+    });
+}
+// The AI only IDENTIFIES the problems (label + keywords + parent). Frequency and intensity are then
+// MEASURED from the corpus — frequency = how many posts mention it, intensity = density of
+// emotional language in those posts — so the map reflects real signal, not invented numbers.
 async function generatePolarityData(findings, corpus, audience) {
     const main = (findings || []).map((f, i) => `${i + 1}: ${f.title}`).join('\n');
     const sample = (corpus || []).slice(0, 30).map(p => `${p.title} ${p.body}`.substring(0, 220)).join('\n---\n');
@@ -1833,18 +1924,28 @@ async function generatePolarityData(findings, corpus, audience) {
             model: AI_MODEL,
             messages: [
                 { role: 'system', content: 'You output only valid JSON.' },
-                { role: 'user', content: `For "${audience}", the main problems are:\n${main}\n\nUsing these and the discussions below, produce 12-16 specific problems this audience faces. They MUST be facets/sub-problems OF the main problems above — do not invent unrelated ones. For each: "label" (2-5 words), "parent" (the number of the main problem it belongs to), "frequency" (integer 1-100 = how often it comes up), "intensity" (integer 1-100 = how painful/severe). Respond ONLY with JSON: {"points":[{"label","parent","frequency","intensity"}]}. Discussions:\n${sample}` }
+                { role: 'user', content: `For "${audience}", the main problems are:\n${main}\n\nUsing these and the discussions below, produce 12-16 specific problems this audience faces. They MUST be facets/sub-problems OF the main problems above — do not invent unrelated ones. For each: "label" (2-5 words), "parent" (the number of the main problem it belongs to), and "keywords" (2-4 words/short phrases in the audience's own language used to detect this problem in text). Respond ONLY with JSON: {"points":[{"label","parent","keywords"}]}. Discussions:\n${sample}` }
             ],
             temperature: 0.3, max_completion_tokens: 900, response_format: { type: 'json_object' }
         });
         const pts = Array.isArray(parsed.points) ? parsed.points : [];
-        const clean = pts.map(p => ({
-            label: String(p.label || '').trim(),
-            parent: (parseInt(p.parent, 10) || 1),
-            x: Math.max(0, Math.min(100, Math.round(Number(p.frequency) || 0))),
-            y: Math.max(0, Math.min(100, Math.round(Number(p.intensity) || 0)))
-        })).filter(p => p.label && (p.x > 0 || p.y > 0));
-        return clean.length >= 3 ? clean : null;
+        // Build a lowercased text index of the corpus (title + body + comments) once.
+        const texts = (corpus || []).map(p => `${p.title || ''} ${p.body || ''} ${p.commentsText || ''}`.toLowerCase());
+        const measured = pts.map(p => {
+            const kws = Array.isArray(p.keywords) ? p.keywords : [];
+            let freq = 0, intenSum = 0;
+            for (const t of texts) { if (_matchesKeywords(t, kws)) { freq++; intenSum += _intensityScore(t); } }
+            return { label: String(p.label || '').trim(), parent: parseInt(p.parent, 10) || 1, freqRaw: freq, intenRaw: freq ? intenSum / freq : 0 };
+        }).filter(p => p.label && p.freqRaw > 0);
+        if (measured.length < 3) return null;
+        // Normalise to 0-100 RELATIVE to the set so the bubbles spread across the quadrant chart.
+        const maxFreq = Math.max(1, ...measured.map(m => m.freqRaw));
+        const maxInten = Math.max(1, ...measured.map(m => m.intenRaw));
+        return measured.map(m => ({
+            label: m.label, parent: m.parent,
+            x: Math.max(5, Math.round((m.freqRaw / maxFreq) * 100)),   // frequency — measured
+            y: Math.max(5, Math.round((m.intenRaw / maxInten) * 100))  // intensity — measured
+        }));
     } catch (e) {
         console.warn('[Polarity] data gen failed, using findings only:', e && e.message);
         return null;
@@ -3878,17 +3979,30 @@ async function ensureFullExportData() {
         } catch (e) { console.warn('[Export] sub-problems failed for', f.title, e && e.message); }
     }
 }
+// Always-visible toast (the normal loader lives inside #full-header, which is hidden once results
+// show — so it can't give feedback here). Pass a falsy msg to remove it.
+function _exportToast(msg) {
+    let t = document.getElementById('pp-export-toast');
+    if (!msg) { if (t) t.remove(); return; }
+    if (!t) {
+        t = document.createElement('div');
+        t.id = 'pp-export-toast';
+        t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:2147483647;background:#0b1437;color:#fff;padding:13px 20px;border-radius:10px;font-family:system-ui,sans-serif;font-size:14px;font-weight:600;box-shadow:0 8px 28px rgba(0,0,0,0.35);max-width:320px;';
+        document.body.appendChild(t);
+    }
+    t.textContent = msg;
+}
 async function exportFindings() {
+    if (window._exporting) { console.log('[Export] already running — ignoring extra click'); return; }
+    window._exporting = true;
     console.log('[Export] clicked — preparing full CSV…');
-    const btn = document.getElementById('export-findings-btn');
-    // Visible feedback: building the full export (wide-scan + sub-problems) can take ~30–60s.
-    try { showLoader('Building full export (analysing themes & sub-problems)…'); } catch (e) { }
-    if (btn && !btn.children.length) { btn.disabled = true; } // only safe to disable if it's a plain button
+    _exportToast('Building export… this can take up to a minute.');
     try {
         // Ensure every section exists: findings, posts, polarity, sub-problems, then the wide-scan.
         try { await ensureFullExportData(); } catch (e) { console.warn('[Export] ensure data failed (continuing)', e); }
         if (!window._wideScan && window._corpus && window._corpus.length) {
             console.log('[Export] running wide scan so it is included…');
+            _exportToast('Building export… analysing themes (almost there).');
             try { await runWideScan(); } catch (e) { console.warn('[Export] wide scan failed (continuing)', e); }
         }
         const rows = collectAnalysisRows();
@@ -3900,9 +4014,14 @@ async function exportFindings() {
         const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); document.body.removeChild(a);
         setTimeout(() => URL.revokeObjectURL(url), 1000);
         console.log(`[Export] ${rows.length} rows → ${name}`);
+        _exportToast('Export downloaded ✓');
+        setTimeout(() => _exportToast(''), 4000);
+    } catch (e) {
+        console.error('[Export] failed', e);
+        _exportToast('Export failed — see console.');
+        setTimeout(() => _exportToast(''), 5000);
     } finally {
-        try { hideLoader(); } catch (e) { }
-        if (btn) { btn.disabled = false; }
+        window._exporting = false;
     }
 }
 if (typeof window !== 'undefined') window.exportFindings = exportFindings;

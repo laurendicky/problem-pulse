@@ -1,3 +1,4 @@
+
 // =============================================================================
 // problem-pulse-v2.js — clean rebuild, piece by piece.
 //
@@ -19,7 +20,7 @@
 const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/openai-proxy';
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 101 — Reddit 429 resilience: callReddit retries transient 429/5xx with backoff; find-communities shows a clear "Reddit is busy (rate limit)" message instead of "no communities found"', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 102 — honest headline metric: big number = posts + comments mined (relabel Webflow ".count-insights" to "posts & comments analysed"); 429 retries from BUILD 101 retained', 'color:#00a5ce;font-weight:bold');
 
 const suggestions = ['Dog Owners', 'New Parents', 'Home Bakers', 'Freelance Designers', 'Runners', 'Houseplant Lovers'];
 
@@ -859,10 +860,14 @@ async function runProblemFinder(preset) {
         }
         // Part 3 — Tab 1 ("Who they are"). All read from the corpus; nothing refetched.
         showLoader('Analysing audience…');
-        // "insights" = total discussion signals mined (sum of comment counts). Flagged: tell me the
-        // exact definition you want and I'll change this one line.
-        const insightsCount = corpus.reduce((sum, p) => sum + (p.comments || 0), 0);
-        renderTab1Counts(audience, corpus.length, insightsCount); // instant, from data we already have
+        // Headline volume = posts + the comments of real discussion they sit on. This is the honest
+        // "real conversation mined" figure (large, and defensible as the discussion pool the analysis
+        // draws on). NOTE: relabel the Webflow element from "insights found" to "posts & comments
+        // analysed" (or "data points") so the claim matches the number. A rigorously-true "analysed"
+        // count of this size comes later from the embeddings wide-scan (see embeddings-wide-scan-plan.md).
+        const commentPool = corpus.reduce((sum, p) => sum + (p.comments || 0), 0);
+        const dataPoints = corpus.length + commentPool; // posts + comments mined
+        renderTab1Counts(audience, corpus.length, dataPoints); // instant, from data we already have
         // The two AI panels run in parallel (2 OpenAI calls) so the tab fills as fast as possible.
         await Promise.all([
             generateAndRenderWho(corpus, audience),
@@ -1012,9 +1017,10 @@ function auditTab1Elements() {
     });
 }
 
-// Tab-1 count line — "[insights] insights found in [posts] posts" + the audience name. Logs how many
-// elements each selector matched so a zero-match (wrong class) is obvious.
-function renderTab1Counts(audience, postsCount, insightCount) {
+// Tab-1 count line. .count-posts = curated posts analysed; .count-insights = posts + comments mined
+// (the "real conversation" volume — relabel the Webflow copy to "posts & comments analysed"). Logs
+// how many elements each selector matched so a zero-match (wrong class) is obvious.
+function renderTab1Counts(audience, postsCount, dataPoints) {
     const set = (sel, val) => {
         const els = document.querySelectorAll(sel);
         console.log(`[Counts] "${sel}" matched ${els.length} element(s)`);
@@ -1022,7 +1028,7 @@ function renderTab1Counts(audience, postsCount, insightCount) {
     };
     set('.count-audience', audience || '');
     set('.count-posts', Number(postsCount).toLocaleString());
-    set('.count-insights, .count-insight', Number(insightCount).toLocaleString());
+    set('.count-insights, .count-insight', Number(dataPoints).toLocaleString());
 }
 
 // Audience archetype — a 2-3 word name + a 2-sentence character study. Fills the designed

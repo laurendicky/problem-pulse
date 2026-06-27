@@ -20,7 +20,7 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 const EMBEDDINGS_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/embeddings-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 113 — demographics need ≥30 self-IDs to show "measured" (else honest audience-baseline estimate); structured who-data (demographics/archetype/profile) in export; post-assignment prompt rejects tutorials/success/wrong-perspective posts (fixes keyword hijacking)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 114 — assignment: deterministic educational/promo filter + subreddit-domain relevance rule (kills tutorial/ad/"declines"-synonym leaks); Where tab now samples by RESOURCE density so tools/creators/podcasts surface (fixes thin Where data)', 'color:#00a5ce;font-weight:bold');
 
 // Hide the results panel on page load so the page never flashes an empty results section before a
 // search. You can keep #results-wrapper-b set to `display:flex` in Webflow (easier to design) — this
@@ -1686,21 +1686,30 @@ function assignPostsByKeyword(findings, corpus) {
     return buckets.map(arr => arr.sort((a, b) => b.score - a.score || (b.post.score - a.post.score)).map(x => x.post));
 }
 
+// Deterministic backstop for the educational/promo posts the LLM keeps letting through: clear
+// tutorials, "explained visually", success write-ups ("how I built/grew/scraped…"), courses,
+// webinars, recruiting ads, etc. These are teaching/selling, not someone venting a struggle, so they
+// must never be assigned to a pain finding regardless of keyword overlap.
+const _EDU_PROMO_RE = /\b(explained visually|visual (explanation|guide)|tutorial|step[- ]by[- ]step|ultimate guide|complete guide|beginner'?s? guide|how i (built|made|grew|got|created|scraped|landed|earned|launched)|free course|master ?class|webinar|cheat ?sheet|e-?book|we'?re hiring|now hiring|jobs and career|promo code|discount code|giveaway)\b/i;
+function _isEducationalOrPromo(p) {
+    return _EDU_PROMO_RE.test(`${p.title || ''} ${(p.body || '').slice(0, 200)}`);
+}
+
 // PRIMARY: let the model decide which problem each post genuinely belongs to (or NONE). This is
 // semantic, so it catches things keywords can't — a heart-warming post won't land under "Health",
 // and off-topic/positive/rescue posts get dropped. Falls back to keyword matching on failure.
 async function assignPostsToFindings(findings, corpus) {
-    // Drop near-empty / photo posts, then take a LARGE density-ranked candidate set so every real
-    // problem can gather lots of posts (this pool drives both the modal posts AND prevalence).
+    // Drop near-empty / photo posts AND clear tutorials/promos, then take a density-ranked candidate
+    // set so every real problem can gather lots of posts (this pool drives the modal posts AND prevalence).
     const candidates = dedupeByTitle(corpus)
-        .filter(p => ((p.title || '').length + (p.body || '').length) >= 80)
+        .filter(p => ((p.title || '').length + (p.body || '').length) >= 80 && !_isEducationalOrPromo(p))
         .slice(0, 45); // smaller batch so the assignment JSON fits the output cap + 26s window
     const buckets = findings.map(() => []);
     try {
         const audience = window._canonicalAudience || window.originalGroupName || 'this audience';
         const problemList = findings.map((f, i) => `${i + 1}: ${f.title} — ${f.summary || ''}`).join('\n');
-        const postList = candidates.map((p, i) => `${i + 1}: "${(p.title || '').slice(0, 120)}" — ${(p.body || '').replace(/\s+/g, ' ').slice(0, 160)}`).join('\n');
-        const prompt = `You are matching Reddit posts to the problem each one is genuinely about, for a "${audience}" audience.\n\nProblems:\n${problemList}\n\nPosts:\n${postList}\n\nFor each post return the number of the SINGLE problem the AUTHOR is personally experiencing, venting about, or asking for help with. Use 0 (none) GENEROUSLY. Apply ALL of these rules — when in doubt, use 0:\n- REJECT posts that are guides, tutorials, "how I did X", success stories, results/case-studies, book or tool recommendations, self-promotion, or news/data articles — even if they contain matching keywords. We only want genuine struggles, questions and venting, not wins or teaching.\n- REJECT posts whose author is NOT a "${audience}" member hitting the problem first-hand — e.g. a hiring manager rather than a job-seeker, a professional groomer/trainer rather than a pet owner, an outside observer, or someone in a different field who merely shares a word.\n- REJECT off-topic posts that only share a keyword (e.g. a global-economics article matching "progress"/"slowed"), plus positive/heart-warming stories, rescue/adoption pleas, "help me name my pet", breed-ID, and photo posts.\nMatch a post ONLY when the author clearly belongs to the audience AND is describing that specific problem as their own unresolved struggle. Respond ONLY with JSON: {"assignments":[{"post":1,"problem":2}]}.`;
+        const postList = candidates.map((p, i) => `${i + 1}: (r/${p.subreddit || '?'}) "${(p.title || '').slice(0, 120)}" — ${(p.body || '').replace(/\s+/g, ' ').slice(0, 160)}`).join('\n');
+        const prompt = `You are matching Reddit posts to the problem each one is genuinely about, for a "${audience}" audience.\n\nProblems:\n${problemList}\n\nPosts (each prefixed with its subreddit):\n${postList}\n\nFor each post return the number of the SINGLE problem the AUTHOR is personally experiencing, venting about, or asking for help with. Use 0 (none) GENEROUSLY. Apply ALL of these rules — when in doubt, use 0:\n- A SHARED WORD IS NOT A MATCH. The post's MAIN SUBJECT must BE the problem, in the "${audience}" domain. Reject a post that merely contains a word from the problem (e.g. a human-mortality chart saying risk "declines" must NOT map to "Ad Performance Decline"; a global-economics article saying "progress" "slowed" must NOT map to an SEO finding).\n- REJECT posts that are guides, tutorials, "explained" write-ups, "how I did X" success stories, results/case-studies, book or tool recommendations, self-promotion, recruiting/job ads, or news/data articles — even if they contain matching keywords. We only want genuine struggles, questions and venting, not wins, teaching or selling.\n- REJECT posts whose author is NOT a "${audience}" member hitting the problem first-hand — e.g. a hiring manager rather than a job-seeker, a professional groomer/trainer rather than a pet owner, a parent of a teenager rather than a new parent, an outside observer, or someone in a different field who merely shares a word.\nMatch a post ONLY when its subreddit + content clearly fit the "${audience}" domain AND the author is describing that specific problem as their own unresolved struggle. Respond ONLY with JSON: {"assignments":[{"post":1,"problem":2}]}.`;
         const parsed = await callOpenAI({
             model: AI_MODEL,
             messages: [
@@ -2911,6 +2920,21 @@ function renderWherePanelUI(elId, items, cfg) {
       </div>`;
 }
 
+// The corpus is ranked by PROBLEM density (complaints), so the resource/recommendation threads —
+// where tools, creators, podcasts and communities actually get named — sink to the bottom and never
+// reach the Where extractor. Re-rank by RESOURCE-signal density first, so the AI analyses the posts
+// most likely to contain proper nouns. Pure in-memory, works for any audience, zero extra cost.
+const _WHERE_RESOURCE_WORDS = ['recommend', 'tool', 'app', 'software', 'podcast', 'youtube', 'channel', 'book', 'website', 'favourite', 'favorite', 'best', 'creator', 'influencer', 'expert', 'follow', 'group', 'discord', 'facebook', 'instagram', 'twitter', 'course', 'newsletter', 'subscribe'];
+function getResourceDenseSample(corpus, limit = 18) {
+    return (corpus || []).map(p => {
+        const text = `${p.title || ''} ${p.body || ''} ${p.commentsText || ''}`.toLowerCase();
+        let score = 0;
+        _WHERE_RESOURCE_WORDS.forEach(w => { const m = text.match(new RegExp('\\b' + w + '\\b', 'g')); if (m) score += m.length; });
+        if (p.commentsText) score += 10; // enriched threads are where resources get named
+        return { post: p, score };
+    }).sort((a, b) => b.score - a.score).map(x => x.post).slice(0, limit);
+}
+
 // Single, high-efficiency call that harvests all 5 entity lists at once (with seeding built in).
 async function generateAndRenderAllWherePanels(corpus, audience) {
     const panels = ['thought-leaders', 'tools-apps', 'events-places', 'watering-holes', 'podcasts'];
@@ -2926,11 +2950,9 @@ async function generateAndRenderAllWherePanels(corpus, audience) {
     const titlesList = corpus.slice(0, 70)
         .map((p, i) => `[Post ${i} Title] ${p.title} (r/${p.subreddit || ''})`)
         .join('\n');
-    // Comment-ENRICHED threads first (that's where creators/podcasts/events get named), then the
-    // densest remaining posts.
-    const enriched = corpus.filter(p => p.commentsText);
-    const rest = corpus.filter(p => !p.commentsText);
-    const sample = [...enriched, ...rest].slice(0, 18)
+    // Re-rank by RESOURCE-signal density so the 18 bodies we send are the ones most packed with
+    // tool/creator/podcast/community mentions (not the loudest complaints).
+    const sample = getResourceDenseSample(corpus, 18)
         .map((p, i) => `[Post ${i} Body] ${(p.body || '').slice(0, 350)}\nDiscussions: ${(p.commentsText || '').slice(0, 900)}`)
         .join('\n---\n');
 

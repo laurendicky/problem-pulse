@@ -20,7 +20,7 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 const EMBEDDINGS_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/embeddings-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 120 — audience demographics restyled to match the social-split/location look (light, Plus Jakarta Sans, soft rounded surfaces, dot legend, pill bar). Removed the inline dark heading — add a Webflow title if #overview-div needs one', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 121 — demographics recoloured to brand blue #686ee2 / pink #d6539d, 16px percentages, tighter lower margins; archetype now fills .who-tag blocks in .tag-wrap with 5 one-word audience snapshot tags (preserves the tag-wrap)', 'color:#00a5ce;font-weight:bold');
 
 // Hide the results panel on page load so the page never flashes an empty results section before a
 // search. You can keep #results-wrapper-b set to `display:flex` in Webflow (easier to design) — this
@@ -973,32 +973,33 @@ function renderDemographicsHTML(d) {
         : `Estimated from discussion language & audience name`;
     const genderNote = note(d.gender_source, d.gender_n, 'users');
     const ageNote = note(d.age_source, d.age_n, 'ages');
+    const BLUE = '#686ee2', PINK = '#d6539d';
     const ageCard = (label, val, primary) => `
-        <div style="padding:12px 8px; border-radius:12px; background:${primary ? 'rgba(0,165,206,0.10)' : '#f6f7f9'}; ${primary ? 'box-shadow:inset 0 0 0 1px rgba(0,165,206,0.35);' : ''}">
-            <div style="font-size:0.68rem; font-weight:700; letter-spacing:0.04em; color:#9ca3af; text-transform:uppercase;">${label}</div>
-            <div style="font-size:1.25rem; font-weight:800; color:#1f2937; margin-top:2px;">${val}%</div>
+        <div style="padding:11px 8px; border-radius:12px; background:${primary ? 'rgba(104,110,226,0.10)' : '#f6f7f9'}; ${primary ? 'box-shadow:inset 0 0 0 1px rgba(104,110,226,0.40);' : ''}">
+            <div style="font-size:0.68rem; font-weight:700; letter-spacing:0.04em; color:${primary ? BLUE : '#9ca3af'}; text-transform:uppercase;">${label}</div>
+            <div style="font-size:16px; font-weight:800; color:#1f2937; margin-top:2px;">${val}%</div>
         </div>`;
     const dot = (c) => `<span style="width:11px; height:11px; border-radius:50%; background:${c}; flex:0 0 auto; box-shadow:0 1px 3px rgba(0,0,0,0.15);"></span>`;
     return `
         <div style="font-family:'Plus Jakarta Sans', system-ui, sans-serif; color:#1f2937;">
-            <div style="margin-bottom:20px;">
+            <div style="margin-bottom:16px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:9px; font-size:0.95rem; font-weight:600;">
-                    <span style="display:flex; align-items:center; gap:8px;">${dot('#00a5ce')} Male <b style="color:#374151;">${male}%</b></span>
-                    <span style="display:flex; align-items:center; gap:8px;">Female <b style="color:#374151;">${female}%</b> ${dot('#fd80c7')}</span>
+                    <span style="display:flex; align-items:center; gap:8px;">${dot(BLUE)} Male <b style="color:#374151;">${male}%</b></span>
+                    <span style="display:flex; align-items:center; gap:8px;">Female <b style="color:#374151;">${female}%</b> ${dot(PINK)}</span>
                 </div>
                 <div style="width:100%; height:10px; background:#eef0f4; border-radius:999px; display:flex; overflow:hidden;">
-                    <div style="width:${male}%; background:#00a5ce;"></div>
-                    <div style="width:${female}%; background:#fd80c7;"></div>
+                    <div style="width:${male}%; background:${BLUE};"></div>
+                    <div style="width:${female}%; background:${PINK};"></div>
                 </div>
                 <div style="font-size:0.72rem; color:#9ca3af; margin-top:7px;">${genderNote}</div>
             </div>
             <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; text-align:center;">
                 ${ageCard('18-24', a1, false)}${ageCard('25-45', a2, true)}${ageCard('45+', a3, false)}
             </div>
-            <div style="font-size:0.72rem; color:#9ca3af; margin-top:7px; margin-bottom:18px;">${ageNote}</div>
-            <div style="border-top:1px solid #eef0f4; padding-top:14px; font-size:0.9rem; display:flex; align-items:center; gap:8px;">
+            <div style="font-size:0.72rem; color:#9ca3af; margin-top:7px; margin-bottom:12px;">${ageNote}</div>
+            <div style="border-top:1px solid #eef0f4; padding-top:11px; font-size:0.9rem; display:flex; align-items:center; gap:8px;">
                 <span style="color:#6b7280;">Primary Life Stage</span>
-                <span style="color:#00a5ce; font-weight:700;">${lifeStage}</span>
+                <span style="color:${BLUE}; font-weight:700;">${lifeStage}</span>
             </div>
         </div>`;
 }
@@ -1104,6 +1105,33 @@ function renderTab1Counts(audience, postsCount, dataPoints) {
     set('.count-insights, .count-insight', Number(dataPoints).toLocaleString());
 }
 
+// Set the archetype summary text WITHOUT destroying a .tag-wrap the user nested inside #archetype-d
+// (setting .textContent would wipe it). Removes only the previous text nodes, keeps the tag-wrap.
+function _setArchetypeSummary(descEl, text) {
+    if (!descEl) return;
+    const tagWrap = descEl.querySelector('.tag-wrap');
+    if (!tagWrap) { descEl.textContent = text || ''; return; }
+    [...descEl.childNodes].forEach(node => { if (node !== tagWrap) descEl.removeChild(node); });
+    if (text) descEl.insertBefore(document.createTextNode(text + ' '), tagWrap);
+}
+// Fill .tag-wrap with one-word .who-tag snapshot tags, cloning the user's existing .who-tag as a
+// styled blueprint so the Webflow styling is preserved.
+function renderWhoTags(tags) {
+    const wrap = document.querySelector('#archetype-d .tag-wrap, #architype-d .tag-wrap, .archetype-d .tag-wrap, .architype-d .tag-wrap, .tag-wrap');
+    if (!wrap) return;
+    if (!window._whoTagBlueprint) { const bp = wrap.querySelector('.who-tag'); if (bp) window._whoTagBlueprint = bp.cloneNode(true); }
+    const bp = window._whoTagBlueprint;
+    wrap.querySelectorAll('.who-tag').forEach(el => el.remove());
+    const words = (tags || []).map(t => String(t || '').trim().split(/\s+/)[0].replace(/[^a-zA-Z0-9'\-]/g, '')).filter(Boolean).slice(0, 6);
+    words.forEach(w => {
+        let node;
+        if (bp) { node = bp.cloneNode(true); node.textContent = w; }
+        else { node = document.createElement('div'); node.className = 'who-tag'; node.textContent = w; }
+        wrap.appendChild(node);
+    });
+    console.log('[Archetype] tags:', words);
+}
+
 // Audience archetype — a 2-3 word name + a 2-sentence character study. Fills the designed
 // #archetype-heading (/.archetype-heading/.architype-heading) and #archetype-d in place.
 async function generateAndRenderArchetype(corpus, audience) {
@@ -1113,7 +1141,7 @@ async function generateAndRenderArchetype(corpus, audience) {
     console.log('[Archetype] heading el:', headingEl ? (headingEl.id || headingEl.className) : 'NONE', '| desc el:', descEl ? (descEl.id || descEl.className) : 'NONE');
     if (!headingEl && !descEl) { console.warn('[Archetype] no archetype elements found.'); return; }
     if (headingEl) headingEl.textContent = 'Analysing…';
-    if (descEl) descEl.textContent = '';
+    _setArchetypeSummary(descEl, ''); // clear text but keep the nested .tag-wrap
 
     const sample = corpus.slice(0, 20)
         .map(p => `Title: ${p.title}\nContent: ${p.body}`.substring(0, 450))
@@ -1123,7 +1151,7 @@ async function generateAndRenderArchetype(corpus, audience) {
         model: AI_MODEL,
         messages: [
             { role: 'system', content: 'You are a sharp cultural observer who writes psychologically specific field notes about online communities. You output only valid JSON and never sound like a marketing deck.' },
-            { role: 'user', content: `You have spent months lurking inside the "${audience}" community on Reddit. Below are real discussions. Respond ONLY with a valid JSON object with these keys: "archetype" (a short, 2-3 word evocative name for this audience, e.g. "The Practical Innovators") and "summary" (EXACTLY 2 short sentences, 40 words maximum — a sharp character study built around one instinct or contradiction, landing one memorable phrase; do NOT use "this audience is driven by", "they value", or "they appreciate"). Posts:\n${sample}` }
+            { role: 'user', content: `You have spent months lurking inside the "${audience}" community on Reddit. Below are real discussions. Respond ONLY with a valid JSON object with these keys: "archetype" (a short, 2-3 word evocative name for this audience, e.g. "The Practical Innovators"), "summary" (EXACTLY 2 short sentences, 40 words maximum — a sharp character study built around one instinct or contradiction, landing one memorable phrase; do NOT use "this audience is driven by", "they value", or "they appreciate"), and "tags" (an array of 5 SINGLE-WORD snapshot descriptors of this audience — exactly one word each, evocative and specific, e.g. ["Overwhelmed","Devoted","Resourceful","Time-poor","Anxious"]). Posts:\n${sample}` }
         ],
         temperature: 0.6,
         max_completion_tokens: 300,
@@ -1133,13 +1161,14 @@ async function generateAndRenderArchetype(corpus, audience) {
     try {
         const parsed = await callOpenAI(payload);
         if (headingEl) headingEl.textContent = parsed.archetype || '';
-        if (descEl) descEl.textContent = parsed.summary || '';
-        window._archetype = { name: parsed.archetype || '', summary: parsed.summary || '' }; // for export
+        _setArchetypeSummary(descEl, parsed.summary || ''); // preserves the nested .tag-wrap
+        renderWhoTags(parsed.tags);                         // one-word snapshot tags
+        window._archetype = { name: parsed.archetype || '', summary: parsed.summary || '', tags: parsed.tags || [] }; // for export
         console.log('[Archetype] rendered:', parsed.archetype);
     } catch (error) {
         console.error('[Archetype] failed:', error);
         if (headingEl) headingEl.textContent = 'Analysis Failed';
-        if (descEl) descEl.textContent = 'Could not generate the audience summary. Please try again.';
+        _setArchetypeSummary(descEl, 'Could not generate the audience summary. Please try again.');
     }
 }
 
@@ -3938,6 +3967,7 @@ function collectAnalysisRows() {
     if (window._archetype) {
         push('who_archetype', '-', 'name', window._archetype.name);
         push('who_archetype', '-', 'summary', window._archetype.summary);
+        push('who_archetype', '-', 'tags', (window._archetype.tags || []).join(', '));
     }
     // WHO — profile (goals / fears / characteristics / rejects)
     if (window._profile) {

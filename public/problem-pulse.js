@@ -20,7 +20,7 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 const EMBEDDINGS_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/embeddings-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 117 — Where: Tools/Events/Waterholes are now DYNAMIC — the AI picks the 3 best-fit category labels per audience (e.g. GitHub Repos, Kitchen Gear) + niche-specific fallbacks, so panels fill with real data. Experts + Podcasts stay fixed. Add #tools-apps-title / #events-places-title / #watering-holes-title in Webflow for exact heading targeting', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 120 — audience demographics restyled to match the social-split/location look (light, Plus Jakarta Sans, soft rounded surfaces, dot legend, pill bar). Removed the inline dark heading — add a Webflow title if #overview-div needs one', 'color:#00a5ce;font-weight:bold');
 
 // Hide the results panel on page load so the page never flashes an empty results section before a
 // search. You can keep #results-wrapper-b set to `display:flex` in Webflow (easier to design) — this
@@ -973,38 +973,32 @@ function renderDemographicsHTML(d) {
         : `Estimated from discussion language & audience name`;
     const genderNote = note(d.gender_source, d.gender_n, 'users');
     const ageNote = note(d.age_source, d.age_n, 'ages');
+    const ageCard = (label, val, primary) => `
+        <div style="padding:12px 8px; border-radius:12px; background:${primary ? 'rgba(0,165,206,0.10)' : '#f6f7f9'}; ${primary ? 'box-shadow:inset 0 0 0 1px rgba(0,165,206,0.35);' : ''}">
+            <div style="font-size:0.68rem; font-weight:700; letter-spacing:0.04em; color:#9ca3af; text-transform:uppercase;">${label}</div>
+            <div style="font-size:1.25rem; font-weight:800; color:#1f2937; margin-top:2px;">${val}%</div>
+        </div>`;
+    const dot = (c) => `<span style="width:11px; height:11px; border-radius:50%; background:${c}; flex:0 0 auto; box-shadow:0 1px 3px rgba(0,0,0,0.15);"></span>`;
     return `
-        <div style="background: transparent; padding: 24px; border-radius: 12px; border: 1px solid #333; color: white; font-family: sans-serif;">
-            <h3 style="margin: 0 0 20px 0; font-size: 18px; color: #00a5ce;">Audience Demographics</h3>
-            <div style="margin-bottom: 25px;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px;">
-                    <span>Male: <strong>${male}%</strong></span>
-                    <span>Female: <strong>${female}%</strong></span>
+        <div style="font-family:'Plus Jakarta Sans', system-ui, sans-serif; color:#1f2937;">
+            <div style="margin-bottom:20px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:9px; font-size:0.95rem; font-weight:600;">
+                    <span style="display:flex; align-items:center; gap:8px;">${dot('#00a5ce')} Male <b style="color:#374151;">${male}%</b></span>
+                    <span style="display:flex; align-items:center; gap:8px;">Female <b style="color:#374151;">${female}%</b> ${dot('#fd80c7')}</span>
                 </div>
-                <div style="width: 100%; height: 8px; background: #333; border-radius: 4px; display: flex; overflow: hidden;">
-                    <div style="width: ${male}%; background: #00a5ce; height: 100%;"></div>
-                    <div style="width: ${female}%; background: #fd80c7; height: 100%;"></div>
+                <div style="width:100%; height:10px; background:#eef0f4; border-radius:999px; display:flex; overflow:hidden;">
+                    <div style="width:${male}%; background:#00a5ce;"></div>
+                    <div style="width:${female}%; background:#fd80c7;"></div>
                 </div>
-                <div style="font-size: 11px; color: #888; margin-top: 6px;">${genderNote}</div>
+                <div style="font-size:0.72rem; color:#9ca3af; margin-top:7px;">${genderNote}</div>
             </div>
-            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 8px; text-align: center;">
-                <div style="padding: 10px; border-radius: 8px;">
-                    <div style="font-size: 11px; color: #888; text-transform: uppercase;">18-24</div>
-                    <div style="font-size: 18px; font-weight: bold;">${a1}%</div>
-                </div>
-                <div style="padding: 10px; border-radius: 8px; border: 1px solid #00a5ce;">
-                    <div style="font-size: 11px; color: #888; text-transform: uppercase;">25-45</div>
-                    <div style="font-size: 18px; font-weight: bold;">${a2}%</div>
-                </div>
-                <div style="padding: 10px; border-radius: 8px;">
-                    <div style="font-size: 11px; color: #888; text-transform: uppercase;">45+</div>
-                    <div style="font-size: 18px; font-weight: bold;">${a3}%</div>
-                </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; text-align:center;">
+                ${ageCard('18-24', a1, false)}${ageCard('25-45', a2, true)}${ageCard('45+', a3, false)}
             </div>
-            <div style="font-size: 11px; color: #888; margin-bottom: 20px;">${ageNote}</div>
-            <div style="border-top: 1px solid #333; padding-top: 15px; font-size: 14px;">
-                <span style="color: #888;">Primary Life Stage:</span>
-                <span style="margin-left: 5px; color: #00a5ce; font-weight: 500;">${lifeStage}</span>
+            <div style="font-size:0.72rem; color:#9ca3af; margin-top:7px; margin-bottom:18px;">${ageNote}</div>
+            <div style="border-top:1px solid #eef0f4; padding-top:14px; font-size:0.9rem; display:flex; align-items:center; gap:8px;">
+                <span style="color:#6b7280;">Primary Life Stage</span>
+                <span style="color:#00a5ce; font-weight:700;">${lifeStage}</span>
             </div>
         </div>`;
 }
@@ -2896,25 +2890,9 @@ function _whereSignal(items) {
 function _trunc(s, n) { s = String(s || '').trim(); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; }
 
 // Shared self-contained renderer for the experts / tools / events / waterholes panels.
-// Set a panel's heading text to the AI-chosen category label. Reliable hook first: an element with
-// id `${containerId}-title` (add these in Webflow for guaranteed targeting); else a best-effort
-// search for a heading in the panel's block that isn't inside the items container.
-function _setPanelHeading(containerId, title) {
-    if (!title) return;
-    let h = document.getElementById(containerId + '-title');
-    if (!h) {
-        const el = document.getElementById(containerId);
-        if (el) {
-            const block = el.closest('.where-panel, .where-panel-block, [class*="panel"], .w-col, section') || el.parentElement;
-            if (block) { h = block.querySelector('h1,h2,h3,h4,h5,[class*="title"],[class*="heading"]'); if (h && el.contains(h)) h = null; }
-        }
-    }
-    if (h) h.textContent = title;
-}
 function renderWherePanelUI(elId, items, cfg) {
     const el = document.getElementById(elId);
     if (!el) return;
-    if (cfg.dynamicTitle) _setPanelHeading(elId, cfg.dynamicTitle);
     if (!items || !items.length) {
         el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">${cfg.empty}</p>`;
         return;
@@ -2983,31 +2961,32 @@ For each list, retrieve up to 6 of the most prominent, real names. If there are 
 CRITICAL EXTRACTION RULES (DO NOT VIOLATE):
 - Every entry MUST be a specific, trademarked BRAND, PROPER NOUN, or named entity.
 - NEVER extract generic category plural nouns, descriptions, or activities.
-  * WRONG (Generic): "design software", "sneaker apps", "parenting groups", "dog training apps", "dog parks".
-  * RIGHT (Proper Nouns): "Figma", "StockX", "Peanut App", "Puppr", "Redwood Dog Park".
+  * WRONG (Generic): "design software", "sneaker apps", "parenting groups", "running shoe brands", "dog training apps", "dog parks".
+  * RIGHT (Proper Nouns): "Figma", "StockX", "Peanut App", "Nike SNKRS", "Puppr", "Redwood Dog Park".
 - Do NOT return the audience's own anonymous Reddit usernames.
-- Keep every "role"/"sub"/"focus" description to a MAXIMUM of 4 words — terse, no filler.
-- Any "suggested": true fallback must be highly regarded, NON-OBVIOUS, and deeply specific to this niche. AVOID generic mega-brands — do NOT suggest "Google"/"YouTube" as a tool or "Mark Zuckerberg" as an expert; instead suggest specific software (e.g. "GitLab", "Vercel") and domain-specific practitioners. Prefer real names found in the text; only append suggestions when a list has fewer than 6.
+- Keep every "role"/"use"/"what"/"focus" description to a MAXIMUM of 4 words — terse, no filler (e.g. "ML library", "Sleep-tracking app", "Annual design conf", "Dog trainer").
+- If no specific brand or proper noun is named, return an empty list or use your curated "suggested": true fallback to suggest actual brands.
 
-Extract:
-A. "experts": Real people, creators, authors, or leaders they follow or learn from. Examples: Emily Oster (Parenthood), Karen Pryor (Dogs), Andrej Karpathy (AI).
-B. "media": Podcasts, YouTube channels, newsletters, or shows they recommend or watch.
-C. "dynamic": the THREE resource categories THIS audience ACTUALLY discusses most. Choose category TYPES that fit where this community really congregates and what it really uses, so the slots fill with REAL names instead of placeholders. Examples by audience:
-   - AI/ML: "Libraries & Tools", "GitHub Repos", "Model Hubs", "Discord/Slack", "Newsletters".
-   - Home Bakers: "Kitchen Gear", "Ingredient Brands", "Cookbooks & Blogs", "Local Markets", "Facebook Groups".
-   - SEO Pros: "SEO Tools", "Industry Conferences", "Slack/Discord", "Newsletters".
-   - Dog Owners: "Apps & Services", "Food & Gear Brands", "Vets & Trainers", "Facebook Groups".
-   For each of the 3 return a short "title" (2-3 words) and an "items" list (up to 6).
+Extract these five categories:
+1. "experts": Real people, creators, YouTubers, authors, or leaders they follow or learn from.
+   * Examples: Emily Oster (Parenthood), Jacques Slade (Sneakers), Tobias van Schneider (Design), Karen Pryor (Dogs).
+2. "tools": ONLY digital things used online — apps, software, websites, or online platforms. NOT physical retail stores, NOT physical products.
+   * WRONG here: "Home Depot", "Lowe's", "IKEA" (those are STORES → put in events); "Citristrip", "Kong toy" (physical products → leave out entirely).
+   * RIGHT: Huckleberry (Parenthood), GOAT app (Sneakers), Spline (Design), Rover app (Dogs), Canva, Notion, Pinterest.
+3. "events": Physical real-world places they go — retail STORES (e.g. Home Depot, Lowe's, IKEA), expos, meetups, parks, clubs, classes, venues.
+   * Examples: Home Depot (DIY), Sneaker Con (Sneakers), Config (Design), Crufts (Dogs), a named local park or store.
+4. "waterholes": Non-Reddit communities where they gather (e.g. Slack workspaces, Discord servers, Facebook groups, independent forums).
+   * Examples: SoleSavy Discord (Sneakers), Designer Hangout Slack (Design), Peanut App Groups (Parenthood).
+5. "media": Podcasts, YouTube channels, newsletters, or video shows they recommend or watch.
+   * Examples: Taking Cara Babies YouTube (Parenthood), Full Size Run (Sneakers), The Futur (Design).
 
 Respond ONLY with a valid JSON object matching this schema:
 {
   "experts": [{"name": "Specific Person Name", "role": "max 4 words", "suggested": false}],
-  "media": [{"name": "Specific Show/Channel Name", "type": "podcast/youtube/show", "focus": "max 4 words", "suggested": false}],
-  "dynamic": [
-    {"title": "2-3 words", "items": [{"name": "Specific Brand/Name", "sub": "max 4 words", "suggested": false}]},
-    {"title": "2-3 words", "items": [{"name": "Specific Brand/Name", "sub": "max 4 words", "suggested": false}]},
-    {"title": "2-3 words", "items": [{"name": "Specific Brand/Name", "sub": "max 4 words", "suggested": false}]}
-  ]
+  "tools": [{"name": "Specific App/Site Brand", "use": "max 4 words", "suggested": false}],
+  "events": [{"name": "Specific Venue/Event Name", "what": "max 4 words", "suggested": false}],
+  "waterholes": [{"name": "Specific Group Name", "platform": "e.g. Discord/Facebook/Forum", "suggested": false}],
+  "media": [{"name": "Specific Show/Channel Name", "type": "podcast/youtube/show", "focus": "max 4 words", "suggested": false}]
 }
 
 [READING INSTRUCTIONS]
@@ -3054,31 +3033,23 @@ ${sample}`;
             return out;
         };
 
-        // Experts — fixed category.
         const experts = build(parsed.experts, x => x.role, true); // person mode → surname grounding
-        renderWherePanelUI('thought-leaders', experts, { round: true, accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)', empty: 'No experts or creators were identified.', context: 'These are the most relevant figures for the niche; few were named directly in the posts.' });
+        renderWherePanelUI('thought-leaders', experts, { round: true, accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)', empty: 'No experts or creators were identified.', context: 'This community rarely names specific creators in discussion — these are the most relevant figures for the niche.' });
 
-        // Three DYNAMIC categories the AI chose to fit this audience → the three fixed containers,
-        // each with an AI-picked heading so the slot matches where the data actually is.
-        const dynCats = Array.isArray(parsed.dynamic) ? parsed.dynamic.slice(0, 3) : [];
-        const dynTargets = [
-            { id: 'tools-apps', accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)' },
-            { id: 'events-places', accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)' },
-            { id: 'watering-holes', accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)' }
-        ];
-        const dynamic = dynTargets.map((t, i) => {
-            const cat = dynCats[i] || { title: '', items: [] };
-            const items = build(cat.items, x => x.sub, false);
-            renderWherePanelUI(t.id, items, { round: false, accent: t.accent, accentBg: t.accentBg, empty: 'None named in the discussions.', context: 'These are the most relevant for this niche; few were named directly in the posts.', dynamicTitle: cat.title });
-            return { title: cat.title || t.id, items };
-        });
+        const tools = build(parsed.tools, x => x.use);
+        renderWherePanelUI('tools-apps', tools, { round: false, accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)', empty: 'No tools or apps were identified.', context: 'Physical-first communities discuss software and apps less than digital-first ones — these are their most common digital touchpoints.' });
 
-        // Media/Podcasts — fixed category (keeps its icons).
+        const events = build(parsed.events, x => x.what);
+        renderWherePanelUI('events-places', events, { round: false, accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)', empty: 'No physical events or places were identified.', context: 'Borderless, digital-first communities rarely name physical venues — these are the most relevant real-world events for the niche.' });
+
+        const waterholes = build(parsed.waterholes, x => `Platform: ${x.platform || 'Community'}`);
+        renderWherePanelUI('watering-holes', waterholes, { round: false, accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)', empty: 'No off-Reddit community watering holes were identified.', context: 'This audience rarely names off-Reddit communities directly — these are common gathering spots for the niche.' });
+
         const media = build(parsed.media, x => { const mt = x.type === 'youtube' ? 'YouTube' : (x.type === 'show' ? 'Show' : 'Podcast'); return `${mt}${x.focus ? ' | ' + x.focus : ''}`; });
         renderWherePodcasts(media);
 
-        window._whereData = { experts, media, dynamic }; // for CSV export
-        console.log(`[Where] harvest: experts=${experts.length} media=${media.length} | dynamic=${dynamic.map(d => `${d.title}(${d.items.length})`).join(', ')}`);
+        window._whereData = { experts, tools, events, waterholes, media }; // for CSV export
+        console.log(`[Where] unified harvest: experts=${experts.length} tools=${tools.length} events=${events.length} waterholes=${waterholes.length} media=${media.length}`);
     } catch (e) {
         console.error('[Where] unified panel rendering failed:', e);
         // Allow a retry on the next tab open instead of leaving the tab stuck blank, and show a
@@ -3750,6 +3721,7 @@ function transitionToStep1() {
     if (step2) step2.classList.remove('visible');
     if (step1) step1.classList.remove('hidden');
     if (welcome) welcome.style.display = ''; // restore Webflow's default (visible)
+    _showMascot(); // bring the hero mascots back when returning to the start
 
     // Hide the results, restore the landing header.
     const results = document.getElementById('results-wrapper-b');
@@ -4035,16 +4007,13 @@ function collectAnalysisRows() {
     // WHERE — the five panels (structured: name, sub-label, mention count, suggested-or-real)
     const wd = window._whereData;
     if (wd) {
-        const emit = (section, arr) => (arr || []).forEach((it, i) => {
-            push(section, i + 1, 'name', it.name);
-            push(section, i + 1, 'detail', it.sub);
-            push(section, i + 1, it.suggested ? 'status' : 'mentions', it.suggested ? 'suggested (not found in corpus)' : it.count);
-        });
-        emit('where_experts', wd.experts);
-        emit('where_media', wd.media);
-        (wd.dynamic || []).forEach((cat, ci) => {
-            const slug = 'where_' + String(cat.title || ('panel' + (ci + 1))).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
-            emit(slug, cat.items);
+        const panelMap = { experts: 'where_experts', tools: 'where_tools', events: 'where_events', waterholes: 'where_waterholes', media: 'where_media' };
+        Object.keys(panelMap).forEach(key => {
+            (wd[key] || []).forEach((it, i) => {
+                push(panelMap[key], i + 1, 'name', it.name);
+                push(panelMap[key], i + 1, 'detail', it.sub);
+                push(panelMap[key], i + 1, it.suggested ? 'status' : 'mentions', it.suggested ? 'suggested (not found in corpus)' : it.count);
+            });
         });
     }
     // displayed text of the rendered panels (faithful "what the user sees")
@@ -4096,7 +4065,7 @@ function _exportToast(msg) {
     if (!t) {
         t = document.createElement('div');
         t.id = 'pp-export-toast';
-        t.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:2147483647;background:#0b1437;color:#fff;padding:14px 40px 14px 18px;border-radius:10px;font-family:system-ui,sans-serif;font-size:14px;font-weight:600;box-shadow:0 8px 28px rgba(0,0,0,0.35);max-width:320px;';
+        t.style.cssText = 'position:fixed;bottom:16px;right:16px;z-index:2147483647;background:#0b1437;color:#fff;padding:14px 40px 14px 18px;border-radius:10px;font-family:system-ui,sans-serif;font-size:14px;font-weight:600;box-shadow:0 8px 28px rgba(0,0,0,0.35);max-width:min(340px, calc(100vw - 32px));box-sizing:border-box;';
         const span = document.createElement('span');
         span.className = 'pp-toast-msg';
         t.appendChild(span);
@@ -4256,6 +4225,28 @@ async function reopenSavedSearch(audienceKey) {
 
 function openTabSaved() { renderSavedSearches(); }
 
+// Smoothly fade out the hero mascots (#mascot-wrap) the moment a search starts (suggestion pill or
+// Find-communities). Fades opacity + a small lift, then removes from layout so it can't intercept
+// clicks. Idempotent. _showMascot restores it when the user goes back to the start.
+function _hideMascot() {
+    const m = document.getElementById('mascot-wrap');
+    if (!m || m.dataset.ppHidden === '1') return;
+    m.dataset.ppHidden = '1';
+    m.style.transition = 'opacity 0.45s ease, transform 0.45s ease';
+    m.style.opacity = '0';
+    m.style.transform = 'translateY(-10px)';
+    m.style.pointerEvents = 'none';
+    setTimeout(() => { if (m.dataset.ppHidden === '1') m.style.display = 'none'; }, 480);
+}
+function _showMascot() {
+    const m = document.getElementById('mascot-wrap');
+    if (!m) return;
+    m.dataset.ppHidden = '';
+    m.style.display = '';
+    // next frame so the display change applies before we transition opacity back in
+    requestAnimationFrame(() => { m.style.opacity = '1'; m.style.transform = 'translateY(0)'; m.style.pointerEvents = ''; });
+}
+
 // --- wire the buttons -------------------------------------------------------
 function initEntryFlow() {
     const findBtn = document.getElementById('find-communities-btn');
@@ -4276,6 +4267,7 @@ function initEntryFlow() {
         pills.addEventListener('click', (e) => {
             const pill = e.target.closest('.pf-suggestion-pill');
             if (!pill) return;
+            _hideMascot();
             const gi = document.getElementById('group-input');
             if (gi) gi.value = pill.getAttribute('data-value');
             findBtn.click();
@@ -4286,6 +4278,7 @@ function initEntryFlow() {
     // whether they exist yet when the button is first wired.
     findBtn.addEventListener('click', async (e) => {
         e.preventDefault();
+        _hideMascot();
         console.log('[Entry] find-communities-btn clicked');
         const groupInput = document.getElementById('group-input');
         const choices = document.getElementById('subreddit-choices');
@@ -4417,6 +4410,8 @@ function initEntryFlow() {
 // Safety net: delegated click handlers so these buttons work even if Webflow renders them after
 // init. Each is guarded by dataset.ppWired so it never double-fires with the direct listeners.
 document.addEventListener('click', (e) => {
+    // Fade the hero mascots out the instant a search starts, however the click was wired.
+    if (e.target.closest('#find-communities-btn, .pf-suggestion-pill')) _hideMascot();
     const searchBtn = e.target.closest('#search-selected-btn');
     if (searchBtn && !searchBtn.dataset.ppWired) { e.preventDefault(); runProblemFinder(); return; }
     const backBtn = e.target.closest('#back-to-step1-btn');

@@ -20,7 +20,7 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 const EMBEDDINGS_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/embeddings-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 121 — demographics recoloured to brand blue #686ee2 / pink #d6539d, 16px percentages, tighter lower margins; archetype now fills .who-tag blocks in .tag-wrap with 5 one-word audience snapshot tags (preserves the tag-wrap)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 122 — demographics dark text now #201e57; removed Primary Life Stage row; lowered the 25-45 tile background opacity', 'color:#00a5ce;font-weight:bold');
 
 // Hide the results panel on page load so the page never flashes an empty results section before a
 // search. You can keep #results-wrapper-b set to `display:flex` in Webflow (easier to design) — this
@@ -967,25 +967,24 @@ function renderDemographicsHTML(d) {
     const n = (v) => (typeof v === 'number' && isFinite(v)) ? Math.max(0, Math.round(v)) : 0;
     const male = n(d.male_pct), female = n(d.female_pct);
     const a1 = n(d.age_18_24), a2 = n(d.age_25_45), a3 = n(d.age_45_plus);
-    const lifeStage = (d.top_life_stage || '—').toString();
     const note = (src, count, kind) => src === 'measured'
         ? `Measured from ${count} self-identified ${kind}`
         : `Estimated from discussion language & audience name`;
     const genderNote = note(d.gender_source, d.gender_n, 'users');
     const ageNote = note(d.age_source, d.age_n, 'ages');
-    const BLUE = '#686ee2', PINK = '#d6539d';
+    const BLUE = '#686ee2', PINK = '#d6539d', DARK = '#201e57';
     const ageCard = (label, val, primary) => `
-        <div style="padding:11px 8px; border-radius:12px; background:${primary ? 'rgba(104,110,226,0.10)' : '#f6f7f9'}; ${primary ? 'box-shadow:inset 0 0 0 1px rgba(104,110,226,0.40);' : ''}">
+        <div style="padding:11px 8px; border-radius:12px; background:${primary ? 'rgba(104,110,226,0.075)' : '#f6f7f9'}; ${primary ? 'box-shadow:inset 0 0 0 1px rgba(104,110,226,0.40);' : ''}">
             <div style="font-size:0.68rem; font-weight:700; letter-spacing:0.04em; color:${primary ? BLUE : '#9ca3af'}; text-transform:uppercase;">${label}</div>
-            <div style="font-size:16px; font-weight:800; color:#1f2937; margin-top:2px;">${val}%</div>
+            <div style="font-size:16px; font-weight:800; color:${DARK}; margin-top:2px;">${val}%</div>
         </div>`;
     const dot = (c) => `<span style="width:11px; height:11px; border-radius:50%; background:${c}; flex:0 0 auto; box-shadow:0 1px 3px rgba(0,0,0,0.15);"></span>`;
     return `
-        <div style="font-family:'Plus Jakarta Sans', system-ui, sans-serif; color:#1f2937;">
+        <div style="font-family:'Plus Jakarta Sans', system-ui, sans-serif; color:${DARK};">
             <div style="margin-bottom:16px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:9px; font-size:0.95rem; font-weight:600;">
-                    <span style="display:flex; align-items:center; gap:8px;">${dot(BLUE)} Male <b style="color:#374151;">${male}%</b></span>
-                    <span style="display:flex; align-items:center; gap:8px;">Female <b style="color:#374151;">${female}%</b> ${dot(PINK)}</span>
+                    <span style="display:flex; align-items:center; gap:8px;">${dot(BLUE)} Male <b style="color:${DARK};">${male}%</b></span>
+                    <span style="display:flex; align-items:center; gap:8px;">Female <b style="color:${DARK};">${female}%</b> ${dot(PINK)}</span>
                 </div>
                 <div style="width:100%; height:10px; background:#eef0f4; border-radius:999px; display:flex; overflow:hidden;">
                     <div style="width:${male}%; background:${BLUE};"></div>
@@ -996,11 +995,7 @@ function renderDemographicsHTML(d) {
             <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; text-align:center;">
                 ${ageCard('18-24', a1, false)}${ageCard('25-45', a2, true)}${ageCard('45+', a3, false)}
             </div>
-            <div style="font-size:0.72rem; color:#9ca3af; margin-top:7px; margin-bottom:12px;">${ageNote}</div>
-            <div style="border-top:1px solid #eef0f4; padding-top:11px; font-size:0.9rem; display:flex; align-items:center; gap:8px;">
-                <span style="color:#6b7280;">Primary Life Stage</span>
-                <span style="color:${BLUE}; font-weight:700;">${lifeStage}</span>
-            </div>
+            <div style="font-size:0.72rem; color:#9ca3af; margin-top:7px;">${ageNote}</div>
         </div>`;
 }
 

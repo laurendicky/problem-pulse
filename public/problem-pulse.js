@@ -20,7 +20,7 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 const EMBEDDINGS_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/embeddings-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 114 — assignment: deterministic educational/promo filter + subreddit-domain relevance rule (kills tutorial/ad/"declines"-synonym leaks); Where tab now samples by RESOURCE density so tools/creators/podcasts surface (fixes thin Where data)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 115 — export now includes full Where (5 panels) + Shop (brands/products/demand signals) as structured rows, and force-loads those tabs first so they\'re never blank in the export', 'color:#00a5ce;font-weight:bold');
 
 // Hide the results panel on page load so the page never flashes an empty results section before a
 // search. You can keep #results-wrapper-b set to `display:flex` in Webflow (easier to design) — this
@@ -869,6 +869,7 @@ async function runProblemFinder(preset) {
         window._shopPromise = null; window._entityData = null; // Tab 5 regenerates too
         window._wideScan = null; // wide-scan recomputes for the new audience (no stale leak into export)
         window._demographics = null; window._archetype = null; window._profile = null; // who-data per audience
+        window._whereData = null; window._demandSignals = null; // where/shop export data per audience
         try { briefCache.clear(); } catch (e) { } // drop cached brand/product briefs for the new audience
         window._corpusEnrichedPromise = null; // re-enrich comments for the new audience
         if (window._polarityChart && window._polarityChart.destroy) { window._polarityChart.destroy(); window._polarityChart = null; }
@@ -3050,6 +3051,7 @@ ${sample}`;
         const media = build(parsed.media, x => { const mt = x.type === 'youtube' ? 'YouTube' : (x.type === 'show' ? 'Show' : 'Podcast'); return `${mt}${x.focus ? ' | ' + x.focus : ''}`; });
         renderWherePodcasts(media);
 
+        window._whereData = { experts, tools, events, waterholes, media }; // for CSV export
         console.log(`[Where] unified harvest: experts=${experts.length} tools=${tools.length} events=${events.length} waterholes=${waterholes.length} media=${media.length}`);
     } catch (e) {
         console.error('[Where] unified panel rendering failed:', e);
@@ -3643,6 +3645,7 @@ ${listForAI}`;
             return { category: cat, problem_theme: String(s.problem_theme).trim(), quote: String(s.quote).trim(), source: { subreddit: post.subreddit || '', ups: post.score || 0, url: post.permalink || '' } };
         }).filter(Boolean);
     } catch (e) { console.warn('[Shop] demand signals failed:', e && e.message); }
+    window._demandSignals = signals; // for CSV export
     console.log(`[Shop] ${signals.length} demand signals`);
     renderConstellation(signals);
 }
@@ -3995,6 +3998,26 @@ function collectAnalysisRows() {
         const obj = (window._entityData && window._entityData[type]) || {};
         Object.values(obj).forEach((e, i) => { push('shop_' + type, i + 1, 'name', e.originalName || ''); push('shop_' + type, i + 1, 'mentions', e.count); });
     });
+    // shop — demand signals (structured)
+    (window._demandSignals || []).forEach((s, i) => {
+        push('shop_demand', i + 1, 'category', s.category);
+        push('shop_demand', i + 1, 'theme', s.problem_theme);
+        push('shop_demand', i + 1, 'quote', s.quote);
+        push('shop_demand', i + 1, 'subreddit', s.source && s.source.subreddit);
+        push('shop_demand', i + 1, 'permalink', s.source && s.source.url);
+    });
+    // WHERE — the five panels (structured: name, sub-label, mention count, suggested-or-real)
+    const wd = window._whereData;
+    if (wd) {
+        const panelMap = { experts: 'where_experts', tools: 'where_tools', events: 'where_events', waterholes: 'where_waterholes', media: 'where_media' };
+        Object.keys(panelMap).forEach(key => {
+            (wd[key] || []).forEach((it, i) => {
+                push(panelMap[key], i + 1, 'name', it.name);
+                push(panelMap[key], i + 1, 'detail', it.sub);
+                push(panelMap[key], i + 1, it.suggested ? 'status' : 'mentions', it.suggested ? 'suggested (not found in corpus)' : it.count);
+            });
+        });
+    }
     // displayed text of the rendered panels (faithful "what the user sees")
     const dom = [
         ['talk', 'voice', '#voice-p-wrap'],
@@ -4002,13 +4025,7 @@ function collectAnalysisRows() {
         ['talk', 'hooks', '#hook-wrap'],
         ['talk', 'insider_language', '#insider-language'],
         ['talk', 'language_avoid', '#nega-wrap'],
-        ['talk', 'language_use', '#positive-wrap'],
-        ['where', 'thought_leaders', '#thought-leaders'],
-        ['where', 'tools_apps', '#tools-apps'],
-        ['where', 'events_places', '#events-places'],
-        ['where', 'watering_holes', '#watering-holes'],
-        ['where', 'media', '#podcasts'],
-        ['shop', 'demand_signals', '#demand-signals, #demand-signals-wrap, .demand-signal-list']
+        ['talk', 'language_use', '#positive-wrap']
     ];
     dom.forEach(([s, i, sel]) => {
         try { const el = document.querySelector(sel); if (el) { const t = (el.innerText || '').trim(); if (t) push(s, i, 'displayed_text', t.slice(0, 4000)); } } catch (e) { }
@@ -4028,6 +4045,8 @@ async function ensureFullExportData() {
     if (!window._corpus || !window._corpus.length) return;
     try { if (typeof ensureFindings === 'function') await ensureFindings(); } catch (e) { }
     try { await loadPolarityMap(); } catch (e) { }   // computes + stashes window._polarityPoints
+    try { if (typeof loadTabWhere === 'function') await loadTabWhere(); } catch (e) { }   // Where panels → window._whereData
+    try { if (typeof loadTabShop === 'function') await loadTabShop(); } catch (e) { }     // brands/products + window._demandSignals
     const findings = window._findings || [];
     window._subProblemCache = window._subProblemCache || {};
     for (let i = 0; i < findings.length; i++) {

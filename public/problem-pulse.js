@@ -20,7 +20,7 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 const EMBEDDINGS_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/embeddings-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 115 — export now includes full Where (5 panels) + Shop (brands/products/demand signals) as structured rows, and force-loads those tabs first so they\'re never blank in the export', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 117 — Where: Tools/Events/Waterholes are now DYNAMIC — the AI picks the 3 best-fit category labels per audience (e.g. GitHub Repos, Kitchen Gear) + niche-specific fallbacks, so panels fill with real data. Experts + Podcasts stay fixed. Add #tools-apps-title / #events-places-title / #watering-holes-title in Webflow for exact heading targeting', 'color:#00a5ce;font-weight:bold');
 
 // Hide the results panel on page load so the page never flashes an empty results section before a
 // search. You can keep #results-wrapper-b set to `display:flex` in Webflow (easier to design) — this
@@ -1410,7 +1410,10 @@ async function generateAndRenderFindings(corpus, audience) {
 
         // BACKGROUND: the accurate semantic assignment. When it lands we store the posts AND refine
         // each card's prevalence bar so it matches the real supporting-post counts. .see-more awaits this.
-        window._assignmentPromise = assignPostsToFindings(ranked, corpus)
+        // Filter educational/promo (tutorials, books, ads) out of EVERY assignment path — the AI path,
+        // the keyword fallback, AND the top-up — so they can't leak into finding posts on any route.
+        const cleanCorpus = corpus.filter(p => !_isEducationalOrPromo(p));
+        window._assignmentPromise = assignPostsToFindings(ranked, cleanCorpus)
             .then(buckets => {
                 ranked.forEach((f, i) => { f._posts = buckets[i] || []; f.support = (buckets[i] || []).length; });
                 // Re-sort by REAL support so cards display highest → lowest prevalence, then re-render
@@ -1422,7 +1425,7 @@ async function generateAndRenderFindings(corpus, audience) {
                     renderFindingCard(idx + 1, f);
                 });
                 // Top up thin findings' display posts (prevalence above is left untouched).
-                topUpFindingPosts(ranked, corpus, 6, 8);
+                topUpFindingPosts(ranked, cleanCorpus, 6, 8);
                 window._findings = ranked;
                 window._findingPosts = ranked.map(f => (f._posts || []).slice(0, 8));
                 window._findingPostsFull = ranked.map(f => f._posts || []);
@@ -1431,7 +1434,7 @@ async function generateAndRenderFindings(corpus, audience) {
             })
             .catch(e => {
                 console.warn('[Findings] assignment failed — keyword posts:', e && e.message);
-                const kw = assignPostsByKeyword(ranked, corpus);
+                const kw = assignPostsByKeyword(ranked, cleanCorpus);
                 window._findingPosts = kw.map(arr => arr.slice(0, 8));
                 window._findingPostsFull = kw;
             });
@@ -1691,7 +1694,7 @@ function assignPostsByKeyword(findings, corpus) {
 // tutorials, "explained visually", success write-ups ("how I built/grew/scraped…"), courses,
 // webinars, recruiting ads, etc. These are teaching/selling, not someone venting a struggle, so they
 // must never be assigned to a pain finding regardless of keyword overlap.
-const _EDU_PROMO_RE = /\b(explained visually|visual (explanation|guide)|tutorial|step[- ]by[- ]step|ultimate guide|complete guide|beginner'?s? guide|how i (built|made|grew|got|created|scraped|landed|earned|launched)|free course|master ?class|webinar|cheat ?sheet|e-?book|we'?re hiring|now hiring|jobs and career|promo code|discount code|giveaway)\b/i;
+const _EDU_PROMO_RE = /\b(explained visually|visual (explanation|guide)|tutorial|step[- ]by[- ]step|(ultimate|complete|practical|beginner'?s?|field) guide|hands[- ]on|how i (built|made|grew|got|created|scraped|landed|earned|launched)|free (course|book)|master ?class|webinar|cheat ?sheet|e-?book|we'?re hiring|now hiring|jobs and career|promo code|discount code|giveaway)\b/i;
 function _isEducationalOrPromo(p) {
     return _EDU_PROMO_RE.test(`${p.title || ''} ${(p.body || '').slice(0, 200)}`);
 }
@@ -2893,9 +2896,25 @@ function _whereSignal(items) {
 function _trunc(s, n) { s = String(s || '').trim(); return s.length > n ? s.slice(0, n - 1).trimEnd() + '…' : s; }
 
 // Shared self-contained renderer for the experts / tools / events / waterholes panels.
+// Set a panel's heading text to the AI-chosen category label. Reliable hook first: an element with
+// id `${containerId}-title` (add these in Webflow for guaranteed targeting); else a best-effort
+// search for a heading in the panel's block that isn't inside the items container.
+function _setPanelHeading(containerId, title) {
+    if (!title) return;
+    let h = document.getElementById(containerId + '-title');
+    if (!h) {
+        const el = document.getElementById(containerId);
+        if (el) {
+            const block = el.closest('.where-panel, .where-panel-block, [class*="panel"], .w-col, section') || el.parentElement;
+            if (block) { h = block.querySelector('h1,h2,h3,h4,h5,[class*="title"],[class*="heading"]'); if (h && el.contains(h)) h = null; }
+        }
+    }
+    if (h) h.textContent = title;
+}
 function renderWherePanelUI(elId, items, cfg) {
     const el = document.getElementById(elId);
     if (!el) return;
+    if (cfg.dynamicTitle) _setPanelHeading(elId, cfg.dynamicTitle);
     if (!items || !items.length) {
         el.innerHTML = `<p class="placeholder-text" style="text-align:center; color:#9ca3af; padding:1rem;">${cfg.empty}</p>`;
         return;
@@ -2964,32 +2983,31 @@ For each list, retrieve up to 6 of the most prominent, real names. If there are 
 CRITICAL EXTRACTION RULES (DO NOT VIOLATE):
 - Every entry MUST be a specific, trademarked BRAND, PROPER NOUN, or named entity.
 - NEVER extract generic category plural nouns, descriptions, or activities.
-  * WRONG (Generic): "design software", "sneaker apps", "parenting groups", "running shoe brands", "dog training apps", "dog parks".
-  * RIGHT (Proper Nouns): "Figma", "StockX", "Peanut App", "Nike SNKRS", "Puppr", "Redwood Dog Park".
+  * WRONG (Generic): "design software", "sneaker apps", "parenting groups", "dog training apps", "dog parks".
+  * RIGHT (Proper Nouns): "Figma", "StockX", "Peanut App", "Puppr", "Redwood Dog Park".
 - Do NOT return the audience's own anonymous Reddit usernames.
-- Keep every "role"/"use"/"what"/"focus" description to a MAXIMUM of 4 words — terse, no filler (e.g. "ML library", "Sleep-tracking app", "Annual design conf", "Dog trainer").
-- If no specific brand or proper noun is named, return an empty list or use your curated "suggested": true fallback to suggest actual brands.
+- Keep every "role"/"sub"/"focus" description to a MAXIMUM of 4 words — terse, no filler.
+- Any "suggested": true fallback must be highly regarded, NON-OBVIOUS, and deeply specific to this niche. AVOID generic mega-brands — do NOT suggest "Google"/"YouTube" as a tool or "Mark Zuckerberg" as an expert; instead suggest specific software (e.g. "GitLab", "Vercel") and domain-specific practitioners. Prefer real names found in the text; only append suggestions when a list has fewer than 6.
 
-Extract these five categories:
-1. "experts": Real people, creators, YouTubers, authors, or leaders they follow or learn from.
-   * Examples: Emily Oster (Parenthood), Jacques Slade (Sneakers), Tobias van Schneider (Design), Karen Pryor (Dogs).
-2. "tools": ONLY digital things used online — apps, software, websites, or online platforms. NOT physical retail stores, NOT physical products.
-   * WRONG here: "Home Depot", "Lowe's", "IKEA" (those are STORES → put in events); "Citristrip", "Kong toy" (physical products → leave out entirely).
-   * RIGHT: Huckleberry (Parenthood), GOAT app (Sneakers), Spline (Design), Rover app (Dogs), Canva, Notion, Pinterest.
-3. "events": Physical real-world places they go — retail STORES (e.g. Home Depot, Lowe's, IKEA), expos, meetups, parks, clubs, classes, venues.
-   * Examples: Home Depot (DIY), Sneaker Con (Sneakers), Config (Design), Crufts (Dogs), a named local park or store.
-4. "waterholes": Non-Reddit communities where they gather (e.g. Slack workspaces, Discord servers, Facebook groups, independent forums).
-   * Examples: SoleSavy Discord (Sneakers), Designer Hangout Slack (Design), Peanut App Groups (Parenthood).
-5. "media": Podcasts, YouTube channels, newsletters, or video shows they recommend or watch.
-   * Examples: Taking Cara Babies YouTube (Parenthood), Full Size Run (Sneakers), The Futur (Design).
+Extract:
+A. "experts": Real people, creators, authors, or leaders they follow or learn from. Examples: Emily Oster (Parenthood), Karen Pryor (Dogs), Andrej Karpathy (AI).
+B. "media": Podcasts, YouTube channels, newsletters, or shows they recommend or watch.
+C. "dynamic": the THREE resource categories THIS audience ACTUALLY discusses most. Choose category TYPES that fit where this community really congregates and what it really uses, so the slots fill with REAL names instead of placeholders. Examples by audience:
+   - AI/ML: "Libraries & Tools", "GitHub Repos", "Model Hubs", "Discord/Slack", "Newsletters".
+   - Home Bakers: "Kitchen Gear", "Ingredient Brands", "Cookbooks & Blogs", "Local Markets", "Facebook Groups".
+   - SEO Pros: "SEO Tools", "Industry Conferences", "Slack/Discord", "Newsletters".
+   - Dog Owners: "Apps & Services", "Food & Gear Brands", "Vets & Trainers", "Facebook Groups".
+   For each of the 3 return a short "title" (2-3 words) and an "items" list (up to 6).
 
 Respond ONLY with a valid JSON object matching this schema:
 {
   "experts": [{"name": "Specific Person Name", "role": "max 4 words", "suggested": false}],
-  "tools": [{"name": "Specific App/Site Brand", "use": "max 4 words", "suggested": false}],
-  "events": [{"name": "Specific Venue/Event Name", "what": "max 4 words", "suggested": false}],
-  "waterholes": [{"name": "Specific Group Name", "platform": "e.g. Discord/Facebook/Forum", "suggested": false}],
-  "media": [{"name": "Specific Show/Channel Name", "type": "podcast/youtube/show", "focus": "max 4 words", "suggested": false}]
+  "media": [{"name": "Specific Show/Channel Name", "type": "podcast/youtube/show", "focus": "max 4 words", "suggested": false}],
+  "dynamic": [
+    {"title": "2-3 words", "items": [{"name": "Specific Brand/Name", "sub": "max 4 words", "suggested": false}]},
+    {"title": "2-3 words", "items": [{"name": "Specific Brand/Name", "sub": "max 4 words", "suggested": false}]},
+    {"title": "2-3 words", "items": [{"name": "Specific Brand/Name", "sub": "max 4 words", "suggested": false}]}
+  ]
 }
 
 [READING INSTRUCTIONS]
@@ -3036,23 +3054,31 @@ ${sample}`;
             return out;
         };
 
+        // Experts — fixed category.
         const experts = build(parsed.experts, x => x.role, true); // person mode → surname grounding
-        renderWherePanelUI('thought-leaders', experts, { round: true, accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)', empty: 'No experts or creators were identified.', context: 'This community rarely names specific creators in discussion — these are the most relevant figures for the niche.' });
+        renderWherePanelUI('thought-leaders', experts, { round: true, accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)', empty: 'No experts or creators were identified.', context: 'These are the most relevant figures for the niche; few were named directly in the posts.' });
 
-        const tools = build(parsed.tools, x => x.use);
-        renderWherePanelUI('tools-apps', tools, { round: false, accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)', empty: 'No tools or apps were identified.', context: 'Physical-first communities discuss software and apps less than digital-first ones — these are their most common digital touchpoints.' });
+        // Three DYNAMIC categories the AI chose to fit this audience → the three fixed containers,
+        // each with an AI-picked heading so the slot matches where the data actually is.
+        const dynCats = Array.isArray(parsed.dynamic) ? parsed.dynamic.slice(0, 3) : [];
+        const dynTargets = [
+            { id: 'tools-apps', accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)' },
+            { id: 'events-places', accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)' },
+            { id: 'watering-holes', accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)' }
+        ];
+        const dynamic = dynTargets.map((t, i) => {
+            const cat = dynCats[i] || { title: '', items: [] };
+            const items = build(cat.items, x => x.sub, false);
+            renderWherePanelUI(t.id, items, { round: false, accent: t.accent, accentBg: t.accentBg, empty: 'None named in the discussions.', context: 'These are the most relevant for this niche; few were named directly in the posts.', dynamicTitle: cat.title });
+            return { title: cat.title || t.id, items };
+        });
 
-        const events = build(parsed.events, x => x.what);
-        renderWherePanelUI('events-places', events, { round: false, accent: '#00a5ce', accentBg: 'rgba(0,165,206,0.14)', empty: 'No physical events or places were identified.', context: 'Borderless, digital-first communities rarely name physical venues — these are the most relevant real-world events for the niche.' });
-
-        const waterholes = build(parsed.waterholes, x => `Platform: ${x.platform || 'Community'}`);
-        renderWherePanelUI('watering-holes', waterholes, { round: false, accent: '#7C5CFF', accentBg: 'rgba(124,92,255,0.12)', empty: 'No off-Reddit community watering holes were identified.', context: 'This audience rarely names off-Reddit communities directly — these are common gathering spots for the niche.' });
-
+        // Media/Podcasts — fixed category (keeps its icons).
         const media = build(parsed.media, x => { const mt = x.type === 'youtube' ? 'YouTube' : (x.type === 'show' ? 'Show' : 'Podcast'); return `${mt}${x.focus ? ' | ' + x.focus : ''}`; });
         renderWherePodcasts(media);
 
-        window._whereData = { experts, tools, events, waterholes, media }; // for CSV export
-        console.log(`[Where] unified harvest: experts=${experts.length} tools=${tools.length} events=${events.length} waterholes=${waterholes.length} media=${media.length}`);
+        window._whereData = { experts, media, dynamic }; // for CSV export
+        console.log(`[Where] harvest: experts=${experts.length} media=${media.length} | dynamic=${dynamic.map(d => `${d.title}(${d.items.length})`).join(', ')}`);
     } catch (e) {
         console.error('[Where] unified panel rendering failed:', e);
         // Allow a retry on the next tab open instead of leaving the tab stuck blank, and show a
@@ -4009,13 +4035,16 @@ function collectAnalysisRows() {
     // WHERE — the five panels (structured: name, sub-label, mention count, suggested-or-real)
     const wd = window._whereData;
     if (wd) {
-        const panelMap = { experts: 'where_experts', tools: 'where_tools', events: 'where_events', waterholes: 'where_waterholes', media: 'where_media' };
-        Object.keys(panelMap).forEach(key => {
-            (wd[key] || []).forEach((it, i) => {
-                push(panelMap[key], i + 1, 'name', it.name);
-                push(panelMap[key], i + 1, 'detail', it.sub);
-                push(panelMap[key], i + 1, it.suggested ? 'status' : 'mentions', it.suggested ? 'suggested (not found in corpus)' : it.count);
-            });
+        const emit = (section, arr) => (arr || []).forEach((it, i) => {
+            push(section, i + 1, 'name', it.name);
+            push(section, i + 1, 'detail', it.sub);
+            push(section, i + 1, it.suggested ? 'status' : 'mentions', it.suggested ? 'suggested (not found in corpus)' : it.count);
+        });
+        emit('where_experts', wd.experts);
+        emit('where_media', wd.media);
+        (wd.dynamic || []).forEach((cat, ci) => {
+            const slug = 'where_' + String(cat.title || ('panel' + (ci + 1))).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+            emit(slug, cat.items);
         });
     }
     // displayed text of the rendered panels (faithful "what the user sees")

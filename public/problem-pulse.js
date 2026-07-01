@@ -20,7 +20,7 @@ const OPENAI_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/f
 const REDDIT_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/reddit-proxy';
 const EMBEDDINGS_PROXY_URL = 'https://iridescent-fairy-a41db7.netlify.app/.netlify/functions/embeddings-proxy';
 
-console.log('%c[problem-pulse-v2] BUILD 124 — demographics: gender is now a DONUT (conic-gradient, blue/pink) + age as mini horizontal bars — gives the Who tab a data-viz anchor. NOTE: taller than the old bar+tiles (watch your 100svh)', 'color:#00a5ce;font-weight:bold');
+console.log('%c[problem-pulse-v2] BUILD 125 — reverted demographics to the compact bar + age tiles (the donut broke the one-screen height and unbalanced the row)', 'color:#00a5ce;font-weight:bold');
 
 // Hide the results panel on page load so the page never flashes an empty results section before a
 // search. You can keep #results-wrapper-b set to `display:flex` in Webflow (easier to design) — this
@@ -972,39 +972,30 @@ function renderDemographicsHTML(d) {
         : `Estimated from discussion language & audience name`;
     const genderNote = note(d.gender_source, d.gender_n, 'users');
     const ageNote = note(d.age_source, d.age_n, 'ages');
-    const BLUE = '#686ee2', PINK = '#d6539d', BLUE_LT = '#aeb2ee', DARK = '#201e57';
-    // Gender DONUT (conic-gradient, same technique as the social-split chart) — gives the Who tab a
-    // real data-viz anchor instead of a flat bar. Blue = male, pink = female, thin white gap between.
-    const maleDeg = Math.max(0, Math.min(360, Math.round(male * 3.6)));
-    const gap = (male > 0 && female > 0) ? 2 : 0;
-    const donutBg = `conic-gradient(from -90deg, ${BLUE} 0deg ${maleDeg}deg, #fff ${maleDeg}deg ${maleDeg + gap}deg, ${PINK} ${maleDeg + gap}deg 360deg)`;
-    const domPct = female >= male ? female : male, domLbl = female >= male ? 'Female' : 'Male';
-    const dot = (c) => `<span style="width:11px; height:11px; border-radius:50%; background:${c}; flex:0 0 auto;"></span>`;
-    const ageBar = (label, val, primary) => `
-        <div style="display:flex; align-items:center; gap:10px;">
-            <span style="width:46px; font-size:0.72rem; font-weight:700; letter-spacing:0.03em; color:#9ca3af; text-transform:uppercase;">${label}</span>
-            <div style="flex:1; height:9px; background:#eef0f4; border-radius:999px; overflow:hidden;"><div style="height:100%; width:${val}%; background:${primary ? BLUE : BLUE_LT}; border-radius:999px;"></div></div>
-            <span style="width:34px; text-align:right; font-size:16px; font-weight:800; color:${DARK};">${val}%</span>
+    const BLUE = '#686ee2', PINK = '#d6539d', DARK = '#201e57';
+    const ageCard = (label, val, primary) => `
+        <div style="padding:11px 8px; border-radius:12px; background:${primary ? 'rgba(104,110,226,0.075)' : '#f6f7f9'}; ${primary ? 'box-shadow:inset 0 0 0 1px rgba(104,110,226,0.40);' : ''}">
+            <div style="font-size:0.68rem; font-weight:700; letter-spacing:0.04em; color:${primary ? BLUE : '#9ca3af'}; text-transform:uppercase;">${label}</div>
+            <div style="font-size:16px; font-weight:800; color:${DARK}; margin-top:2px;">${val}%</div>
         </div>`;
+    const dot = (c) => `<span style="width:11px; height:11px; border-radius:50%; background:${c}; flex:0 0 auto; box-shadow:0 1px 3px rgba(0,0,0,0.15);"></span>`;
     return `
         <div style="font-family:'Plus Jakarta Sans', system-ui, sans-serif; color:${DARK};">
-            <div style="display:flex; align-items:center; gap:18px; margin-bottom:12px;">
-                <div style="width:118px; height:118px; flex:0 0 auto; border-radius:50%; background:${donutBg}; position:relative;">
-                    <div style="position:absolute; inset:26%; border-radius:50%; background:#fff; display:flex; flex-direction:column; align-items:center; justify-content:center;">
-                        <div style="font-size:1.35rem; font-weight:800; color:${DARK}; line-height:1;">${domPct}%</div>
-                        <div style="font-size:0.7rem; font-weight:600; color:#8a8fb0; margin-top:2px;">${domLbl}</div>
-                    </div>
+            <div style="margin-bottom:16px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:9px; font-size:0.95rem; font-weight:600;">
+                    <span style="display:flex; align-items:center; gap:8px;">${dot(BLUE)} Male <b style="color:${DARK};">${male}%</b></span>
+                    <span style="display:flex; align-items:center; gap:8px;">Female <b style="color:${DARK};">${female}%</b> ${dot(PINK)}</span>
                 </div>
-                <div style="display:flex; flex-direction:column; gap:11px;">
-                    <div style="display:flex; align-items:center; gap:9px; font-size:0.95rem; font-weight:600;">${dot(BLUE)} Male <b>${male}%</b></div>
-                    <div style="display:flex; align-items:center; gap:9px; font-size:0.95rem; font-weight:600;">${dot(PINK)} Female <b>${female}%</b></div>
+                <div style="width:100%; height:10px; background:#eef0f4; border-radius:999px; display:flex; overflow:hidden;">
+                    <div style="width:${male}%; background:${BLUE};"></div>
+                    <div style="width:${female}%; background:${PINK};"></div>
                 </div>
+                <div style="font-size:0.72rem; color:#9ca3af; margin-top:7px;">${genderNote}</div>
             </div>
-            <div style="font-size:0.72rem; color:#9ca3af; margin-bottom:12px;">${genderNote}</div>
-            <div style="display:flex; flex-direction:column; gap:10px;">
-                ${ageBar('18-24', a1, false)}${ageBar('25-45', a2, true)}${ageBar('45+', a3, false)}
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; text-align:center;">
+                ${ageCard('18-24', a1, false)}${ageCard('25-45', a2, true)}${ageCard('45+', a3, false)}
             </div>
-            <div style="font-size:0.72rem; color:#9ca3af; margin-top:10px;">${ageNote}</div>
+            <div style="font-size:0.72rem; color:#9ca3af; margin-top:7px;">${ageNote}</div>
         </div>`;
 }
 
